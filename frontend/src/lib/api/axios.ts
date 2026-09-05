@@ -1,9 +1,19 @@
 import axios from "axios";
 
 // Single axios instance — interceptors are configured in interceptors.ts
-// and imported via layout.tsx to avoid circular dependencies.
+// and imported via main.tsx / layout to avoid circular dependencies.
+const getBaseUrl = (): string => {
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  if (typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  return "";
+};
+
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  baseURL: getBaseUrl(),
   withCredentials: true, // IMPORTANT: sends tp_token cookie on every request
 });
 
