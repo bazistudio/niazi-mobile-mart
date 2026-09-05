@@ -1,0 +1,40 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/2.0.0/crates/tauri-config-schema/schema.json",
+  "productName": "Niazi Mobile Mart",
+  "version": "5.0.3",
+  "identifier": "com.bazi.niazimobilemart",
+  "build": {
+    "beforeDevCommand": "npm --prefix ../frontend run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm --prefix ../frontend run build",
+    "frontendDist": "../frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Niazi Mobile Mart",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": ["default"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

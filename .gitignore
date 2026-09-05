@@ -1,0 +1,36 @@
+# Rust / Tauri build artifacts
+src-tauri/target/
+**/target/
+
+# Node dependencies
+node_modules/
+**/node_modules/
+
+# Next.js & Frontend builds
+frontend/.next/
+frontend/out/
+frontend/dist/
+frontend/build/
+**/dist/
+**/build/
+
+# Environment configs
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temp
+temp/
+tmp/

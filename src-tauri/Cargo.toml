@@ -1,0 +1,23 @@
+[package]
+name = "niazi-mobile-mart"
+version = "5.0.3"
+description = "Niazi Mobile Mart - Desktop ERP & POS"
+authors = ["Niazi Mobile Mart"]
+edition = "2021"
+
+[lib]
+name = "niazi_mobile_mart_lib"
+crate-type = ["staticlib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0.5", features = [] }
+
+[dependencies]
+tauri = { version = "2.1.1", features = [] }
+tauri-plugin-opener = "2.0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tokio = { version = "1.43", features = ["sync", "rt", "macros", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }

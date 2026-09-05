@@ -1,14 +1,15 @@
 /**
- * Platform Adapter for TijaratPro
+ * Platform Adapter for Niazi Mobile Mart / TijaratPro
  * Decouples platform-specific implementations from the business logic.
  */
+import { isTauriEnvironment } from './tauri/tauriClient';
 
 export const platformAdapter = {
-  isDesktop: () => false,
+  isDesktop: () => isTauriEnvironment(),
   
   isMobile: () => false,
   
-  isWeb: () => true,
+  isWeb: () => !isTauriEnvironment(),
 
   /**
    * Dispatches global events. Useful for decoupled cross-module communication.
