@@ -1,19 +1,14 @@
 import { defineConfig } from "eslint/config";
-import next from "eslint-config-next";
 
 export default defineConfig([
-  ...next(),
   {
     rules: {
-      "@next/next/no-html-link-for-pages": "warn",
-      "@typescript-eslint/no-unused-vars": "warn"
+      "no-unused-vars": "off"
     },
     ignores: [
-      ".next/**",
-      "out/**",
-      "build/**",
+      "dist/**",
       "node_modules/**",
-      "next-env.d.ts"
+      "*.d.ts"
     ]
   }
 ]);
