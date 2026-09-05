@@ -2,7 +2,10 @@ import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { ShopAdminDashboardLayout } from '@/features/dashboard/components/shop-admin/ShopAdminDashboardLayout';
 import { ShopAdminDashboard } from '@/features/dashboard/components/shop-admin/ShopAdminDashboard';
+import { DashboardRedirectPage } from '@/pages/dashboard/DashboardRedirectPage';
+import { StaffDashboardPage } from '@/pages/dashboard/staff/StaffDashboardPage';
 import { authRoutes } from './authRoutes';
+import { organizationRoutes } from './organizationRoutes';
 
 export const AppRoutes: React.FC = () => {
   return (
@@ -13,9 +16,21 @@ export const AppRoutes: React.FC = () => {
       {/* Authentication Routes (Batch 1) */}
       {authRoutes}
 
+      {/* Organization Routes (Batch 2) */}
+      <Route path="/dashboard">
+        <Route index element={<DashboardRedirectPage />} />
+        {organizationRoutes}
+        
+        {/* Staff Dashboard (Batch 2) */}
+        <Route path="staff" element={
+          <ShopAdminDashboardLayout>
+            <StaffDashboardPage />
+          </ShopAdminDashboardLayout>
+        } />
+      </Route>
+
       {/* Main Dashboard Shell Layout Route */}
       <Route path="/dashboard" element={<ShopAdminDashboardLayout />}>
-        <Route index element={<Navigate to="/dashboard/shop-admin" replace />} />
         <Route path="shop-admin" element={<ShopAdminDashboard />} />
       </Route>
 
