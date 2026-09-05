@@ -1,8 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Search, Package, Users, Truck, FileText, Loader2, ChevronDown } from 'lucide-react';
 import { useGlobalSearch } from '@/hooks/useGlobalSearch';
-import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { usePosStore } from '@/features/pos/store/usePosStore';
 
 interface SearchInputProps {
@@ -27,8 +26,9 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
   const { results, isLoading, error, debouncedQuery } = useGlobalSearch(query, category, isFocused, 300);
   const dropdownRef = useRef<HTMLDivElement>(null);
   
-  const pathname = usePathname();
-  const router = useRouter();
+  const location = useLocation();
+  const pathname = location.pathname;
+  const navigate = useNavigate();
   const { addToCart } = usePosStore();
   const isPosPage = pathname === '/dashboard/shop-admin/pos';
 
@@ -71,7 +71,7 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
     addToCart(posProduct as any);
     
     if (!isPosPage) {
-      router.push('/dashboard/shop-admin/pos');
+      navigate('/dashboard/shop-admin/pos');
     }
     
     setIsFocused(false);
@@ -87,15 +87,15 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
     if (type === 'product') {
       handleProductSelect(item);
     } else if (type === 'customer') {
-      router.push(`/dashboard/shop-admin/customers/${item._id}`);
+      navigate(`/dashboard/shop-admin/customers/${item._id}`);
       handleLinkClick();
     } else if (type === 'supplier') {
-      router.push(`/dashboard/shop-admin/suppliers/${item._id}`);
+      navigate(`/dashboard/shop-admin/suppliers/${item._id}`);
       handleLinkClick();
     } else if (type === 'invoice') {
       const orderNum = item.orderNumber || item.invoiceNumber || query;
       const cleanNum = orderNum.replace(/^ORD-/i, '');
-      router.push(`/dashboard/shop-admin?invoice=${cleanNum}`);
+      navigate(`/dashboard/shop-admin?invoice=${cleanNum}`);
       handleLinkClick();
     }
   };
@@ -379,7 +379,7 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
                       <Link
                         id={`search-item-${globalIdx}`}
                         key={customer._id}
-                        href={`/dashboard/shop-admin/customers/${customer._id}`}
+                        to={`/dashboard/shop-admin/customers/${customer._id}`}
                         onClick={handleLinkClick}
                         className={`flex items-center justify-between px-3 py-2 rounded-md transition-colors group ${isSelected ? 'bg-surface-hover ring-1 ring-focus-ring' : 'hover:bg-surface-hover'}`}
                       >
@@ -415,7 +415,7 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
                       <Link
                         id={`search-item-${globalIdx}`}
                         key={supplier._id}
-                        href={`/dashboard/shop-admin/suppliers/${supplier._id}`}
+                        to={`/dashboard/shop-admin/suppliers/${supplier._id}`}
                         onClick={handleLinkClick}
                         className={`flex items-center justify-between px-3 py-2 rounded-md transition-colors group ${isSelected ? 'bg-surface-hover ring-1 ring-focus-ring' : 'hover:bg-surface-hover'}`}
                       >
@@ -452,7 +452,7 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
                       <Link
                         id={`search-item-${globalIdx}`}
                         key={invoice._id}
-                        href={`/dashboard/shop-admin/history?invoice=${invoice._id}`}
+                        to={`/dashboard/shop-admin/history?invoice=${invoice._id}`}
                         onClick={handleLinkClick}
                         className={`flex items-center justify-between px-3 py-2 rounded-md transition-colors group ${isSelected ? 'bg-surface-hover ring-1 ring-focus-ring' : 'hover:bg-surface-hover'}`}
                       >

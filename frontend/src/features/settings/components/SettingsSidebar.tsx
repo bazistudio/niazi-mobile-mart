@@ -1,8 +1,7 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { Link, useLocation } from 'react-router-dom';
 import { Settings, Users, Shield, Palette, Printer, Database } from 'lucide-react';
 
 const navItems = [
@@ -15,7 +14,8 @@ const navItems = [
 ];
 
 export const SettingsSidebar: React.FC = () => {
-  const pathname = usePathname();
+  const location = useLocation();
+  const pathname = location.pathname;
 
   return (
     <div className="w-56 flex-shrink-0">
@@ -30,7 +30,7 @@ export const SettingsSidebar: React.FC = () => {
           return (
             <Link
               key={item.name}
-              href={item.href}
+              to={item.href}
               aria-current={isActive ? 'page' : undefined}
               className={`group relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
                 isActive

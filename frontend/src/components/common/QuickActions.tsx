@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { PlusCircle, ShoppingCart, Package, Receipt, Wrench, UserPlus, ChevronDown } from 'lucide-react';
 import { useInventoryUIStore } from '@/features/inventory/store/inventory-ui.store';
 
@@ -47,7 +47,7 @@ export const QuickActions = () => {
             Add Product
           </button>
           <Link
-            href="/dashboard/shop-admin/expenses/new"
+            to="/dashboard/shop-admin/expenses"
             className="group flex items-center px-4 py-2 text-sm text-text-secondary hover:bg-surface-hover transition-colors"
             onClick={() => setIsOpen(false)}
           >
@@ -55,7 +55,7 @@ export const QuickActions = () => {
             Add Expense
           </Link>
           <Link
-            href="/dashboard/shop-admin/repairs/new"
+            to="/dashboard/shop-admin/repairs"
             className="group flex items-center px-4 py-2 text-sm text-text-secondary hover:bg-surface-hover transition-colors"
             onClick={() => setIsOpen(false)}
           >
@@ -63,7 +63,7 @@ export const QuickActions = () => {
             Create Repair Job
           </Link>
           <Link
-            href="/dashboard/shop-admin/customers/new"
+            to="/dashboard/shop-admin/customers"
             className="group flex items-center px-4 py-2 text-sm text-text-secondary hover:bg-surface-hover transition-colors"
             onClick={() => setIsOpen(false)}
           >

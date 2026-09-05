@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { useRoles } from '../hooks/useRoles';
 
 const CREATE_NEW_ROLE_VALUE = '__create_new_role__';
@@ -24,12 +24,12 @@ export const RoleSelect: React.FC<RoleSelectProps> = ({
   placeholder = 'Select a role',
 }) => {
   const { data: roles = [], isLoading } = useRoles();
-  const router = useRouter();
+  const navigate = useNavigate();
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selected = e.target.value;
     if (selected === CREATE_NEW_ROLE_VALUE) {
-      router.push('/dashboard/shop-admin/settings/roles');
+      navigate('/dashboard/shop-admin/settings/roles');
       return;
     }
     onChange(selected);

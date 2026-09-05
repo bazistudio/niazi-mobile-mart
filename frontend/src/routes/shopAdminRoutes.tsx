@@ -23,6 +23,15 @@ import { ExpensesPage } from '@/pages/dashboard/shop-admin/ExpensesPage';
 import { BusinessLedgerPage } from '@/pages/dashboard/shop-admin/BusinessLedgerPage';
 import { KdsPage } from '@/pages/dashboard/shop-admin/KdsPage';
 import { MarketingPage } from '@/pages/dashboard/shop-admin/MarketingPage';
+import { ProfilePage } from '@/pages/dashboard/shop-admin/ProfilePage';
+import { AuditPage } from '@/pages/dashboard/shop-admin/AuditPage';
+import { SettingsLayout } from '@/pages/dashboard/shop-admin/settings/SettingsLayout';
+import { GeneralSettingsPage } from '@/pages/dashboard/shop-admin/settings/GeneralSettingsPage';
+import { AppearancePage } from '@/pages/dashboard/shop-admin/settings/AppearancePage';
+import { BackupRestorePage } from '@/pages/dashboard/shop-admin/settings/BackupRestorePage';
+import { PrinterPage } from '@/pages/dashboard/shop-admin/settings/PrinterPage';
+import { RolesSettingsPage } from '@/pages/dashboard/shop-admin/settings/RolesSettingsPage';
+import { WorkforcePage } from '@/pages/dashboard/shop-admin/settings/WorkforcePage';
 
 export const shopAdminCoreRoutes = (
   <>
@@ -62,7 +71,21 @@ export const shopAdminCoreRoutes = (
     <Route path="business-ledger" element={<BusinessLedgerPage />} />
     <Route path="kds" element={<KdsPage />} />
     <Route path="marketing" element={<MarketingPage />} />
+
+    {/* Batch 6: Settings, Profile & Audit */}
+    <Route path="profile" element={<ProfilePage />} />
+    <Route path="audit" element={<AuditPage />} />
+
+    <Route path="settings" element={<SettingsLayout />}>
+      <Route index element={<GeneralSettingsPage />} />
+      <Route path="appearance" element={<AppearancePage />} />
+      <Route path="backup" element={<BackupRestorePage />} />
+      <Route path="printer" element={<PrinterPage />} />
+      <Route path="roles" element={<RolesSettingsPage />} />
+      <Route path="users" element={<WorkforcePage />} />
+    </Route>
   </>
 );
+
 
 
