@@ -1,5 +1,6 @@
 import React from 'react';
 import { Route } from 'react-router-dom';
+import { RoleGuard } from '@/components/auth/RoleGuard';
 import { OrganizationDashboardLayout } from '@/features/dashboard/components/organization/OrganizationDashboardLayout';
 import { OrganizationDashboardPage } from '@/pages/dashboard/organization/OrganizationDashboardPage';
 import { ShopsManagementPage } from '@/pages/dashboard/organization/ShopsManagementPage';
@@ -8,11 +9,13 @@ import { OrganizationSettingsPage } from '@/pages/dashboard/organization/Organiz
 import { AuditLogsPage } from '@/pages/dashboard/organization/AuditLogsPage';
 
 export const organizationRoutes = (
-  <Route path="organization" element={<OrganizationDashboardLayout />}>
-    <Route index element={<OrganizationDashboardPage />} />
-    <Route path="shops" element={<ShopsManagementPage />} />
-    <Route path="staff" element={<StaffManagementPage />} />
-    <Route path="settings" element={<OrganizationSettingsPage />} />
-    <Route path="audit-logs" element={<AuditLogsPage />} />
+  <Route element={<RoleGuard allowedRoles={['SUPER_ADMIN', 'MULTI_ADMIN', 'OWNER']} fallbackPath="/dashboard/shop-admin" />}>
+    <Route path="organization" element={<OrganizationDashboardLayout />}>
+      <Route index element={<OrganizationDashboardPage />} />
+      <Route path="shops" element={<ShopsManagementPage />} />
+      <Route path="staff" element={<StaffManagementPage />} />
+      <Route path="settings" element={<OrganizationSettingsPage />} />
+      <Route path="audit-logs" element={<AuditLogsPage />} />
+    </Route>
   </Route>
 );

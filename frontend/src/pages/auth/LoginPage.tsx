@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "@/lib/auth/core/auth.store";
 import { loginUser } from "@/lib/auth/core/auth.client";
 import type { LoginFormData } from "@/lib/auth/auth.schema";
@@ -18,7 +18,10 @@ import {
 
 export function LoginForm() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { setAuth } = useAuthStore();
+
+  const from = (location.state as any)?.from?.pathname || "/dashboard";
 
   // Mode: "login" or "forgot"
   const [mode, setMode] = useState<"login" | "forgot">("login");
@@ -51,7 +54,7 @@ export function LoginForm() {
       // hydrate zustand store
       setAuth(user, session);
 
-      navigate("/dashboard");
+      navigate(from, { replace: true });
     } catch (err: any) {
       const code = err.response?.data?.code;
       if (code === "ACCOUNT_PENDING") {
