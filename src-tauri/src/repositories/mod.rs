@@ -1,5 +1,3 @@
-//! Repositories module for Niazi Mobile Mart
-//! 
-//! Future phases will implement repository interfaces and database adapters:
-//! - traits (UserRepository, ProductRepository, OrderRepository, LedgerRepository)
-//! - database implementations (SQLite persistence layer)
+pub mod user_repository;
+
+pub use user_repository::InMemoryUserRepository;

@@ -1,12 +1,36 @@
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-/// Application session context for active multi-shop/tenant state
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+use crate::domain::access_control::StaffAccessProfile;
+use crate::domain::user::{User, UserRole};
+use crate::repositories::InMemoryUserRepository;
+
+/// Native application session context owned and strictly enforced by Rust
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionContext {
+    pub is_authenticated: bool,
+    pub is_locked: bool,
     pub user_id: Option<String>,
-    pub organization_id: Option<String>,
-    pub shop_id: Option<String>,
+    pub username: Option<String>,
+    pub role: Option<UserRole>,
+    pub login_time_ms: Option<u128>,
+    pub access_profile: Option<StaffAccessProfile>,
+}
+
+impl Default for SessionContext {
+    fn default() -> Self {
+        Self {
+            is_authenticated: false,
+            is_locked: false,
+            user_id: None,
+            username: None,
+            role: None,
+            login_time_ms: None,
+            access_profile: None,
+        }
+    }
 }
 
 /// Global thread-safe application state managed by Tauri runtime
@@ -14,6 +38,7 @@ pub struct SessionContext {
 pub struct AppState {
     pub app_version: String,
     pub session: Arc<RwLock<SessionContext>>,
+    pub user_repo: InMemoryUserRepository,
     pub is_initialized: Arc<RwLock<bool>>,
 }
 
@@ -22,6 +47,7 @@ impl AppState {
         Self {
             app_version: app_version.into(),
             session: Arc::new(RwLock::new(SessionContext::default())),
+            user_repo: InMemoryUserRepository::new(),
             is_initialized: Arc::new(RwLock::new(true)),
         }
     }
@@ -30,9 +56,42 @@ impl AppState {
         self.session.read().await.clone()
     }
 
-    pub async fn set_session(&self, context: SessionContext) {
+    pub async fn set_authenticated(&self, user: &User) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+
         let mut session = self.session.write().await;
-        *session = context;
+        *session = SessionContext {
+            is_authenticated: true,
+            is_locked: false,
+            user_id: Some(user.id.clone()),
+            username: Some(user.username.clone()),
+            role: Some(user.role),
+            login_time_ms: Some(now),
+            access_profile: Some(user.access_profile.clone()),
+        };
+    }
+
+    pub async fn lock_session(&self) -> bool {
+        let mut session = self.session.write().await;
+        if session.is_authenticated {
+            session.is_locked = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub async fn unlock_session(&self) -> bool {
+        let mut session = self.session.write().await;
+        if session.is_authenticated && session.is_locked {
+            session.is_locked = false;
+            true
+        } else {
+            false
+        }
     }
 
     pub async fn clear_session(&self) {
@@ -48,23 +107,47 @@ mod tests {
     #[tokio::test]
     async fn test_app_state_session_lifecycle() {
         let state = AppState::new("5.0.3");
-        assert_eq!(state.app_version, "5.0.3");
+        let initial = state.get_session().await;
+        assert!(!initial.is_authenticated);
+        assert!(!initial.is_locked);
 
-        let initial_session = state.get_session().await;
-        assert_eq!(initial_session, SessionContext::default());
-
-        let new_context = SessionContext {
-            user_id: Some("usr_123".to_string()),
-            organization_id: Some("org_456".to_string()),
-            shop_id: Some("shop_789".to_string()),
+        let user = User {
+            id: "u_test".to_string(),
+            name: "Test Staff".to_string(),
+            username: "teststaff".to_string(),
+            login_key_hash: "dummy".to_string(),
+            pin_hash: Some("dummy".to_string()),
+            role: UserRole::Cashier,
+            is_active: true,
+            access_profile: StaffAccessProfile::cashier_default(),
+            failed_pin_attempts: 0,
+            pin_locked_until_ms: None,
+            failed_login_attempts: 0,
+            login_locked_until_ms: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
 
-        state.set_session(new_context.clone()).await;
-        let active_session = state.get_session().await;
-        assert_eq!(active_session, new_context);
+        state.set_authenticated(&user).await;
+        let auth_session = state.get_session().await;
+        assert!(auth_session.is_authenticated);
+        assert!(!auth_session.is_locked);
+        assert_eq!(auth_session.username, Some("teststaff".to_string()));
 
+        // Test lock
+        assert!(state.lock_session().await);
+        let locked_session = state.get_session().await;
+        assert!(locked_session.is_locked);
+
+        // Test unlock
+        assert!(state.unlock_session().await);
+        let unlocked_session = state.get_session().await;
+        assert!(!unlocked_session.is_locked);
+
+        // Test logout
         state.clear_session().await;
-        let cleared_session = state.get_session().await;
-        assert_eq!(cleared_session, SessionContext::default());
+        let logged_out = state.get_session().await;
+        assert!(!logged_out.is_authenticated);
+        assert!(!logged_out.is_locked);
     }
 }

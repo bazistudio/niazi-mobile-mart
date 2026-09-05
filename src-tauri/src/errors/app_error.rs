@@ -22,6 +22,9 @@ pub enum AppError {
     #[error("Database error: {0}")]
     Database(String),
 
+    #[error("Resource locked or temporarily blocked: {0}")]
+    Locked(String),
+
     #[error("Internal application error: {0}")]
     Internal(String),
 }
@@ -44,6 +47,7 @@ impl Serialize for AppError {
             AppError::Forbidden(msg) => ("FORBIDDEN", msg.as_str()),
             AppError::Conflict(msg) => ("CONFLICT", msg.as_str()),
             AppError::Database(msg) => ("DATABASE_ERROR", msg.as_str()),
+            AppError::Locked(msg) => ("LOCKED", msg.as_str()),
             AppError::Internal(msg) => ("INTERNAL_ERROR", msg.as_str()),
         };
 

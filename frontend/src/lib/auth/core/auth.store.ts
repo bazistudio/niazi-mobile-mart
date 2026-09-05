@@ -6,6 +6,7 @@ import { AuthSession } from "@/types/auth/session";
 import { setSession, clearSession } from "@/lib/auth/core/auth.session";
 import axiosInstance from "@/lib/api/axios";
 import { getQueryClient } from "@/components/providers/ReactQueryProvider";
+import { isTauriEnvironment, tauriClient } from "@/lib/tauri/tauriClient";
 
 interface AuthState {
   user: AuthUser | null;
@@ -47,19 +48,29 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   // LOGOUT (sync — for interceptor hard-logout)
   // -------------------------
   logout: () => {
+    if (isTauriEnvironment()) {
+      tauriClient.authLogout().catch(console.error);
+    }
     clearSession();
     getQueryClient().clear();
     set({ user: null, session: null, isAuthenticated: false, isHydrated: true });
-    // isHydrated: true — hydration is done, we confirmed there's no valid session
   },
 
   // -------------------------
-  // LOGOUT ASYNC — for UI logout button (calls backend to clear cookie)
+  // LOGOUT ASYNC — for UI logout button
   // -------------------------
   logoutAsync: async () => {
-    try {
-      await axiosInstance.post("/api/v1/auth/logout");
-    } catch { /* ignore — clear client state regardless */ }
+    if (isTauriEnvironment()) {
+      try {
+        await tauriClient.authLogout();
+      } catch (err) {
+        console.warn("[Tauri authLogout error]", err);
+      }
+    } else {
+      try {
+        await axiosInstance.post("/api/v1/auth/logout");
+      } catch { /* ignore */ }
+    }
     clearSession();
     getQueryClient().clear();
     set({ user: null, session: null, isAuthenticated: false });

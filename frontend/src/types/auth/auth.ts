@@ -3,7 +3,9 @@ export type UserRole =
   | "MULTI_ADMIN"
   | "SHOP_ADMIN"
   | "OWNER"
-  | "ADMIN"     // backend default registration role (alias of SHOP_ADMIN)
+  | "ADMIN"
+  | "MANAGER"
+  | "CASHIER"
   | "STAFF";
 
 export interface AuthUser {

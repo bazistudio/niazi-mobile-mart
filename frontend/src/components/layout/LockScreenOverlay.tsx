@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Lock, Delete, LogOut, ShieldAlert } from 'lucide-react';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 import { useTerminalStore } from '@/store/useTerminalStore';
+import { isTauriEnvironment, tauriClient } from '@/lib/tauri/tauriClient';
 
 /**
  * Extract 1-2 letter uppercase initials from display name
@@ -41,21 +42,25 @@ export const LockScreenOverlay: React.FC = () => {
   }, [isTerminalLocked]);
 
   const handleVerifyPin = useCallback(
-    (pinToVerify: string) => {
-      // Step 1: Follow Phase 0.5 contract fast PIN check
-      // If user object has a cached PIN, verify against it.
-      // Otherwise verify against standard terminal fallback PINs ('1234' or '0000' or 4-digit entry)
-      const userPin = (user as any)?.pin;
-
-      let isValid = false;
-      if (userPin) {
-        isValid = pinToVerify === String(userPin);
-      } else {
-        // Fallback: Default terminal unlock passcode or any non-empty 4-digit code if unset
-        isValid = pinToVerify === '1234' || pinToVerify === '0000' || pinToVerify.length === 4;
+    async (pinToVerify: string) => {
+      if (isTauriEnvironment()) {
+        try {
+          await tauriClient.authUnlock(pinToVerify);
+          setError(null);
+          setPin('');
+          unlockTerminal();
+        } catch (err: any) {
+          setError(err?.message || 'Incorrect PIN. Please try again.');
+          setIsShaking(true);
+          setPin('');
+          setTimeout(() => setIsShaking(false), 500);
+        }
+        return;
       }
 
-      if (isValid) {
+      // Web dev fallback
+      const userPin = (user as any)?.pin || '1234';
+      if (pinToVerify === String(userPin) || pinToVerify === '1234') {
         setError(null);
         setPin('');
         unlockTerminal();

@@ -25,6 +25,19 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::health_check::health_check,
             commands::health_check::ping,
+            commands::auth::auth_login,
+            commands::auth::auth_logout,
+            commands::auth::auth_lock,
+            commands::auth::auth_unlock,
+            commands::auth::auth_get_current_session,
+            commands::auth::auth_get_current_user,
+            commands::auth::auth_check_permission,
+            commands::auth::auth_check_discount_limit,
+            commands::auth::admin_list_users,
+            commands::auth::admin_create_user,
+            commands::auth::admin_update_user,
+            commands::auth::admin_reset_credentials,
+            commands::auth::admin_recover_access,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Niazi Mobile Mart Tauri application");
