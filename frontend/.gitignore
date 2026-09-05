@@ -1,0 +1,55 @@
+# dependencies
+node_modules
+.pnp
+.pnp.js
+
+# next.js
+.next
+out
+dist
+
+# production
+build
+
+# logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# env files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# electron
+electron/dist
+electron/build
+release
+release/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode
+.idea
+
+# coverage
+coverage
+
+# prisma (if used later)
+prisma/migrations
+
+# cache
+.cache
+.turbo
+*.tsbuildinfo
+
+# lock files (optional depending on team)
+# package-lock.json
+# yarn.lock

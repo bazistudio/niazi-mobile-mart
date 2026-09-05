@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: tijaratpro-backend
+    runtime: node
+    plan: free
+    region: frankfurt # or wherever close to your users
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: JWT_SECRET
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: SUPER_ADMIN_EMAIL
+        sync: false
+      - key: CLIENT_URL
+        sync: false

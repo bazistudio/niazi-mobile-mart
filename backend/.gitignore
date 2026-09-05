@@ -1,0 +1,66 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Build output
+dist/
+build/
+
+# Coverage
+coverage/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / Editor
+.vscode/
+.idea/
+
+# Temporary files
+tmp/
+temp/
+
+# MongoDB
+*.db
+
+# Uploads
+uploads/
+
+# Misc
+*.swp
+
+# Documentation & Local Notes
+docs backend/
+docs backend
+docs\ backend/
+
+# Temporary Scripts & Debugging Artifacts
+check_*.js
+test_*.js
+fix_*.js
+patch_*.js
+cleanup_*.js
+list_*.js
+repair-*.js
+*.pdf
+*.txt

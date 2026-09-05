@@ -1,0 +1,133 @@
+/**
+ * PERMISSION_REGISTRY
+ * Central authority for all RBAC rules in TijaratPro.
+ * This ensures that even if the frontend is bypassed, the backend rejects unauthorized actions.
+ */
+
+const ROLES = {
+  SUPER_ADMIN: "SUPER_ADMIN",
+  MULTI_ADMIN: "MULTI_ADMIN",
+  OWNER: "OWNER",
+  SHOP_ADMIN: "SHOP_ADMIN",
+  ADMIN: "ADMIN",
+  MANAGER: "MANAGER",
+  CASHIER: "CASHIER",
+  STAFF: "STAFF",
+}
+
+const PERMISSIONS = {
+  // Product Management
+  PRODUCT_CREATE: "product:create",
+  PRODUCT_EDIT: "product:edit",
+  PRODUCT_DELETE: "product:delete",
+  PRODUCT_VIEW: "product:view",
+
+  // Inventory Management
+  STOCK_ADJUST: "stock:adjust",
+  STOCK_TRANSFER: "stock:transfer",
+  STOCK_DAMAGE: "stock:damage",
+  STOCK_VIEW: "stock:view",
+
+  // POS / Sales
+  POS_SALE: "pos:sale",
+  POS_VOID: "pos:void",
+  POS_PRICE_OVERRIDE: "pos:override",
+  POS_DISCOUNT: "pos:discount",
+
+  // Financials
+  FINANCE_VIEW: "finance:view",
+  CREDIT_LIMIT_OVERRIDE: "finance:credit_override",
+
+  // Audit & System
+  AUDIT_VIEW: "audit:view",
+  SETTINGS_EDIT: "settings:edit",
+  
+  // Financial Permissions
+  FINANCE_READ: "finance:read",
+  FINANCE_CREATE: "finance:create",
+  FINANCE_OVERRIDE: "finance:override", // e.g. price manual override in POS
+  
+  // Admin & Staff Permissions
+  STAFF_MANAGE: "staff:manage",
+  REPORTS_EXPORT: "reports:export",
+
+  // Order Management
+  ORDER_CREATE: "order:create",
+  ORDER_READ: "order:read",
+  ORDER_CANCEL: "order:cancel",
+  
+  // Product Update
+  PRODUCT_UPDATE: "product:update",
+}
+
+/**
+ * ROLE_PERMISSIONS
+ * Mapping of Roles to Permission Keys
+ */
+const ROLE_PERMISSIONS = {
+  SUPER_ADMIN: ["*"],
+  MULTI_ADMIN: ["*"],
+  OWNER: ["*"],
+  SHOP_ADMIN: [
+    PERMISSIONS.PRODUCT_CREATE,
+    PERMISSIONS.PRODUCT_UPDATE,
+    PERMISSIONS.PRODUCT_EDIT,
+    PERMISSIONS.PRODUCT_DELETE,
+    PERMISSIONS.PRODUCT_VIEW,
+    PERMISSIONS.STOCK_ADJUST,
+    PERMISSIONS.STOCK_DAMAGE,
+    PERMISSIONS.STOCK_TRANSFER,
+    PERMISSIONS.ORDER_CREATE,
+    PERMISSIONS.ORDER_READ,
+    PERMISSIONS.ORDER_CANCEL,
+    PERMISSIONS.FINANCE_READ,
+    PERMISSIONS.FINANCE_CREATE,
+    PERMISSIONS.FINANCE_OVERRIDE,
+    PERMISSIONS.STAFF_MANAGE,
+    PERMISSIONS.SETTINGS_EDIT,
+    PERMISSIONS.REPORTS_EXPORT,
+  ],
+  ADMIN: [
+    PERMISSIONS.PRODUCT_CREATE,
+    PERMISSIONS.PRODUCT_UPDATE,
+    PERMISSIONS.PRODUCT_EDIT,
+    PERMISSIONS.PRODUCT_DELETE,
+    PERMISSIONS.PRODUCT_VIEW,
+    PERMISSIONS.STOCK_ADJUST,
+    PERMISSIONS.STOCK_DAMAGE,
+    PERMISSIONS.STOCK_TRANSFER,
+    PERMISSIONS.ORDER_CREATE,
+    PERMISSIONS.ORDER_READ,
+    PERMISSIONS.ORDER_CANCEL,
+    PERMISSIONS.FINANCE_READ,
+    PERMISSIONS.FINANCE_CREATE,
+    PERMISSIONS.FINANCE_OVERRIDE,
+    PERMISSIONS.STAFF_MANAGE,
+    PERMISSIONS.SETTINGS_EDIT,
+    PERMISSIONS.REPORTS_EXPORT,
+  ],
+  MANAGER: [
+    PERMISSIONS.PRODUCT_CREATE,
+    PERMISSIONS.PRODUCT_UPDATE,
+    PERMISSIONS.PRODUCT_EDIT,
+    PERMISSIONS.PRODUCT_VIEW,
+    PERMISSIONS.STOCK_ADJUST,
+    PERMISSIONS.STOCK_DAMAGE,
+    PERMISSIONS.STOCK_TRANSFER,
+    PERMISSIONS.ORDER_CREATE,
+    PERMISSIONS.ORDER_READ,
+    PERMISSIONS.FINANCE_READ,
+    PERMISSIONS.REPORTS_EXPORT,
+  ],
+  CASHIER: [
+    PERMISSIONS.ORDER_CREATE,
+    PERMISSIONS.ORDER_READ,
+  ],
+  STAFF: [],
+}
+
+module.exports = {
+  ROLES,
+  PERMISSIONS,
+  ROLE_PERMISSIONS,
+}
