@@ -7,6 +7,7 @@ import { StaffDashboardPage } from '@/pages/dashboard/staff/StaffDashboardPage';
 import { authRoutes } from './authRoutes';
 import { organizationRoutes } from './organizationRoutes';
 import { shopAdminCoreRoutes } from './shopAdminRoutes';
+import { NotFoundPage } from '@/pages/NotFoundPage';
 
 export const AppRoutes: React.FC = () => {
   return (
@@ -30,15 +31,16 @@ export const AppRoutes: React.FC = () => {
         } />
       </Route>
 
-      {/* Main Shop Admin Shell Layout Route (Batch 3) */}
+      {/* Main Shop Admin Shell Layout Route (Batch 3-6) */}
       <Route path="/dashboard/shop-admin" element={<ShopAdminDashboardLayout />}>
         {shopAdminCoreRoutes}
       </Route>
 
       {/* Catch-all route */}
-      <Route path="*" element={<Navigate to="/dashboard/shop-admin" replace />} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 };
 
 export default AppRoutes;
+
