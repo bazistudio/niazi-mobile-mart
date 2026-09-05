@@ -67,7 +67,7 @@ export const shopAdminNavigation: NavigationGroup[] = [
     ],
   },
   // Dev-only — not rendered in production
-  ...(process.env.NODE_ENV === 'development' ? [{
+  ...(import.meta.env.DEV ? [{
     label: 'Developer',
     items: [
       { name: 'Audit Panel', href: '/dashboard/shop-admin/audit', icon: Bug },

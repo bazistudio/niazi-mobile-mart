@@ -90,7 +90,7 @@ class DomainEventBus {
       this.eventHistory.shift();
     }
 
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.log(`[EVENT_BUS] ⚡ ${event}`, payload);
     }
 

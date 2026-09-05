@@ -21,7 +21,7 @@ export interface BoundaryViolation {
 
 class DomainBoundaryEnforcer {
   private violations: BoundaryViolation[] = [];
-  private isDev = process.env.NODE_ENV === 'development';
+  private isDev = import.meta.env.DEV;
 
   // Rules encoded as [caller, callee, method, rule, severity]
   private readonly FORBIDDEN_PATTERNS: Array<{

@@ -70,7 +70,7 @@ class SyncEngine {
     this.cleanupFns.push(inventoryAdapter.initialize());
     this.cleanupFns.push(salesAdapter.initialize());
 
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.log('[SYNC_ENGINE] 🟢 Initialized — Real-time sync active');
       console.log(`[SYNC_ENGINE] Adapters: inventory, sales`);
       console.log(`[SYNC_ENGINE] Event bridges: stockEventBus → domainEventBus`);
@@ -86,7 +86,7 @@ class SyncEngine {
     this.cleanupFns = [];
     this.isInitialized = false;
 
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.log('[SYNC_ENGINE] 🔴 Disposed');
     }
   }

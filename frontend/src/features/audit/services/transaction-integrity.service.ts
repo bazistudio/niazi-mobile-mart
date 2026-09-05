@@ -25,7 +25,7 @@ export interface TransactionRecord {
 
 class TransactionLedger {
   private transactions: Map<string, TransactionRecord> = new Map();
-  private isDev = process.env.NODE_ENV === 'development';
+  private isDev = import.meta.env.DEV;
 
   begin(id: string): string {
     if (!this.isDev) return id;
