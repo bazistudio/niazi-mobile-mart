@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { Settings, LogOut, ChevronDown, Loader2, User as UserIcon } from 'lucide-react';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 
@@ -103,7 +103,7 @@ export const UserMenu = () => {
           {/* Menu items */}
           <div className="py-1" role="none">
             <Link
-              href="/dashboard/shop-admin/profile"
+              to="/dashboard/shop-admin/profile"
               onClick={() => setIsOpen(false)}
               role="menuitem"
               className={menuItemClass}
@@ -112,7 +112,7 @@ export const UserMenu = () => {
               Your Profile
             </Link>
             <Link
-              href="/dashboard/shop-admin/settings"
+              to="/dashboard/shop-admin/settings"
               onClick={() => setIsOpen(false)}
               role="menuitem"
               className={menuItemClass}

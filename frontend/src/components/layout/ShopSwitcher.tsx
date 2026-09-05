@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Building, Store, Loader2, Check } from 'lucide-react';
 import { useOrganizationStore, Shop } from '@/store/useOrganizationStore';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import api from '@/lib/api/axios';
 
 export const ShopSwitcher = () => {
@@ -12,7 +12,7 @@ export const ShopSwitcher = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [shops, setShops] = useState<Shop[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const router = useRouter();
+  const navigate = useNavigate();
 
   const { user } = useAuthStore();
   const {
@@ -81,7 +81,7 @@ export const ShopSwitcher = () => {
         organizationId: activeOrganizationId,
         shopId,
       });
-      router.push(path);
+      navigate(path);
     } catch (error) {
       console.error('Failed to switch context', error);
       setActiveContext(

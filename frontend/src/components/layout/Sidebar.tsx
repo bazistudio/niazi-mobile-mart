@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { Link, useLocation } from 'react-router-dom';
 import { shopAdminNavigation } from '../../constants/navigation/shop-admin-navigation';
 import { organizationNavigation } from '../../constants/navigation/organization-navigation';
 import { validateRoute } from '../../lib/navigation/route-validator';
@@ -10,7 +9,7 @@ import { usePermissions } from '../../lib/auth/usePermissions';
 import { Menu, ChevronLeft } from 'lucide-react';
 
 export const Sidebar = () => {
-  const pathname = usePathname();
+  const { pathname } = useLocation();
   const { hasPermission } = usePermissions();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -82,7 +81,7 @@ export const Sidebar = () => {
                 return (
                   <Link
                     key={item.name}
-                    href={item.href}
+                    to={item.href}
                     title={isCollapsed ? item.name : undefined}
                     aria-current={isActive ? 'page' : undefined}
                     className={`group relative flex items-center py-2 text-sm font-medium rounded-md transition-all duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${

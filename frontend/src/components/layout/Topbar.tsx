@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { Menu, Bell, ShoppingCart, Plus, ReceiptText, RefreshCw, Lock } from 'lucide-react';
 import { UserMenu } from './UserMenu';
 import { SearchInput } from '../common/SearchInput';
@@ -51,7 +51,7 @@ export const Topbar = ({ setMobileMenuOpen }: TopbarProps) => {
         <div className="flex flex-shrink-0 items-center gap-1.5">
           {/* New Sale CTA */}
           <Link
-            href="/dashboard/shop-admin/pos"
+            to="/dashboard/shop-admin/pos"
             className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary-hover active:bg-primary-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-1 transition-all duration-fast"
           >
             <ShoppingCart className="h-3.5 w-3.5" aria-hidden="true" />

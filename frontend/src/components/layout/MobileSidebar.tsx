@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { Link, useLocation } from 'react-router-dom';
 import { X } from 'lucide-react';
 import { shopAdminNavigation } from '../../constants/navigation/shop-admin-navigation';
 import { organizationNavigation } from '../../constants/navigation/organization-navigation';
@@ -15,7 +14,7 @@ interface MobileSidebarProps {
 }
 
 export const MobileSidebar = ({ isOpen, setIsOpen }: MobileSidebarProps) => {
-  const pathname = usePathname();
+  const { pathname } = useLocation();
   const { hasPermission } = usePermissions();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -129,7 +128,7 @@ export const MobileSidebar = ({ isOpen, setIsOpen }: MobileSidebarProps) => {
                       return (
                         <Link
                           key={item.name}
-                          href={item.href}
+                          to={item.href}
                           onClick={() => setIsOpen(false)}
                           aria-current={isActive ? 'page' : undefined}
                           className={`group relative flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-md transition-all duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${

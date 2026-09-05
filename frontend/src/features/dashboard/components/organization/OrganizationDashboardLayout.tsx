@@ -1,7 +1,5 @@
-'use client';
-
 import React, { useState } from 'react';
-import { usePathname } from 'next/navigation';
+import { useLocation, Outlet } from 'react-router-dom';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { MobileSidebar } from '@/components/layout/MobileSidebar';
 import { Topbar } from '@/components/layout/Topbar';
@@ -9,12 +7,13 @@ import { DashboardShell } from '@/components/layout/DashboardShell';
 import { useDashboardShortcuts } from '@/hooks/useDashboardShortcuts';
 
 interface OrganizationDashboardLayoutProps {
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }
 
 export const OrganizationDashboardLayout = ({ children }: OrganizationDashboardLayoutProps) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const pathname = usePathname();
+  const location = useLocation();
+  const pathname = location.pathname;
   
   // Initialize Global Dashboard Shortcuts
   useDashboardShortcuts();
@@ -34,7 +33,7 @@ export const OrganizationDashboardLayout = ({ children }: OrganizationDashboardL
 
         {/* Dashboard Content Area */}
         <DashboardShell variant="default">
-          {children}
+          {children || <Outlet />}
         </DashboardShell>
       </div>
     </div>

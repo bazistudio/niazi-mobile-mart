@@ -3,7 +3,7 @@ import { X, ReceiptText, Clock, User, CreditCard, Banknote, AlertCircle, Chevron
 import { useQuery } from '@tanstack/react-query';
 import { salesApi } from '@/services/sales.api';
 import { format, startOfWeek, startOfMonth } from 'date-fns';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'react-router-dom';
 import { usePrintStore } from '@/lib/printer';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
 import { printFormatter } from '@/features/settings/printer/utils/printFormatter';

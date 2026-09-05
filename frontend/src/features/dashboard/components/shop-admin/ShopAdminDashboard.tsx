@@ -12,7 +12,7 @@ import { DailySalesModal } from './DailySalesModal';
 
 import { useQuery } from '@tanstack/react-query';
 import { dashboardApi } from '@/services/dashboard.api';
-import { useSearchParams, useRouter, usePathname } from 'next/navigation';
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { useTenantQueryKeys } from '@/lib/react-query/useTenantQueryKeys';
 
 export const ShopAdminDashboard = () => {
@@ -20,9 +20,10 @@ export const ShopAdminDashboard = () => {
   const [filter, setFilter] = useState<'today' | 'week' | 'month'>('today');
   const [isDailySalesModalOpen, setIsDailySalesModalOpen] = useState(false);
 
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const pathname = location.pathname;
   const searchInvoice = searchParams.get('invoice');
 
   useEffect(() => {
@@ -34,7 +35,7 @@ export const ShopAdminDashboard = () => {
   const handleCloseModal = () => {
     setIsDailySalesModalOpen(false);
     if (searchInvoice) {
-      router.replace(pathname, { scroll: false });
+      navigate(pathname, { replace: true });
     }
   };
 

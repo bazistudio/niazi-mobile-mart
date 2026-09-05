@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { useTerminalStore } from '@/store/useTerminalStore';
 
 export const useDashboardShortcuts = () => {
-  const router = useRouter();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -12,15 +12,15 @@ export const useDashboardShortcuts = () => {
         switch (e.key.toLowerCase()) {
           case 'c':
             e.preventDefault();
-            router.push('/dashboard/shop-admin/customers?tab=customers');
+            navigate('/dashboard/shop-admin/customers?tab=customers');
             break;
           case 'l':
             e.preventDefault();
-            router.push('/dashboard/shop-admin/customers?tab=ledger');
+            navigate('/dashboard/shop-admin/customers?tab=ledger');
             break;
           case 'a':
             e.preventDefault();
-            router.push('/dashboard/shop-admin/customers?tab=analytics');
+            navigate('/dashboard/shop-admin/customers?tab=analytics');
             break;
         }
         return;
@@ -37,22 +37,22 @@ export const useDashboardShortcuts = () => {
           case 'p':
             // Fast Navigate to POS
             e.preventDefault();
-            router.push('/dashboard/shop-admin/pos');
+            navigate('/dashboard/shop-admin/pos');
             break;
           case 'd':
             // Navigate to Dashboard
             e.preventDefault();
-            router.push('/dashboard/shop-admin');
+            navigate('/dashboard/shop-admin');
             break;
           case 'i':
             // Navigate to Inventory & Products
             e.preventDefault();
-            router.push('/dashboard/shop-admin/inventory');
+            navigate('/dashboard/shop-admin/inventory');
             break;
           case 'o':
             // Navigate to Operations / Expenses
             e.preventDefault();
-            router.push('/dashboard/shop-admin/expenses');
+            navigate('/dashboard/shop-admin/expenses');
             break;
         }
       }
@@ -60,6 +60,6 @@ export const useDashboardShortcuts = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [router]);
+  }, [navigate]);
 };
 
