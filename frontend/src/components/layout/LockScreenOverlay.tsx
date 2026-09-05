@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Lock, Unlock, Delete, LogOut, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { Lock, Delete, LogOut, ShieldAlert } from 'lucide-react';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 import { useTerminalStore } from '@/store/useTerminalStore';
 

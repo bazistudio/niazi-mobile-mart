@@ -1,7 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: process.env.NEXT_EXPORT === "true" ? "export" : undefined, // 'export' for Electron static build, undefined for Vercel
   eslint: {
     ignoreDuringBuilds: true,
   },

@@ -207,7 +207,7 @@ export const ProfilePage: React.FC = () => {
             <div className="space-y-2 text-xs">
               <div className="flex justify-between py-1.5 border-b border-neutral-100 dark:border-neutral-800">
                 <span className="text-neutral-500">Device Platform</span>
-                <span className="font-semibold text-neutral-800 dark:text-neutral-200">Desktop Electron / POS Shell</span>
+                <span className="font-semibold text-neutral-800 dark:text-neutral-200">Web Browser / POS Shell</span>
               </div>
               <div className="flex justify-between py-1.5 border-b border-neutral-100 dark:border-neutral-800">
                 <span className="text-neutral-500">Auth Method</span>

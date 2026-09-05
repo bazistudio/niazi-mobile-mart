@@ -5,7 +5,6 @@ import "@/lib/api/interceptors"; // registers Axios interceptors (device-id + 40
 import AuthHydrator from "@/components/auth/AuthHydrator";
 import { Toaster } from "react-hot-toast";
 import ReactQueryProvider from "@/components/providers/ReactQueryProvider";
-import { DesktopShell } from "@/components/layout/desktop/DesktopShell";
 import { GlobalPrintPreviewModal } from "@/lib/printer";
 
 const geistSans = Geist({
@@ -38,9 +37,11 @@ export default function RootLayout({
           <Toaster position="bottom-right" />
           {/* Rehydrates Zustand store from localStorage on every page load */}
           <AuthHydrator />
-          <DesktopShell>
-            {children}
-          </DesktopShell>
+          <div className="flex flex-col min-h-screen">
+            <div className="flex-1 flex flex-col min-h-0 relative">
+              {children}
+            </div>
+          </div>
           <GlobalPrintPreviewModal />
         </ReactQueryProvider>
       </body>

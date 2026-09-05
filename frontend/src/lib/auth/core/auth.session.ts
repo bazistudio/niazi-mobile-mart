@@ -5,7 +5,7 @@ import { AuthSession } from "@/types/auth/session";
 const SESSION_KEY = "tijarat_session";
 
 /**
- * Save session securely in browser/Electron storage
+ * Save session securely in browser storage
  */
 export function setSession(session: AuthSession) {
   if (typeof window === "undefined") return;
@@ -50,7 +50,7 @@ export function isSessionValid(session: AuthSession | null): boolean {
 // Removed getAccessToken and getRefreshToken to prevent mixed sources of truth
 
 /**
- * Get device ID (Electron + browser safe)
+ * Get device ID (Browser safe)
  */
 export function getDeviceId(): string {
   if (typeof window === "undefined") return "server";

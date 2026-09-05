@@ -2,12 +2,11 @@
 
 import React from 'react';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
-import { ShieldCheck, Circle, Command, Keyboard } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 
 export const GlobalFooter: React.FC = () => {
   const user = useAuthStore((s) => s.user);
   const displayName = (user as any)?.name || (user as any)?.username || 'Shop Admin';
-  const role = user?.role || 'SHOP_ADMIN';
 
   return (
     <footer className="h-7 w-full border-t border-border bg-surface/90 backdrop-blur-xs px-3 sm:px-4 flex items-center justify-between text-[11px] text-text-muted flex-shrink-0 select-none z-10">

@@ -550,46 +550,13 @@ export const usePosStore = create<PosStore>()(
           let result;
 
           try {
-            // ALWAYS prioritize the cloud API to ensure stock is reduced and sale is created centrally
+            // Send order creation to API
             result = await salesApi.createOrder(payload);
           } catch (apiError: any) {
             const errorMessage = apiError.response?.data?.message || apiError.message || "Unknown API error";
-            console.warn("Cloud API failed, checking for offline fallback...", errorMessage);
+            console.warn("Cloud API failed:", errorMessage);
             toast.error("Backend Sync Failed: " + errorMessage);
-            
-            if (platformAdapter.isDesktop()) {
-              console.log("Using Offline Fallback");
-              // Calculate grandTotal for offline storage since it's not on the session object
-              const subtotal = session.cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
-              let discountAmt = 0;
-              if (session.invoiceDiscountType === 'percentage') {
-                discountAmt = subtotal * ((session.invoiceDiscountValue || 0) / 100);
-              } else {
-                discountAmt = session.invoiceDiscountValue || 0;
-              }
-              const offlineGrandTotal = subtotal - discountAmt;
-
-              const saleId = `SALE-${Date.now()}`;
-              const sqlitePayload = {
-                id: saleId,
-                customerId: payload.customerId || 'walk-in',
-                total: offlineGrandTotal,
-                status: 'completed',
-                items: JSON.stringify(payload.items),
-                paymentMethod: payload.paymentMethod,
-                discount: payload.discount,
-              };
-              
-              const mutateResult = await platformAdapter.saveOfflineOrder(sqlitePayload);
-              if (mutateResult.success && mutateResult.order) {
-                result = { success: true, order: mutateResult.order };
-              } else {
-                throw new Error("Failed to save to local offline queue. Order lost.");
-              }
-            } else {
-              // If not desktop, we can't fall back. Throw the original API error.
-              throw apiError;
-            }
+            throw apiError;
           }
 
           if (!result.success) {

@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { Menu, Bell, ShoppingCart, Plus, ReceiptText, RefreshCw, Lock } from 'lucide-react';
 import { UserMenu } from './UserMenu';
 import { SearchInput } from '../common/SearchInput';
-import { DesktopAppButton } from './DesktopAppButton';
 import { ThemeToggle } from './ThemeToggle';
 import { ShopSwitcher } from './ShopSwitcher';
 import { selectForceSync, selectStatus } from '@/features/inventory/core/inventory.selectors';
@@ -106,9 +105,6 @@ export const Topbar = ({ setMobileMenuOpen }: TopbarProps) => {
           >
             <Lock className="h-4 w-4" aria-hidden="true" />
           </button>
-
-          {/* Desktop App */}
-          <DesktopAppButton />
 
           {/* Notifications */}
           <button

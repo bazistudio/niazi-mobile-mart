@@ -1,33 +1,22 @@
 {
   "name": "tijaratpro",
   "version": "5.0.3",
-  "main": "dist-electron/main.js",
   "private": true,
+  "description": "TijaratPro ERP Web Application",
+  "author": "TijaratPro",
   "scripts": {
     "dev": "next dev",
-    "dev:electron": "tsup --watch --onSuccess \"electron dist-electron/main.js\"",
-    "dev:all": "concurrently \"npm run dev\" \"npm run dev:electron\"",
     "build": "next build",
-    "build:export": "cross-env NEXT_EXPORT=true next build",
-    "build:electron": "tsup",
     "start": "next start",
-    "lint": "eslint",
-    "postinstall": "electron-rebuild -f -w better-sqlite3",
-    "pack": "npm run build:export && npm run build:electron && electron-builder --dir",
-    "dist": "npm run build:export && npm run build:electron && electron-builder --publish never",
-    "release": "npm run build:export && npm run build:electron && electron-builder --publish always"
+    "lint": "eslint"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",
     "@tanstack/react-query": "^5.101.0",
     "axios": "^1.17.0",
-    "better-sqlite3": "^12.11.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
-    "electron-log": "^5.4.4",
-    "electron-store": "^11.0.2",
-    "electron-updater": "^6.8.9",
     "html2canvas": "^1.4.1",
     "html2pdf.js": "^0.14.0",
     "jspdf": "^4.2.1",
@@ -43,107 +32,18 @@
     "zod": "^4.4.3",
     "zustand": "^5.0.14"
   },
-  "build": {
-    "appId": "com.tijaratpro.desktop",
-    "productName": "TijaratPro",
-    "protocols": {
-      "name": "TijaratPro",
-      "schemes": [
-        "tijaratpro"
-      ]
-    },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "bazistudio",
-        "repo": "tijaratpro-erp"
-      }
-    ],
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist-electron/**/*",
-      "out/**/*",
-      "package.json"
-    ],
-    "win": {
-      "target": [
-        "nsis",
-        "portable"
-      ]
-    },
-    "nsis": {
-      "artifactName": "${productName}-Setup-${version}.${ext}",
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "deleteAppDataOnUninstall": false,
-      "runAfterFinish": true,
-      "displayLanguageSelector": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "TijaratPro"
-    },
-    "executableName": "TijaratPro",
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
-    "compression": "maximum",
-    "fileAssociations": [
-      {
-        "ext": "tijarat",
-        "name": "TijaratPro Data",
-        "description": "TijaratPro Data File",
-        "role": "Editor"
-      },
-      {
-        "ext": "tpbackup",
-        "name": "TijaratPro Backup",
-        "description": "TijaratPro Backup File",
-        "role": "Editor"
-      },
-      {
-        "ext": "tijaratbackup",
-        "name": "TijaratPro Backup (Legacy)",
-        "description": "TijaratPro Backup File",
-        "role": "Editor"
-      },
-      {
-        "ext": "tijaratinvoice",
-        "name": "TijaratPro Invoice",
-        "description": "TijaratPro Invoice File",
-        "role": "Editor"
-      },
-      {
-        "ext": "tijaratconfig",
-        "name": "TijaratPro Config",
-        "description": "TijaratPro Config File",
-        "role": "Editor"
-      }
-    ],
-    "portable": {
-      "artifactName": "${productName}-Portable-${version}.${ext}"
-    }
-  },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
     "@tailwindcss/postcss": "^4",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "concurrently": "^10.0.3",
     "cross-env": "^10.1.0",
-    "electron": "^42.4.1",
-    "electron-builder": "^26.15.3",
-    "electron-rebuild": "^3.2.9",
     "eslint": "^9",
     "eslint-config-next": "^15.5.19",
     "knip": "^6.17.1",
     "tailwindcss": "^4",
     "ts-prune": "^0.10.3",
-    "tsup": "^8.5.1",
     "typescript": "^5"
-  },
-  "description": "Professional Desktop Application for TijaratPro",
-  "author": "TijaratPro"
+  }
 }

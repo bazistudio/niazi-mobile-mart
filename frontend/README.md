@@ -1,11 +1,11 @@
 # 🏪 TijaratPro ERP
 
-Offline-first, multi-tenant ERP & POS system built for modern retail businesses.
+Multi-tenant ERP & POS system built for modern retail businesses.
 
-Built with **Next.js + Electron + TypeScript**, TijaratPro is designed to handle:
+Built with **Next.js + TypeScript**, TijaratPro is designed to handle:
 - Multi-shop management
 - Role-based access control
-- Offline-first POS operations
+- Real-time POS operations
 - Real-time inventory sync
 - Scalable SaaS architecture
 
@@ -14,13 +14,11 @@ Built with **Next.js + Electron + TypeScript**, TijaratPro is designed to handle
 ## 🚀 Tech Stack
 
 - Next.js (App Router)
-- Electron (Desktop POS)
+- React
 - TypeScript
 - Zustand (State Management)
 - Axios (API Layer)
 - TailwindCSS
-- PostgreSQL / MongoDB (planned backend)
-- Offline-first architecture
 
 ---
 
@@ -28,7 +26,7 @@ Built with **Next.js + Electron + TypeScript**, TijaratPro is designed to handle
 
 ### 🔐 Authentication System
 - JWT + Refresh Token support
-- Device binding (Electron security)
+- Device binding security
 - Role-based access control:
   - SUPER_ADMIN
   - MULTI_ADMIN
@@ -44,17 +42,17 @@ Built with **Next.js + Electron + TypeScript**, TijaratPro is designed to handle
 
 ---
 
-### 💻 Desktop POS (Electron)
-- Offline-first sales system
-- Local cache database support
-- Sync when online
+### 💻 Web POS
+- Fast cashier checkout
+- Real-time stock sync
+- Thermal & A4 invoice printing
 
 ---
 
-### 🔄 Sync Engine (Planned)
-- Background sync queue
-- Conflict resolution
+### 🔄 Sync Engine
+- Real-time sync engine
 - Event-based updates
+- Decoupled platform adapter
 
 ---
 
