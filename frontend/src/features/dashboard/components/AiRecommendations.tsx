@@ -1,7 +1,5 @@
-'use client';
-
 import React from 'react';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import {
   Sparkles,
   AlertTriangle,
@@ -196,7 +194,7 @@ export const AiRecommendations: React.FC<AiRecommendationsProps> = ({
 
             {rec.actionHref && rec.actionLabel && (
               <Link
-                href={rec.actionHref}
+                to={rec.actionHref}
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface border border-border hover:bg-surface-hover hover:border-primary/40 text-text-primary font-bold text-[11px] transition-colors shrink-0 shadow-xs"
               >
                 <span>{rec.actionLabel}</span>

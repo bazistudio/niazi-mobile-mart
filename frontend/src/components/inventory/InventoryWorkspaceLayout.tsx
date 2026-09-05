@@ -1,16 +1,14 @@
-'use client';
-
 import React, { useState } from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { Link, useLocation, Outlet } from 'react-router-dom';
 import { InventoryFilterProvider } from './InventoryFilterContext';
 import { InventoryFilterBar } from './InventoryFilterBar';
 import { AddProductDrawer } from './AddProductDrawer';
 import { useInventoryUIStore } from '@/features/inventory/store/inventory-ui.store';
 import { selectProducts } from '@/features/inventory/core/inventory.selectors';
 
-export function InventoryWorkspaceLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+export function InventoryWorkspaceLayout({ children }: { children?: React.ReactNode }) {
+  const location = useLocation();
+  const pathname = location.pathname;
   const [formatInMillions, setFormatInMillions] = useState(false);
   const { isAddProductOpen, setAddProductOpen } = useInventoryUIStore();
   const products = selectProducts();
@@ -40,7 +38,7 @@ export function InventoryWorkspaceLayout({ children }: { children: React.ReactNo
           <div className="px-4 flex items-end justify-between h-14 border-b border-gray-100 dark:border-gray-700/50">
             <nav className="flex space-x-1" aria-label="Tabs">
               <Link
-                href="/dashboard/shop-admin/inventory"
+                to="/dashboard/shop-admin/inventory"
                 className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
                   isProducts
                     ? 'border-[#006970] text-[#006970] dark:border-[#00B4BB] dark:text-[#00B4BB]'
@@ -51,7 +49,7 @@ export function InventoryWorkspaceLayout({ children }: { children: React.ReactNo
               </Link>
               
               <Link
-                href="/dashboard/shop-admin/inventory/stock"
+                to="/dashboard/shop-admin/inventory/stock"
                 className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
                   isStock
                     ? 'border-[#006970] text-[#006970] dark:border-[#00B4BB] dark:text-[#00B4BB]'
@@ -62,7 +60,7 @@ export function InventoryWorkspaceLayout({ children }: { children: React.ReactNo
               </Link>
               
               <Link
-                href="/dashboard/shop-admin/inventory/import"
+                to="/dashboard/shop-admin/inventory/import"
                 className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
                   isImport
                     ? 'border-[#006970] text-[#006970] dark:border-[#00B4BB] dark:text-[#00B4BB]'
@@ -77,14 +75,14 @@ export function InventoryWorkspaceLayout({ children }: { children: React.ReactNo
             <div className="flex items-center gap-3 pb-1.5">
               <button 
                 onClick={() => setAddProductOpen(true)}
-                className="px-3 py-1.5 bg-[#006970] hover:bg-[#005a60] text-white text-sm font-medium rounded shadow-sm transition-colors"
+                className="px-3 py-1.5 bg-[#006970] hover:bg-[#005a60] text-white text-sm font-medium rounded shadow-sm transition-colors cursor-pointer"
               >
                 + Add Product
               </button>
               
               <button 
                 onClick={() => setFormatInMillions(!formatInMillions)}
-                className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-3 py-1.5 rounded shadow-sm flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-3 py-1.5 rounded shadow-sm flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
                 title="Click to toggle millions format"
               >
                 <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Invest Volume:</span>
@@ -101,7 +99,7 @@ export function InventoryWorkspaceLayout({ children }: { children: React.ReactNo
 
         {/* Main Content Area (Maximized for Data) */}
         <main className="flex-1 overflow-hidden flex flex-col relative">
-          {children}
+          {children || <Outlet />}
         </main>
         
         <AddProductDrawer 

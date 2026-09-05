@@ -6,6 +6,7 @@ import { DashboardRedirectPage } from '@/pages/dashboard/DashboardRedirectPage';
 import { StaffDashboardPage } from '@/pages/dashboard/staff/StaffDashboardPage';
 import { authRoutes } from './authRoutes';
 import { organizationRoutes } from './organizationRoutes';
+import { shopAdminCoreRoutes } from './shopAdminRoutes';
 
 export const AppRoutes: React.FC = () => {
   return (
@@ -29,17 +30,10 @@ export const AppRoutes: React.FC = () => {
         } />
       </Route>
 
-      {/* Main Dashboard Shell Layout Route */}
-      <Route path="/dashboard" element={<ShopAdminDashboardLayout />}>
-        <Route path="shop-admin" element={<ShopAdminDashboard />} />
+      {/* Main Shop Admin Shell Layout Route (Batch 3) */}
+      <Route path="/dashboard/shop-admin" element={<ShopAdminDashboardLayout />}>
+        {shopAdminCoreRoutes}
       </Route>
-
-      {/* Direct route for backwards compatibility / direct deep links */}
-      <Route path="/dashboard/shop-admin" element={
-        <ShopAdminDashboardLayout>
-          <ShopAdminDashboard />
-        </ShopAdminDashboardLayout>
-      } />
 
       {/* Catch-all route */}
       <Route path="*" element={<Navigate to="/dashboard/shop-admin" replace />} />

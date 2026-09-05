@@ -2,7 +2,7 @@
 
 import React, { useEffect } from 'react';
 import { Package, RefreshCw, Plus } from 'lucide-react';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { 
   selectFetchProducts,
   selectForceSync,
@@ -48,14 +48,14 @@ export const ProductListWidget = () => {
           <button 
             onClick={() => forceSync()}
             disabled={reqStatus === 'loading'}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${reqStatus === 'loading' ? 'animate-spin' : ''}`} />
             Sync Now
           </button>
           
           <Link
-            href="/dashboard/shop-admin/products/new"
+            to="/dashboard/shop-admin/products/new"
             className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-white bg-[#006970] hover:bg-[#005a60] rounded-lg transition-colors"
           >
             <Plus className="h-3.5 w-3.5" />
