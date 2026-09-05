@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { supplierApi } from '@/services/supplier.api';
 import { LedgerBook } from '@/features/ledger/components/LedgerBook';
 import { Phone, MapPin, FileText, ShoppingCart, DollarSign, Calendar, Printer, Edit, CreditCard, ArrowLeft, Building2, ChevronDown, ChevronUp, Download } from 'lucide-react';
@@ -16,7 +16,7 @@ interface SupplierProfileProps {
 }
 
 export const SupplierProfile: React.FC<SupplierProfileProps> = ({ id }) => {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [detail, setDetail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { openPreview } = usePrintStore();
@@ -121,7 +121,7 @@ export const SupplierProfile: React.FC<SupplierProfileProps> = ({ id }) => {
   };
 
   const handleNewPurchase = () => {
-    router.push(`/dashboard/shop-admin/import?supplierId=${supplier.id}`);
+    navigate(`/dashboard/shop-admin/import?supplierId=${supplier.id}`);
   };
 
   return (
@@ -129,8 +129,8 @@ export const SupplierProfile: React.FC<SupplierProfileProps> = ({ id }) => {
       {/* Top Bar Navigation */}
       <div className="flex items-center gap-4">
         <button 
-          onClick={() => router.push('/dashboard/shop-admin/suppliers')}
-          className="p-1.5 hover:bg-surface-hover rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          onClick={() => navigate('/dashboard/shop-admin/suppliers')}
+          className="p-1.5 hover:bg-surface-hover rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring cursor-pointer"
         >
           <ArrowLeft className="w-5 h-5 text-text-secondary" />
         </button>

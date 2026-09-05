@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useHistoryStore } from '../store/history.store';
 import { HistoryRowActions } from './HistoryRowActions';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 
 export const HistoryTable: React.FC = () => {
   const { items, isLoading, error } = useHistoryStore();
@@ -67,7 +67,7 @@ export const HistoryTable: React.FC = () => {
                 <td className="px-6 py-4 whitespace-nowrap">
                   {item.party.id && (item.party.type === 'customer' || item.party.type === 'supplier') ? (
                     <Link 
-                      href={`/dashboard/shop-admin/${item.party.type === 'supplier' ? 'suppliers' : 'customers'}/${item.party.id}`}
+                      to={`/dashboard/shop-admin/${item.party.type === 'supplier' ? 'suppliers' : 'customers'}/${item.party.id}`}
                       className="font-medium text-[#006970] hover:text-[#00585e] hover:underline"
                     >
                       {item.party.name}

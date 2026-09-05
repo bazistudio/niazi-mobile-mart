@@ -9,9 +9,18 @@ import { InventoryStockPage } from '@/pages/dashboard/shop-admin/inventory/Inven
 import { InventoryImportPage } from '@/pages/dashboard/shop-admin/inventory/InventoryImportPage';
 import { StockPage } from '@/pages/dashboard/shop-admin/StockPage';
 import { ImportPage } from '@/pages/dashboard/shop-admin/ImportPage';
+import { SalesPage } from '@/pages/dashboard/shop-admin/SalesPage';
+import { HistoryPage } from '@/pages/dashboard/shop-admin/HistoryPage';
+import { CustomersPage } from '@/pages/dashboard/shop-admin/CustomersPage';
+import { CustomerDetailPage } from '@/pages/dashboard/shop-admin/CustomerDetailPage';
+import { SuppliersPage } from '@/pages/dashboard/shop-admin/SuppliersPage';
+import { SupplierDetailPage } from '@/pages/dashboard/shop-admin/SupplierDetailPage';
+import { PartiesPage } from '@/pages/dashboard/shop-admin/PartiesPage';
+import { PartyDetailPage } from '@/pages/dashboard/shop-admin/PartyDetailPage';
 
 export const shopAdminCoreRoutes = (
   <>
+    {/* Batch 3: Core */}
     <Route index element={<ShopAdminDashboard />} />
     <Route path="pos" element={<POSPage />} />
     <Route path="products" element={<ProductsPage />} />
@@ -26,5 +35,19 @@ export const shopAdminCoreRoutes = (
     {/* Direct alias routes */}
     <Route path="stock" element={<StockPage />} />
     <Route path="import" element={<ImportPage />} />
+
+    {/* Batch 4: Sales, History, Customers, Suppliers, Parties */}
+    <Route path="sales" element={<SalesPage />} />
+    <Route path="history" element={<HistoryPage />} />
+    
+    <Route path="customers" element={<CustomersPage />} />
+    <Route path="customers/:id" element={<CustomerDetailPage />} />
+
+    <Route path="suppliers" element={<SuppliersPage />} />
+    <Route path="suppliers/:id" element={<SupplierDetailPage />} />
+
+    <Route path="parties" element={<PartiesPage />} />
+    <Route path="parties/:id" element={<PartyDetailPage />} />
   </>
 );
+

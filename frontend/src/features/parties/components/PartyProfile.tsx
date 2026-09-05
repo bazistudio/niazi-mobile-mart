@@ -4,7 +4,7 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { partyApi } from '@/services/party.api';
 import { ArrowLeft, BookOpen, Building2, Phone, Mail, MapPin } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 
 interface PartyProfileProps {
@@ -12,7 +12,7 @@ interface PartyProfileProps {
 }
 
 export const PartyProfile: React.FC<PartyProfileProps> = ({ partyId }) => {
-  const router = useRouter();
+  const navigate = useNavigate();
 
   const { data: response, isLoading } = useQuery({
     queryKey: ['partyLedger', partyId],
@@ -37,8 +37,8 @@ export const PartyProfile: React.FC<PartyProfileProps> = ({ partyId }) => {
       {/* Header & Back Button */}
       <div className="flex items-center gap-4">
         <button 
-          onClick={() => router.back()}
-          className="p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors shadow-sm"
+          onClick={() => navigate(-1)}
+          className="p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors shadow-sm cursor-pointer"
         >
           <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" />
         </button>

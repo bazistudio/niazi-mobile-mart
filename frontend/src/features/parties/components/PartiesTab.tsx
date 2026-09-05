@@ -3,13 +3,13 @@
 import React, { useState, useMemo } from 'react';
 import { Plus, Search, Edit, Trash2, BookOpen, Users, DollarSign, Briefcase } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { partyApi } from '@/services/party.api';
 import toast from 'react-hot-toast';
 import { PartyFormDrawer } from './modals/PartyFormDrawer';
 
 export const PartiesTab = () => {
-  const router = useRouter();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -67,7 +67,7 @@ export const PartiesTab = () => {
   };
 
   const navigateToLedger = (partyId: string) => {
-    router.push(`/dashboard/shop-admin/parties/${partyId}`);
+    navigate(`/dashboard/shop-admin/parties/${partyId}`);
   };
 
   return (

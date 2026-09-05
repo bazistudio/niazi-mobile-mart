@@ -4,7 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { Plus, Search, Edit, Trash2, BookOpen, Truck, DollarSign, Activity } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supplierApi } from '@/services/supplier.api';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { SupplierFormDrawer } from './modals/AddSupplierDrawer';
 import toast from 'react-hot-toast';
 import { useTenantQueryKeys } from '@/lib/react-query/useTenantQueryKeys';
@@ -12,7 +12,7 @@ import { invalidateQueries } from '@/lib/react-query/invalidate';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 
 export const SuppliersTab = () => {
-  const router = useRouter();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const keys = useTenantQueryKeys();
   const { user } = useAuthStore();
@@ -47,7 +47,7 @@ export const SuppliersTab = () => {
   }, [suppliers]);
 
   const navigateToLedger = (supplierId: string) => {
-    router.push(`/dashboard/shop-admin/suppliers/${supplierId}`);
+    navigate(`/dashboard/shop-admin/suppliers/${supplierId}`);
   };
 
   const handleDelete = async (id: string) => {

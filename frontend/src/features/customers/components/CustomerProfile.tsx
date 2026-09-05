@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { customerApi } from '@/services/customer.api';
 import { LedgerBook } from '@/features/ledger/components/LedgerBook';
 import { Phone, MapPin, FileText, ShoppingCart, DollarSign, Calendar, Printer, Edit, Plus, CreditCard, ArrowLeft, ChevronDown, ChevronUp, Download, Loader2 } from 'lucide-react';
@@ -19,7 +19,7 @@ interface CustomerProfileProps {
 const cardClass = 'bg-surface rounded-xl border border-border shadow-card';
 
 export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [detail, setDetail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { openPreview } = usePrintStore();
@@ -128,9 +128,9 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
       <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={() => router.back()}
+          onClick={() => navigate(-1)}
           aria-label="Go back"
-          className="p-1.5 hover:bg-surface-hover rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="p-1.5 hover:bg-surface-hover rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring cursor-pointer"
         >
           <ArrowLeft className="w-5 h-5 text-text-secondary" />
         </button>
@@ -171,8 +171,8 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
             <h3 className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2">Quick Actions</h3>
             <button
               type="button"
-              onClick={() => router.push(`/dashboard/shop-admin/pos?customerId=${customer.id}`)}
-              className={`${actionBtnClass} bg-primary/10 text-primary hover:bg-primary/20`}
+              onClick={() => navigate(`/dashboard/shop-admin/pos?customerId=${customer.id}`)}
+              className={`${actionBtnClass} bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer`}
             >
               <ShoppingCart className="w-4 h-4" /> New Sale
             </button>

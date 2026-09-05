@@ -4,7 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { Plus, Search, Edit, Trash2, BookOpen, Users, DollarSign, Activity } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { customerApi } from '@/services/customer.api';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { CustomerFormDrawer } from './modals/AddCustomerDrawer';
 import toast from 'react-hot-toast';
 import { useTenantQueryKeys } from '@/lib/react-query/useTenantQueryKeys';
@@ -12,7 +12,7 @@ import { invalidateQueries } from '@/lib/react-query/invalidate';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 
 export const CustomersTab = () => {
-  const router = useRouter();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const keys = useTenantQueryKeys();
   const { user } = useAuthStore();
@@ -46,7 +46,7 @@ export const CustomersTab = () => {
   }, [customers]);
 
   const navigateToLedger = (customerId: string) => {
-    router.push(`/dashboard/shop-admin/customers/${customerId}`);
+    navigate(`/dashboard/shop-admin/customers/${customerId}`);
   };
 
   const handleDelete = async (id: string) => {

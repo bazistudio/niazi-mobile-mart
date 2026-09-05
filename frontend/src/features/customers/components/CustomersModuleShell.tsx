@@ -1,16 +1,15 @@
-'use client';
-
 import React, { useState, useEffect } from 'react';
-import { useSearchParams, useRouter, usePathname } from 'next/navigation';
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Users, BookOpen, BarChart3 } from 'lucide-react';
 import { CustomersTab } from './CustomersTab';
 import { CreditLedgerTab } from './CreditLedgerTab';
 import { AnalyticsTab } from './AnalyticsTab';
 
 export const CustomersModuleShell = () => {
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const pathname = location.pathname;
   const [activeTab, setActiveTab] = useState<'customers' | 'ledger' | 'analytics'>('customers');
 
   useEffect(() => {
@@ -22,9 +21,7 @@ export const CustomersModuleShell = () => {
 
   const handleTabChange = (tab: 'customers' | 'ledger' | 'analytics') => {
     setActiveTab(tab);
-    const params = new URLSearchParams(searchParams.toString());
-    params.set('tab', tab);
-    router.push(`${pathname}?${params.toString()}`);
+    setSearchParams({ tab });
   };
 
   return (
