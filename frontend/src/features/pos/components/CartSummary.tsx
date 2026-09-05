@@ -11,7 +11,6 @@ import { MultiPaymentModal } from './MultiPaymentModal';
 import { DiscountModal } from './DiscountModal';
 import { DBCustomer } from '@/types/db.types';
 import { CustomerSelector } from './CustomerSelector';
-import { useSearchParams } from 'next/navigation';
 import { customerApi } from '@/services/customer.api';
 import { CreditLimitWarningModal } from './modals/CreditLimitWarningModal';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';

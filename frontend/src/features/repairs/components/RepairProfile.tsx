@@ -4,11 +4,11 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { repairApi } from '../services/repair.api';
 import { ArrowLeft, CheckCircle, Clock, Save, Smartphone, Wrench, FileText, Download, User, DollarSign } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 
 export const RepairProfile = ({ repairId }: { repairId: string }) => {
-  const router = useRouter();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'timeline' | 'parts' | 'labor' | 'payments' | 'notes'>('timeline');
 
@@ -41,7 +41,7 @@ export const RepairProfile = ({ repairId }: { repairId: string }) => {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <button 
-            onClick={() => router.push('/dashboard/shop-admin/repairs')}
+            onClick={() => navigate('/dashboard/shop-admin/repairs')}
             className="p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors shadow-sm"
           >
             <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" />

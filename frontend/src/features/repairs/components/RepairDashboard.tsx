@@ -4,14 +4,14 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { repairApi } from '../services/repair.api';
 import { Search, Download, Plus, Wrench, Clock, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { RepairFormDrawer } from './modals/RepairFormDrawer';
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui';
 import type { BadgeProps } from '@/components/ui';
 
 export const RepairDashboard = () => {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -177,8 +177,8 @@ export const RepairDashboard = () => {
                   <tr
                     key={job.id}
                     className="hover:bg-surface-hover transition-colors cursor-pointer group focus-within:bg-surface-hover"
-                    onClick={() => router.push(`/dashboard/shop-admin/repairs/${job.id}`)}
-                    onKeyDown={(e) => e.key === 'Enter' && router.push(`/dashboard/shop-admin/repairs/${job.id}`)}
+                    onClick={() => navigate(`/dashboard/shop-admin/repairs/${job.id}`)}
+                    onKeyDown={(e) => e.key === 'Enter' && navigate(`/dashboard/shop-admin/repairs/${job.id}`)}
                     tabIndex={0}
                     role="button"
                   >
