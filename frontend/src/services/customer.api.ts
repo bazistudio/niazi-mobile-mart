@@ -1,26 +1,90 @@
 import { DBCustomer } from '@/types/db.types';
+import { tauriClient, CustomerSummaryDto, Customer } from '@/lib/tauri/tauriClient';
+
+function mapSummaryToDBCustomer(c: CustomerSummaryDto): DBCustomer {
+  return {
+    id: c.id,
+    _id: c.id,
+    accountCode: c.customer_code,
+    name: c.name,
+    mobile: c.phone,
+    phone: c.phone,
+    currentBalance: c.outstanding_balance,
+    creditLimit: c.credit_limit,
+    createdAt: new Date(c.created_at).getTime(),
+  };
+}
+
+function mapCustomerToDBCustomer(c: Customer, balance = 0): DBCustomer {
+  return {
+    id: c.id,
+    _id: c.id,
+    accountCode: c.customer_code,
+    name: c.name,
+    mobile: c.phone,
+    phone: c.phone,
+    currentBalance: balance,
+    creditLimit: c.credit_limit,
+    createdAt: new Date(c.created_at).getTime(),
+  };
+}
 
 export const customerApi = {
-  getCustomers: async (_page = 1, _limit = 100): Promise<{
+  getCustomers: async (page = 1, limit = 100): Promise<{
     success: boolean;
     data: DBCustomer[];
     pagination: { page: number; limit: number; total: number; pages: number };
   }> => {
-    return {
-      success: true,
-      data: [],
-      pagination: { page: 1, limit: 100, total: 0, pages: 1 }
-    };
+    try {
+      const summaries = await tauriClient.customerList({
+        limit,
+        offset: (page - 1) * limit,
+      });
+      const data = summaries.map(mapSummaryToDBCustomer);
+      return {
+        success: true,
+        data,
+        pagination: {
+          page,
+          limit,
+          total: data.length,
+          pages: Math.ceil(data.length / limit) || 1,
+        },
+      };
+    } catch (err: any) {
+      console.error('Failed to get customers via Tauri IPC:', err);
+      return {
+        success: false,
+        data: [],
+        pagination: { page: 1, limit, total: 0, pages: 1 },
+      };
+    }
   },
 
-  searchCustomers: async (_keyword: string): Promise<{
+  searchCustomers: async (keyword: string): Promise<{
     success: boolean;
     data: DBCustomer[];
   }> => {
-    return {
-      success: true,
-      data: []
-    };
+    try {
+      if (!keyword || !keyword.trim()) {
+        const all = await tauriClient.customerList({ limit: 50 });
+        return {
+          success: true,
+          data: all.map(mapSummaryToDBCustomer),
+        };
+      }
+      const results = await tauriClient.customerSearch(keyword.trim());
+      return {
+        success: true,
+        data: results.map(mapSummaryToDBCustomer),
+      };
+    } catch (err: any) {
+      console.error('Failed to search customers via Tauri IPC:', err);
+      return {
+        success: false,
+        data: [],
+      };
+    }
   },
 
   addCustomer: async (customerData: Partial<DBCustomer>): Promise<{
@@ -28,19 +92,25 @@ export const customerApi = {
     data: DBCustomer;
     message: string;
   }> => {
-    const newCust: DBCustomer = {
-      id: `cust_${Date.now()}`,
-      accountCode: customerData.accountCode || 'CUST-001',
-      name: customerData.name || 'New Customer',
-      mobile: customerData.mobile || customerData.phone || '',
-      currentBalance: customerData.currentBalance || 0,
-      creditLimit: customerData.creditLimit || 0,
-    };
-    return {
-      success: true,
-      data: newCust,
-      message: 'Customer saved locally (Phase 14 domain placeholder)',
-    };
+    try {
+      const created = await tauriClient.customerCreate({
+        name: customerData.name || 'Unnamed Customer',
+        phone: customerData.phone || customerData.mobile || '',
+        alternate_phone: (customerData as any).alternate_phone || null,
+        email: (customerData as any).email || null,
+        address: (customerData as any).address || null,
+        notes: (customerData as any).notes || null,
+        credit_limit: customerData.creditLimit ?? 0,
+      });
+      return {
+        success: true,
+        data: mapCustomerToDBCustomer(created, 0),
+        message: 'Customer created successfully',
+      };
+    } catch (err: any) {
+      console.error('Failed to add customer via Tauri IPC:', err);
+      throw new Error(err?.toString() || 'Failed to add customer');
+    }
   },
 
   updateCustomer: async (id: string, customerData: Partial<DBCustomer>): Promise<{
@@ -48,28 +118,44 @@ export const customerApi = {
     data: DBCustomer;
     message: string;
   }> => {
-    return {
-      success: true,
-      data: {
-        id,
-        accountCode: customerData.accountCode || 'CUST-001',
-        name: customerData.name || 'Customer',
-        mobile: customerData.mobile || customerData.phone || '',
-        currentBalance: customerData.currentBalance || 0,
-        creditLimit: customerData.creditLimit || 0,
-      },
-      message: 'Customer updated locally',
-    };
+    try {
+      const updated = await tauriClient.customerUpdate(id, {
+        name: customerData.name,
+        phone: customerData.phone || customerData.mobile,
+        alternate_phone: (customerData as any).alternate_phone,
+        email: (customerData as any).email,
+        address: (customerData as any).address,
+        notes: (customerData as any).notes,
+        credit_limit: customerData.creditLimit,
+        is_active: (customerData as any).is_active,
+      });
+      const balance = await tauriClient.customerGetBalance(id).catch(() => 0);
+      return {
+        success: true,
+        data: mapCustomerToDBCustomer(updated, balance),
+        message: 'Customer updated successfully',
+      };
+    } catch (err: any) {
+      console.error('Failed to update customer via Tauri IPC:', err);
+      throw new Error(err?.toString() || 'Failed to update customer');
+    }
   },
 
-  deleteCustomer: async (_id: string): Promise<{
+  deleteCustomer: async (id: string): Promise<{
     success: boolean;
     message: string;
   }> => {
-    return {
-      success: true,
-      message: 'Customer deleted',
-    };
+    try {
+      // Phase 15 Rule: Customers with financial history are safely deactivated, never physically deleted
+      await tauriClient.customerDeactivate(id);
+      return {
+        success: true,
+        message: 'Customer deactivated successfully',
+      };
+    } catch (err: any) {
+      console.error('Failed to deactivate customer via Tauri IPC:', err);
+      throw new Error(err?.toString() || 'Failed to deactivate customer');
+    }
   },
 
   getCustomerDetail: async (id: string): Promise<{
@@ -85,25 +171,24 @@ export const customerApi = {
       };
     };
   }> => {
-    return {
-      success: true,
-      data: {
-        customer: {
-          id,
-          accountCode: 'CUST-001',
-          name: 'Walk-in Customer',
-          mobile: '',
-          currentBalance: 0,
-          creditLimit: 0,
+    try {
+      const detail = await tauriClient.customerGetDetail(id);
+      return {
+        success: true,
+        data: {
+          customer: mapCustomerToDBCustomer(detail.customer, detail.outstanding_balance),
+          stats: {
+            totalSales: detail.total_sales_amount,
+            outstanding: detail.outstanding_balance,
+            invoiceCount: detail.total_sales_count,
+            lastTransactionDate: detail.last_transaction_date,
+            recentInvoices: [],
+          },
         },
-        stats: {
-          totalSales: 0,
-          outstanding: 0,
-          invoiceCount: 0,
-          lastTransactionDate: null,
-          recentInvoices: [],
-        }
-      }
-    };
-  }
+      };
+    } catch (err: any) {
+      console.error('Failed to get customer detail via Tauri IPC:', err);
+      throw new Error(err?.toString() || 'Failed to get customer detail');
+    }
+  },
 };

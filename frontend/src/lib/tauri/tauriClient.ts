@@ -574,6 +574,157 @@ export const tauriClient = {
       active_branch_count: 1,
     };
   },
+
+  // ── Customer & Ledger Domain (Phase 15) ──────────────────────────────────
+  async customerCreate(dto: CreateCustomerDto): Promise<Customer> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Customer>('customer_create', { dto });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async customerUpdate(id: string, dto: UpdateCustomerDto): Promise<Customer> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Customer>('customer_update', { id, dto });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async customerGetById(id: string): Promise<Customer> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Customer>('customer_get_by_id', { id });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async customerGetDetail(id: string): Promise<CustomerDetailDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<CustomerDetailDto>('customer_get_detail', { id });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async customerList(filter?: CustomerFilter): Promise<CustomerSummaryDto[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<CustomerSummaryDto[]>('customer_list', { filter });
+    }
+    return [];
+  },
+
+  async customerSearch(query: string): Promise<CustomerSummaryDto[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<CustomerSummaryDto[]>('customer_search', { query });
+    }
+    return [];
+  },
+
+  async customerGetLedger(
+    customerId: string,
+    limit?: number,
+    offset?: number
+  ): Promise<CustomerLedgerEntry[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<CustomerLedgerEntry[]>('customer_get_ledger', {
+        customerId,
+        limit,
+        offset,
+      });
+    }
+    return [];
+  },
+
+  async customerGetStatement(customerId: string): Promise<CustomerStatementDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<CustomerStatementDto>('customer_get_statement', {
+        customerId,
+      });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async customerGetBalance(customerId: string): Promise<number> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<number>('customer_get_balance', { customerId });
+    }
+    return 0;
+  },
+
+  async customerRecordPayment(
+    dto: RecordCustomerPaymentDto
+  ): Promise<CustomerPaymentResultDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<CustomerPaymentResultDto>('customer_record_payment', {
+        dto,
+      });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async customerDeactivate(id: string): Promise<void> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('customer_deactivate', { id });
+    }
+  },
+
+  // ── Sales & Checkout Domain (Phase 15) ────────────────────────────────────
+  async saleComplete(dto: CompleteSaleDto): Promise<SaleResultDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SaleResultDto>('sale_complete', { dto });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async saleGetById(id: string): Promise<Sale | null> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Sale | null>('sale_get_by_id', { id });
+    }
+    return null;
+  },
+
+  async saleGetByInvoice(invoiceNumber: string): Promise<Sale | null> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Sale | null>('sale_get_by_invoice', { invoiceNumber });
+    }
+    return null;
+  },
+
+  async saleList(filter?: SaleFilterDto): Promise<Sale[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Sale[]>('sale_list', { filter });
+    }
+    return [];
+  },
+
+  async saleGetLines(saleId: string): Promise<SaleLine[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SaleLine[]>('sale_get_lines', { saleId });
+    }
+    return [];
+  },
+
+  async saleGetPayments(saleId: string): Promise<SalePayment[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SalePayment[]>('sale_get_payments', { saleId });
+    }
+    return [];
+  },
 };
 
 // ── Type Definitions for Organization & Branch ──────────────────────────────
@@ -775,4 +926,215 @@ export interface LowStockItemDto {
   branch_name: string;
   current_quantity: number;
   low_stock_threshold: number;
+}
+
+// ── Type Definitions for Customer & Customer Ledger (Phase 15) ──────────────
+export interface Customer {
+  id: string;
+  customer_code: string;
+  name: string;
+  phone: string;
+  alternate_phone: string | null;
+  email: string | null;
+  address: string | null;
+  notes: string | null;
+  credit_limit: number; // Stored in whole PKR, 0 = unlimited credit
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomerSummaryDto {
+  id: string;
+  customer_code: string;
+  name: string;
+  phone: string;
+  credit_limit: number;
+  outstanding_balance: number; // In whole PKR
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface CustomerDetailDto {
+  customer: Customer;
+  outstanding_balance: number;
+  total_sales_count: number;
+  total_sales_amount: number;
+  last_transaction_date: string | null;
+}
+
+export interface CreateCustomerDto {
+  name: string;
+  phone: string;
+  alternate_phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  notes?: string | null;
+  credit_limit?: number | null;
+}
+
+export interface UpdateCustomerDto {
+  name?: string | null;
+  phone?: string | null;
+  alternate_phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  notes?: string | null;
+  credit_limit?: number | null;
+  is_active?: boolean | null;
+}
+
+export interface CustomerFilter {
+  search?: string | null;
+  is_active?: boolean | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export type CustomerLedgerEntryType = 'SALE' | 'PAYMENT' | 'ADJUSTMENT';
+
+export interface CustomerLedgerEntry {
+  id: string;
+  customer_id: string;
+  reference_id: string | null;
+  reference_number: string | null;
+  entry_type: CustomerLedgerEntryType;
+  debit: number;
+  credit: number;
+  balance_after: number;
+  description: string;
+  performed_by: string | null;
+  created_at: string;
+}
+
+export interface CustomerStatementRowDto {
+  id: string;
+  date: string;
+  reference_number: string | null;
+  description: string;
+  entry_type: string;
+  debit: number;
+  credit: number;
+  balance: number;
+}
+
+export interface CustomerStatementDto {
+  customer_id: string;
+  customer_name: string;
+  customer_code: string;
+  phone: string;
+  credit_limit: number;
+  current_balance: number;
+  entries: CustomerStatementRowDto[];
+}
+
+export interface RecordCustomerPaymentDto {
+  customer_id: string;
+  amount: number;
+  payment_method: string;
+  reference_number?: string | null;
+  notes?: string | null;
+}
+
+export interface AllocatedSaleDto {
+  sale_id: string;
+  invoice_number: string;
+  amount_allocated: number;
+  previous_paid: number;
+  new_paid: number;
+  total_amount: number;
+  payment_status: string;
+}
+
+export interface CustomerPaymentResultDto {
+  payment_id: string;
+  receipt_number: string;
+  customer_id: string;
+  amount_paid: number;
+  previous_balance: number;
+  new_balance: number;
+  allocated_sales: AllocatedSaleDto[];
+}
+
+// ── Type Definitions for Sales & Checkout (Phase 15) ────────────────────────
+export type PaymentStatus = 'PAID' | 'PARTIALLY_PAID' | 'UNPAID';
+export type SaleStatus = 'COMPLETED' | 'VOIDED' | 'REFUNDED';
+
+export interface Sale {
+  id: string;
+  invoice_number: string;
+  branch_id: string;
+  customer_id: string | null;
+  customer_name_snapshot: string | null;
+  subtotal: number;
+  discount: number;
+  tax_amount: number;
+  total_amount: number;
+  paid_amount: number;
+  change_amount: number;
+  payment_status: PaymentStatus;
+  sale_status: SaleStatus;
+  performed_by: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SaleLine {
+  id: string;
+  sale_id: string;
+  product_id: string;
+  product_name_snapshot: string;
+  sku_snapshot: string;
+  unit_price: number;
+  cost_price_snapshot: number;
+  quantity: number;
+  discount: number;
+  line_total: number;
+  created_at: string;
+}
+
+export interface SalePayment {
+  id: string;
+  sale_id: string;
+  amount: number;
+  payment_method: string;
+  reference_number: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface SaleItemDto {
+  product_id: string;
+  quantity: number;
+  discount?: number | null;
+}
+
+export interface CompleteSaleDto {
+  branch_id?: string | null;
+  customer_id?: string | null;
+  items: SaleItemDto[];
+  discount?: number | null;
+  paid_amount?: number | null;
+  payment_method?: string | null;
+  notes?: string | null;
+}
+
+export interface SaleResultDto {
+  sale: Sale;
+  lines: SaleLine[];
+  payments: SalePayment[];
+  credit_amount: number;
+  customer_balance_after: number | null;
+}
+
+export interface SaleFilterDto {
+  customer_id?: string | null;
+  branch_id?: string | null;
+  payment_status?: string | null;
+  sale_status?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  limit?: number | null;
+  offset?: number | null;
 }

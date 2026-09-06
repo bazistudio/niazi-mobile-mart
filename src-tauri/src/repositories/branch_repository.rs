@@ -1,4 +1,3 @@
-use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use crate::db::connection::DatabaseConnection;

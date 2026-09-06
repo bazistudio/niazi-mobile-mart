@@ -80,6 +80,25 @@ pub fn run() {
             commands::organization::branch_list,
             commands::organization::branch_get_main,
             commands::organization::organization_get_dashboard_stats,
+            // Customer & Ledger Commands
+            commands::customer::customer_create,
+            commands::customer::customer_update,
+            commands::customer::customer_get_by_id,
+            commands::customer::customer_get_detail,
+            commands::customer::customer_list,
+            commands::customer::customer_search,
+            commands::customer::customer_get_ledger,
+            commands::customer::customer_get_statement,
+            commands::customer::customer_get_balance,
+            commands::customer::customer_record_payment,
+            commands::customer::customer_deactivate,
+            // Sales & Checkout Commands
+            commands::sales::sale_complete,
+            commands::sales::sale_get_by_id,
+            commands::sales::sale_get_by_invoice,
+            commands::sales::sale_list,
+            commands::sales::sale_get_lines,
+            commands::sales::sale_get_payments,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Niazi Mobile Mart Tauri application");

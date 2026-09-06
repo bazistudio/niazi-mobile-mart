@@ -277,6 +277,59 @@ pub const MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_sale_payments_sale_id ON sale_payments(sale_id);
         "#,
     },
+    Migration {
+        version: 5,
+        name: "005_customers_and_ledger",
+        up: r#"
+        -- Counters for sequential customer codes and payment receipts
+        INSERT OR IGNORE INTO counters (name, value) VALUES ('customer_code', 0);
+        INSERT OR IGNORE INTO counters (name, value) VALUES ('payment_receipt', 0);
+
+        -- Customers master table
+        CREATE TABLE IF NOT EXISTS customers (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            customer_code TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            alternate_phone TEXT,
+            email TEXT,
+            address TEXT,
+            notes TEXT,
+            credit_limit INTEGER NOT NULL DEFAULT 0 CHECK(credit_limit >= 0),
+            is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_code ON customers(customer_code);
+        CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
+        CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name COLLATE NOCASE);
+        CREATE INDEX IF NOT EXISTS idx_customers_is_active ON customers(is_active);
+
+        -- Customer Ledger Entries (Append-only Auditable Financial Journal)
+        CREATE TABLE IF NOT EXISTS customer_ledger_entries (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+            reference_id TEXT,
+            reference_number TEXT,
+            entry_type TEXT NOT NULL CHECK(entry_type IN ('SALE', 'PAYMENT', 'ADJUSTMENT')),
+            debit INTEGER NOT NULL DEFAULT 0 CHECK(debit >= 0),
+            credit INTEGER NOT NULL DEFAULT 0 CHECK(credit >= 0),
+            balance_after INTEGER NOT NULL CHECK(balance_after >= 0),
+            description TEXT NOT NULL,
+            performed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_customer_ledger_customer_id ON customer_ledger_entries(customer_id);
+        CREATE INDEX IF NOT EXISTS idx_customer_ledger_created_at ON customer_ledger_entries(created_at);
+        CREATE INDEX IF NOT EXISTS idx_customer_ledger_reference_id ON customer_ledger_entries(reference_id);
+        CREATE INDEX IF NOT EXISTS idx_customer_ledger_entry_type ON customer_ledger_entries(entry_type);
+
+        -- Customer index on sales table
+        CREATE INDEX IF NOT EXISTS idx_sales_customer_id ON sales(customer_id);
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction
@@ -353,23 +406,24 @@ mod tests {
         // Enable foreign keys
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
 
-        // 1. First run applies migrations (4 total: Core, Product/Inventory, Auth Security, Sales/Invoices)
+        // 1. First run applies migrations (5 total: Core, Product/Inventory, Auth Security, Sales/Invoices, Customers/Ledger)
         let count = MigrationRunner::run(&mut conn).unwrap();
-        assert_eq!(count, 4);
+        assert_eq!(count, 5);
 
-        // Verify permanent tables exist (5 from Phase 6 + 6 from Phase 7 + 4 from Phase 14 = 15 tables)
+        // Verify permanent tables exist (5 from Phase 6 + 6 from Phase 7 + 4 from Phase 14 + 2 from Phase 15 = 17 tables)
         let tables_count: i64 = conn
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN (
                     'organizations', 'branches', 'users', 'user_access_profiles', 'public_rates',
                     'categories', 'brands', 'units', 'products', 'stock', 'stock_movements',
-                    'counters', 'sales', 'sale_lines', 'sale_payments'
+                    'counters', 'sales', 'sale_lines', 'sale_payments',
+                    'customers', 'customer_ledger_entries'
                 )",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(tables_count, 15);
+        assert_eq!(tables_count, 17);
 
         // Verify users table has recovery_key_hash and must_change_password
         let user_cols: Vec<String> = {
@@ -537,34 +591,83 @@ mod tests {
         );
         assert!(dup_res.is_err(), "Duplicate invoice_number must be rejected by UNIQUE constraint");
 
-        // 4. Verify sale_lines table & foreign key
+        // 4. Verify sale_lines table & foreign key with valid 36-char UUIDs
         conn.execute(
             "INSERT INTO categories (id, name, code, is_active, created_at, updated_at)
-             VALUES ('cat1', 'Cat', 'CAT1', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+             VALUES ('00000000-0000-0000-0000-000000000010', 'Cat', 'CAT1', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
             [],
         ).unwrap();
         conn.execute(
             "INSERT INTO units (id, name, is_active, created_at, updated_at)
-             VALUES ('unt1', 'Piece', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+             VALUES ('00000000-0000-0000-0000-000000000020', 'Piece', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
             [],
         ).unwrap();
         conn.execute(
             "INSERT INTO products (id, name, sku, category_id, unit_id, purchase_price, sale_price, is_active, created_at, updated_at)
-             VALUES ('prod1', 'Item 1', 'SKU-1', 'cat1', 'unt1', 500, 1000, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+             VALUES ('00000000-0000-0000-0000-000000000030', 'Item 1', 'SKU-1', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000020', 500, 1000, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
             [],
         ).unwrap();
 
         conn.execute(
             "INSERT INTO sale_lines (id, sale_id, product_id, product_name_snapshot, sku_snapshot, unit_price, cost_price_snapshot, quantity, discount, line_total, created_at)
-             VALUES ('line1', '11111111-1111-1111-1111-111111111111', 'prod1', 'Item 1', 'SKU-1', 1000, 500, 1, 0, 1000, '2026-01-01T00:00:00Z')",
+             VALUES ('00000000-0000-0000-0000-000000000040', '11111111-1111-1111-1111-111111111111', '00000000-0000-0000-0000-000000000030', 'Item 1', 'SKU-1', 1000, 500, 1, 0, 1000, '2026-01-01T00:00:00Z')",
             [],
         ).unwrap();
 
-        // 5. Verify sale_payments table & foreign key
+        // 5. Verify sale_payments table & foreign key with valid 36-char UUIDs
         conn.execute(
             "INSERT INTO sale_payments (id, sale_id, amount, payment_method, created_at)
-             VALUES ('pay1', '11111111-1111-1111-1111-111111111111', 1000, 'CASH', '2026-01-01T00:00:00Z')",
+             VALUES ('00000000-0000-0000-0000-000000000050', '11111111-1111-1111-1111-111111111111', 1000, 'CASH', '2026-01-01T00:00:00Z')",
             [],
         ).unwrap();
+    }
+
+    #[test]
+    fn test_migration_005_customers_and_ledger() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+
+        MigrationRunner::run(&mut conn).unwrap();
+
+        // 1. Verify counters for customer_code and payment_receipt
+        let cus_counter: i64 = conn
+            .query_row("SELECT value FROM counters WHERE name = 'customer_code'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(cus_counter, 0);
+
+        let rec_counter: i64 = conn
+            .query_row("SELECT value FROM counters WHERE name = 'payment_receipt'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rec_counter, 0);
+
+        // 2. Verify customers table insert & constraints
+        conn.execute(
+            "INSERT INTO customers (id, customer_code, name, phone, credit_limit, is_active, created_at, updated_at)
+             VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'CUS-000001', 'Ali Khan', '03001234567', 50000, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        // Unique constraint on customer_code
+        let dup_code = conn.execute(
+            "INSERT INTO customers (id, customer_code, name, phone, credit_limit, is_active, created_at, updated_at)
+             VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'CUS-000001', 'Bilal', '03009876543', 0, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        );
+        assert!(dup_code.is_err(), "Duplicate customer_code must fail");
+
+        // 3. Verify customer_ledger_entries insert & foreign key
+        conn.execute(
+            "INSERT INTO customer_ledger_entries (id, customer_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, created_at)
+             VALUES ('cccccccc-cccc-cccc-cccc-cccccccccccc', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111', 'INV-000001', 'SALE', 10000, 0, 10000, 'Credit Sale INV-000001', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        // Verify balance query SUM(debit) - SUM(credit)
+        let balance: i64 = conn.query_row(
+            "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM customer_ledger_entries WHERE customer_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(balance, 10000);
     }
 }
