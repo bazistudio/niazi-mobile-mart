@@ -5,4 +5,6 @@ pub mod health_check;
 pub mod inventory;
 pub mod organization;
 pub mod product;
+pub mod purchases;
 pub mod sales;
+pub mod supplier;

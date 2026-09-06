@@ -4,7 +4,9 @@ pub mod customer;
 pub mod inventory;
 pub mod organization;
 pub mod product;
+pub mod purchases;
 pub mod sales;
+pub mod supplier;
 pub mod user;
 
 pub use access_control::{StaffAccessProfile, StaffOperationalLimits};
@@ -21,8 +23,17 @@ pub use organization::{
     PKR_CURRENCY_SYMBOL,
 };
 pub use product::Product;
+pub use purchases::{
+    CompletePurchaseDto, Purchase, PurchaseFilterDto, PurchaseItemDto, PurchaseLine,
+    PurchasePaymentStatus, PurchaseResultDto, PurchaseStatus,
+};
 pub use sales::{
     CompleteSaleDto, PaymentStatus, Sale, SaleFilterDto, SaleItemDto, SaleLine, SalePayment,
     SaleResultDto, SaleStatus,
+};
+pub use supplier::{
+    AllocatedPurchaseDto, CreateSupplierDto, RecordSupplierPaymentDto, Supplier, SupplierDetailDto,
+    SupplierFilter, SupplierLedgerEntry, SupplierLedgerEntryType, SupplierPaymentResultDto,
+    SupplierStatementDto, SupplierStatementRowDto, SupplierSummaryDto, UpdateSupplierDto,
 };
 pub use user::{SanitizedUser, User, UserRole};

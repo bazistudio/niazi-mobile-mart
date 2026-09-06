@@ -7,7 +7,10 @@ use crate::db::connection::DatabaseConnection;
 use crate::domain::access_control::StaffAccessProfile;
 use crate::domain::user::{User, UserRole};
 use crate::repositories::{BranchRepository, SQLiteUserRepository};
-use crate::services::{CatalogService, CustomerService, InventoryService, ProductService, SaleService};
+use crate::services::{
+    CatalogService, CustomerService, InventoryService, ProductService, PurchaseService, SaleService,
+    SupplierService,
+};
 
 /// Native application session context owned and strictly enforced by Rust
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -48,6 +51,8 @@ pub struct AppState {
     pub inventory_service: InventoryService,
     pub customer_service: CustomerService,
     pub sale_service: SaleService,
+    pub supplier_service: SupplierService,
+    pub purchase_service: PurchaseService,
     pub is_initialized: Arc<RwLock<bool>>,
 }
 
@@ -61,6 +66,8 @@ impl AppState {
         let inventory_service = InventoryService::new(db.clone());
         let customer_service = CustomerService::new(db.clone());
         let sale_service = SaleService::new(db.clone());
+        let supplier_service = SupplierService::new(db.clone());
+        let purchase_service = PurchaseService::new(db.clone());
 
         Self {
             app_version: app_version.into(),
@@ -73,6 +80,8 @@ impl AppState {
             inventory_service,
             customer_service,
             sale_service,
+            supplier_service,
+            purchase_service,
             is_initialized: Arc::new(RwLock::new(true)),
         }
     }

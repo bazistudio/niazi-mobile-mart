@@ -725,6 +725,151 @@ export const tauriClient = {
     }
     return [];
   },
+
+  // ── Suppliers & Payables Domain (Phase 16) ──────────────────────────────────
+  async supplierCreate(dto: CreateSupplierDto): Promise<Supplier> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Supplier>('supplier_create', { dto });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async supplierUpdate(id: string, dto: UpdateSupplierDto): Promise<Supplier> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Supplier>('supplier_update', { id, dto });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async supplierGetById(id: string): Promise<Supplier | null> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Supplier | null>('supplier_get_by_id', { id });
+    }
+    return null;
+  },
+
+  async supplierGetDetail(id: string): Promise<SupplierDetailDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SupplierDetailDto>('supplier_get_detail', { id });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async supplierList(filter?: SupplierFilter): Promise<SupplierSummaryDto[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SupplierSummaryDto[]>('supplier_list', { filter });
+    }
+    return [];
+  },
+
+  async supplierSearch(query: string): Promise<SupplierSummaryDto[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SupplierSummaryDto[]>('supplier_search', { query });
+    }
+    return [];
+  },
+
+  async supplierGetLedger(
+    supplierId: string,
+    limit?: number,
+    offset?: number
+  ): Promise<SupplierLedgerEntry[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SupplierLedgerEntry[]>('supplier_get_ledger', {
+        supplierId,
+        limit,
+        offset,
+      });
+    }
+    return [];
+  },
+
+  async supplierGetStatement(supplierId: string): Promise<SupplierStatementDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SupplierStatementDto>('supplier_get_statement', {
+        supplierId,
+      });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async supplierGetBalance(supplierId: string): Promise<number> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<number>('supplier_get_balance', { supplierId });
+    }
+    return 0;
+  },
+
+  async supplierRecordPayment(
+    dto: RecordSupplierPaymentDto
+  ): Promise<SupplierPaymentResultDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SupplierPaymentResultDto>('supplier_record_payment', {
+        dto,
+      });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async supplierDeactivate(id: string): Promise<void> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('supplier_deactivate', { id });
+    }
+  },
+
+  // ── Purchasing Domain (Phase 16) ──────────────────────────────────────────
+  async purchaseComplete(dto: CompletePurchaseDto): Promise<PurchaseResultDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<PurchaseResultDto>('purchase_complete', { dto });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async purchaseGetById(id: string): Promise<Purchase | null> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Purchase | null>('purchase_get_by_id', { id });
+    }
+    return null;
+  },
+
+  async purchaseGetByNumber(purchaseNumber: string): Promise<Purchase | null> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Purchase | null>('purchase_get_by_number', {
+        purchaseNumber,
+      });
+    }
+    return null;
+  },
+
+  async purchaseList(filter?: PurchaseFilterDto): Promise<Purchase[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Purchase[]>('purchase_list', { filter });
+    }
+    return [];
+  },
+
+  async purchaseGetLines(purchaseId: string): Promise<PurchaseLine[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<PurchaseLine[]>('purchase_get_lines', { purchaseId });
+    }
+    return [];
+  },
 };
 
 // ── Type Definitions for Organization & Branch ──────────────────────────────
@@ -1133,6 +1278,200 @@ export interface SaleFilterDto {
   branch_id?: string | null;
   payment_status?: string | null;
   sale_status?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+// ── Type Definitions for Suppliers & Purchasing (Phase 16) ───────────────────
+export interface Supplier {
+  id: string;
+  supplier_code: string;
+  name: string;
+  phone: string;
+  alternate_phone: string | null;
+  email: string | null;
+  address: string | null;
+  notes: string | null;
+  credit_limit: number; // 0 = unlimited credit
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SupplierSummaryDto {
+  id: string;
+  supplier_code: string;
+  name: string;
+  phone: string;
+  credit_limit: number;
+  outstanding_balance: number; // In whole PKR
+  is_active: boolean;
+}
+
+export interface SupplierDetailDto {
+  supplier: Supplier;
+  outstanding_balance: number;
+  recent_purchases: Purchase[];
+  recent_payments: SupplierLedgerEntry[];
+}
+
+export interface CreateSupplierDto {
+  name: string;
+  phone: string;
+  alternate_phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  notes?: string | null;
+  credit_limit?: number | null;
+}
+
+export interface UpdateSupplierDto {
+  name?: string | null;
+  phone?: string | null;
+  alternate_phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  notes?: string | null;
+  credit_limit?: number | null;
+  is_active?: boolean | null;
+}
+
+export interface SupplierFilter {
+  search?: string | null;
+  is_active?: boolean | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export type SupplierLedgerEntryType = 'PURCHASE' | 'PAYMENT' | 'ADJUSTMENT';
+
+export interface SupplierLedgerEntry {
+  id: string;
+  supplier_id: string;
+  reference_id: string | null;
+  reference_number: string | null;
+  entry_type: SupplierLedgerEntryType;
+  debit: number;
+  credit: number;
+  balance_after: number;
+  description: string;
+  performed_by: string | null;
+  created_at: string;
+}
+
+export interface SupplierStatementRowDto {
+  date: string;
+  reference_number: string | null;
+  entry_type: string;
+  description: string;
+  debit: number;
+  credit: number;
+  balance: number;
+}
+
+export interface SupplierStatementDto {
+  supplier: Supplier;
+  start_date: string | null;
+  end_date: string | null;
+  opening_balance: number;
+  closing_balance: number;
+  total_debit: number;
+  total_credit: number;
+  rows: SupplierStatementRowDto[];
+}
+
+export interface RecordSupplierPaymentDto {
+  supplier_id: string;
+  amount: number;
+  payment_method: string;
+  reference_number?: string | null;
+  notes?: string | null;
+}
+
+export interface AllocatedPurchaseDto {
+  purchase_id: string;
+  purchase_number: string;
+  amount_allocated: number;
+  previous_paid: number;
+  new_paid: number;
+  total_amount: number;
+  payment_status: string;
+}
+
+export interface SupplierPaymentResultDto {
+  payment_id: string;
+  receipt_number: string;
+  supplier_id: string;
+  amount_paid: number;
+  previous_balance: number;
+  new_balance: number;
+  allocated_purchases: AllocatedPurchaseDto[];
+}
+
+export type PurchasePaymentStatus = 'PAID' | 'PARTIALLY_PAID' | 'UNPAID';
+export type PurchaseStatus = 'COMPLETED' | 'CANCELLED';
+
+export interface Purchase {
+  id: string;
+  purchase_number: string;
+  supplier_id: string;
+  branch_id: string;
+  subtotal: number;
+  discount: number;
+  total_amount: number;
+  paid_amount: number;
+  credit_amount: number;
+  payment_status: PurchasePaymentStatus;
+  status: PurchaseStatus;
+  notes: string | null;
+  performed_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PurchaseLine {
+  id: string;
+  purchase_id: string;
+  product_id: string;
+  product_name_snapshot: string;
+  sku_snapshot: string;
+  quantity: number;
+  unit_cost: number;
+  discount: number;
+  line_total: number;
+  created_at: string;
+}
+
+export interface PurchaseItemDto {
+  product_id: string;
+  quantity: number;
+  unit_cost?: number | null;
+  discount?: number | null;
+}
+
+export interface CompletePurchaseDto {
+  branch_id?: string | null;
+  supplier_id: string;
+  items: PurchaseItemDto[];
+  discount?: number | null;
+  paid_amount?: number | null;
+  notes?: string | null;
+}
+
+export interface PurchaseResultDto {
+  purchase: Purchase;
+  lines: PurchaseLine[];
+  credit_amount: number;
+  supplier_balance_after: number;
+}
+
+export interface PurchaseFilterDto {
+  supplier_id?: string | null;
+  branch_id?: string | null;
+  payment_status?: string | null;
+  status?: string | null;
   start_date?: string | null;
   end_date?: string | null;
   limit?: number | null;

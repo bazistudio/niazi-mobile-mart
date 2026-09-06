@@ -330,6 +330,99 @@ pub const MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_sales_customer_id ON sales(customer_id);
         "#,
     },
+    Migration {
+        version: 6,
+        name: "006_suppliers_purchasing_and_payables",
+        up: r#"
+        -- Counters for sequential supplier codes, purchases, and supplier payment receipts
+        INSERT OR IGNORE INTO counters (name, value) VALUES ('supplier_code', 0);
+        INSERT OR IGNORE INTO counters (name, value) VALUES ('purchase_number', 0);
+        INSERT OR IGNORE INTO counters (name, value) VALUES ('supplier_payment_receipt', 0);
+
+        -- Suppliers master table
+        CREATE TABLE IF NOT EXISTS suppliers (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            supplier_code TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            alternate_phone TEXT,
+            email TEXT,
+            address TEXT,
+            notes TEXT,
+            credit_limit INTEGER NOT NULL DEFAULT 0 CHECK(credit_limit >= 0),
+            is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_suppliers_code ON suppliers(supplier_code);
+        CREATE INDEX IF NOT EXISTS idx_suppliers_phone ON suppliers(phone);
+        CREATE INDEX IF NOT EXISTS idx_suppliers_name ON suppliers(name COLLATE NOCASE);
+        CREATE INDEX IF NOT EXISTS idx_suppliers_is_active ON suppliers(is_active);
+
+        -- Purchases header table
+        CREATE TABLE IF NOT EXISTS purchases (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            purchase_number TEXT NOT NULL UNIQUE,
+            supplier_id TEXT NOT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
+            branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+            subtotal INTEGER NOT NULL CHECK(subtotal >= 0),
+            discount INTEGER NOT NULL DEFAULT 0 CHECK(discount >= 0),
+            total_amount INTEGER NOT NULL CHECK(total_amount >= 0),
+            paid_amount INTEGER NOT NULL DEFAULT 0 CHECK(paid_amount >= 0),
+            credit_amount INTEGER NOT NULL DEFAULT 0 CHECK(credit_amount >= 0),
+            payment_status TEXT NOT NULL CHECK(payment_status IN ('PAID', 'PARTIALLY_PAID', 'UNPAID')),
+            status TEXT NOT NULL DEFAULT 'COMPLETED' CHECK(status IN ('COMPLETED', 'CANCELLED')),
+            notes TEXT,
+            performed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_purchases_number ON purchases(purchase_number);
+        CREATE INDEX IF NOT EXISTS idx_purchases_supplier_id ON purchases(supplier_id);
+        CREATE INDEX IF NOT EXISTS idx_purchases_branch_id ON purchases(branch_id);
+        CREATE INDEX IF NOT EXISTS idx_purchases_payment_status ON purchases(payment_status);
+        CREATE INDEX IF NOT EXISTS idx_purchases_created_at ON purchases(created_at);
+
+        -- Purchase Lines item table
+        CREATE TABLE IF NOT EXISTS purchase_lines (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            purchase_id TEXT NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+            product_id TEXT NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+            product_name_snapshot TEXT NOT NULL,
+            sku_snapshot TEXT NOT NULL,
+            quantity INTEGER NOT NULL CHECK(quantity > 0),
+            unit_cost INTEGER NOT NULL CHECK(unit_cost >= 0),
+            discount INTEGER NOT NULL DEFAULT 0 CHECK(discount >= 0),
+            line_total INTEGER NOT NULL CHECK(line_total >= 0),
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_purchase_lines_purchase_id ON purchase_lines(purchase_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_lines_product_id ON purchase_lines(product_id);
+
+        -- Supplier Ledger Entries (Append-only Auditable Financial Journal)
+        CREATE TABLE IF NOT EXISTS supplier_ledger_entries (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            supplier_id TEXT NOT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
+            reference_id TEXT,
+            reference_number TEXT,
+            entry_type TEXT NOT NULL CHECK(entry_type IN ('PURCHASE', 'PAYMENT', 'ADJUSTMENT')),
+            debit INTEGER NOT NULL DEFAULT 0 CHECK(debit >= 0),
+            credit INTEGER NOT NULL DEFAULT 0 CHECK(credit >= 0),
+            balance_after INTEGER NOT NULL CHECK(balance_after >= 0),
+            description TEXT NOT NULL,
+            performed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_supplier_ledger_supplier_id ON supplier_ledger_entries(supplier_id);
+        CREATE INDEX IF NOT EXISTS idx_supplier_ledger_created_at ON supplier_ledger_entries(created_at);
+        CREATE INDEX IF NOT EXISTS idx_supplier_ledger_reference_id ON supplier_ledger_entries(reference_id);
+        CREATE INDEX IF NOT EXISTS idx_supplier_ledger_entry_type ON supplier_ledger_entries(entry_type);
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction
@@ -406,24 +499,25 @@ mod tests {
         // Enable foreign keys
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
 
-        // 1. First run applies migrations (5 total: Core, Product/Inventory, Auth Security, Sales/Invoices, Customers/Ledger)
+        // 1. First run applies migrations (6 total: Core, Product/Inventory, Auth Security, Sales/Invoices, Customers/Ledger, Suppliers/Purchasing)
         let count = MigrationRunner::run(&mut conn).unwrap();
-        assert_eq!(count, 5);
+        assert_eq!(count, 6);
 
-        // Verify permanent tables exist (5 from Phase 6 + 6 from Phase 7 + 4 from Phase 14 + 2 from Phase 15 = 17 tables)
+        // Verify permanent tables exist (5 from Phase 6 + 6 from Phase 7 + 4 from Phase 14 + 2 from Phase 15 + 4 from Phase 16 = 21 tables)
         let tables_count: i64 = conn
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN (
                     'organizations', 'branches', 'users', 'user_access_profiles', 'public_rates',
                     'categories', 'brands', 'units', 'products', 'stock', 'stock_movements',
                     'counters', 'sales', 'sale_lines', 'sale_payments',
-                    'customers', 'customer_ledger_entries'
+                    'customers', 'customer_ledger_entries',
+                    'suppliers', 'purchases', 'purchase_lines', 'supplier_ledger_entries'
                 )",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(tables_count, 17);
+        assert_eq!(tables_count, 21);
 
         // Verify users table has recovery_key_hash and must_change_password
         let user_cols: Vec<String> = {
@@ -669,5 +763,64 @@ mod tests {
             |r| r.get(0),
         ).unwrap();
         assert_eq!(balance, 10000);
+    }
+
+    #[test]
+    fn test_migration_006_suppliers_and_purchases() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+
+        MigrationRunner::run(&mut conn).unwrap();
+
+        // 1. Verify counters for supplier_code, purchase_number, supplier_payment_receipt
+        let sup_counter: i64 = conn
+            .query_row("SELECT value FROM counters WHERE name = 'supplier_code'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(sup_counter, 0);
+
+        let pur_counter: i64 = conn
+            .query_row("SELECT value FROM counters WHERE name = 'purchase_number'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(pur_counter, 0);
+
+        let pay_counter: i64 = conn
+            .query_row("SELECT value FROM counters WHERE name = 'supplier_payment_receipt'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(pay_counter, 0);
+
+        // 2. Verify suppliers table insert & unique constraint
+        conn.execute(
+            "INSERT INTO suppliers (id, supplier_code, name, phone, credit_limit, is_active, created_at, updated_at)
+             VALUES ('11111111-2222-3333-4444-555555555555', 'SUP-000001', 'Samsung Wholesaler', '03111234567', 100000, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        let dup_code = conn.execute(
+            "INSERT INTO suppliers (id, supplier_code, name, phone, credit_limit, is_active, created_at, updated_at)
+             VALUES ('22222222-3333-4444-5555-666666666666', 'SUP-000001', 'Another Supplier', '03221234567', 0, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        );
+        assert!(dup_code.is_err(), "Duplicate supplier_code must fail");
+
+        // 3. Verify purchases table insert & foreign keys
+        conn.execute(
+            "INSERT INTO purchases (id, purchase_number, supplier_id, branch_id, subtotal, discount, total_amount, paid_amount, credit_amount, payment_status, status, created_at, updated_at)
+             VALUES ('33333333-4444-5555-6666-777777777777', 'PUR-000001', '11111111-2222-3333-4444-555555555555', '00000000-0000-0000-0000-000000000002', 50000, 0, 50000, 20000, 30000, 'PARTIALLY_PAID', 'COMPLETED', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        // 4. Verify supplier_ledger_entries insert & balance
+        conn.execute(
+            "INSERT INTO supplier_ledger_entries (id, supplier_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, created_at)
+             VALUES ('44444444-5555-6666-7777-888888888888', '11111111-2222-3333-4444-555555555555', '33333333-4444-5555-6666-777777777777', 'PUR-000001', 'PURCHASE', 30000, 0, 30000, 'Credit Purchase PUR-000001', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        let payable_balance: i64 = conn.query_row(
+            "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM supplier_ledger_entries WHERE supplier_id = '11111111-2222-3333-4444-555555555555'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(payable_balance, 30000);
     }
 }
