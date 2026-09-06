@@ -207,6 +207,76 @@ pub const MIGRATIONS: &[Migration] = &[
         ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0;
         "#,
     },
+    Migration {
+        version: 4,
+        name: "004_sales_and_invoices_schema",
+        up: r#"
+        -- Atomic sequential counter table for collision-safe invoice numbering
+        CREATE TABLE IF NOT EXISTS counters (
+            name TEXT PRIMARY KEY,
+            value INTEGER NOT NULL DEFAULT 0
+        );
+
+        INSERT OR IGNORE INTO counters (name, value) VALUES ('invoice', 0);
+
+        -- Sales / Invoice Header Table
+        CREATE TABLE IF NOT EXISTS sales (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            invoice_number TEXT NOT NULL UNIQUE,
+            branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+            customer_id TEXT,
+            customer_name_snapshot TEXT,
+            subtotal INTEGER NOT NULL CHECK(subtotal >= 0),
+            discount INTEGER NOT NULL DEFAULT 0 CHECK(discount >= 0),
+            tax_amount INTEGER NOT NULL DEFAULT 0 CHECK(tax_amount >= 0),
+            total_amount INTEGER NOT NULL CHECK(total_amount >= 0),
+            paid_amount INTEGER NOT NULL CHECK(paid_amount >= 0),
+            change_amount INTEGER NOT NULL DEFAULT 0 CHECK(change_amount >= 0),
+            payment_status TEXT NOT NULL CHECK(payment_status IN ('PAID', 'PARTIALLY_PAID', 'UNPAID')),
+            sale_status TEXT NOT NULL CHECK(sale_status IN ('COMPLETED', 'VOIDED', 'REFUNDED')),
+            performed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_invoice_number ON sales(invoice_number);
+        CREATE INDEX IF NOT EXISTS idx_sales_branch_id ON sales(branch_id);
+        CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
+        CREATE INDEX IF NOT EXISTS idx_sales_sale_status ON sales(sale_status);
+
+        -- Sale Line Items (Immutable Historical Snapshot)
+        CREATE TABLE IF NOT EXISTS sale_lines (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+            product_id TEXT NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+            product_name_snapshot TEXT NOT NULL,
+            sku_snapshot TEXT NOT NULL,
+            unit_price INTEGER NOT NULL CHECK(unit_price >= 0),
+            cost_price_snapshot INTEGER NOT NULL DEFAULT 0 CHECK(cost_price_snapshot >= 0),
+            quantity INTEGER NOT NULL CHECK(quantity > 0),
+            discount INTEGER NOT NULL DEFAULT 0 CHECK(discount >= 0),
+            line_total INTEGER NOT NULL CHECK(line_total >= 0),
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sale_lines_sale_id ON sale_lines(sale_id);
+        CREATE INDEX IF NOT EXISTS idx_sale_lines_product_id ON sale_lines(product_id);
+
+        -- Sale Payments (Payment records)
+        CREATE TABLE IF NOT EXISTS sale_payments (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+            amount INTEGER NOT NULL CHECK(amount > 0),
+            payment_method TEXT NOT NULL CHECK(payment_method IN ('CASH', 'CARD', 'BANK_TRANSFER', 'OTHER')),
+            reference_number TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sale_payments_sale_id ON sale_payments(sale_id);
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction
@@ -283,22 +353,23 @@ mod tests {
         // Enable foreign keys
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
 
-        // 1. First run applies migrations
+        // 1. First run applies migrations (4 total: Core, Product/Inventory, Auth Security, Sales/Invoices)
         let count = MigrationRunner::run(&mut conn).unwrap();
-        assert_eq!(count, 3);
+        assert_eq!(count, 4);
 
-        // Verify permanent tables exist (5 from Phase 6 + 6 from Phase 7 = 11 tables)
+        // Verify permanent tables exist (5 from Phase 6 + 6 from Phase 7 + 4 from Phase 14 = 15 tables)
         let tables_count: i64 = conn
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN (
                     'organizations', 'branches', 'users', 'user_access_profiles', 'public_rates',
-                    'categories', 'brands', 'units', 'products', 'stock', 'stock_movements'
+                    'categories', 'brands', 'units', 'products', 'stock', 'stock_movements',
+                    'counters', 'sales', 'sale_lines', 'sale_payments'
                 )",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(tables_count, 11);
+        assert_eq!(tables_count, 15);
 
         // Verify users table has recovery_key_hash and must_change_password
         let user_cols: Vec<String> = {
@@ -420,5 +491,80 @@ mod tests {
         // 2. Second run is idempotent (0 applied)
         let second_run = MigrationRunner::run(&mut conn).unwrap();
         assert_eq!(second_run, 0);
+    }
+
+    #[test]
+    fn test_migration_004_sales_schema() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+
+        MigrationRunner::run(&mut conn).unwrap();
+
+        // 1. Verify counters table exists and has initial 'invoice' row
+        let counter_val: i64 = conn
+            .query_row("SELECT value FROM counters WHERE name = 'invoice'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(counter_val, 0);
+
+        // 2. Verify sales table columns
+        let sales_cols: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(sales)").unwrap();
+            stmt.query_map([], |row| row.get(1))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        assert!(sales_cols.contains(&"invoice_number".to_string()));
+        assert!(sales_cols.contains(&"branch_id".to_string()));
+        assert!(sales_cols.contains(&"subtotal".to_string()));
+        assert!(sales_cols.contains(&"total_amount".to_string()));
+        assert!(sales_cols.contains(&"paid_amount".to_string()));
+        assert!(sales_cols.contains(&"payment_status".to_string()));
+        assert!(sales_cols.contains(&"sale_status".to_string()));
+
+        // 3. Verify unique constraint on invoice_number
+        conn.execute(
+            "INSERT INTO sales (id, invoice_number, branch_id, subtotal, discount, tax_amount, total_amount, paid_amount, change_amount, payment_status, sale_status, created_at, updated_at)
+             VALUES ('11111111-1111-1111-1111-111111111111', 'INV-000001', '00000000-0000-0000-0000-000000000002', 1000, 0, 0, 1000, 1000, 0, 'PAID', 'COMPLETED', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        // Inserting duplicate invoice_number must fail
+        let dup_res = conn.execute(
+            "INSERT INTO sales (id, invoice_number, branch_id, subtotal, discount, tax_amount, total_amount, paid_amount, change_amount, payment_status, sale_status, created_at, updated_at)
+             VALUES ('22222222-2222-2222-2222-222222222222', 'INV-000001', '00000000-0000-0000-0000-000000000002', 1000, 0, 0, 1000, 1000, 0, 'PAID', 'COMPLETED', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        );
+        assert!(dup_res.is_err(), "Duplicate invoice_number must be rejected by UNIQUE constraint");
+
+        // 4. Verify sale_lines table & foreign key
+        conn.execute(
+            "INSERT INTO categories (id, name, code, is_active, created_at, updated_at)
+             VALUES ('cat1', 'Cat', 'CAT1', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO units (id, name, is_active, created_at, updated_at)
+             VALUES ('unt1', 'Piece', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO products (id, name, sku, category_id, unit_id, purchase_price, sale_price, is_active, created_at, updated_at)
+             VALUES ('prod1', 'Item 1', 'SKU-1', 'cat1', 'unt1', 500, 1000, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        conn.execute(
+            "INSERT INTO sale_lines (id, sale_id, product_id, product_name_snapshot, sku_snapshot, unit_price, cost_price_snapshot, quantity, discount, line_total, created_at)
+             VALUES ('line1', '11111111-1111-1111-1111-111111111111', 'prod1', 'Item 1', 'SKU-1', 1000, 500, 1, 0, 1000, '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        // 5. Verify sale_payments table & foreign key
+        conn.execute(
+            "INSERT INTO sale_payments (id, sale_id, amount, payment_method, created_at)
+             VALUES ('pay1', '11111111-1111-1111-1111-111111111111', 1000, 'CASH', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
     }
 }
