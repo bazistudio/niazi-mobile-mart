@@ -47,7 +47,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
   useEffect(() => {
     if (isOpen) {
       try {
-        const remembered = localStorage.getItem('tijaratpro_last_product_masters');
+        const remembered = localStorage.getItem('niazi_last_product_masters') || localStorage.getItem('tijaratpro_last_product_masters');
         if (remembered) {
           const parsed = JSON.parse(remembered);
           setFormData(prev => ({
@@ -88,7 +88,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
   const handleSave = async () => {
     try {
       // Remember selections for next time
-      localStorage.setItem('tijaratpro_last_product_masters', JSON.stringify({
+      localStorage.setItem('niazi_last_product_masters', JSON.stringify({
         categoryId: formData.categoryId,
         brandId: formData.brandId,
         companyId: formData.companyId,

@@ -21,7 +21,7 @@ export const InvoiceReceipt: React.FC = () => {
   useEffect(() => {
     if (invoice) {
       const effectiveShop: ShopHeader = shopHeader || {
-        name: invoice.shop?.name || 'TijaratPro POS',
+        name: invoice.shop?.name || 'Niazi Mobile Mart POS',
         address: invoice.shop?.address || '',
         phone: invoice.shop?.phone || '',
         email: '',

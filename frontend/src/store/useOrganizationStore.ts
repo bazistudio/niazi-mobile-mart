@@ -53,6 +53,14 @@ interface OrganizationState {
   clear: () => void;
 }
 
+// Migrate legacy storage key if present
+if (typeof window !== 'undefined' && !localStorage.getItem('niazi-org-storage')) {
+  const legacyOrg = localStorage.getItem('tijaratpro-org-storage');
+  if (legacyOrg) {
+    localStorage.setItem('niazi-org-storage', legacyOrg);
+  }
+}
+
 export const useOrganizationStore = create<OrganizationState>()(
   persist(
     (set) => ({
@@ -71,17 +79,19 @@ export const useOrganizationStore = create<OrganizationState>()(
         viewMode: shopId ? 'shop' : 'organization'
       }),
       
-      setActiveOrganization: (org) => set({ activeOrganization: org }),
+      setActiveOrganization: (org) => set({ 
+        activeOrganization: org, 
+        activeOrganizationId: org?._id || null 
+      }),
       
-      setActiveShop: (shop) => {
-        set({ 
-          activeShop: shop,
-        });
-      },
+      setActiveShop: (shop) => set({ 
+        activeShop: shop, 
+        activeShopId: shop?._id || null 
+      }),
       
       setViewMode: (mode) => set({ viewMode: mode }),
       setOrganizations: (orgs) => set({ organizations: orgs }),
-      setMemberships: (memberships) => set({ memberships: memberships }),
+      setMemberships: (memberships) => set({ memberships }),
       
       clear: () => set({
         activeOrganizationId: null,
@@ -94,7 +104,7 @@ export const useOrganizationStore = create<OrganizationState>()(
       })
     }),
     {
-      name: 'tijaratpro-org-storage',
+      name: 'niazi-org-storage',
       // We ONLY persist the IDs and ViewMode. Everything else loads from the API to stay fresh.
       partialize: (state) => ({ 
         activeOrganizationId: state.activeOrganizationId,

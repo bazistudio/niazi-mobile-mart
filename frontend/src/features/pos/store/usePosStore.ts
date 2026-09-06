@@ -9,6 +9,14 @@ import { ledgerApi } from '@/services/ledger.api';
 import { platformAdapter } from '@/lib/platformAdapter';
 import { InvoiceDocument } from '../services/document/document.service';
 
+// Migrate legacy POS storage key if present
+if (typeof window !== 'undefined' && !localStorage.getItem('niazi-pos')) {
+  const legacyPos = localStorage.getItem('tijaratpro-pos');
+  if (legacyPos) {
+    localStorage.setItem('niazi-pos', legacyPos);
+  }
+}
+
 export interface CartItem {
   productId: string;
   sku: string;
@@ -767,7 +775,7 @@ export const usePosStore = create<PosStore>()(
       setLastInvoice: (invoice) => set({ lastInvoice: invoice })
     }),
     {
-      name: 'tijaratpro-pos',
+      name: 'niazi-pos',
       partialize: (state) => ({
         isWholesaleMode: state.isWholesaleMode,
         // Ideally we only persist offline transactions or handle them with IndexedDB

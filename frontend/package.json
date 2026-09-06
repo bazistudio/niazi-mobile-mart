@@ -1,9 +1,9 @@
 {
-  "name": "tijaratpro",
+  "name": "niazi-mobile-mart",
   "version": "5.0.3",
   "private": true,
-  "description": "TijaratPro ERP Web Application",
-  "author": "TijaratPro",
+  "description": "Niazi Mobile Mart ERP Web Application",
+  "author": "Niazi Mobile Mart",
   "type": "module",
   "scripts": {
     "dev": "vite",

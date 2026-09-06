@@ -107,7 +107,7 @@ export function SignupPage() {
               Business Registration
             </h1>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Start managing your enterprise workspace with TijaratPro
+              Start managing your workspace with Niazi Mobile Mart
             </p>
           </div>
 
@@ -382,7 +382,7 @@ export function SignupPage() {
         {/* System footer badge */}
         <div className="mt-3 text-center text-[11px] text-slate-600 flex items-center justify-center gap-1.5">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
-          <span className="font-medium text-slate-700">TijaratPro Enterprise Edition</span>
+          <span className="font-medium text-slate-700">Niazi Mobile Mart Desktop Edition</span>
         </div>
       </div>
     </main>

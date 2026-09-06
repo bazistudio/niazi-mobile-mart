@@ -14,7 +14,7 @@ export const GlobalFooter: React.FC = () => {
       <div className="flex items-center gap-2.5">
         <span className="font-semibold text-text-secondary flex items-center gap-1">
           <span className="h-2 w-2 rounded-full bg-success inline-block animate-pulse" />
-          TijaratPro POS
+          Niazi Mobile Mart POS
         </span>
         <span className="hidden sm:inline text-border">|</span>
         <span className="hidden sm:inline-flex items-center gap-1 text-text-muted">

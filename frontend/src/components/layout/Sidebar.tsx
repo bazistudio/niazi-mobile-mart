@@ -37,10 +37,10 @@ export const Sidebar = () => {
           aria-hidden={isCollapsed}
         >
           <span className="w-7 h-7 rounded-md bg-primary text-white flex items-center justify-center font-black flex-shrink-0 text-sm shadow-sm">
-            T
+            N
           </span>
           <span className="text-base font-bold text-primary whitespace-nowrap tracking-tight">
-            TijaratPro
+            Niazi Mobile Mart
           </span>
         </div>
 

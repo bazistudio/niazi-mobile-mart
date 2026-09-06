@@ -21,10 +21,10 @@ export const PosHeader: React.FC = () => {
         <div className="flex items-center gap-2.5 shrink-0">
           <div className="flex items-center gap-1.5">
             <span className="w-6 h-6 rounded-md bg-primary text-white flex items-center justify-center font-black text-xs shadow-xs">
-              T
+              N
             </span>
             <span className="hidden md:inline font-bold text-xs tracking-tight text-text-primary">
-              Tijarat<span className="text-primary font-black">POS</span>
+              Niazi<span className="text-primary font-black">POS</span>
             </span>
           </div>
 

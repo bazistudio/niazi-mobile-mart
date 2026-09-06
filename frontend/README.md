@@ -1,8 +1,8 @@
-# 🏪 TijaratPro ERP
+# 🏪 Niazi Mobile Mart
 
-Multi-tenant ERP & POS system built for modern retail businesses.
+Private internal ERP & POS system built for Niazi Mobile Mart.
 
-Built with **Next.js + TypeScript**, TijaratPro is designed to handle:
+Designed for **Niazi Mobile Mart**, this application is built to handle:
 - Multi-shop management
 - Role-based access control
 - Real-time POS operations
@@ -13,8 +13,9 @@ Built with **Next.js + TypeScript**, TijaratPro is designed to handle:
 
 ## 🚀 Tech Stack
 
-- Next.js (App Router)
-- React
+- React 19
+- Vite
+- Tauri v2 (Desktop Core)
 - TypeScript
 - Zustand (State Management)
 - Axios (API Layer)

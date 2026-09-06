@@ -46,7 +46,7 @@ export const InvoicePreviewModal: React.FC<Props> = ({ item, onClose }) => {
                 <p className="text-sm text-gray-500 mt-1"># {item.referenceId}</p>
               </div>
               <div className="text-right">
-                <p className="font-semibold text-gray-900 dark:text-white">{activeShop?.name || 'TijaratPro Store'}</p>
+                <p className="font-semibold text-gray-900 dark:text-white">{activeShop?.name || 'Niazi Mobile Mart'}</p>
                 <p className="text-sm text-gray-500">{activeShop?.address || 'Main Branch'}</p>
               </div>
             </div>

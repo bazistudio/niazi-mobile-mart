@@ -20,7 +20,7 @@ export const generateBarcodeSvg = (data: string, maxWidth: number = 200, height:
   
   // Encode characters into variable width bars
   const cleanData = data.toUpperCase().replace(/[^A-Z0-9\-_]/g, '');
-  const pattern = cleanData || 'TIJARATPRO';
+  const pattern = cleanData || 'NIAZIMOBILEMART';
   
   // Simple checksum and bar pattern generator
   const bars: { x: number; w: number }[] = [];
@@ -219,7 +219,7 @@ export const printFormatter = {
     html += '</table>';
     html += '<div style="clear: both; margin-top: 40px; text-align: center; white-space: pre-wrap; font-size: 11px;">';
     html += '<p>' + (shop.footerText || 'Thank you for your business!') + '</p>';
-    html += '<p style="font-size: 9px; color: #666; margin-top: 4px;">Powered by TijaratPro ERP</p>';
+    html += '<p style="font-size: 9px; color: #666; margin-top: 4px;">Powered by Niazi Mobile Mart</p>';
     html += '</div>';
     html += '</div>';
 
@@ -330,7 +330,7 @@ const formatA4 = (invoice: UnifiedInvoice, settings: PrinterSettings, title: str
       
       <div style="clear: both; margin-top: 50px; text-align: center; font-size: 11px;">
         <p style="white-space: pre-wrap; margin: 0;">${invoice.shop.footerText || 'Thank you for your business!'}</p>
-        <p style="font-size: 9px; color: #888; margin-top: 6px;">Powered by TijaratPro ERP</p>
+        <p style="font-size: 9px; color: #888; margin-top: 6px;">Powered by Niazi Mobile Mart</p>
       </div>
     </div>
   `;
@@ -473,7 +473,7 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
       <!-- Footer & Branding -->
       <div style="text-align: center; margin-top: 8px; font-size: ${is58 ? '8.5px' : '9.5px'}; border-top: 1px dashed #000; padding-top: 4px;">
         <div style="font-weight: bold;">${invoice.shop.footerText || 'Thank you for shopping with us!'}</div>
-        <div style="font-size: 8px; color: #555; margin-top: 3px; letter-spacing: 0.5px;">Powered by TijaratPro</div>
+        <div style="font-size: 8px; color: #555; margin-top: 3px; letter-spacing: 0.5px;">Powered by Niazi Mobile Mart</div>
       </div>
     </div>
   `;

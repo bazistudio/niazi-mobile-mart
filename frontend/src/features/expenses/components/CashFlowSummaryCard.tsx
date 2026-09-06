@@ -33,7 +33,7 @@ export const CashFlowSummaryCard: React.FC = () => {
     let cashTxCount = 0;
 
     orders.forEach(order => {
-      // In TijaratPro, totalAmount or grandTotal is authoritative
+      // In Niazi Mobile Mart, totalAmount or grandTotal is authoritative
       const amount = order.totalAmount || order.grandTotal || 0;
       // If payment method is cash or multi-payment containing cash
       const isCash = !order.paymentMethod || order.paymentMethod.toLowerCase() === 'cash';

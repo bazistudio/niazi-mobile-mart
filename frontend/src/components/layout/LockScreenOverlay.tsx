@@ -252,7 +252,7 @@ export const LockScreenOverlay: React.FC = () => {
           </button>
 
           <span className="text-[11px] text-text-muted">
-            TijaratPro POS
+            Niazi Mobile Mart POS
           </span>
         </div>
       </div>

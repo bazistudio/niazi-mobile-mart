@@ -6,9 +6,7 @@ src-tauri/target/
 node_modules/
 **/node_modules/
 
-# Next.js & Frontend builds
-frontend/.next/
-frontend/out/
+# Frontend builds
 frontend/dist/
 frontend/build/
 **/dist/
@@ -34,3 +32,6 @@ Thumbs.db
 # Temp
 temp/
 tmp/
+
+# Documentation & Local Archives
+docs/

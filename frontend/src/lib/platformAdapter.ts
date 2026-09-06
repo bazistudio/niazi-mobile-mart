@@ -1,5 +1,5 @@
 /**
- * Platform Adapter for Niazi Mobile Mart / TijaratPro
+ * Platform Adapter for Niazi Mobile Mart
  * Decouples platform-specific implementations from the business logic.
  */
 import { isTauriEnvironment } from './tauri/tauriClient';

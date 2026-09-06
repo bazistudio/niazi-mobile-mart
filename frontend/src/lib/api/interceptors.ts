@@ -8,7 +8,7 @@ axiosInstance.interceptors.request.use(
   (config) => {
     // tp_token cookie sent automatically via withCredentials: true
     if (typeof window !== "undefined") {
-      const deviceId = localStorage.getItem("tijarat_device_id");
+      const deviceId = localStorage.getItem("niazi_device_id") || localStorage.getItem("tijarat_device_id");
       if (deviceId) {
         config.headers["x-device-id"] = deviceId;
       }

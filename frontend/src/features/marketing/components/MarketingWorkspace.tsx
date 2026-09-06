@@ -147,7 +147,7 @@ export const MarketingWorkspace: React.FC = () => {
     if (!messageBody) return 'Your message preview will appear here...';
     return messageBody
       .replace(/{name}/g, previewSample.name || 'Valued Customer')
-      .replace(/{shop}/g, activeShop?.name || 'TijaratPro Shop')
+      .replace(/{shop}/g, activeShop?.name || 'Niazi Mobile Mart')
       .replace(/{balance}/g, (previewSample.currentBalance || 0).toLocaleString());
   }, [messageBody, previewSample, activeShop]);
 

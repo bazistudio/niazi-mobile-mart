@@ -2,7 +2,8 @@
 
 import { AuthSession } from "@/types/auth/session";
 
-const SESSION_KEY = "tijarat_session";
+const SESSION_KEY = "niazi_session";
+const LEGACY_SESSION_KEY = "tijarat_session";
 
 /**
  * Save session securely in browser storage
@@ -19,7 +20,7 @@ export function setSession(session: AuthSession) {
 export function getSession(): AuthSession | null {
   if (typeof window === "undefined") return null;
 
-  const data = localStorage.getItem(SESSION_KEY);
+  const data = localStorage.getItem(SESSION_KEY) || localStorage.getItem(LEGACY_SESSION_KEY);
   if (!data) return null;
 
   try {
@@ -36,6 +37,7 @@ export function clearSession() {
   if (typeof window === "undefined") return;
 
   localStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem(LEGACY_SESSION_KEY);
 }
 
 /**
@@ -55,11 +57,11 @@ export function isSessionValid(session: AuthSession | null): boolean {
 export function getDeviceId(): string {
   if (typeof window === "undefined") return "server";
 
-  let deviceId = localStorage.getItem("tijarat_device_id");
+  let deviceId = localStorage.getItem("niazi_device_id") || localStorage.getItem("tijarat_device_id");
 
   if (!deviceId) {
     deviceId = crypto.randomUUID();
-    localStorage.setItem("tijarat_device_id", deviceId);
+    localStorage.setItem("niazi_device_id", deviceId);
   }
 
   return deviceId;

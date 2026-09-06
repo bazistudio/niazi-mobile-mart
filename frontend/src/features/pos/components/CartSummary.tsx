@@ -212,7 +212,7 @@ export const CartSummary: React.FC = () => {
 
         const activeShop = useOrganizationStore.getState().activeShop;
         const realShopProfile = {
-          name: shopHeader?.name || activeShop?.name || 'TijaratPro Store',
+          name: shopHeader?.name || activeShop?.name || 'Niazi Mobile Mart',
           address: shopHeader?.address || (activeShop as any)?.address || 'Main Branch',
           phone1: shopHeader?.phone || (activeShop as any)?.phone || '',
         };

@@ -93,10 +93,10 @@ export const MobileSidebar = ({ isOpen, setIsOpen }: MobileSidebarProps) => {
             {/* Logo */}
             <div className="flex h-12 shrink-0 items-center gap-2.5 px-5 border-b border-border sticky top-0 bg-surface z-10">
               <span className="w-7 h-7 rounded-md bg-primary text-white flex items-center justify-center font-black text-sm shadow-sm flex-shrink-0">
-                T
+                N
               </span>
               <span className="text-base font-bold text-primary tracking-tight">
-                TijaratPro
+                Niazi Mobile Mart
               </span>
             </div>
 

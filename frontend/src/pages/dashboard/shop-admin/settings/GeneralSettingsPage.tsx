@@ -13,7 +13,7 @@ import toast from 'react-hot-toast';
 const defaultSettings = {
   business: {
     logoUrl: '',
-    name: 'TijaratPro Store',
+    name: 'Niazi Mobile Mart',
     type: 'Retail Shop',
     phone: '',
     whatsapp: '',
@@ -459,7 +459,7 @@ export const GeneralSettingsPage: React.FC = () => {
             <p className="text-sm text-text-muted mb-4">This will permanently delete all your branches, employees, and data. This action is irreversible.</p>
             <div className="mb-4">
               <label className="text-xs font-semibold mb-1 block">Type organization name to confirm:</label>
-              <input type="text" placeholder="TijaratPro Main Shop" className="w-full p-2 border border-border rounded-md text-sm mb-3" />
+              <input type="text" placeholder="Niazi Mobile Mart Main Branch" className="w-full p-2 border border-border rounded-md text-sm mb-3" />
               <input type="password" placeholder="Admin Password" className="w-full p-2 border border-border rounded-md text-sm" />
             </div>
             <div className="flex justify-end gap-3">

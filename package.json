@@ -1,0 +1,12 @@
+{
+  "name": "niazi-mobile-mart-workspace",
+  "version": "5.0.3",
+  "private": true,
+  "description": "Niazi Mobile Mart Desktop ERP & POS Workspace",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "preview": "npm --prefix frontend run preview",
+    "lint": "npm --prefix frontend run lint"
+  }
+}

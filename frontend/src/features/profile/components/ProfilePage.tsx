@@ -168,7 +168,7 @@ export const ProfilePage: React.FC = () => {
               <div className="p-4 rounded-xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-100 dark:border-neutral-800">
                 <span className="text-xs text-neutral-400 block mb-1">Organization Scope</span>
                 <span className="font-bold text-neutral-900 dark:text-white">
-                  {activeOrganization?.name || user.organizationId || 'TijaratPro Enterprise'}
+                  {activeOrganization?.name || user.organizationId || 'Niazi Mobile Mart'}
                 </span>
               </div>
             </div>
