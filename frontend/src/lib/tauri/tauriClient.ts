@@ -1073,6 +1073,99 @@ export const tauriClient = {
     }
     return [];
   },
+
+  // ── Profitability & COGS (Phase 20) ─────────────────────────────────────────
+  async profitGetPeriod(
+    startDate?: string | null,
+    endDate?: string | null,
+    branchId?: string | null
+  ): Promise<PeriodProfitabilityDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<PeriodProfitabilityDto>('profit_get_period', {
+        startDate: startDate || null,
+        endDate: endDate || null,
+        branchId: branchId || null,
+      });
+    }
+    return {
+      start_date: startDate || null,
+      end_date: endDate || null,
+      gross_revenue: 0,
+      discounts: 0,
+      net_revenue: 0,
+      cogs: 0,
+      gross_profit: 0,
+      gross_margin: 0,
+      sales_count: 0,
+      returns_count: 0,
+    };
+  },
+
+  async profitGetDaily(
+    startDate?: string | null,
+    endDate?: string | null,
+    branchId?: string | null
+  ): Promise<DailyProfitabilityDto[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<DailyProfitabilityDto[]>('profit_get_daily', {
+        startDate: startDate || null,
+        endDate: endDate || null,
+        branchId: branchId || null,
+      });
+    }
+    return [];
+  },
+
+  async profitGetProduct(
+    productId?: string | null,
+    startDate?: string | null,
+    endDate?: string | null,
+    branchId?: string | null
+  ): Promise<ProductProfitabilityDto[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<ProductProfitabilityDto[]>('profit_get_product', {
+        productId: productId || null,
+        startDate: startDate || null,
+        endDate: endDate || null,
+        branchId: branchId || null,
+      });
+    }
+    return [];
+  },
+
+  async profitGetSale(saleId: string): Promise<SaleProfitabilityDto | null> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SaleProfitabilityDto | null>('profit_get_sale', { saleId });
+    }
+    return null;
+  },
+
+  async profitGetDashboardSummary(branchId?: string | null): Promise<DashboardProfitSummaryDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<DashboardProfitSummaryDto>('profit_get_dashboard_summary', {
+        branchId: branchId || null,
+      });
+    }
+    const emptyMetrics: ProfitMetricsDto = {
+      gross_revenue: 0,
+      discounts: 0,
+      net_revenue: 0,
+      cogs: 0,
+      gross_profit: 0,
+      gross_margin: 0,
+      orders_count: 0,
+    };
+    return {
+      today: emptyMetrics,
+      this_month: emptyMetrics,
+      total: emptyMetrics,
+    };
+  },
 };
 
 // ── Type Definitions for Organization & Branch ──────────────────────────────
@@ -1477,6 +1570,9 @@ export interface SaleResultDto {
   payments: SalePayment[];
   credit_amount: number;
   customer_balance_after: number | null;
+  cogs: number;
+  gross_profit: number;
+  gross_margin: number;
 }
 
 export interface SaleFilterDto {
@@ -2018,5 +2114,71 @@ export interface PurchaseReturnFilterDto {
   status?: string | null;
   limit?: number | null;
   offset?: number | null;
+}
+
+// ── Type Definitions for Profitability & COGS (Phase 20) ─────────────────────
+export interface ProfitMetricsDto {
+  gross_revenue: number;
+  discounts: number;
+  net_revenue: number;
+  cogs: number;
+  gross_profit: number;
+  gross_margin: number;
+  orders_count: number;
+}
+
+export interface PeriodProfitabilityDto {
+  start_date: string | null;
+  end_date: string | null;
+  gross_revenue: number;
+  discounts: number;
+  net_revenue: number;
+  cogs: number;
+  gross_profit: number;
+  gross_margin: number;
+  sales_count: number;
+  returns_count: number;
+}
+
+export interface DailyProfitabilityDto {
+  date: string;
+  gross_revenue: number;
+  discounts: number;
+  net_revenue: number;
+  cogs: number;
+  gross_profit: number;
+  gross_margin: number;
+}
+
+export interface ProductProfitabilityDto {
+  product_id: string;
+  product_name: string;
+  sku: string;
+  quantity_sold: number;
+  quantity_returned: number;
+  net_quantity: number;
+  gross_revenue: number;
+  discounts: number;
+  net_revenue: number;
+  cogs: number;
+  gross_profit: number;
+  gross_margin: number;
+}
+
+export interface SaleProfitabilityDto {
+  sale_id: string;
+  invoice_number: string;
+  gross_revenue: number;
+  discounts: number;
+  net_revenue: number;
+  cogs: number;
+  gross_profit: number;
+  gross_margin: number;
+}
+
+export interface DashboardProfitSummaryDto {
+  today: ProfitMetricsDto;
+  this_month: ProfitMetricsDto;
+  total: ProfitMetricsDto;
 }
 

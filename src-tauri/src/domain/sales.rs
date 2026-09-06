@@ -134,6 +134,9 @@ pub struct SaleResultDto {
     pub payments: Vec<SalePayment>,
     pub credit_amount: i64,
     pub customer_balance_after: Option<i64>,
+    pub cogs: i64,
+    pub gross_profit: i64,
+    pub gross_margin: i64,
 }
 
 /// Filter for querying sales

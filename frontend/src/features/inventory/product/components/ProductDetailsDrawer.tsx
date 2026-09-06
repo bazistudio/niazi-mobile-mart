@@ -1,9 +1,10 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Package, Tag, Hash, ShoppingBag, BarChart2, Clock, Edit2 } from 'lucide-react';
 import { InventoryProduct, StockStatus } from '@/features/inventory/types';
 import { StockStatusBadge } from '@/components/inventory/StockStatusBadge';
+import { tauriClient, ProductProfitabilityDto } from '@/lib/tauri/tauriClient';
 
 interface ProductDetailsDrawerProps {
   product: InventoryProduct;
@@ -19,9 +20,32 @@ const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) 
 );
 
 export const ProductDetailsDrawer = ({ product, onClose, onEdit }: ProductDetailsDrawerProps) => {
-  const margin = product.purchasePrice && product.price
-    ? (((product.price - product.purchasePrice) / product.purchasePrice) * 100).toFixed(1)
+  const currentCost = product.averageCost ?? product.purchasePrice;
+  const estimatedMargin = product.price > 0 && currentCost !== undefined && currentCost !== null
+    ? Math.round(((product.price - currentCost) * 100) / product.price)
     : null;
+
+  const [realizedProfit, setRealizedProfit] = useState<ProductProfitabilityDto | null>(null);
+  const [isLoadingProfit, setIsLoadingProfit] = useState<boolean>(true);
+
+  useEffect(() => {
+    let active = true;
+    setIsLoadingProfit(true);
+    tauriClient
+      .profitGetProduct(product.id)
+      .then((res) => {
+        if (active && res && res.length > 0) {
+          setRealizedProfit(res[0]);
+        }
+        if (active) setIsLoadingProfit(false);
+      })
+      .catch(() => {
+        if (active) setIsLoadingProfit(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [product.id]);
 
   return (
     <>
@@ -117,11 +141,25 @@ export const ProductDetailsDrawer = ({ product, onClose, onEdit }: ProductDetail
               />
               <DetailRow
                 label="Estimated Margin"
-                value={margin ? (
-                  <span className={Number(margin) >= 0 ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-red-600'}>
-                    {margin}%
+                value={estimatedMargin !== null ? (
+                  <span className={estimatedMargin >= 0 ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-red-600'}>
+                    {estimatedMargin}% (Estimate)
                   </span>
                 ) : null}
+              />
+              <DetailRow
+                label="Realized Gross Margin"
+                value={
+                  isLoadingProfit ? (
+                    <span className="text-gray-400 text-xs">Loading...</span>
+                  ) : realizedProfit && realizedProfit.quantity_sold > 0 ? (
+                    <span className={realizedProfit.gross_margin >= 0 ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-red-600'}>
+                      {realizedProfit.gross_margin}% (Actual: PKR {realizedProfit.gross_profit.toLocaleString()})
+                    </span>
+                  ) : (
+                    <span className="text-gray-400 text-xs">No sales yet</span>
+                  )
+                }
               />
             </div>
           </section>

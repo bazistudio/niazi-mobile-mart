@@ -59,24 +59,25 @@ export const dashboardApi = {
   getMetrics: async (): Promise<{ success: boolean; data: DashboardMetrics }> => {
     if (isTauriEnvironment()) {
       const stats = await tauriClient.organizationGetDashboardStats();
+      const profitSummary = await tauriClient.profitGetDashboardSummary();
       return {
         success: true,
         data: {
           summary: {
             revenue: {
-              today: 0,
-              thisMonth: 0,
-              total: 0,
+              today: profitSummary.today.net_revenue,
+              thisMonth: profitSummary.this_month.net_revenue,
+              total: profitSummary.total.net_revenue,
               growth: 0,
             },
             profit: {
-              today: 0,
-              thisMonth: 0,
-              total: 0,
+              today: profitSummary.today.gross_profit,
+              thisMonth: profitSummary.this_month.gross_profit,
+              total: profitSummary.total.gross_profit,
             },
             orders: {
-              today: 0,
-              total: 0,
+              today: profitSummary.today.orders_count,
+              total: profitSummary.total.orders_count,
             },
             inventory: {
               totalProducts: stats.product_count,

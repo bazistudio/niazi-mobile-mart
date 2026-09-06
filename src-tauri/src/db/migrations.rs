@@ -631,6 +631,34 @@ pub const MIGRATIONS: &[Migration] = &[
         UPDATE products SET average_cost = purchase_price WHERE average_cost = 0;
         "#,
     },
+    Migration {
+        version: 10,
+        name: "010_profitability_and_cogs",
+        up: r#"
+        -- 1. Performance Indexes for Profitability and COGS Analytics
+        CREATE INDEX IF NOT EXISTS idx_sales_status_created ON sales(sale_status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_sales_returns_status_created ON sales_returns(status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_sale_lines_product_cost ON sale_lines(product_id, cost_price_snapshot);
+        CREATE INDEX IF NOT EXISTS idx_sales_return_lines_sale_line ON sales_return_lines(sale_line_id);
+
+        -- 2. Historical Backfill Safety Rule:
+        -- Backfill legacy sale lines where cost_price_snapshot = 0.
+        -- We reconstruct cost using the product's average_cost if established (> 0),
+        -- falling back to purchase_price.
+        -- Never modifies any non-zero snapshots, and only executes for unpopulated legacy rows.
+        UPDATE sale_lines
+        SET cost_price_snapshot = (
+            SELECT CASE
+                WHEN p.average_cost > 0 THEN p.average_cost
+                WHEN p.purchase_price > 0 THEN p.purchase_price
+                ELSE 0
+            END
+            FROM products p
+            WHERE p.id = sale_lines.product_id
+        )
+        WHERE cost_price_snapshot = 0;
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction
@@ -708,9 +736,9 @@ mod tests {
         // Enable foreign keys
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
 
-        // 1. First run applies migrations (9 total: Core, Product/Inventory, Auth Security, Sales/Invoices, Customers/Ledger, Suppliers/Purchasing, Cash Management/Closing, Returns/Stock Reversal, Product Average Cost)
+        // 1. First run applies migrations (10 total: Core, Product/Inventory, Auth Security, Sales/Invoices, Customers/Ledger, Suppliers/Purchasing, Cash Management/Closing, Returns/Stock Reversal, Product Average Cost, Profitability and COGS)
         let count = MigrationRunner::run(&mut conn).unwrap();
-        assert_eq!(count, 9);
+        assert_eq!(count, 10);
 
         // Verify permanent tables exist (5 from Phase 6 + 6 from Phase 7 + 4 from Phase 14 + 2 from Phase 15 + 4 from Phase 16 + 4 from Phase 17 + 4 from Phase 18 = 29 tables)
         let tables_count: i64 = conn
@@ -1225,9 +1253,9 @@ mod tests {
             [],
         ).unwrap();
 
-        // 2. Now run MigrationRunner to execute migration 009
+        // 2. Now run MigrationRunner to execute pending migrations
         let executed = MigrationRunner::run(&mut conn).unwrap();
-        assert_eq!(executed, 1);
+        assert!(executed >= 1);
 
         // 3. Verify column exists on products table
         let mut stmt = conn.prepare("PRAGMA table_info(products)").unwrap();
@@ -1249,5 +1277,101 @@ mod tests {
 
         assert_eq!(purch_price, 30000);
         assert_eq!(avg_cost, 30000, "Existing product average_cost must be initialized to purchase_price");
+    }
+
+    #[test]
+    fn test_migration_010_profitability_schema() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+
+        // 1. Run migrations up to 009 manually first
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            );",
+        ).unwrap();
+
+        for m in &MIGRATIONS[0..9] {
+            conn.execute_batch(m.up).unwrap();
+            conn.execute(
+                "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, ?3)",
+                params![m.version, m.name, "2026-01-01T00:00:00Z"],
+            ).unwrap();
+        }
+
+        // Insert prerequisite data: branch, category, product, sale, and sale lines
+        conn.execute(
+            "INSERT INTO categories (id, name, code, is_active, created_at, updated_at)
+             VALUES ('00000000-0000-0000-0000-000000000010', 'Phones', 'PHN', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        conn.execute(
+            "INSERT INTO products (id, name, sku, category_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, created_at, updated_at)
+             VALUES ('00000000-0000-0000-0000-000000000030', 'Samsung A15', 'SAM-A15', '00000000-0000-0000-0000-000000000010', 30000, 32000, 35000, 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        let branch_id = "00000000-0000-0000-0000-000000000002";
+        conn.execute(
+            "INSERT INTO sales (id, invoice_number, branch_id, subtotal, discount, tax_amount, total_amount, paid_amount, change_amount, payment_status, sale_status, created_at, updated_at)
+             VALUES ('00000000-0000-0000-0000-000000000040', 'INV-000001', ?1, 70000, 0, 0, 70000, 70000, 0, 'PAID', 'COMPLETED', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            params![branch_id],
+        ).unwrap();
+
+        // Line 1: legacy cost_price_snapshot = 0
+        conn.execute(
+            "INSERT INTO sale_lines (id, sale_id, product_id, product_name_snapshot, sku_snapshot, unit_price, cost_price_snapshot, quantity, discount, line_total, created_at)
+             VALUES ('00000000-0000-0000-0000-000000000051', '00000000-0000-0000-0000-000000000040', '00000000-0000-0000-0000-000000000030', 'Samsung A15', 'SAM-A15', 35000, 0, 1, 0, 35000, '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        // Line 2: existing cost_price_snapshot = 29000 (must NOT be overwritten)
+        conn.execute(
+            "INSERT INTO sale_lines (id, sale_id, product_id, product_name_snapshot, sku_snapshot, unit_price, cost_price_snapshot, quantity, discount, line_total, created_at)
+             VALUES ('00000000-0000-0000-0000-000000000052', '00000000-0000-0000-0000-000000000040', '00000000-0000-0000-0000-000000000030', 'Samsung A15', 'SAM-A15', 35000, 29000, 1, 0, 35000, '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        // 2. Run MigrationRunner to execute migration 010
+        let executed = MigrationRunner::run(&mut conn).unwrap();
+        assert_eq!(executed, 1);
+
+        // 3. Verify all four required indexes exist
+        let indexes: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type='index'").unwrap();
+            stmt.query_map([], |row| row.get(0))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect()
+        };
+
+        assert!(indexes.contains(&"idx_sales_status_created".to_string()), "idx_sales_status_created missing");
+        assert!(indexes.contains(&"idx_sales_returns_status_created".to_string()), "idx_sales_returns_status_created missing");
+        assert!(indexes.contains(&"idx_sale_lines_product_cost".to_string()), "idx_sale_lines_product_cost missing");
+        assert!(indexes.contains(&"idx_sales_return_lines_sale_line".to_string()), "idx_sales_return_lines_sale_line missing");
+
+        // 4. Verify historical backfill:
+        // Line 1 (was 0) should be backfilled to product.average_cost (32000)
+        let cost_1: i64 = conn.query_row(
+            "SELECT cost_price_snapshot FROM sale_lines WHERE id = '00000000-0000-0000-0000-000000000051'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(cost_1, 32000, "Legacy 0 cost snapshot should be backfilled to product average_cost");
+
+        // Line 2 (was 29000) should remain 29000 (never overwritten!)
+        let cost_2: i64 = conn.query_row(
+            "SELECT cost_price_snapshot FROM sale_lines WHERE id = '00000000-0000-0000-0000-000000000052'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(cost_2, 29000, "Established non-zero cost snapshot must NEVER be overwritten");
+
+        // 5. Verify idempotency
+        let second_run = MigrationRunner::run(&mut conn).unwrap();
+        assert_eq!(second_run, 0);
     }
 }

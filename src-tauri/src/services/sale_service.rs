@@ -103,7 +103,11 @@ impl SaleService {
             }
 
             let unit_price = product.sale_price;
-            let cost_price = product.purchase_price;
+            let cost_price = if product.average_cost > 0 {
+                product.average_cost
+            } else {
+                product.purchase_price
+            };
             let line_disc = item.discount.unwrap_or(0).max(0);
             let subtotal = unit_price * item.quantity;
             let line_total = subtotal.saturating_sub(line_disc);
@@ -322,12 +326,19 @@ impl SaleService {
                 }
             }
 
+            let cogs: i64 = sale_lines.iter().map(|l| l.quantity * l.cost_price_snapshot).sum();
+            let gross_profit = sale.total_amount - cogs;
+            let gross_margin = crate::domain::profit::calculate_gross_margin(gross_profit, sale.total_amount);
+
             Ok(SaleResultDto {
                 sale,
                 lines: sale_lines,
                 payments: sale_payments,
                 credit_amount,
                 customer_balance_after,
+                cogs,
+                gross_profit,
+                gross_margin,
             })
         })
         .await?;

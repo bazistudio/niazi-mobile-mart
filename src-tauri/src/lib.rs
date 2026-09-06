@@ -145,6 +145,12 @@ pub fn run() {
             commands::purchase_return::purchase_return_get,
             commands::purchase_return::purchase_return_list,
             commands::purchase_return::purchase_return_get_by_purchase,
+            // Profitability & COGS Commands (Phase 20)
+            commands::profit::profit_get_period,
+            commands::profit::profit_get_daily,
+            commands::profit::profit_get_product,
+            commands::profit::profit_get_sale,
+            commands::profit::profit_get_dashboard_summary,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Niazi Mobile Mart Tauri application");

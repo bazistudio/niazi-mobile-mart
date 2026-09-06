@@ -6,12 +6,18 @@ pub mod expense;
 pub mod inventory;
 pub mod organization;
 pub mod product;
+pub mod profit;
 pub mod purchase_return;
 pub mod purchases;
 pub mod sales;
 pub mod sales_return;
 pub mod supplier;
 pub mod user;
+
+pub use profit::{
+    calculate_gross_margin, DailyProfitabilityDto, DashboardProfitSummaryDto, PeriodProfitabilityDto,
+    ProductProfitabilityDto, ProfitMetricsDto, SaleProfitabilityDto,
+};
 
 pub use access_control::{StaffAccessProfile, StaffOperationalLimits};
 pub use catalog::{Brand, Category, Unit};
