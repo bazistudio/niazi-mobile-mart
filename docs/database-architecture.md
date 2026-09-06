@@ -5,7 +5,7 @@
 **Edition**: Desktop ERP & POS (Local Tauri) + Cloud API (Online PostgreSQL) + Public Play Store Mobile Application  
 **Primary Currency**: PKR (Pakistan Rupee - `Rs`)  
 **Identity Standard**: UUID v4  
-**Financial Representation**: Exact Integer Minor Units (`paisa`)  
+**Financial Representation**: Integer Whole Pakistani Rupees (`1 stored integer = 1 PKR`)  
 
 ---
 
@@ -65,19 +65,42 @@ Niazi Mobile Mart operates on a dual-tier persistence architecture unified by a 
 
 # 3. CURRENCY & FINANCIAL DATA SPECIFICATION
 
+### PERMANENT NIAZI MONEY MODEL
+
+> **Niazi Mobile Mart stores monetary values as signed 64-bit integer whole Pakistani Rupees. One stored integer represents one PKR rupee. For example, `2000` represents Rs 2,000. The system does not use paisa, minor-unit scaling, or floating-point financial values.**
+
 1. **PKR Single-Currency Lock**:
    - Currency Code: `PKR`
    - Display Symbol: `Rs`
-   - Minor Unit Name: `paisa`
-   - Currency Scale: 2 decimal places (1 PKR = 100 paisa)
+   - Whole Rupee Unit: `1 stored integer = 1 PKR`
+   - No minor units: No `paisa`, no decimal subdivisions, no minor unit names.
    - The ERP is single-currency: No USD, EUR, GBP, AED, SAR, multi-currency accounting, or currency switching.
 
-2. **Exact Integer Minor Units (`Money`)**:
-   - Authoritative financial values (prices, costs, discounts, taxes, balances, ledger entries) MUST be stored as signed 64-bit integers (`i64`) representing minor units (`paisa`).
-   - Floating-point representations (`f32`, `f64`, `REAL`, `FLOAT`, `DOUBLE`) are strictly forbidden for stored or authoritative financial calculations.
-   - Example:
-     - `Rs 100.00` = `10000` paisa
-     - `Rs 1,250.50` = `125050` paisa
+2. **Canonical Storage Mapping**:
+   ```text
+   Business amount       Stored integer value
+   ------------------------------------------
+   Rs 0                  0
+   Rs 100                100
+   Rs 1,500              1500
+   Rs 2,000              2000
+   Rs 380,000            380000
+   ```
+
+3. **Type Mapping Across Layers**:
+   ```text
+   Layer                 Type
+   ------------------------------------------
+   Rust Domain / DB      i64 (`Money { rupees: i64 }`)
+   SQLite (Local)        INTEGER NOT NULL
+   PostgreSQL (Cloud)    BIGINT NOT NULL
+   JSON / DTOs           i64 (e.g. 380000)
+   ```
+
+4. **Absolute Prohibitions for Financial Values**:
+   - **No floating point**: `f32`, `f64`, `REAL`, `FLOAT`, `DOUBLE`, or decimal conversion via float are strictly forbidden.
+   - **No currency scaling**: No `* 100` or `/ 100` operations.
+   - **No decimal display formatting**: The UI formatting contract is `Rs 2,000`, `Rs 15,500`, `Rs 380,000`. Never `Rs 2,000.00` or `toFixed(2)`.
 
 ---
 
@@ -188,7 +211,7 @@ with_transaction(&db, |tx| {
        "product_id": "UUID",
        "product_name": "Samsung Galaxy S24 Ultra",
        "category": "Smartphones",
-       "selling_rate_paisa": 38000000,
+       "selling_rate": 380000,
        "currency": "PKR",
        "updated_at": "2026-01-01T00:00:00Z"
      }
@@ -200,17 +223,17 @@ with_transaction(&db, |tx| {
 # 10. LOCAL SQLITE TABLES (PHASE 6 BASELINE)
 
 1. `schema_migrations` (version, name, applied_at)
-2. `organizations` (id, name, currency, currency_symbol, minor_unit, created_at, updated_at)
+2. `organizations` (id, name, currency, currency_symbol, created_at, updated_at)
 3. `branches` (id, organization_id, name, code, is_active, created_at, updated_at)
 4. `users` (id, branch_id, name, username, login_key_hash, pin_hash, role, is_active, lockouts, created_at, updated_at)
 5. `user_access_profiles` (user_id, allowed_pages, allowed_actions, limits, created_at, updated_at)
-6. `public_rates` (product_id, product_name, category, selling_rate_paisa, currency, is_public, published_by, updated_at)
+6. `public_rates` (product_id, product_name, category, selling_rate, currency, is_public, published_by, updated_at)
 
 ---
 
 # 11. ONLINE POSTGRESQL SCHEMA BLUEPRINT
 
-The future online PostgreSQL database mirrors the domain model using the same UUID identifiers:
+The future online PostgreSQL database mirrors the domain model using the same UUID identifiers and integer whole-PKR money model:
 
 ```sql
 -- Identity & Organization
@@ -219,7 +242,6 @@ CREATE TABLE organizations (
     name VARCHAR(255) NOT NULL,
     currency VARCHAR(3) NOT NULL DEFAULT 'PKR',
     currency_symbol VARCHAR(10) NOT NULL DEFAULT 'Rs',
-    minor_unit VARCHAR(20) NOT NULL DEFAULT 'paisa',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -245,12 +267,12 @@ CREATE TABLE public_users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Public Rates for Play Store App
+-- Public Rates for Play Store App (1 stored integer = 1 PKR rupee)
 CREATE TABLE public_rates (
     product_id UUID PRIMARY KEY,
     product_name VARCHAR(255) NOT NULL,
     category VARCHAR(100) NOT NULL,
-    selling_rate_paisa BIGINT NOT NULL CHECK (selling_rate_paisa >= 0),
+    selling_rate BIGINT NOT NULL CHECK (selling_rate >= 0),
     currency VARCHAR(3) NOT NULL DEFAULT 'PKR',
     is_public BOOLEAN NOT NULL DEFAULT TRUE,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -279,7 +301,7 @@ CREATE INDEX idx_public_rates_is_public ON public_rates(is_public);
 | **Business Identity** | Single Organization (Niazi Mobile Mart) | Seeded row `00000000-0000-0000-0000-000000000001`, no tenant signup |
 | **Branch Scope** | Controlled Retail Branches | `branches.organization_id` foreign key, user assigned `branch_id` |
 | **Currency** | PKR (Pakistan Rupee) | `organizations.currency = 'PKR'`, UI currency switcher disabled |
-| **Financial Values** | Integer Minor Units (`paisa`) | `i64` `Money` struct with zero floating-point drift |
+| **Financial Values** | Integer Whole PKR Rupee (`1 integer = 1 PKR`) | `i64` `Money { rupees: i64 }`, `INTEGER` / `BIGINT`, zero float, no scaling |
 | **Identity Standard** | UUID v4 (36-char string) | Pre-generation, `CHECK(length(id) = 36)` |
 | **Timestamps** | ISO 8601 UTC RFC 3339 | `TEXT` / `TIMESTAMPTZ` UTC storage |
 | **Local Database** | SQLite (WAL mode) | `DatabaseConnection` with foreign keys, busy timeout, WAL |

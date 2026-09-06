@@ -23,6 +23,9 @@ pub enum DbError {
 
     #[error("Database is busy or locked: {0}")]
     DatabaseLocked(String),
+
+    #[error("Validation error: {0}")]
+    ValidationError(String),
 }
 
 impl From<rusqlite::Error> for DbError {
@@ -54,6 +57,7 @@ impl From<DbError> for AppError {
             DbError::NotFound(msg) => AppError::NotFound(msg),
             DbError::ConstraintViolation(msg) => AppError::Conflict(msg),
             DbError::DatabaseLocked(msg) => AppError::Locked(msg),
+            DbError::ValidationError(msg) => AppError::Validation(msg),
             DbError::ConnectionError(msg)
             | DbError::MigrationError(msg)
             | DbError::QueryError(msg)

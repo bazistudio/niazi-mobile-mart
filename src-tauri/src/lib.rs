@@ -39,6 +39,35 @@ pub fn run() {
             commands::auth::admin_update_user,
             commands::auth::admin_reset_credentials,
             commands::auth::admin_recover_access,
+            // Catalog Commands
+            commands::catalog::category_create,
+            commands::catalog::category_get,
+            commands::catalog::category_list,
+            commands::catalog::category_update,
+            commands::catalog::brand_create,
+            commands::catalog::brand_get,
+            commands::catalog::brand_list,
+            commands::catalog::brand_update,
+            commands::catalog::unit_create,
+            commands::catalog::unit_get,
+            commands::catalog::unit_list,
+            commands::catalog::unit_update,
+            // Product Commands
+            commands::product::product_create,
+            commands::product::product_update,
+            commands::product::product_get,
+            commands::product::product_get_by_sku,
+            commands::product::product_get_by_barcode,
+            commands::product::product_list,
+            commands::product::product_deactivate,
+            // Inventory Commands
+            commands::inventory::inventory_increase,
+            commands::inventory::inventory_decrease,
+            commands::inventory::inventory_adjust,
+            commands::inventory::inventory_transfer,
+            commands::inventory::inventory_get_stock,
+            commands::inventory::inventory_get_movements,
+            commands::inventory::inventory_get_low_stock,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Niazi Mobile Mart Tauri application");
