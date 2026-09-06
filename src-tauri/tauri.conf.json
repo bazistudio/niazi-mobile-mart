@@ -4,9 +4,9 @@
   "version": "5.0.3",
   "identifier": "com.bazi.niazimobilemart",
   "build": {
-    "beforeDevCommand": "npm --prefix ../frontend run dev",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm --prefix ../frontend run build",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../frontend/dist"
   },
   "app": {
