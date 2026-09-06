@@ -19,8 +19,48 @@ use crate::domain::supplier::{
 use crate::errors::{AppError, AppResult};
 use crate::repositories::inventory_repository::SQLiteInventoryRepository;
 use crate::repositories::{
-    SQLiteCashRepository, SQLitePurchaseRepository, SQLiteSupplierRepository,
+    SQLiteCashRepository, SQLiteProductRepository, SQLitePurchaseRepository, SQLiteSupplierRepository,
 };
+
+/// Calculates the deterministic weighted-average cost in whole PKR integers.
+///
+/// Formula:
+/// If existing_stock <= 0:
+///     new_average_cost = incoming_unit_cost
+/// Else:
+///     total_cost = (existing_stock * existing_avg_cost) + (incoming_qty * incoming_unit_cost)
+///     total_qty = existing_stock + incoming_qty
+///     quotient = total_cost / total_qty
+///     remainder = total_cost % total_qty
+///     if remainder * 2 >= total_qty { quotient + 1 } else { quotient }
+pub fn calculate_weighted_average_cost(
+    existing_stock: i64,
+    existing_avg_cost: i64,
+    incoming_qty: i64,
+    incoming_unit_cost: i64,
+) -> i64 {
+    if incoming_qty <= 0 {
+        return existing_avg_cost;
+    }
+    if existing_stock <= 0 {
+        return incoming_unit_cost;
+    }
+
+    let new_total_stock = existing_stock + incoming_qty;
+    if new_total_stock <= 0 {
+        return incoming_unit_cost;
+    }
+
+    let total_cost = (existing_stock * existing_avg_cost) + (incoming_qty * incoming_unit_cost);
+    let quotient = total_cost / new_total_stock;
+    let remainder = total_cost % new_total_stock;
+
+    if remainder * 2 >= new_total_stock {
+        quotient + 1
+    } else {
+        quotient
+    }
+}
 
 #[derive(Clone)]
 pub struct PurchaseService {
@@ -276,8 +316,34 @@ impl PurchaseService {
                     created_at: now.clone(),
                 };
 
+                // Read total existing stock across all branches for product costing
+                let existing_total_stock: i64 = tx
+                    .query_row(
+                        "SELECT COALESCE(SUM(quantity), 0) FROM stock WHERE product_id = ?1",
+                        params![line.product_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(0);
+
+                // Read current product average_cost and purchase_price
+                let (current_avg_cost, _current_purch_price): (i64, i64) = tx
+                    .query_row(
+                        "SELECT average_cost, purchase_price FROM products WHERE id = ?1",
+                        params![line.product_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .map_err(|e| DbError::QueryError(format!("Failed to read product cost for {}: {e}", line.product_id)))?;
+
+                // Calculate deterministic weighted-average cost in whole PKR
+                let new_average_cost = calculate_weighted_average_cost(
+                    existing_total_stock,
+                    current_avg_cost,
+                    line.quantity,
+                    line.unit_cost,
+                );
+
                 // Read current stock for branch
-                let current_stock: i64 = tx
+                let current_branch_stock: i64 = tx
                     .query_row(
                         "SELECT quantity FROM stock WHERE product_id = ?1 AND branch_id = ?2",
                         params![line.product_id, branch_id],
@@ -285,7 +351,7 @@ impl PurchaseService {
                     )
                     .unwrap_or(0);
 
-                let resulting_stock = current_stock + line.quantity;
+                let resulting_stock = current_branch_stock + line.quantity;
 
                 SQLiteInventoryRepository::set_stock_in_tx(
                     tx,
@@ -301,7 +367,7 @@ impl PurchaseService {
                     branch_id: branch_id.clone(),
                     movement_type: StockMovementType::In,
                     quantity: line.quantity,
-                    previous_stock: current_stock,
+                    previous_stock: current_branch_stock,
                     resulting_stock,
                     reason: Some(format!("Supplier Purchase {purchase_number}")),
                     performed_by: user_id_owned.clone(),
@@ -311,12 +377,15 @@ impl PurchaseService {
 
                 SQLiteInventoryRepository::insert_movement_in_tx(tx, &movement)?;
 
-                // Update catalog purchase_price to latest cost
-                tx.execute(
-                    "UPDATE products SET purchase_price = ?1, updated_at = ?2 WHERE id = ?3",
-                    params![line.unit_cost, now, line.product_id],
+                // Update catalog average_cost (weighted average) and purchase_price (latest purchase cost) atomically
+                SQLiteProductRepository::update_cost_in_tx(
+                    tx,
+                    &line.product_id,
+                    new_average_cost,
+                    line.unit_cost,
+                    &now,
                 )
-                .map_err(|e| DbError::QueryError(format!("Failed to update product cost: {e}")))?;
+                .map_err(|e| DbError::QueryError(format!("Failed to update product costing: {e}")))?;
 
                 domain_lines.push(p_line);
             }
@@ -926,5 +995,293 @@ pub mod tests {
 
         let ledger_count: i64 = conn.query_row("SELECT count(*) FROM supplier_ledger_entries", [], |r| r.get(0)).unwrap();
         assert_eq!(ledger_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_phase19_costing_tests_1_to_11() {
+        let (db, purchase_svc, supplier_svc, prod_id, _) = setup_test_context().await;
+
+        let supplier = supplier_svc
+            .create_supplier(CreateSupplierDto {
+                name: "Costing Test Wholesaler".to_string(),
+                phone: "03009991122".to_string(),
+                alternate_phone: None,
+                email: None,
+                address: None,
+                notes: None,
+                credit_limit: Some(500000),
+            })
+            .await
+            .unwrap();
+
+        // Ensure product starts with 0 stock and known average_cost / purchase_price
+        {
+            let conn_arc = db.inner();
+            let conn = conn_arc.lock().await;
+            conn.execute(
+                "UPDATE products SET average_cost = 0, purchase_price = 0 WHERE id = ?1",
+                params![prod_id],
+            ).unwrap();
+            conn.execute("DELETE FROM stock WHERE product_id = ?1", params![prod_id]).unwrap();
+        }
+
+        // Test 1 — First Purchase (Zero stock case):
+        // Stock = 0, Purchase = 10 @ 100
+        // Expected Average = 100, Last Purchase = 100, Stock = 10
+        purchase_svc
+            .complete_purchase(
+                None,
+                CompletePurchaseDto {
+                    branch_id: None,
+                    supplier_id: supplier.id.clone(),
+                    items: vec![PurchaseItemDto {
+                        product_id: prod_id.clone(),
+                        quantity: 10,
+                        unit_cost: Some(100),
+                        discount: None,
+                    }],
+                    discount: None,
+                    paid_amount: Some(1000),
+                    payment_method: Some("CASH".to_string()),
+                    notes: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        {
+            let conn_arc = db.inner();
+            let conn = conn_arc.lock().await;
+            let (avg, last_purch): (i64, i64) = conn
+                .query_row(
+                    "SELECT average_cost, purchase_price FROM products WHERE id = ?1",
+                    params![prod_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            let stock: i64 = conn
+                .query_row(
+                    "SELECT quantity FROM stock WHERE product_id = ?1",
+                    params![prod_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+
+            assert_eq!(avg, 100, "Test 1: First purchase must set average_cost = incoming unit_cost");
+            assert_eq!(last_purch, 100, "Test 1: Last purchase cost must be 100");
+            assert_eq!(stock, 10, "Test 1: Stock must be 10");
+        }
+
+        // Test 2 — Equal Quantity:
+        // Existing: 10 @ 100
+        // New purchase: 10 @ 105
+        // Total cost = 1,000 + 1,050 = 2,050 / 20 = 102.5 -> rounds up to 103
+        // Stored Average Cost: PKR 103, Last Purchase Cost: PKR 105, Stock: 20
+        purchase_svc
+            .complete_purchase(
+                None,
+                CompletePurchaseDto {
+                    branch_id: None,
+                    supplier_id: supplier.id.clone(),
+                    items: vec![PurchaseItemDto {
+                        product_id: prod_id.clone(),
+                        quantity: 10,
+                        unit_cost: Some(105),
+                        discount: None,
+                    }],
+                    discount: None,
+                    paid_amount: Some(1050),
+                    payment_method: Some("CASH".to_string()),
+                    notes: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        {
+            let conn_arc = db.inner();
+            let conn = conn_arc.lock().await;
+            let (avg, last_purch): (i64, i64) = conn
+                .query_row(
+                    "SELECT average_cost, purchase_price FROM products WHERE id = ?1",
+                    params![prod_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            let stock: i64 = conn
+                .query_row(
+                    "SELECT quantity FROM stock WHERE product_id = ?1",
+                    params![prod_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+
+            assert_eq!(avg, 103, "Test 2: 2050 / 20 = 102.5 -> rounded up to 103");
+            assert_eq!(last_purch, 105, "Test 2: Last purchase cost must be 105");
+            assert_eq!(stock, 20, "Test 2: Stock must be 20");
+        }
+
+        // Test 3 & 4 — Unequal Quantity and Deterministic Rounding:
+        // Verification of helper formula directly:
+        // 10 @ 100 + 20 @ 105 = 3100 / 30 = 103.333 -> 103 (remainder 10 * 2 = 20 < 30 -> round down)
+        assert_eq!(calculate_weighted_average_cost(10, 100, 20, 105), 103);
+
+        // Rounding up case:
+        // 10 @ 100 + 10 @ 105 = 2050 / 20 = 102 remainder 10 (10 * 2 >= 20 -> 103)
+        assert_eq!(calculate_weighted_average_cost(10, 100, 10, 105), 103);
+
+        // Test 5 — Multiple Purchases Evolving Cost:
+        // From existing state: stock 20 @ 103
+        // New purchase: 10 @ 110
+        // Total cost = (20 * 103) + (10 * 110) = 2,060 + 1,100 = 3,160 / 30 = 105 remainder 10 (10 * 2 < 30 -> 105)
+        purchase_svc
+            .complete_purchase(
+                None,
+                CompletePurchaseDto {
+                    branch_id: None,
+                    supplier_id: supplier.id.clone(),
+                    items: vec![PurchaseItemDto {
+                        product_id: prod_id.clone(),
+                        quantity: 10,
+                        unit_cost: Some(110),
+                        discount: None,
+                    }],
+                    discount: None,
+                    paid_amount: Some(1100),
+                    payment_method: Some("CASH".to_string()),
+                    notes: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        {
+            let conn_arc = db.inner();
+            let conn = conn_arc.lock().await;
+            let (avg, last_purch): (i64, i64) = conn
+                .query_row(
+                    "SELECT average_cost, purchase_price FROM products WHERE id = ?1",
+                    params![prod_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            let stock: i64 = conn
+                .query_row(
+                    "SELECT quantity FROM stock WHERE product_id = ?1",
+                    params![prod_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+
+            assert_eq!(avg, 105, "Test 5: Average cost evolved to 105");
+            assert_eq!(last_purch, 110, "Test 5: Last purchase cost must be 110");
+            assert_eq!(stock, 30, "Test 5: Stock must be 30");
+        }
+
+        // Test 6 — Average Cost and Last Purchase Cost remain independent:
+        // Average Cost = 105, Last Purchase Cost = 110
+        {
+            let conn_arc = db.inner();
+            let conn = conn_arc.lock().await;
+            let (avg, last_purch): (i64, i64) = conn
+                .query_row(
+                    "SELECT average_cost, purchase_price FROM products WHERE id = ?1",
+                    params![prod_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            assert_ne!(avg, last_purch, "Test 6: Average Cost (105) and Last Purchase Cost (110) must be independent");
+        }
+
+        // Test 8 — Purchase Rollback preserves cost:
+        // Force a transaction failure with invalid item quantity 0
+        let rollback_attempt = purchase_svc
+            .complete_purchase(
+                None,
+                CompletePurchaseDto {
+                    branch_id: None,
+                    supplier_id: supplier.id.clone(),
+                    items: vec![PurchaseItemDto {
+                        product_id: prod_id.clone(),
+                        quantity: 0, // Invalid!
+                        unit_cost: Some(200),
+                        discount: None,
+                    }],
+                    discount: None,
+                    paid_amount: None,
+                    payment_method: None,
+                    notes: None,
+                },
+            )
+            .await;
+
+        assert!(rollback_attempt.is_err(), "Invalid quantity must fail");
+        {
+            let conn_arc = db.inner();
+            let conn = conn_arc.lock().await;
+            let (avg, last_purch): (i64, i64) = conn
+                .query_row(
+                    "SELECT average_cost, purchase_price FROM products WHERE id = ?1",
+                    params![prod_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            let stock: i64 = conn
+                .query_row(
+                    "SELECT quantity FROM stock WHERE product_id = ?1",
+                    params![prod_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+
+            assert_eq!(avg, 105, "Test 8: Average cost unchanged on rollback");
+            assert_eq!(last_purch, 110, "Test 8: Last purchase price unchanged on rollback");
+            assert_eq!(stock, 30, "Test 8: Stock unchanged on rollback");
+        }
+
+        // Test 11 — Supplier Credit Limit Failure preserves cost:
+        let credit_fail_attempt = purchase_svc
+            .complete_purchase(
+                None,
+                CompletePurchaseDto {
+                    branch_id: None,
+                    supplier_id: supplier.id.clone(),
+                    items: vec![PurchaseItemDto {
+                        product_id: prod_id.clone(),
+                        quantity: 1000,
+                        unit_cost: Some(1000), // 1,000,000 credit exceeds 500,000 credit limit
+                        discount: None,
+                    }],
+                    discount: None,
+                    paid_amount: Some(0), // 1M credit
+                    payment_method: None,
+                    notes: None,
+                },
+            )
+            .await;
+
+        assert!(credit_fail_attempt.is_err(), "Exceeding credit limit must fail");
+        {
+            let conn_arc = db.inner();
+            let conn = conn_arc.lock().await;
+            let (avg, last_purch): (i64, i64) = conn
+                .query_row(
+                    "SELECT average_cost, purchase_price FROM products WHERE id = ?1",
+                    params![prod_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            let stock: i64 = conn
+                .query_row(
+                    "SELECT quantity FROM stock WHERE product_id = ?1",
+                    params![prod_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+
+            assert_eq!(avg, 105, "Test 11: Average cost unchanged on credit limit failure");
+            assert_eq!(last_purch, 110, "Test 11: Last purchase price unchanged on credit limit failure");
+            assert_eq!(stock, 30, "Test 11: Stock unchanged on credit limit failure");
+        }
     }
 }

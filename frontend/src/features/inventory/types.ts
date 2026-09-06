@@ -64,7 +64,9 @@ export interface InventoryProduct {
   stock: number;
   minStockThreshold: number;
   price: number; // Sale price
-  purchasePrice?: number;
+  purchasePrice?: number; // Last purchase cost
+  averageCost?: number; // Weighted average cost (whole PKR)
+  lastPurchaseCost?: number; // Explicit alias for last purchase cost
   unit?: string;
   status: StockStatus;
   image?: string;

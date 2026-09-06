@@ -425,6 +425,7 @@ mod tests {
                     brand_id: None,
                     unit_id: Some("22222222-2222-2222-2222-222222222222".to_string()),
                     purchase_price: 500,
+                    average_cost: None,
                     sale_price: 1000,
                     low_stock_threshold: Some(5),
                     description: None,

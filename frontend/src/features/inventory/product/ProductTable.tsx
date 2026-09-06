@@ -129,9 +129,14 @@ export const ProductTable = ({ products, isLoading }: ProductTableProps) => {
                   <StockStatusBadge status={product.status} />
                 </td>
                 <td className="px-4 py-1.5 whitespace-nowrap">
-                  <span className="text-gray-500 dark:text-gray-400 font-medium">
-                    {product.purchasePrice ? `PKR ${product.purchasePrice.toLocaleString()}` : '-'}
-                  </span>
+                  <div className="flex flex-col text-xs">
+                    <span className="text-gray-900 dark:text-gray-100 font-semibold">
+                      Avg: {product.averageCost !== undefined && product.averageCost !== null ? `PKR ${product.averageCost.toLocaleString()}` : (product.purchasePrice ? `PKR ${product.purchasePrice.toLocaleString()}` : '-')}
+                    </span>
+                    <span className="text-gray-500 dark:text-gray-400 text-[11px]">
+                      Last: {product.purchasePrice ? `PKR ${product.purchasePrice.toLocaleString()}` : '-'}
+                    </span>
+                  </div>
                 </td>
                 <td className="px-4 py-1.5 whitespace-nowrap">
                   <span className="text-gray-700 dark:text-gray-300 font-medium">

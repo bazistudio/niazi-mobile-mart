@@ -21,6 +21,8 @@ export const inventoryApi = {
       categoryId: { _id: p.category_id, name: 'Catalog' },
       price: p.sale_price,
       purchasePrice: p.purchase_price,
+      averageCost: p.average_cost,
+      lastPurchaseCost: p.purchase_price,
       quantity: 0,
       lowStockThreshold: p.low_stock_threshold,
       description: p.description || undefined,

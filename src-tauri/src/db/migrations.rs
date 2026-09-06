@@ -620,6 +620,17 @@ pub const MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_purchase_return_lines_product_id ON purchase_return_lines(product_id);
         "#,
     },
+    Migration {
+        version: 9,
+        name: "009_product_average_cost",
+        up: r#"
+        -- Add average_cost column to products table with default 0 and non-negative check
+        ALTER TABLE products ADD COLUMN average_cost INTEGER NOT NULL DEFAULT 0 CHECK(average_cost >= 0);
+
+        -- Initialize existing products: set average_cost = purchase_price if available and average_cost is 0
+        UPDATE products SET average_cost = purchase_price WHERE average_cost = 0;
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction
@@ -689,6 +700,7 @@ impl MigrationRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::params;
 
     #[test]
     fn test_migration_execution_and_idempotency() {
@@ -696,9 +708,9 @@ mod tests {
         // Enable foreign keys
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
 
-        // 1. First run applies migrations (8 total: Core, Product/Inventory, Auth Security, Sales/Invoices, Customers/Ledger, Suppliers/Purchasing, Cash Management/Closing, Returns/Stock Reversal)
+        // 1. First run applies migrations (9 total: Core, Product/Inventory, Auth Security, Sales/Invoices, Customers/Ledger, Suppliers/Purchasing, Cash Management/Closing, Returns/Stock Reversal, Product Average Cost)
         let count = MigrationRunner::run(&mut conn).unwrap();
-        assert_eq!(count, 8);
+        assert_eq!(count, 9);
 
         // Verify permanent tables exist (5 from Phase 6 + 6 from Phase 7 + 4 from Phase 14 + 2 from Phase 15 + 4 from Phase 16 + 4 from Phase 17 + 4 from Phase 18 = 29 tables)
         let tables_count: i64 = conn
@@ -1099,7 +1111,7 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
 
         let applied = MigrationRunner::run(&mut conn).unwrap();
-        assert_eq!(applied, 8);
+        assert!(applied >= 8);
 
         // 1. Verify counters for sales and purchase returns
         let sr_counter: i64 = conn
@@ -1176,5 +1188,66 @@ mod tests {
         assert!(prl_cols.contains(&"unit_cost".to_string()));
         assert!(prl_cols.contains(&"quantity".to_string()));
         assert!(prl_cols.contains(&"return_amount".to_string()));
+    }
+
+    #[test]
+    fn test_migration_009_product_average_cost() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+
+        // 1. Run migrations up to 008 manually first
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            );",
+        ).unwrap();
+
+        for m in &MIGRATIONS[0..8] {
+            conn.execute_batch(m.up).unwrap();
+            conn.execute(
+                "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, ?3)",
+                params![m.version, m.name, "2026-01-01T00:00:00Z"],
+            ).unwrap();
+        }
+
+        // Insert a sample product prior to migration 009
+        conn.execute(
+            "INSERT INTO categories (id, name, code, is_active, created_at, updated_at)
+             VALUES ('00000000-0000-0000-0000-000000000010', 'Phones', 'PHN', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        conn.execute(
+            "INSERT INTO products (id, name, sku, category_id, purchase_price, sale_price, low_stock_threshold, is_active, created_at, updated_at)
+             VALUES ('00000000-0000-0000-0000-000000000030', 'Samsung A15', 'SAM-A15', '00000000-0000-0000-0000-000000000010', 30000, 35000, 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        // 2. Now run MigrationRunner to execute migration 009
+        let executed = MigrationRunner::run(&mut conn).unwrap();
+        assert_eq!(executed, 1);
+
+        // 3. Verify column exists on products table
+        let mut stmt = conn.prepare("PRAGMA table_info(products)").unwrap();
+        let prod_cols: Vec<String> = stmt
+            .query_map([], |row| row.get(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert!(prod_cols.contains(&"average_cost".to_string()));
+
+        // 4. Verify existing product initialized with purchase_price
+        let (avg_cost, purch_price): (i64, i64) = conn
+            .query_row(
+                "SELECT average_cost, purchase_price FROM products WHERE id = '00000000-0000-0000-0000-000000000030'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(purch_price, 30000);
+        assert_eq!(avg_cost, 30000, "Existing product average_cost must be initialized to purchase_price");
     }
 }

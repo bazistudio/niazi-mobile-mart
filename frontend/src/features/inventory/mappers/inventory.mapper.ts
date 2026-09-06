@@ -26,6 +26,8 @@ export const inventoryMapper = {
       minStockThreshold: dto.lowStockThreshold,
       price: dto.price,
       purchasePrice: dto.purchasePrice,
+      averageCost: dto.averageCost ?? dto.purchasePrice,
+      lastPurchaseCost: dto.lastPurchaseCost ?? dto.purchasePrice,
       barcode: dto.barcode,
       brand: dto.brand,
       description: dto.description,

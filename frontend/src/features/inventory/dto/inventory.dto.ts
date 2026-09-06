@@ -10,6 +10,8 @@ export interface ProductDTO {
   name: string;
   price: number;
   purchasePrice?: number;
+  averageCost?: number;
+  lastPurchaseCost?: number;
   sku?: string;
   barcode?: string;
   quantity: number;

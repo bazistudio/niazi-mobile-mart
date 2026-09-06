@@ -11,7 +11,8 @@ pub struct Product {
     pub category_id: String,
     pub brand_id: Option<String>,
     pub unit_id: Option<String>,
-    pub purchase_price: i64, // Whole PKR (e.g. 1800 = Rs 1,800)
+    pub purchase_price: i64, // Whole PKR - Last Purchase Cost (e.g. 1800 = Rs 1,800)
+    pub average_cost: i64,   // Whole PKR - Weighted Average Cost (e.g. 1800 = Rs 1,800)
     pub sale_price: i64,     // Whole PKR (e.g. 2000 = Rs 2,000)
     pub low_stock_threshold: i64,
     pub is_active: bool,
@@ -30,6 +31,9 @@ impl Product {
     pub fn validate_prices(&self) -> Result<(), String> {
         if self.purchase_price < 0 {
             return Err("Purchase price cannot be negative".to_string());
+        }
+        if self.average_cost < 0 {
+            return Err("Average cost cannot be negative".to_string());
         }
         if self.sale_price < 0 {
             return Err("Sale price cannot be negative".to_string());
@@ -55,7 +59,8 @@ pub struct CreateProductDto {
     pub category_id: String,
     pub brand_id: Option<String>,
     pub unit_id: Option<String>,
-    pub purchase_price: i64, // Whole PKR
+    pub purchase_price: i64, // Whole PKR (Last Purchase Cost)
+    pub average_cost: Option<i64>, // Optional initial average cost; defaults to purchase_price
     pub sale_price: i64,     // Whole PKR
     pub low_stock_threshold: Option<i64>,
     pub description: Option<String>,
@@ -71,7 +76,8 @@ pub struct UpdateProductDto {
     pub category_id: Option<String>,
     pub brand_id: Option<String>,
     pub unit_id: Option<String>,
-    pub purchase_price: Option<i64>, // Whole PKR
+    pub purchase_price: Option<i64>, // Whole PKR (Last Purchase Cost)
+    pub average_cost: Option<i64>,   // Whole PKR (Average Cost)
     pub sale_price: Option<i64>,     // Whole PKR
     pub low_stock_threshold: Option<i64>,
     pub description: Option<String>,
@@ -101,6 +107,7 @@ mod tests {
             brand_id: Some("brand_1".to_string()),
             unit_id: Some("unit_1".to_string()),
             purchase_price: 320000, // Rs 320,000
+            average_cost: 320000,   // Rs 320,000
             sale_price: 380000,     // Rs 380,000
             low_stock_threshold: 5,
             is_active: true,
@@ -116,6 +123,10 @@ mod tests {
         assert!(invalid_price.validate_prices().is_err());
 
         invalid_price.purchase_price = 320000;
+        invalid_price.average_cost = -10;
+        assert!(invalid_price.validate_prices().is_err());
+
+        invalid_price.average_cost = 320000;
         invalid_price.sale_price = -50;
         assert!(invalid_price.validate_prices().is_err());
 

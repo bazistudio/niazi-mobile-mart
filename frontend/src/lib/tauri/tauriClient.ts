@@ -1170,7 +1170,8 @@ export interface Product {
   category_id: string;
   brand_id: string | null;
   unit_id: string | null;
-  purchase_price: number; // Stored in whole Pakistani Rupees (1 stored integer = 1 PKR)
+  purchase_price: number; // Stored in whole Pakistani Rupees - Last Purchase Cost (1 stored integer = 1 PKR)
+  average_cost: number;   // Stored in whole Pakistani Rupees - Weighted Average Cost (1 stored integer = 1 PKR)
   sale_price: number;     // Stored in whole Pakistani Rupees (1 stored integer = 1 PKR)
   low_stock_threshold: number;
   is_active: boolean;
@@ -1187,6 +1188,7 @@ export interface CreateProductDto {
   brand_id?: string | null;
   unit_id?: string | null;
   purchase_price: number;
+  average_cost?: number | null;
   sale_price: number;
   low_stock_threshold?: number | null;
   description?: string | null;
@@ -1202,6 +1204,7 @@ export interface UpdateProductDto {
   brand_id?: string | null;
   unit_id?: string | null;
   purchase_price?: number | null;
+  average_cost?: number | null;
   sale_price?: number | null;
   low_stock_threshold?: number | null;
   is_active?: boolean | null;

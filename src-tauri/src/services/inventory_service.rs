@@ -333,6 +333,7 @@ mod tests {
                     brand_id: None,
                     unit_id: Some(unit.id),
                     purchase_price: 1500, // Rs 1,500
+                    average_cost: None,
                     sale_price: 2000,     // Rs 2,000
                     low_stock_threshold: Some(5),
                     description: None,

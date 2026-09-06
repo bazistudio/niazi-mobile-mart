@@ -88,19 +88,35 @@ export const ProductDetailsDrawer = ({ product, onClose, onEdit }: ProductDetail
             </div>
           </section>
 
-          {/* Pricing */}
+          {/* Pricing & Costing */}
           <section>
             <h3 className="flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
-              <ShoppingBag className="h-3.5 w-3.5" /> Pricing
+              <ShoppingBag className="h-3.5 w-3.5" /> Pricing & Costing
             </h3>
             <div className="rounded-xl border border-gray-100 dark:border-gray-800 overflow-hidden">
               <DetailRow label="Sale Price" value={`PKR ${product.price.toLocaleString()}`} />
               <DetailRow
-                label="Purchase Price"
+                label="Average Cost"
+                value={
+                  product.averageCost !== undefined && product.averageCost !== null
+                    ? `PKR ${product.averageCost.toLocaleString()}`
+                    : (product.purchasePrice ? `PKR ${product.purchasePrice.toLocaleString()}` : null)
+                }
+              />
+              <DetailRow
+                label="Last Purchase Cost"
                 value={product.purchasePrice ? `PKR ${product.purchasePrice.toLocaleString()}` : null}
               />
               <DetailRow
-                label="Margin"
+                label="Inventory Value"
+                value={
+                  product.stock > 0 && (product.averageCost || product.purchasePrice)
+                    ? `PKR ${(product.stock * (product.averageCost ?? product.purchasePrice!)).toLocaleString()}`
+                    : null
+                }
+              />
+              <DetailRow
+                label="Estimated Margin"
                 value={margin ? (
                   <span className={Number(margin) >= 0 ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-red-600'}>
                     {margin}%
