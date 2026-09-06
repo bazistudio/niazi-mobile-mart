@@ -34,6 +34,32 @@ impl std::fmt::Display for UserRole {
     }
 }
 
+/// Account approval and operational status
+/// 0 = DISABLED/SUSPENDED, 1 = ACTIVE, 2 = PENDING, 3 = REJECTED
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum UserStatus {
+    Disabled = 0,
+    Active = 1,
+    Pending = 2,
+    Rejected = 3,
+}
+
+impl UserStatus {
+    pub fn from_i32(val: i32) -> Self {
+        match val {
+            1 => Self::Active,
+            2 => Self::Pending,
+            3 => Self::Rejected,
+            _ => Self::Disabled,
+        }
+    }
+
+    pub fn to_i32(&self) -> i32 {
+        *self as i32
+    }
+}
+
 /// Internal native user entity
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
@@ -45,7 +71,11 @@ pub struct User {
     #[serde(skip_serializing)]
     pub pin_hash: Option<String>,
     pub role: UserRole,
+    pub status: UserStatus,
     pub is_active: bool,
+    #[serde(skip_serializing)]
+    pub recovery_key_hash: Option<String>,
+    pub must_change_password: bool,
     pub access_profile: StaffAccessProfile,
     pub failed_pin_attempts: u32,
     pub pin_locked_until_ms: Option<u128>,
@@ -63,7 +93,9 @@ impl User {
             name: self.name.clone(),
             username: self.username.clone(),
             role: self.role,
-            is_active: self.is_active,
+            status: self.status,
+            is_active: self.status == UserStatus::Active,
+            must_change_password: self.must_change_password,
             has_pin: self.pin_hash.is_some(),
             access_profile: self.access_profile.clone(),
             created_at: self.created_at.clone(),
@@ -78,7 +110,9 @@ pub struct SanitizedUser {
     pub name: String,
     pub username: String,
     pub role: UserRole,
+    pub status: UserStatus,
     pub is_active: bool,
+    pub must_change_password: bool,
     pub has_pin: bool,
     pub access_profile: StaffAccessProfile,
     pub created_at: String,
@@ -97,7 +131,10 @@ mod tests {
             login_key_hash: "$argon2id$v=19$m=19456,t=2,p=1$secret".to_string(),
             pin_hash: Some("$argon2id$v=19$pinsecret".to_string()),
             role: UserRole::Cashier,
+            status: UserStatus::Active,
             is_active: true,
+            recovery_key_hash: Some("$argon2id$v=19$recoverysecret".to_string()),
+            must_change_password: false,
             access_profile: StaffAccessProfile::cashier_default(),
             failed_pin_attempts: 0,
             pin_locked_until_ms: None,
@@ -110,11 +147,13 @@ mod tests {
         let sanitized = user.sanitize();
         assert_eq!(sanitized.id, "u_1");
         assert_eq!(sanitized.role, UserRole::Cashier);
+        assert_eq!(sanitized.status, UserStatus::Active);
         assert!(sanitized.has_pin);
 
         let json = serde_json::to_string(&sanitized).unwrap();
         assert!(!json.contains("login_key_hash"));
         assert!(!json.contains("pin_hash"));
+        assert!(!json.contains("recovery_key_hash"));
         assert!(!json.contains("secret"));
     }
 }

@@ -2,9 +2,8 @@ use rusqlite::params;
 
 use crate::db::connection::DatabaseConnection;
 use crate::domain::access_control::{StaffAccessProfile, StaffOperationalLimits};
-use crate::domain::user::{User, UserRole};
+use crate::domain::user::{User, UserRole, UserStatus};
 use crate::errors::{AppError, AppResult};
-use crate::services::hasher::hash_credential;
 
 /// SQLite-backed persistent User Repository enforcing relational integrity and transactions
 #[derive(Clone)]
@@ -30,57 +29,20 @@ impl SQLiteUserRepository {
         Ok(count > 0)
     }
 
-    /// Seeds initial development administrator and cashier accounts if database is completely empty
-    pub async fn seed_development_defaults_if_empty(&self) -> AppResult<()> {
-        if self.has_any_users().await? {
-            return Ok(());
-        }
+    /// Counts active administrator accounts in the database
+    pub async fn count_active_admins(&self) -> AppResult<i64> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
 
-        // Canonical UUID v4 identifiers
-        let admin_hash = hash_credential("Admin@Niazi2025!")?;
-        let admin_pin_hash = hash_credential("1234")?;
+        let count: i64 = guard
+            .query_row(
+                "SELECT count(*) FROM users WHERE role = 'ADMIN' AND is_active = 1",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| AppError::Database(format!("Failed to count active admins: {e}")))?;
 
-        let admin_user = User {
-            id: "550e8400-e29b-41d4-a716-446655440001".to_string(),
-            name: "System Administrator".to_string(),
-            username: "admin".to_string(),
-            login_key_hash: admin_hash,
-            pin_hash: Some(admin_pin_hash),
-            role: UserRole::Admin,
-            is_active: true,
-            access_profile: StaffAccessProfile::admin_unlimited(),
-            failed_pin_attempts: 0,
-            pin_locked_until_ms: None,
-            failed_login_attempts: 0,
-            login_locked_until_ms: None,
-            created_at: "2026-01-01T00:00:00Z".to_string(),
-            updated_at: "2026-01-01T00:00:00Z".to_string(),
-        };
-
-        let cashier_hash = hash_credential("Cashier@123")?;
-        let cashier_pin_hash = hash_credential("1234")?;
-
-        let cashier_user = User {
-            id: "550e8400-e29b-41d4-a716-446655440002".to_string(),
-            name: "Counter Cashier 1".to_string(),
-            username: "cashier1".to_string(),
-            login_key_hash: cashier_hash,
-            pin_hash: Some(cashier_pin_hash),
-            role: UserRole::Cashier,
-            is_active: true,
-            access_profile: StaffAccessProfile::cashier_default(),
-            failed_pin_attempts: 0,
-            pin_locked_until_ms: None,
-            failed_login_attempts: 0,
-            login_locked_until_ms: None,
-            created_at: "2026-01-01T00:00:00Z".to_string(),
-            updated_at: "2026-01-01T00:00:00Z".to_string(),
-        };
-
-        self.save(admin_user).await?;
-        self.save(cashier_user).await?;
-
-        Ok(())
+        Ok(count)
     }
 
     /// Finds a user by their canonical UUID v4
@@ -92,7 +54,7 @@ impl SQLiteUserRepository {
             SELECT 
                 u.id, u.name, u.username, u.login_key_hash, u.pin_hash, u.role, u.is_active,
                 u.failed_pin_attempts, u.pin_locked_until_ms, u.failed_login_attempts, u.login_locked_until_ms,
-                u.created_at, u.updated_at,
+                u.created_at, u.updated_at, u.recovery_key_hash, u.must_change_password,
                 p.allowed_pages, p.allowed_actions, p.max_discount_percent, p.can_price_override,
                 p.can_refund, p.can_void_sale, p.can_view_profit
             FROM users u
@@ -121,7 +83,7 @@ impl SQLiteUserRepository {
             SELECT 
                 u.id, u.name, u.username, u.login_key_hash, u.pin_hash, u.role, u.is_active,
                 u.failed_pin_attempts, u.pin_locked_until_ms, u.failed_login_attempts, u.login_locked_until_ms,
-                u.created_at, u.updated_at,
+                u.created_at, u.updated_at, u.recovery_key_hash, u.must_change_password,
                 p.allowed_pages, p.allowed_actions, p.max_discount_percent, p.can_price_override,
                 p.can_refund, p.can_void_sale, p.can_view_profit
             FROM users u
@@ -151,14 +113,15 @@ impl SQLiteUserRepository {
 
         // 1. Upsert users table
         let role_str = user.role.to_string();
-        let is_active_int = if user.is_active { 1 } else { 0 };
+        let is_active_int = user.status.to_i32();
+        let must_change_pwd_int = if user.must_change_password { 1 } else { 0 };
 
         tx.execute(
             "INSERT INTO users (
                 id, name, username, login_key_hash, pin_hash, role, is_active,
                 failed_pin_attempts, pin_locked_until_ms, failed_login_attempts, login_locked_until_ms,
-                created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                created_at, updated_at, recovery_key_hash, must_change_password
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 username = excluded.username,
@@ -170,7 +133,9 @@ impl SQLiteUserRepository {
                 pin_locked_until_ms = excluded.pin_locked_until_ms,
                 failed_login_attempts = excluded.failed_login_attempts,
                 login_locked_until_ms = excluded.login_locked_until_ms,
-                updated_at = excluded.updated_at;",
+                updated_at = excluded.updated_at,
+                recovery_key_hash = excluded.recovery_key_hash,
+                must_change_password = excluded.must_change_password;",
             params![
                 user.id,
                 user.name,
@@ -185,6 +150,8 @@ impl SQLiteUserRepository {
                 user.login_locked_until_ms.map(|v| v as i64),
                 user.created_at,
                 user.updated_at,
+                user.recovery_key_hash,
+                must_change_pwd_int,
             ],
         )
         .map_err(|e| AppError::Database(format!("Failed to save user: {e}")))?;
@@ -233,6 +200,48 @@ impl SQLiteUserRepository {
         Ok(())
     }
 
+    /// Atomically updates login password and invalidates recovery key (sets to NULL)
+    pub async fn consume_recovery_key_and_reset_password(
+        &self,
+        user_id: &str,
+        new_login_key_hash: &str,
+    ) -> AppResult<()> {
+        let conn_arc = self.db.inner();
+        let mut guard = conn_arc.lock().await;
+
+        let tx = guard
+            .transaction()
+            .map_err(|e| AppError::Database(format!("Transaction begin failed: {e}")))?;
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let updated = tx
+            .execute(
+                "UPDATE users SET 
+                    login_key_hash = ?1,
+                    recovery_key_hash = NULL,
+                    failed_login_attempts = 0,
+                    login_locked_until_ms = NULL,
+                    must_change_password = 0,
+                    is_active = 1,
+                    updated_at = ?2
+                WHERE id = ?3 AND recovery_key_hash IS NOT NULL",
+                params![new_login_key_hash, now, user_id],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to consume recovery key: {e}")))?;
+
+        if updated == 0 {
+            return Err(AppError::Forbidden(
+                "Recovery key has already been consumed or administrator account is invalid."
+                    .to_string(),
+            ));
+        }
+
+        tx.commit()
+            .map_err(|e| AppError::Database(format!("Commit recovery transaction failed: {e}")))?;
+
+        Ok(())
+    }
+
     /// Lists all staff users with their access profiles
     pub async fn list_all(&self) -> AppResult<Vec<User>> {
         let conn_arc = self.db.inner();
@@ -242,7 +251,7 @@ impl SQLiteUserRepository {
             SELECT 
                 u.id, u.name, u.username, u.login_key_hash, u.pin_hash, u.role, u.is_active,
                 u.failed_pin_attempts, u.pin_locked_until_ms, u.failed_login_attempts, u.login_locked_until_ms,
-                u.created_at, u.updated_at,
+                u.created_at, u.updated_at, u.recovery_key_hash, u.must_change_password,
                 p.allowed_pages, p.allowed_actions, p.max_discount_percent, p.can_price_override,
                 p.can_refund, p.can_void_sale, p.can_view_profit
             FROM users u
@@ -291,16 +300,20 @@ impl SQLiteUserRepository {
         };
 
         let is_active_int: i32 = row.get(6)?;
+        let status = UserStatus::from_i32(is_active_int);
         let pin_locked_ms: Option<i64> = row.get(8)?;
         let login_locked_ms: Option<i64> = row.get(10)?;
+        let recovery_key_hash: Option<String> = row.get(13)?;
+        let must_change_pwd_int: i32 = row.get(14)?;
+        let must_change_password = must_change_pwd_int == 1;
 
-        let pages_json: Option<String> = row.get(13)?;
-        let actions_json: Option<String> = row.get(14)?;
-        let max_discount: Option<f64> = row.get(15)?;
-        let can_override: Option<i32> = row.get(16)?;
-        let can_refund: Option<i32> = row.get(17)?;
-        let can_void: Option<i32> = row.get(18)?;
-        let can_profit: Option<i32> = row.get(19)?;
+        let pages_json: Option<String> = row.get(15)?;
+        let actions_json: Option<String> = row.get(16)?;
+        let max_discount: Option<f64> = row.get(17)?;
+        let can_override: Option<i32> = row.get(18)?;
+        let can_refund: Option<i32> = row.get(19)?;
+        let can_void: Option<i32> = row.get(20)?;
+        let can_profit: Option<i32> = row.get(21)?;
 
         let access_profile = if let (Some(pages), Some(actions)) = (pages_json, actions_json) {
             let allowed_pages: Vec<String> = serde_json::from_str(&pages).unwrap_or_default();
@@ -333,7 +346,10 @@ impl SQLiteUserRepository {
             login_key_hash: row.get(3)?,
             pin_hash: row.get(4)?,
             role,
-            is_active: is_active_int == 1,
+            status,
+            is_active: status == UserStatus::Active,
+            recovery_key_hash,
+            must_change_password,
             access_profile,
             failed_pin_attempts: row.get(7)?,
             pin_locked_until_ms: pin_locked_ms.map(|v| v as u128),
@@ -349,6 +365,7 @@ impl SQLiteUserRepository {
 mod tests {
     use super::*;
     use crate::db::migrations::MigrationRunner;
+    use crate::services::hasher::hash_credential;
 
     #[tokio::test]
     async fn test_sqlite_user_repo_crud_and_persistence() {
@@ -360,27 +377,52 @@ mod tests {
         }
 
         let repo = SQLiteUserRepository::new(db);
-        repo.seed_development_defaults_if_empty().await.unwrap();
+        assert_eq!(repo.has_any_users().await.unwrap(), false);
+        assert_eq!(repo.count_active_admins().await.unwrap(), 0);
 
-        // 1. Find seeded admin
-        let admin = repo.find_by_username("admin").await.unwrap();
-        assert!(admin.is_some());
-        let admin_user = admin.unwrap();
-        assert_eq!(admin_user.role, UserRole::Admin);
-        assert_eq!(admin_user.id.len(), 36);
+        // Save a test user
+        let user = User {
+            id: "550e8400-e29b-41d4-a716-446655440001".to_string(),
+            name: "Test Admin".to_string(),
+            username: "testadmin".to_string(),
+            login_key_hash: hash_credential("Password123!").unwrap(),
+            pin_hash: None,
+            role: UserRole::Admin,
+            status: UserStatus::Active,
+            is_active: true,
+            recovery_key_hash: Some(hash_credential("NZRCV-TEST-KEY1-2222-3333").unwrap()),
+            must_change_password: false,
+            access_profile: StaffAccessProfile::admin_unlimited(),
+            failed_pin_attempts: 0,
+            pin_locked_until_ms: None,
+            failed_login_attempts: 0,
+            login_locked_until_ms: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        repo.save(user).await.unwrap();
 
-        // 2. Update user and verify persistence
-        let mut cashier = repo.find_by_username("cashier1").await.unwrap().unwrap();
-        cashier.failed_login_attempts = 3;
-        cashier.access_profile.limits.max_discount_percent = 7.5;
-        repo.save(cashier).await.unwrap();
+        assert_eq!(repo.has_any_users().await.unwrap(), true);
+        assert_eq!(repo.count_active_admins().await.unwrap(), 1);
 
-        let updated_cashier = repo.find_by_username("cashier1").await.unwrap().unwrap();
-        assert_eq!(updated_cashier.failed_login_attempts, 3);
-        assert_eq!(updated_cashier.access_profile.limits.max_discount_percent, 7.5);
+        // Find by username
+        let found = repo.find_by_username("testadmin").await.unwrap().unwrap();
+        assert_eq!(found.role, UserRole::Admin);
+        assert_eq!(found.status, UserStatus::Active);
+        assert!(found.recovery_key_hash.is_some());
 
-        // 3. List all
-        let all = repo.list_all().await.unwrap();
-        assert_eq!(all.len(), 2);
+        // Single-use recovery consumption
+        let new_hash = hash_credential("NewPassword123!").unwrap();
+        repo.consume_recovery_key_and_reset_password(&found.id, &new_hash)
+            .await
+            .unwrap();
+
+        let recovered = repo.find_by_id(&found.id).await.unwrap().unwrap();
+        assert_eq!(recovered.login_key_hash, new_hash);
+        assert!(recovered.recovery_key_hash.is_none(), "Recovery key must be invalidated to NULL");
+
+        // Second consumption must fail
+        let second_try = repo.consume_recovery_key_and_reset_password(&found.id, "dummy").await;
+        assert!(second_try.is_err(), "Second consumption must be rejected");
     }
 }

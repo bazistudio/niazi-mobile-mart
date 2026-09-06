@@ -27,8 +27,9 @@ export const RoleGuard: React.FC<RoleGuardProps> = ({
   const userRole = user?.role ? String(user.role).toUpperCase() : '';
   const normalizedAllowed = allowedRoles.map((r) => r.toUpperCase());
 
-  // SuperAdmin and Org Owner bypass checks
+  // Admin, SuperAdmin, and Org Owner bypass checks
   const hasAccess =
+    userRole === 'ADMIN' ||
     userRole === 'SUPER_ADMIN' ||
     userRole === 'MULTI_ADMIN' ||
     userRole === 'OWNER' ||

@@ -35,10 +35,20 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Forgot Password state
-  const [forgotIdentifier, setForgotIdentifier] = useState("");
-  const [forgotStatus, setForgotStatus] = useState<"idle" | "sending" | "sent">("idle");
-  const [forgotError, setForgotError] = useState<string | null>(null);
+  // Check if system requires initial administrator bootstrap
+  useEffect(() => {
+    async function checkBootstrap() {
+      try {
+        const needsBootstrap = await tauriClient.authCheckBootstrapStatus();
+        if (needsBootstrap) {
+          navigate("/auth/bootstrap", { replace: true });
+        }
+      } catch (err) {
+        console.error("Bootstrap check error:", err);
+      }
+    }
+    checkBootstrap();
+  }, [navigate]);
 
   const onSubmitLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,16 +66,17 @@ export function LoginForm() {
 
       navigate(from, { replace: true });
     } catch (err: any) {
+      const msg = (err.message || "").toLowerCase();
       const code = err.response?.data?.code;
-      if (code === "ACCOUNT_PENDING") {
+      if (code === "ACCOUNT_PENDING" || msg.includes("pending approval") || msg.includes("pending")) {
         navigate("/auth/pending");
         return;
       }
-      if (code === "ACCOUNT_REJECTED") {
+      if (code === "ACCOUNT_REJECTED" || msg.includes("rejected")) {
         navigate("/auth/rejected");
         return;
       }
-      if (code === "ACCOUNT_SUSPENDED") {
+      if (code === "ACCOUNT_SUSPENDED" || msg.includes("disabled") || msg.includes("suspended")) {
         navigate("/auth/suspended");
         return;
       }
@@ -75,20 +86,6 @@ export function LoginForm() {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const onSubmitForgot = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!forgotIdentifier.trim()) {
-      setForgotError("Please enter your registered email or username.");
-      return;
-    }
-    setForgotStatus("sending");
-    setForgotError(null);
-
-    setTimeout(() => {
-      setForgotStatus("sent");
-    }, 600);
   };
 
   return (
@@ -227,118 +224,60 @@ export function LoginForm() {
         </div>
       ) : (
         <div>
-          {/* Forgot Password View */}
+          {/* Forgot Password / Offline Recovery View */}
           <div className="text-center mb-6">
             <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-amber-300 p-[1px] shadow-[0_8px_16px_-2px_rgba(245,158,11,0.35),0_3px_6px_rgba(0,0,0,0.08)] mb-3">
               <div className="w-full h-full rounded-2xl bg-gradient-to-b from-amber-600 to-amber-700 flex items-center justify-center text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)]">
                 <KeyRound className="w-6 h-6 text-amber-100 drop-shadow" />
               </div>
             </div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Reset Password</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Account Recovery</h1>
             <p className="text-xs text-slate-500 mt-1">
-              Enter your email or username to recover access
+              Offline-first authentication recovery options
             </p>
           </div>
 
-          <form onSubmit={onSubmitForgot} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="forgotIdentifier" className="text-xs font-semibold uppercase tracking-wider text-slate-700">
-                Registered Email or Username
-              </label>
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-[#006970] transition-colors">
-                  <Mail className="w-4 h-4" />
-                </div>
-                <input
-                  id="forgotIdentifier"
-                  type="text"
-                  placeholder="name@business.com or username"
-                  value={forgotIdentifier}
-                  onChange={(e) => setForgotIdentifier(e.target.value)}
-                  required
-                  disabled={forgotStatus === "sent"}
-                  className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50/70 border border-slate-200/90 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 shadow-[inset_0_1px_3px_rgba(15,23,42,0.04)] focus:bg-white focus:outline-none focus:border-[#006970] focus:ring-4 focus:ring-[#006970]/10 transition-all duration-200 disabled:opacity-60"
-                />
-              </div>
+          <div className="flex flex-col gap-4">
+            {/* Staff Guidance */}
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/90 text-xs text-slate-600 space-y-2">
+              <p className="font-semibold text-slate-800 flex items-center gap-1.5">
+                <span>Staff & Cashier Accounts</span>
+              </p>
+              <p className="text-[11px] leading-relaxed">
+                Niazi Mobile Mart operates completely offline without external cloud dependencies. If you forgot your password or PIN, your system administrator can generate a temporary login key for you in the Workforce Management panel.
+              </p>
             </div>
 
-            {/* Support Guidance for POS and Staff */}
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 text-[11px] text-slate-600 leading-relaxed">
-              <span className="font-semibold text-slate-800">Branch & Staff Accounts:</span> If you are operating a POS counter terminal, your Shop Administrator can directly reset your passcode from the Staff Management dashboard.
+            {/* Administrator One-Time Key Action */}
+            <div className="p-4 rounded-xl bg-amber-50/80 border border-amber-200/80 text-xs space-y-2.5">
+              <p className="font-semibold text-amber-900 flex items-center gap-1.5">
+                <KeyRound className="w-4 h-4 text-amber-600" />
+                <span>Administrator Emergency Recovery</span>
+              </p>
+              <p className="text-[11px] text-amber-800 leading-relaxed">
+                System administrators can reset their access using the secret one-time recovery key generated during initial setup.
+              </p>
+              <Link
+                to="/auth/recover-admin"
+                className="w-full mt-1 relative group overflow-hidden bg-gradient-to-b from-amber-600 to-amber-700 text-white font-medium py-2.5 px-4 rounded-xl text-xs transition-all duration-150 shadow-[0_3px_0_#92400e,0_8px_16px_rgba(245,158,11,0.25)] hover:brightness-105 active:translate-y-1 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <span>Enter One-Time Recovery Key</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+              </Link>
             </div>
-
-            {/* Feedback Messages */}
-            {forgotError && (
-              <div
-                role="alert"
-                className="p-3 rounded-xl bg-red-50 border border-red-200/80 flex items-start gap-2.5 text-xs text-red-700 shadow-sm"
-              >
-                <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-                <span>{forgotError}</span>
-              </div>
-            )}
-
-            {forgotStatus === "sent" && (
-              <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200/80 text-xs text-emerald-800 flex items-start gap-2.5 shadow-sm">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-semibold text-emerald-900">Recovery Instructions Dispatched</p>
-                  <p className="mt-0.5 text-emerald-700">
-                    If an account exists for &ldquo;{forgotIdentifier}&rdquo;, reset details have been sent.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* 3D Action Button */}
-            {forgotStatus !== "sent" ? (
-              <button
-                type="submit"
-                disabled={forgotStatus === "sending"}
-                className="w-full relative group overflow-hidden bg-gradient-to-b from-[#007a82] via-[#006970] to-[#005157] text-white font-medium py-2.5 px-4 rounded-xl text-sm transition-all duration-150 shadow-[0_4px_0_#00383c,0_10px_20px_rgba(0,105,112,0.3)] hover:brightness-105 active:translate-y-1 active:shadow-[0_1px_0_#00383c,0_4px_10px_rgba(0,105,112,0.2)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer mt-1"
-              >
-                <div className="absolute inset-x-0 top-0 h-[1px] bg-white/30" />
-                {forgotStatus === "sending" ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Processing…</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Send Reset Instructions</span>
-                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                  </>
-                )}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setForgotStatus("idle");
-                  setMode("login");
-                }}
-                className="w-full relative group overflow-hidden bg-gradient-to-b from-emerald-600 to-emerald-700 text-white font-medium py-2.5 px-4 rounded-xl text-sm transition-all duration-150 shadow-[0_4px_0_#065f46,0_10px_20px_rgba(16,185,129,0.3)] hover:brightness-105 active:translate-y-1 cursor-pointer mt-1"
-              >
-                <span>Return to Sign In</span>
-              </button>
-            )}
 
             {/* Back to Login */}
             <div className="text-center pt-2 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => {
-                  setMode("login");
-                  setForgotStatus("idle");
-                  setForgotError(null);
-                }}
+                onClick={() => setMode("login")}
                 className="inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
                 <span>Back to Sign In</span>
               </button>
             </div>
-          </form>
+          </div>
         </div>
       )}
     </div>

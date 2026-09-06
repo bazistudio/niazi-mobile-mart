@@ -27,15 +27,36 @@ export interface StaffAccessProfile {
   limits: StaffOperationalLimits;
 }
 
+export type UserStatus = 'active' | 'disabled' | 'pending' | 'rejected';
+
 export interface SanitizedUser {
   id: string;
   name: string;
   username: string;
   role: StaffRole;
+  status: UserStatus;
   is_active: boolean;
+  must_change_password: boolean;
   has_pin: boolean;
   access_profile: StaffAccessProfile;
   created_at: string;
+}
+
+export interface BootstrapAdminPayload {
+  name: string;
+  username: string;
+  password: string;
+}
+
+export interface BootstrapAdminResponse {
+  user: SanitizedUser;
+  recovery_key: string;
+}
+
+export interface RegisterStaffPayload {
+  name: string;
+  username: string;
+  password: string;
 }
 
 export interface SessionContext {
@@ -174,6 +195,47 @@ export const tauriClient = {
     return true;
   },
 
+  // ── First-Run Bootstrap & Password Security ───────────────────────────────
+  async authCheckBootstrapStatus(): Promise<boolean> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<boolean>('auth_check_bootstrap_status');
+    }
+    return false;
+  },
+
+  async authBootstrapFirstAdmin(payload: BootstrapAdminPayload): Promise<BootstrapAdminResponse> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<BootstrapAdminResponse>('auth_bootstrap_first_admin', { payload });
+    }
+    throw new Error('Native Tauri environment required for administrator bootstrap');
+  },
+
+  async authChangePassword(currentPassword: string, newPassword: string): Promise<void> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('auth_change_password', { currentPassword, newPassword });
+      return;
+    }
+  },
+
+  async authForcedChangePassword(newPassword: string): Promise<void> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('auth_forced_change_password', { newPassword });
+      return;
+    }
+  },
+
+  async authRegisterStaff(payload: RegisterStaffPayload): Promise<SanitizedUser> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SanitizedUser>('auth_register_staff', { payload });
+    }
+    throw new Error('Native Tauri environment required for staff registration');
+  },
+
   // ── Staff Access Management (Admin) ───────────────────────────────────────
   async adminListUsers(): Promise<SanitizedUser[]> {
     if (isTauriEnvironment()) {
@@ -181,6 +243,39 @@ export const tauriClient = {
       return await invoke<SanitizedUser[]>('admin_list_users');
     }
     return [];
+  },
+
+  async adminApproveStaff(userId: string): Promise<SanitizedUser> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SanitizedUser>('admin_approve_staff', { userId });
+    }
+    throw new Error('Native Tauri environment required');
+  },
+
+  async adminRejectStaff(userId: string): Promise<SanitizedUser> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SanitizedUser>('admin_reject_staff', { userId });
+    }
+    throw new Error('Native Tauri environment required');
+  },
+
+  async adminResetStaffPassword(userId: string, temporaryPassword: string): Promise<void> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('admin_reset_staff_password', { userId, temporaryPassword });
+      return;
+    }
+  },
+
+  async adminRecoverAccess(recoveryToken: string, newLoginKey: string): Promise<void> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('admin_recover_access', { recoveryToken, newLoginKey });
+      return;
+    }
+    throw new Error('Native Tauri environment required for emergency recovery');
   },
 
   async adminCreateUser(payload: {

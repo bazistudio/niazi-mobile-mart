@@ -2,10 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::domain::access_control::StaffAccessProfile;
-use crate::domain::user::{User, UserRole};
+use crate::domain::user::User;
 use crate::errors::{AppError, AppResult};
-use crate::services::hasher::hash_credential;
 
 /// Thread-safe in-memory user repository implementing the data boundary for Phase 5
 #[derive(Clone)]
@@ -14,55 +12,10 @@ pub struct InMemoryUserRepository {
 }
 
 impl InMemoryUserRepository {
-    /// Creates a repository initialized with default internal staff accounts
+    /// Creates an empty in-memory repository with zero default accounts
     pub fn new() -> Self {
-        let mut map = HashMap::new();
-
-        let admin_hash = hash_credential("Admin@Niazi2025!").expect("Admin hash failed");
-        let admin_pin_hash = hash_credential("1234").expect("Admin PIN hash failed");
-
-        let admin_user = User {
-            id: "usr_admin_master".to_string(),
-            name: "System Administrator".to_string(),
-            username: "admin".to_string(),
-            login_key_hash: admin_hash,
-            pin_hash: Some(admin_pin_hash),
-            role: UserRole::Admin,
-            is_active: true,
-            access_profile: StaffAccessProfile::admin_unlimited(),
-            failed_pin_attempts: 0,
-            pin_locked_until_ms: None,
-            failed_login_attempts: 0,
-            login_locked_until_ms: None,
-            created_at: "2026-01-01T00:00:00Z".to_string(),
-            updated_at: "2026-01-01T00:00:00Z".to_string(),
-        };
-
-        let cashier_hash = hash_credential("Cashier@123").expect("Cashier hash failed");
-        let cashier_pin_hash = hash_credential("1234").expect("Cashier PIN hash failed");
-
-        let cashier_user = User {
-            id: "usr_cashier_01".to_string(),
-            name: "Counter Cashier 1".to_string(),
-            username: "cashier1".to_string(),
-            login_key_hash: cashier_hash,
-            pin_hash: Some(cashier_pin_hash),
-            role: UserRole::Cashier,
-            is_active: true,
-            access_profile: StaffAccessProfile::cashier_default(),
-            failed_pin_attempts: 0,
-            pin_locked_until_ms: None,
-            failed_login_attempts: 0,
-            login_locked_until_ms: None,
-            created_at: "2026-01-01T00:00:00Z".to_string(),
-            updated_at: "2026-01-01T00:00:00Z".to_string(),
-        };
-
-        map.insert(admin_user.id.clone(), admin_user);
-        map.insert(cashier_user.id.clone(), cashier_user);
-
         Self {
-            users: Arc::new(RwLock::new(map)),
+            users: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -104,20 +57,37 @@ impl InMemoryUserRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::access_control::StaffAccessProfile;
+    use crate::domain::user::{UserRole, UserStatus};
 
     #[tokio::test]
     async fn test_in_memory_user_crud() {
         let repo = InMemoryUserRepository::new();
+        assert!(repo.find_by_username("admin").await.unwrap().is_none());
 
-        // Allow spawn task to settle
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        let user = User {
+            id: "usr_test_1".to_string(),
+            name: "Test Admin".to_string(),
+            username: "admin".to_string(),
+            login_key_hash: "hash".to_string(),
+            pin_hash: None,
+            role: UserRole::Admin,
+            status: UserStatus::Active,
+            is_active: true,
+            recovery_key_hash: None,
+            must_change_password: false,
+            access_profile: StaffAccessProfile::admin_unlimited(),
+            failed_pin_attempts: 0,
+            pin_locked_until_ms: None,
+            failed_login_attempts: 0,
+            login_locked_until_ms: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        repo.save(user).await.unwrap();
 
-        let admin = repo.find_by_username("admin").await.unwrap();
-        assert!(admin.is_some());
-        assert_eq!(admin.unwrap().role, UserRole::Admin);
-
-        let cashier = repo.find_by_username("cashier1").await.unwrap();
-        assert!(cashier.is_some());
-        assert_eq!(cashier.unwrap().role, UserRole::Cashier);
+        let found = repo.find_by_username("admin").await.unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().role, UserRole::Admin);
     }
 }

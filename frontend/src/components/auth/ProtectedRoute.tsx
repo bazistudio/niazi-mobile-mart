@@ -1,6 +1,7 @@
 import React from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
+import { ForcedPasswordChangeModal } from '@/components/auth/ForcedPasswordChangeModal';
 
 interface ProtectedRouteProps {
   children?: React.ReactNode;
@@ -9,6 +10,7 @@ interface ProtectedRouteProps {
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   const isHydrated = useAuthStore((s) => s.isHydrated);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const user = useAuthStore((s) => s.user);
   const location = useLocation();
 
   if (!isHydrated) {
@@ -26,7 +28,12 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
     return <Navigate to="/auth/login" state={{ from: location }} replace />;
   }
 
-  return children ? <>{children}</> : <Outlet />;
+  return (
+    <>
+      {user?.mustChangePassword && <ForcedPasswordChangeModal />}
+      {children ? <>{children}</> : <Outlet />}
+    </>
+  );
 };
 
 export default ProtectedRoute;

@@ -39,9 +39,11 @@ export async function loginUser(identifier: string, password: string) {
     const user: AuthUser = {
       id: res.user.id,
       name: res.user.name,
+      username: res.user.username,
       email: `${res.user.username}@local`,
-      role: res.user.role as any,
-      status: res.user.is_active ? "active" : "suspended",
+      role: (res.user.role ? res.user.role.toUpperCase() : "STAFF") as any,
+      status: (res.user.status ? res.user.status.toLowerCase() : (res.user.is_active ? "active" : "suspended")) as any,
+      mustChangePassword: res.user.must_change_password,
       permissions: res.user.access_profile.allowed_actions,
       createdAt: res.user.created_at,
     };
@@ -117,9 +119,11 @@ export async function getMeUser() {
     return {
       id: rawUser.id,
       name: rawUser.name,
+      username: rawUser.username,
       email: `${rawUser.username}@local`,
-      role: rawUser.role as any,
-      status: rawUser.is_active ? "active" : "suspended",
+      role: (rawUser.role ? rawUser.role.toUpperCase() : "STAFF") as any,
+      status: (rawUser.status ? rawUser.status.toLowerCase() : (rawUser.is_active ? "active" : "suspended")) as any,
+      mustChangePassword: rawUser.must_change_password,
       permissions: rawUser.access_profile.allowed_actions,
       createdAt: rawUser.created_at,
     };

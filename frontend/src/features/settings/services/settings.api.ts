@@ -1,12 +1,77 @@
 import axiosInstance from '@/lib/api/axios';
+import { isTauriEnvironment, tauriClient } from '@/lib/tauri/tauriClient';
 import { CreateRoleDto, UpdateRoleDto, Role, RoleWithPermissions, Permission } from '../types/role.types';
 import { CreateStaffDto, UpdateStaffDto, StaffUser } from '../types/staff.types';
 
 export const settingsApi = {
   // ─── Staff ──────────────────────────────────────────────────────────────────
   getStaff: async (): Promise<StaffUser[]> => {
+    if (isTauriEnvironment()) {
+      const users = await tauriClient.adminListUsers();
+      return users.map((u) => ({
+        id: u.id,
+        _id: u.id,
+        name: u.name,
+        username: u.username,
+        email: `${u.username}@local`,
+        roleId: u.role,
+        roleName: u.role.toUpperCase(),
+        hasPin: u.has_pin,
+        status: (u.status ? u.status.toLowerCase() : (u.is_active ? 'active' : 'inactive')) as any,
+        mustChangePassword: u.must_change_password,
+        createdAt: u.created_at,
+      }));
+    }
     const response = await axiosInstance.get('/api/v1/settings/staff');
     return response.data;
+  },
+
+  approveStaff: async (id: string): Promise<StaffUser> => {
+    if (isTauriEnvironment()) {
+      const u = await tauriClient.adminApproveStaff(id);
+      return {
+        id: u.id,
+        _id: u.id,
+        name: u.name,
+        username: u.username,
+        roleId: u.role,
+        roleName: u.role.toUpperCase(),
+        hasPin: u.has_pin,
+        status: 'active',
+        mustChangePassword: u.must_change_password,
+        createdAt: u.created_at,
+      };
+    }
+    const response = await axiosInstance.patch(`/api/v1/settings/staff/${id}/approve`);
+    return response.data;
+  },
+
+  rejectStaff: async (id: string): Promise<StaffUser> => {
+    if (isTauriEnvironment()) {
+      const u = await tauriClient.adminRejectStaff(id);
+      return {
+        id: u.id,
+        _id: u.id,
+        name: u.name,
+        username: u.username,
+        roleId: u.role,
+        roleName: u.role.toUpperCase(),
+        hasPin: u.has_pin,
+        status: 'rejected',
+        mustChangePassword: u.must_change_password,
+        createdAt: u.created_at,
+      };
+    }
+    const response = await axiosInstance.patch(`/api/v1/settings/staff/${id}/reject`);
+    return response.data;
+  },
+
+  resetStaffPassword: async (id: string, temporaryPassword: string): Promise<void> => {
+    if (isTauriEnvironment()) {
+      await tauriClient.adminResetStaffPassword(id, temporaryPassword);
+      return;
+    }
+    await axiosInstance.patch(`/api/v1/settings/staff/${id}/reset-password`, { temporaryPassword });
   },
 
   createStaff: async (data: CreateStaffDto): Promise<StaffUser> => {

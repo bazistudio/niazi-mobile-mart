@@ -1,8 +1,7 @@
-// ─── Staff User ──────────────────────────────────────────────────────────────
 export interface StaffUser {
   id?: string;
   _id: string;
-  organizationId: string;
+  organizationId?: string;
   name: string;
   phone?: string;
   username?: string;
@@ -11,7 +10,8 @@ export interface StaffUser {
   roleName?: string;
   pin?: string;
   hasPin: boolean;
-  status: 'active' | 'suspended' | 'inactive';
+  status: 'active' | 'suspended' | 'inactive' | 'pending' | 'rejected';
+  mustChangePassword?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }

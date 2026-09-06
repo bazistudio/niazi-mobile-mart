@@ -26,8 +26,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::health_check::health_check,
             commands::health_check::ping,
+            commands::auth::auth_check_bootstrap_status,
+            commands::auth::auth_bootstrap_first_admin,
             commands::auth::auth_login,
             commands::auth::auth_logout,
+            commands::auth::auth_change_password,
+            commands::auth::auth_forced_change_password,
+            commands::auth::auth_register_staff,
             commands::auth::auth_lock,
             commands::auth::auth_unlock,
             commands::auth::auth_get_current_session,
@@ -38,6 +43,9 @@ pub fn run() {
             commands::auth::admin_create_user,
             commands::auth::admin_update_user,
             commands::auth::admin_reset_credentials,
+            commands::auth::admin_approve_staff,
+            commands::auth::admin_reject_staff,
+            commands::auth::admin_reset_staff_password,
             commands::auth::admin_recover_access,
             // Catalog Commands
             commands::catalog::category_create,

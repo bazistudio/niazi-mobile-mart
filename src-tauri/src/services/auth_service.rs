@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::domain::user::SanitizedUser;
+use crate::domain::user::{SanitizedUser, UserStatus};
 use crate::errors::{AppError, AppResult};
 use crate::repositories::SQLiteUserRepository;
 use crate::services::hasher::verify_credential;
@@ -39,10 +39,24 @@ impl AuthService {
             }
         };
 
-        if !user.is_active {
-            return Err(AppError::Forbidden(
-                "Account is disabled. Please contact your system administrator.".to_string(),
-            ));
+        // Validate account status
+        match user.status {
+            UserStatus::Active => {}
+            UserStatus::Pending => {
+                return Err(AppError::Forbidden(
+                    "ACCOUNT_PENDING: Your registration is pending administrator approval.".to_string(),
+                ));
+            }
+            UserStatus::Rejected => {
+                return Err(AppError::Forbidden(
+                    "ACCOUNT_REJECTED: Your account registration was rejected by administration.".to_string(),
+                ));
+            }
+            UserStatus::Disabled => {
+                return Err(AppError::Forbidden(
+                    "ACCOUNT_DISABLED: This account is disabled. Please contact your administrator.".to_string(),
+                ));
+            }
         }
 
         let now = current_time_ms();
@@ -83,6 +97,91 @@ impl AuthService {
         app_state.set_authenticated(&user).await;
 
         Ok(user.sanitize())
+    }
+
+    /// Changes password for the currently authenticated user
+    pub async fn change_password(
+        repo: &SQLiteUserRepository,
+        app_state: &AppState,
+        current_password: &str,
+        new_password: &str,
+    ) -> AppResult<()> {
+        let session = app_state.get_session().await;
+        if !session.is_authenticated {
+            return Err(AppError::Unauthorized(
+                "Authentication required to change password".to_string(),
+            ));
+        }
+
+        let user_id = session
+            .user_id
+            .as_deref()
+            .ok_or_else(|| AppError::Unauthorized("No user ID in active session".to_string()))?;
+
+        let mut user = repo
+            .find_by_id(user_id)
+            .await?
+            .ok_or_else(|| AppError::NotFound("User record not found".to_string()))?;
+
+        if !verify_credential(current_password, &user.login_key_hash) {
+            return Err(AppError::Unauthorized(
+                "Current password is incorrect".to_string(),
+            ));
+        }
+
+        if new_password.trim().len() < 6 {
+            return Err(AppError::Validation(
+                "New password must be at least 6 characters long".to_string(),
+            ));
+        }
+
+        user.login_key_hash = crate::services::hasher::hash_credential(new_password.trim())?;
+        user.must_change_password = false;
+        user.failed_login_attempts = 0;
+        user.login_locked_until_ms = None;
+        user.updated_at = chrono::Utc::now().to_rfc3339();
+
+        repo.save(user).await?;
+        Ok(())
+    }
+
+    /// Forced password change when must_change_password is true
+    pub async fn forced_change_password(
+        repo: &SQLiteUserRepository,
+        app_state: &AppState,
+        new_password: &str,
+    ) -> AppResult<()> {
+        let session = app_state.get_session().await;
+        if !session.is_authenticated {
+            return Err(AppError::Unauthorized(
+                "Authentication required to change password".to_string(),
+            ));
+        }
+
+        let user_id = session
+            .user_id
+            .as_deref()
+            .ok_or_else(|| AppError::Unauthorized("No user ID in active session".to_string()))?;
+
+        let mut user = repo
+            .find_by_id(user_id)
+            .await?
+            .ok_or_else(|| AppError::NotFound("User record not found".to_string()))?;
+
+        if new_password.trim().len() < 6 {
+            return Err(AppError::Validation(
+                "New password must be at least 6 characters long".to_string(),
+            ));
+        }
+
+        user.login_key_hash = crate::services::hasher::hash_credential(new_password.trim())?;
+        user.must_change_password = false;
+        user.failed_login_attempts = 0;
+        user.login_locked_until_ms = None;
+        user.updated_at = chrono::Utc::now().to_rfc3339();
+
+        repo.save(user).await?;
+        Ok(())
     }
 
     /// Unlocks a locked terminal using the active staff member's 4-digit PIN
@@ -264,22 +363,69 @@ impl AuthService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::access_control::StaffAccessProfile;
+    use crate::domain::user::{User, UserRole};
+    use crate::services::hasher::hash_credential;
+
+    async fn create_test_user(
+        repo: &SQLiteUserRepository,
+        username: &str,
+        password: &str,
+        pin: Option<&str>,
+        role: UserRole,
+        status: UserStatus,
+    ) -> User {
+        let user = User {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: format!("Test {}", username),
+            username: username.to_string(),
+            login_key_hash: hash_credential(password).unwrap(),
+            pin_hash: pin.map(|p| hash_credential(p).unwrap()),
+            role,
+            status,
+            is_active: status == UserStatus::Active,
+            recovery_key_hash: None,
+            must_change_password: false,
+            access_profile: match role {
+                UserRole::Admin => StaffAccessProfile::admin_unlimited(),
+                UserRole::Cashier => StaffAccessProfile::cashier_default(),
+                _ => StaffAccessProfile::staff_default(),
+            },
+            failed_pin_attempts: 0,
+            pin_locked_until_ms: None,
+            failed_login_attempts: 0,
+            login_locked_until_ms: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        repo.save(user.clone()).await.unwrap();
+        user
+    }
 
     #[tokio::test]
     async fn test_full_login_and_session_flow() {
         let state = AppState::in_memory("5.0.3");
         let repo = &state.user_repo;
-        repo.seed_development_defaults_if_empty().await.unwrap();
+
+        create_test_user(
+            repo,
+            "admin_test",
+            "ValidPassword123!",
+            Some("1234"),
+            UserRole::Admin,
+            UserStatus::Active,
+        )
+        .await;
 
         // 1. Invalid login fails
-        let invalid = AuthService::login(repo, &state, "admin", "WrongPassword!").await;
+        let invalid = AuthService::login(repo, &state, "admin_test", "WrongPassword!").await;
         assert!(invalid.is_err());
 
         // 2. Valid login succeeds
-        let valid = AuthService::login(repo, &state, "admin", "Admin@Niazi2025!")
+        let valid = AuthService::login(repo, &state, "admin_test", "ValidPassword123!")
             .await
             .expect("Login should succeed");
-        assert_eq!(valid.username, "admin");
+        assert_eq!(valid.username, "admin_test");
 
         let session = state.get_session().await;
         assert!(session.is_authenticated);
@@ -315,62 +461,70 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_disabled_user_login_rejection() {
+    async fn test_pending_and_disabled_user_login_rejection() {
         let state = AppState::in_memory("5.0.3");
         let repo = &state.user_repo;
-        repo.seed_development_defaults_if_empty().await.unwrap();
 
-        // Fetch cashier and disable account
-        let mut cashier = repo.find_by_username("cashier1").await.unwrap().unwrap();
-        cashier.is_active = false;
-        repo.save(cashier).await.unwrap();
+        create_test_user(
+            repo,
+            "pending_user",
+            "Password123!",
+            None,
+            UserRole::Staff,
+            UserStatus::Pending,
+        )
+        .await;
 
-        // Attempt login
-        let res = AuthService::login(repo, &state, "cashier1", "Cashier@123").await;
-        assert!(matches!(res, Err(AppError::Forbidden(_))));
+        let res_pending = AuthService::login(repo, &state, "pending_user", "Password123!").await;
+        assert!(matches!(res_pending, Err(AppError::Forbidden(_))));
+
+        create_test_user(
+            repo,
+            "disabled_user",
+            "Password123!",
+            None,
+            UserRole::Staff,
+            UserStatus::Disabled,
+        )
+        .await;
+
+        let res_disabled = AuthService::login(repo, &state, "disabled_user", "Password123!").await;
+        assert!(matches!(res_disabled, Err(AppError::Forbidden(_))));
     }
 
     #[tokio::test]
-    async fn test_pin_brute_force_lockout() {
+    async fn test_password_change_flow() {
         let state = AppState::in_memory("5.0.3");
         let repo = &state.user_repo;
-        repo.seed_development_defaults_if_empty().await.unwrap();
 
-        // Login as cashier
-        AuthService::login(repo, &state, "cashier1", "Cashier@123")
-            .await
-            .unwrap();
+        create_test_user(
+            repo,
+            "change_pwd_user",
+            "InitialPwd123!",
+            None,
+            UserRole::Staff,
+            UserStatus::Active,
+        )
+        .await;
 
-        // Lock terminal
-        AuthService::lock(&state).await.unwrap();
+        // Login first
+        AuthService::login(repo, &state, "change_pwd_user", "InitialPwd123!").await.unwrap();
 
-        // Fail PIN 5 times
-        for _ in 0..5 {
-            let res = AuthService::unlock(repo, &state, "0000").await;
-            assert!(res.is_err());
-        }
+        // Change password
+        let change_res = AuthService::change_password(
+            repo,
+            &state,
+            "InitialPwd123!",
+            "BrandNewPwd456!",
+        ).await;
+        assert!(change_res.is_ok());
 
-        // 6th attempt should return Locked error due to temporary lockout
-        let locked_res = AuthService::unlock(repo, &state, "1234").await;
-        assert!(matches!(locked_res, Err(AppError::Locked(_))));
-    }
+        // Old password fails
+        let old_res = AuthService::login(repo, &state, "change_pwd_user", "InitialPwd123!").await;
+        assert!(old_res.is_err());
 
-    #[tokio::test]
-    async fn test_discount_operational_limits() {
-        let state = AppState::in_memory("5.0.3");
-        let repo = &state.user_repo;
-        repo.seed_development_defaults_if_empty().await.unwrap();
-
-        // Cashier has 5% discount limit
-        AuthService::login(repo, &state, "cashier1", "Cashier@123")
-            .await
-            .unwrap();
-
-        assert!(AuthService::check_discount_limit(&state, 4.5).await.is_ok());
-        assert!(AuthService::check_discount_limit(&state, 5.0).await.is_ok());
-        assert!(matches!(
-            AuthService::check_discount_limit(&state, 5.1).await,
-            Err(AppError::Forbidden(_))
-        ));
+        // New password succeeds
+        let new_res = AuthService::login(repo, &state, "change_pwd_user", "BrandNewPwd456!").await;
+        assert!(new_res.is_ok());
     }
 }

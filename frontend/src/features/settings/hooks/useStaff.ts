@@ -70,3 +70,37 @@ export function useChangeStaffRole() {
     },
   });
 }
+
+export function useApproveStaff() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => settingsApi.approveStaff(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: STAFF_QUERY_KEY });
+    },
+  });
+}
+
+export function useRejectStaff() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => settingsApi.rejectStaff(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: STAFF_QUERY_KEY });
+    },
+  });
+}
+
+export function useResetStaffPassword() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, temporaryPassword }: { id: string; temporaryPassword: string }) =>
+      settingsApi.resetStaffPassword(id, temporaryPassword),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: STAFF_QUERY_KEY });
+    },
+  });
+}

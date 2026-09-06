@@ -199,6 +199,14 @@ pub const MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at);
         "#,
     },
+    Migration {
+        version: 3,
+        name: "003_auth_security_fields",
+        up: r#"
+        ALTER TABLE users ADD COLUMN recovery_key_hash TEXT;
+        ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0;
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction
@@ -277,7 +285,7 @@ mod tests {
 
         // 1. First run applies migrations
         let count = MigrationRunner::run(&mut conn).unwrap();
-        assert_eq!(count, 2);
+        assert_eq!(count, 3);
 
         // Verify permanent tables exist (5 from Phase 6 + 6 from Phase 7 = 11 tables)
         let tables_count: i64 = conn
@@ -291,6 +299,17 @@ mod tests {
             )
             .unwrap();
         assert_eq!(tables_count, 11);
+
+        // Verify users table has recovery_key_hash and must_change_password
+        let user_cols: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(users)").unwrap();
+            stmt.query_map([], |row| row.get(1))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        assert!(user_cols.contains(&"recovery_key_hash".to_string()));
+        assert!(user_cols.contains(&"must_change_password".to_string()));
 
         // Verify Niazi Mobile Mart organization is locked in
         let org_name: String = conn

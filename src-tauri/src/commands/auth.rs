@@ -4,7 +4,8 @@ use tauri::State;
 use crate::domain::user::SanitizedUser;
 use crate::errors::AppResult;
 use crate::services::admin_service::{
-    AdminService, CreateUserPayload, ResetCredentialsPayload, UpdateUserPayload,
+    AdminService, BootstrapAdminPayload, BootstrapAdminResponse, CreateUserPayload,
+    RegisterStaffPayload, ResetCredentialsPayload, UpdateUserPayload,
 };
 use crate::services::auth_service::AuthService;
 use crate::state::{AppState, SessionContext};
@@ -13,6 +14,21 @@ use crate::state::{AppState, SessionContext};
 pub struct AuthResponse {
     pub user: SanitizedUser,
     pub session: SessionContext,
+}
+
+/// Checks whether first-admin bootstrap is required (active admins == 0)
+#[tauri::command]
+pub async fn auth_check_bootstrap_status(state: State<'_, AppState>) -> AppResult<bool> {
+    AdminService::check_bootstrap_status(&state.user_repo).await
+}
+
+/// One-time First Administrator bootstrap
+#[tauri::command]
+pub async fn auth_bootstrap_first_admin(
+    state: State<'_, AppState>,
+    payload: BootstrapAdminPayload,
+) -> AppResult<BootstrapAdminResponse> {
+    AdminService::bootstrap_first_admin(&state.user_repo, payload).await
 }
 
 /// Primary staff login command using username and login key
@@ -35,6 +51,34 @@ pub async fn auth_login(
 #[tauri::command]
 pub async fn auth_logout(state: State<'_, AppState>) -> AppResult<()> {
     AuthService::logout(&state).await
+}
+
+/// Normal password change for authenticated user
+#[tauri::command]
+pub async fn auth_change_password(
+    state: State<'_, AppState>,
+    current_password: String,
+    new_password: String,
+) -> AppResult<()> {
+    AuthService::change_password(&state.user_repo, &state, &current_password, &new_password).await
+}
+
+/// Forced password change when must_change_password is true
+#[tauri::command]
+pub async fn auth_forced_change_password(
+    state: State<'_, AppState>,
+    new_password: String,
+) -> AppResult<()> {
+    AuthService::forced_change_password(&state.user_repo, &state, &new_password).await
+}
+
+/// Public self-service staff signup (creates account in PENDING status)
+#[tauri::command]
+pub async fn auth_register_staff(
+    state: State<'_, AppState>,
+    payload: RegisterStaffPayload,
+) -> AppResult<SanitizedUser> {
+    AdminService::register_staff(&state.user_repo, payload).await
 }
 
 /// Locks the current terminal session
@@ -105,6 +149,35 @@ pub async fn admin_list_users(state: State<'_, AppState>) -> AppResult<Vec<Sanit
     AdminService::list_users(&state.user_repo, &state).await
 }
 
+/// Approves a pending staff member account (admin only)
+#[tauri::command]
+pub async fn admin_approve_staff(
+    state: State<'_, AppState>,
+    user_id: String,
+) -> AppResult<SanitizedUser> {
+    AdminService::approve_staff(&state.user_repo, &state, &user_id).await
+}
+
+/// Rejects a staff member account (admin only)
+#[tauri::command]
+pub async fn admin_reject_staff(
+    state: State<'_, AppState>,
+    user_id: String,
+) -> AppResult<SanitizedUser> {
+    AdminService::reject_staff(&state.user_repo, &state, &user_id).await
+}
+
+/// Administrator resets a staff member's password to a temporary password,
+/// setting must_change_password = true (admin only)
+#[tauri::command]
+pub async fn admin_reset_staff_password(
+    state: State<'_, AppState>,
+    user_id: String,
+    temporary_password: String,
+) -> AppResult<()> {
+    AdminService::reset_staff_password(&state.user_repo, &state, &user_id, &temporary_password).await
+}
+
 /// Creates a new staff member (admin only)
 #[tauri::command]
 pub async fn admin_create_user(
@@ -139,5 +212,6 @@ pub async fn admin_recover_access(
     recovery_token: String,
     new_login_key: String,
 ) -> AppResult<()> {
-    AdminService::recover_admin_access(&state.user_repo, &recovery_token, &new_login_key).await
+    AdminService::recover_admin_access(&state.user_repo, &state, &recovery_token, &new_login_key).await
 }
+
