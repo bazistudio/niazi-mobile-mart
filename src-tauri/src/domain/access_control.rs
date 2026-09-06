@@ -116,6 +116,22 @@ impl StaffAccessProfile {
         }
     }
 
+    /// Creates completely restricted profile for external public Play Store rate app users.
+    /// STRICT ISOLATION: Zero allowed pages, zero allowed internal ERP actions.
+    pub fn public_user_restricted() -> Self {
+        Self {
+            allowed_pages: vec![],
+            allowed_actions: vec![],
+            limits: StaffOperationalLimits {
+                max_discount_percent: 0.0,
+                can_price_override: false,
+                can_refund: false,
+                can_void_sale: false,
+                can_view_profit: false,
+            },
+        }
+    }
+
     /// Validates if a page route is permitted
     pub fn has_page_access(&self, page: &str) -> bool {
         let clean = page.trim().trim_start_matches('/').to_lowercase();

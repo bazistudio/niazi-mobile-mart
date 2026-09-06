@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod db;
 pub mod domain;
 pub mod errors;
 pub mod events;
@@ -17,7 +18,7 @@ pub fn run() {
         )
         .try_init();
 
-    let app_state = AppState::new("5.0.3");
+    let app_state = AppState::open_default("5.0.3");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

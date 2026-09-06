@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use super::access_control::StaffAccessProfile;
 
-/// System staff roles
+/// System roles (internal staff roles vs external public rate app users)
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum UserRole {
@@ -9,6 +9,17 @@ pub enum UserRole {
     Manager,
     Cashier,
     Staff,
+    PublicUser,
+}
+
+impl UserRole {
+    pub fn is_internal(&self) -> bool {
+        matches!(self, Self::Admin | Self::Manager | Self::Cashier | Self::Staff)
+    }
+
+    pub fn is_public(&self) -> bool {
+        matches!(self, Self::PublicUser)
+    }
 }
 
 impl std::fmt::Display for UserRole {
@@ -18,6 +29,7 @@ impl std::fmt::Display for UserRole {
             UserRole::Manager => write!(f, "MANAGER"),
             UserRole::Cashier => write!(f, "CASHIER"),
             UserRole::Staff => write!(f, "STAFF"),
+            UserRole::PublicUser => write!(f, "PUBLIC_USER"),
         }
     }
 }

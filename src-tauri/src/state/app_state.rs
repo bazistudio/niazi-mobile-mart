@@ -3,9 +3,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+use crate::db::connection::DatabaseConnection;
 use crate::domain::access_control::StaffAccessProfile;
 use crate::domain::user::{User, UserRole};
-use crate::repositories::InMemoryUserRepository;
+use crate::repositories::SQLiteUserRepository;
 
 /// Native application session context owned and strictly enforced by Rust
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -38,18 +39,36 @@ impl Default for SessionContext {
 pub struct AppState {
     pub app_version: String,
     pub session: Arc<RwLock<SessionContext>>,
-    pub user_repo: InMemoryUserRepository,
+    pub db: DatabaseConnection,
+    pub user_repo: SQLiteUserRepository,
     pub is_initialized: Arc<RwLock<bool>>,
 }
 
 impl AppState {
-    pub fn new(app_version: impl Into<String>) -> Self {
+    /// Creates AppState with an existing DatabaseConnection
+    pub fn new(app_version: impl Into<String>, db: DatabaseConnection) -> Self {
+        let user_repo = SQLiteUserRepository::new(db.clone());
+
         Self {
             app_version: app_version.into(),
             session: Arc::new(RwLock::new(SessionContext::default())),
-            user_repo: InMemoryUserRepository::new(),
+            db,
+            user_repo,
             is_initialized: Arc::new(RwLock::new(true)),
         }
+    }
+
+    /// Opens the persistent default local application database
+    pub fn open_default(app_version: impl Into<String>) -> Self {
+        let path = DatabaseConnection::default_db_path();
+        let db = DatabaseConnection::open_file(path).expect("Failed to open persistent SQLite database");
+        Self::new(app_version, db)
+    }
+
+    /// Opens an isolated in-memory database for testing and diagnostics
+    pub fn in_memory(app_version: impl Into<String>) -> Self {
+        let db = DatabaseConnection::open_in_memory().expect("Failed to open in-memory SQLite database");
+        Self::new(app_version, db)
     }
 
     pub async fn get_session(&self) -> SessionContext {
@@ -106,13 +125,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_app_state_session_lifecycle() {
-        let state = AppState::new("5.0.3");
+        let state = AppState::in_memory("5.0.3");
         let initial = state.get_session().await;
         assert!(!initial.is_authenticated);
         assert!(!initial.is_locked);
 
         let user = User {
-            id: "u_test".to_string(),
+            id: "550e8400-e29b-41d4-a716-446655440099".to_string(),
             name: "Test Staff".to_string(),
             username: "teststaff".to_string(),
             login_key_hash: "dummy".to_string(),

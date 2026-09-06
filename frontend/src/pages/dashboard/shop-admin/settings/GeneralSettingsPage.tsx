@@ -228,10 +228,11 @@ export const GeneralSettingsPage: React.FC = () => {
         <div className="space-y-4">
           <SettingsSelect
             label="Currency"
-            description="Base currency for all transactions"
-            value={settings.preferences.currency}
-            onChange={(v) => updatePreference('currency', v)}
-            options={[{ value: 'PKR', label: 'PKR - Pakistani Rupee' }, { value: 'USD', label: 'USD - US Dollar' }]}
+            description="Permanent system currency (Pakistani Rupee - PKR)"
+            value="PKR"
+            disabled={true}
+            onChange={() => {}}
+            options={[{ value: 'PKR', label: 'PKR - Pakistani Rupee (Rs) [Locked]' }]}
           />
           <SettingsSelect
             label="Number Format"

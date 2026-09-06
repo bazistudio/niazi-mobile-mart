@@ -2,7 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::domain::user::SanitizedUser;
 use crate::errors::{AppError, AppResult};
-use crate::repositories::InMemoryUserRepository;
+use crate::repositories::SQLiteUserRepository;
 use crate::services::hasher::verify_credential;
 use crate::state::{AppState, SessionContext};
 
@@ -18,7 +18,7 @@ pub struct AuthService;
 impl AuthService {
     /// Authenticates a staff member using username and login key
     pub async fn login(
-        repo: &InMemoryUserRepository,
+        repo: &SQLiteUserRepository,
         app_state: &AppState,
         username: &str,
         login_key: &str,
@@ -87,7 +87,7 @@ impl AuthService {
 
     /// Unlocks a locked terminal using the active staff member's 4-digit PIN
     pub async fn unlock(
-        repo: &InMemoryUserRepository,
+        repo: &SQLiteUserRepository,
         app_state: &AppState,
         pin: &str,
     ) -> AppResult<SessionContext> {
@@ -267,8 +267,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_full_login_and_session_flow() {
-        let state = AppState::new("5.0.3");
+        let state = AppState::in_memory("5.0.3");
         let repo = &state.user_repo;
+        repo.seed_development_defaults_if_empty().await.unwrap();
 
         // 1. Invalid login fails
         let invalid = AuthService::login(repo, &state, "admin", "WrongPassword!").await;
@@ -315,8 +316,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_disabled_user_login_rejection() {
-        let state = AppState::new("5.0.3");
+        let state = AppState::in_memory("5.0.3");
         let repo = &state.user_repo;
+        repo.seed_development_defaults_if_empty().await.unwrap();
 
         // Fetch cashier and disable account
         let mut cashier = repo.find_by_username("cashier1").await.unwrap().unwrap();
@@ -330,8 +332,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_pin_brute_force_lockout() {
-        let state = AppState::new("5.0.3");
+        let state = AppState::in_memory("5.0.3");
         let repo = &state.user_repo;
+        repo.seed_development_defaults_if_empty().await.unwrap();
 
         // Login as cashier
         AuthService::login(repo, &state, "cashier1", "Cashier@123")
@@ -354,8 +357,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_discount_operational_limits() {
-        let state = AppState::new("5.0.3");
+        let state = AppState::in_memory("5.0.3");
         let repo = &state.user_repo;
+        repo.seed_development_defaults_if_empty().await.unwrap();
 
         // Cashier has 5% discount limit
         AuthService::login(repo, &state, "cashier1", "Cashier@123")

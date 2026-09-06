@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::domain::access_control::StaffAccessProfile;
 use crate::domain::user::{SanitizedUser, User, UserRole};
 use crate::errors::{AppError, AppResult};
-use crate::repositories::InMemoryUserRepository;
+use crate::repositories::SQLiteUserRepository;
 use crate::services::hasher::hash_credential;
 use crate::state::AppState;
 
@@ -58,7 +58,7 @@ impl AdminService {
 
     /// Lists all staff accounts (sanitized view)
     pub async fn list_users(
-        repo: &InMemoryUserRepository,
+        repo: &SQLiteUserRepository,
         app_state: &AppState,
     ) -> AppResult<Vec<SanitizedUser>> {
         Self::ensure_admin(app_state).await?;
@@ -66,9 +66,9 @@ impl AdminService {
         Ok(users.into_iter().map(|u| u.sanitize()).collect())
     }
 
-    /// Creates a new staff member account with Argon2id hashed credentials
+    /// Creates a new staff member account with UUID v4 identifier and Argon2id hashed credentials
     pub async fn create_user(
-        repo: &InMemoryUserRepository,
+        repo: &SQLiteUserRepository,
         app_state: &AppState,
         payload: CreateUserPayload,
     ) -> AppResult<SanitizedUser> {
@@ -93,12 +93,13 @@ impl AdminService {
 
         let login_key_hash = hash_credential(&payload.login_key)?;
         let pin_hash = if let Some(pin) = payload.pin.filter(|p| !p.trim().is_empty()) {
-            if pin.trim().len() != 4 || !pin.chars().all(|c| c.is_ascii_digit()) {
+            let clean = pin.trim();
+            if clean.len() != 4 || !clean.chars().all(|c| c.is_ascii_digit()) {
                 return Err(AppError::Validation(
                     "Staff PIN must be exactly 4 digits".to_string(),
                 ));
             }
-            Some(hash_credential(pin.trim())?)
+            Some(hash_credential(clean)?)
         } else {
             None
         };
@@ -108,11 +109,12 @@ impl AdminService {
             UserRole::Manager => StaffAccessProfile::manager_default(),
             UserRole::Cashier => StaffAccessProfile::cashier_default(),
             UserRole::Staff => StaffAccessProfile::staff_default(),
+            UserRole::PublicUser => StaffAccessProfile::public_user_restricted(),
         });
 
         let now = Utc::now().to_rfc3339();
         let new_user = User {
-            id: format!("usr_{}", Uuid::new_v4().simple()),
+            id: Uuid::new_v4().to_string(),
             name: payload.name.trim().to_string(),
             username: clean_username,
             login_key_hash,
@@ -135,7 +137,7 @@ impl AdminService {
 
     /// Updates staff member properties and access profile
     pub async fn update_user(
-        repo: &InMemoryUserRepository,
+        repo: &SQLiteUserRepository,
         app_state: &AppState,
         payload: UpdateUserPayload,
     ) -> AppResult<SanitizedUser> {
@@ -175,7 +177,7 @@ impl AdminService {
 
     /// Resets staff login key or PIN
     pub async fn reset_credentials(
-        repo: &InMemoryUserRepository,
+        repo: &SQLiteUserRepository,
         app_state: &AppState,
         payload: ResetCredentialsPayload,
     ) -> AppResult<()> {
@@ -221,7 +223,7 @@ impl AdminService {
 
     /// Emergency Administrator credential recovery mechanism
     pub async fn recover_admin_access(
-        repo: &InMemoryUserRepository,
+        repo: &SQLiteUserRepository,
         recovery_token: &str,
         new_login_key: &str,
     ) -> AppResult<()> {
@@ -267,8 +269,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_admin_user_management_lifecycle() {
-        let state = AppState::new("5.0.3");
+        let state = AppState::in_memory("5.0.3");
         let repo = &state.user_repo;
+        repo.seed_development_defaults_if_empty().await.unwrap();
 
         // Login as admin first
         crate::services::auth_service::AuthService::login(
@@ -297,6 +300,7 @@ mod tests {
         .expect("Creation should succeed");
 
         assert_eq!(new_user.username, "cashier_test");
+        assert_eq!(new_user.id.len(), 36); // UUID v4 format
         assert!(new_user.has_pin);
 
         // 2. List users
@@ -317,7 +321,7 @@ mod tests {
         .unwrap();
 
         // 4. Verify login with new credentials
-        let logout_state = AppState::new("5.0.3");
+        let logout_state = AppState::in_memory("5.0.3");
         let login_res = crate::services::auth_service::AuthService::login(
             repo,
             &logout_state,
