@@ -1,111 +1,122 @@
 import { create } from 'zustand';
-import { ExpenseItem, ExpenseStats } from '../types/expenses.types';
-import { expensesApi } from '../services/expenses.api';
+import { Expense, ExpenseCategory, CreateExpenseDto, ExpenseFilterDto } from '../types/expenses.types';
+import { expensesApi } from '@/services/expenses.api';
 import toast from 'react-hot-toast';
 
-export type ExpenseFilterState = {
-  page: number;
-  limit: number;
-  category?: string;
-  startDate?: string;
-  endDate?: string;
+export interface ExpenseFilterState {
   search?: string;
-  sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
-};
+  category_id?: string;
+  payment_method?: string;
+  status?: string;
+  start_date?: string;
+  end_date?: string;
+  limit: number;
+  offset: number;
+}
 
 interface ExpensesState {
-  items: ExpenseItem[];
-  total: number;
-  stats: ExpenseStats | null;
+  items: Expense[];
+  categories: ExpenseCategory[];
   isLoading: boolean;
   isAdding: boolean;
-  isGlobalModalOpen: boolean;
   filters: ExpenseFilterState;
+  isGlobalModalOpen: boolean;
   error: string | null;
 
-  setGlobalModalOpen: (isOpen: boolean) => void;
+  setGlobalModalOpen: (open: boolean) => void;
   setFilters: (filters: Partial<ExpenseFilterState>) => void;
+  fetchCategories: () => Promise<void>;
   fetchExpenses: () => Promise<void>;
-  addExpense: (expense: Omit<ExpenseItem, 'id'>) => Promise<void>;
-  updateExpense: (id: string, expense: Partial<ExpenseItem>) => Promise<void>;
-  deleteExpense: (id: string) => Promise<void>;
+  addExpense: (dto: CreateExpenseDto) => Promise<void>;
+  cancelExpense: (id: string, reason?: string) => Promise<void>;
 }
 
 export const useExpensesStore = create<ExpensesState>((set, get) => ({
   items: [],
-  total: 0,
-  stats: null,
+  categories: [],
   isLoading: false,
   isAdding: false,
   isGlobalModalOpen: false,
-  filters: { page: 1, limit: 50 },
+  filters: { limit: 100, offset: 0 },
   error: null,
 
-  setGlobalModalOpen: (isOpen) => set({ isGlobalModalOpen: isOpen }),
+  setGlobalModalOpen: (open) => set({ isGlobalModalOpen: open }),
 
   setFilters: (newFilters) => {
     set((state) => ({
-      filters: { ...state.filters, ...newFilters, page: newFilters.page || 1 }
+      filters: { ...state.filters, ...newFilters }
     }));
     get().fetchExpenses();
+  },
+
+  fetchCategories: async () => {
+    try {
+      const categories = await expensesApi.getCategories(true);
+      set({ categories });
+    } catch (err: any) {
+      console.error('Failed to fetch expense categories:', err);
+    }
   },
 
   fetchExpenses: async () => {
     try {
       set({ isLoading: true, error: null });
       const { filters } = get();
-      
-      const [expensesResponse, stats] = await Promise.all([
-        expensesApi.getExpenses(filters),
-        expensesApi.getStats()
-      ]);
-      set({ items: expensesResponse.data, total: expensesResponse.total, stats, isLoading: false });
+      const filterDto: ExpenseFilterDto = {
+        category_id: filters.category_id || undefined,
+        payment_method: filters.payment_method || undefined,
+        status: filters.status || undefined,
+        start_date: filters.start_date || undefined,
+        end_date: filters.end_date || undefined,
+        limit: filters.limit,
+        offset: filters.offset,
+      };
+
+      let items = await expensesApi.getExpenses(filterDto);
+
+      // In-memory search filter if search term provided
+      if (filters.search && filters.search.trim() !== '') {
+        const query = filters.search.toLowerCase().trim();
+        items = items.filter((exp) =>
+          exp.expense_number.toLowerCase().includes(query) ||
+          (exp.description && exp.description.toLowerCase().includes(query)) ||
+          (exp.notes && exp.notes.toLowerCase().includes(query)) ||
+          (exp.category_name && exp.category_name.toLowerCase().includes(query))
+        );
+      }
+
+      set({ items, isLoading: false });
     } catch (error: any) {
       set({ error: error.message || 'Failed to fetch expenses', isLoading: false });
     }
   },
 
-  addExpense: async (expense) => {
+  addExpense: async (dto) => {
     try {
       set({ isAdding: true, error: null });
-      await expensesApi.addExpense(expense);
-      await get().fetchExpenses(); // Refresh list and stats
+      await expensesApi.createExpense(dto);
+      await get().fetchExpenses();
       set({ isAdding: false });
-      toast.success('Expense recorded and posted to ledger');
+      toast.success('Expense recorded successfully');
     } catch (error: any) {
-      const errorMsg = error?.response?.data?.message || error?.message || 'Operation failed';
+      const errorMsg = error?.message || 'Failed to record expense';
       set({ error: errorMsg, isAdding: false });
       toast.error(errorMsg);
       throw error;
     }
   },
 
-  updateExpense: async (id, expense) => {
+  cancelExpense: async (id, reason) => {
     try {
       set({ isLoading: true, error: null });
-      await expensesApi.updateExpense(id, expense);
-      await get().fetchExpenses(); // Refresh to get accurate sorted list and new stats
-      toast.success('Expense updated and posted to ledger');
+      await expensesApi.cancelExpense(id, reason);
+      await get().fetchExpenses();
+      toast.success('Expense cancelled successfully');
     } catch (error: any) {
-      const errorMsg = error?.response?.data?.message || error?.message || 'Operation failed';
+      const errorMsg = error?.message || 'Failed to cancel expense';
       set({ error: errorMsg, isLoading: false });
       toast.error(errorMsg);
       throw error;
     }
   },
-
-  deleteExpense: async (id) => {
-    try {
-      set({ isLoading: true, error: null });
-      await expensesApi.deleteExpense(id);
-      await get().fetchExpenses(); // Refresh to reflect deletion
-      toast.success('Expense deleted and ledger reversed');
-    } catch (error: any) {
-      const errorMsg = error?.response?.data?.message || error?.message || 'Operation failed';
-      set({ error: errorMsg, isLoading: false });
-      toast.error(errorMsg);
-      throw error;
-    }
-  }
 }));

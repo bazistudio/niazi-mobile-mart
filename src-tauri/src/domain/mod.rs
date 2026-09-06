@@ -1,6 +1,8 @@
 pub mod access_control;
+pub mod cash;
 pub mod catalog;
 pub mod customer;
+pub mod expense;
 pub mod inventory;
 pub mod organization;
 pub mod product;
@@ -37,3 +39,12 @@ pub use supplier::{
     SupplierStatementDto, SupplierStatementRowDto, SupplierSummaryDto, UpdateSupplierDto,
 };
 pub use user::{SanitizedUser, User, UserRole};
+pub use expense::{
+    CreateExpenseCategoryDto, CreateExpenseDto, Expense, ExpenseCategory, ExpenseFilterDto,
+    ExpenseStatus, UpdateExpenseCategoryDto,
+};
+pub use cash::{
+    CashMovement, CashMovementDirection, CashMovementFilterDto, CashMovementType, CashSession,
+    CashSessionStatus, CloseCashSessionDto, CreateCashAdjustmentDto, DailyCashSummaryDto,
+    OpenCashSessionDto,
+};

@@ -117,6 +117,23 @@ pub fn run() {
             commands::purchases::purchase_get_by_number,
             commands::purchases::purchase_list,
             commands::purchases::purchase_get_lines,
+            // Expense Commands (Phase 17)
+            commands::expense::expense_category_create,
+            commands::expense::expense_category_update,
+            commands::expense::expense_category_list,
+            commands::expense::expense_create,
+            commands::expense::expense_get_by_id,
+            commands::expense::expense_list,
+            commands::expense::expense_cancel,
+            // Cash Management & Closing Commands (Phase 17)
+            commands::cash::cash_session_open,
+            commands::cash::cash_session_get_current,
+            commands::cash::cash_session_get_by_id,
+            commands::cash::cash_session_list,
+            commands::cash::cash_session_close,
+            commands::cash::cash_adjustment_create,
+            commands::cash::cash_movement_list,
+            commands::cash::cash_get_daily_summary,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Niazi Mobile Mart Tauri application");

@@ -20,6 +20,7 @@ import { PartyDetailPage } from '@/pages/dashboard/shop-admin/PartyDetailPage';
 import { RepairsPage } from '@/pages/dashboard/shop-admin/RepairsPage';
 import { RepairDetailPage } from '@/pages/dashboard/shop-admin/RepairDetailPage';
 import { ExpensesPage } from '@/pages/dashboard/shop-admin/ExpensesPage';
+import { CashManagementPage } from '@/pages/dashboard/shop-admin/CashManagementPage';
 import { BusinessLedgerPage } from '@/pages/dashboard/shop-admin/BusinessLedgerPage';
 import { KdsPage } from '@/pages/dashboard/shop-admin/KdsPage';
 import { MarketingPage } from '@/pages/dashboard/shop-admin/MarketingPage';
@@ -68,6 +69,8 @@ export const shopAdminCoreRoutes = (
     <Route path="repairs" element={<RepairsPage />} />
     <Route path="repairs/:id" element={<RepairDetailPage />} />
     <Route path="expenses" element={<ExpensesPage />} />
+    <Route path="cash" element={<CashManagementPage />} />
+    <Route path="cash-management" element={<CashManagementPage />} />
     <Route path="business-ledger" element={<BusinessLedgerPage />} />
     <Route path="kds" element={<KdsPage />} />
     <Route path="marketing" element={<MarketingPage />} />

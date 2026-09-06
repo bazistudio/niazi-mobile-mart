@@ -870,6 +870,128 @@ export const tauriClient = {
     }
     return [];
   },
+
+  // ── Expense Domain (Phase 17) ───────────────────────────────────────────────
+  async expenseCategoryCreate(dto: CreateExpenseCategoryDto): Promise<ExpenseCategory> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<ExpenseCategory>('expense_category_create', { dto });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async expenseCategoryUpdate(id: string, dto: UpdateExpenseCategoryDto): Promise<ExpenseCategory> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<ExpenseCategory>('expense_category_update', { id, dto });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async expenseCategoryList(activeOnly?: boolean): Promise<ExpenseCategory[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<ExpenseCategory[]>('expense_category_list', { activeOnly });
+    }
+    return [];
+  },
+
+  async expenseCreate(dto: CreateExpenseDto): Promise<Expense> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Expense>('expense_create', { dto });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async expenseGetById(id: string): Promise<Expense | null> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Expense | null>('expense_get_by_id', { id });
+    }
+    return null;
+  },
+
+  async expenseList(filter?: ExpenseFilterDto): Promise<Expense[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Expense[]>('expense_list', { filter });
+    }
+    return [];
+  },
+
+  async expenseCancel(id: string): Promise<Expense> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Expense>('expense_cancel', { id });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  // ── Cash Management & Daily Closing Domain (Phase 17) ───────────────────────
+  async cashSessionOpen(dto: OpenCashSessionDto): Promise<CashSession> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<CashSession>('cash_session_open', { dto });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async cashSessionGetCurrent(branchId?: string): Promise<CashSession | null> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<CashSession | null>('cash_session_get_current', { branchId });
+    }
+    return null;
+  },
+
+  async cashSessionGetById(id: string): Promise<CashSession> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<CashSession>('cash_session_get_by_id', { id });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async cashSessionClose(dto: CloseCashSessionDto): Promise<CashSession> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<CashSession>('cash_session_close', { dto });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async cashSessionList(branchId?: string, limit?: number, offset?: number): Promise<CashSession[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<CashSession[]>('cash_session_list', { branchId, limit, offset });
+    }
+    return [];
+  },
+
+  async cashAdjustmentCreate(dto: CreateCashAdjustmentDto): Promise<CashMovement> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<CashMovement>('cash_adjustment_create', { dto });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async cashMovementList(filter?: CashMovementFilterDto): Promise<CashMovement[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<CashMovement[]>('cash_movement_list', { filter });
+    }
+    return [];
+  },
+
+  async cashDailySummary(branchId?: string, businessDate?: string): Promise<DailyCashSummaryDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<DailyCashSummaryDto>('cash_daily_summary', { branchId, businessDate });
+    }
+    throw new Error('Tauri environment required');
+  },
 };
 
 // ── Type Definitions for Organization & Branch ──────────────────────────────
@@ -1457,6 +1579,7 @@ export interface CompletePurchaseDto {
   items: PurchaseItemDto[];
   discount?: number | null;
   paid_amount?: number | null;
+  payment_method?: string | null;
   notes?: string | null;
 }
 
@@ -1476,4 +1599,157 @@ export interface PurchaseFilterDto {
   end_date?: string | null;
   limit?: number | null;
   offset?: number | null;
+}
+
+// ── Type Definitions for Expenses & Cash Management (Phase 17) ────────────────
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateExpenseCategoryDto {
+  name: string;
+  description?: string | null;
+}
+
+export interface UpdateExpenseCategoryDto {
+  name?: string | null;
+  description?: string | null;
+  is_active?: boolean | null;
+}
+
+export type ExpenseStatus = 'COMPLETED' | 'CANCELLED';
+
+export interface Expense {
+  id: string;
+  expense_number: string;
+  category_id: string;
+  branch_id: string;
+  amount: number;
+  payment_method: string;
+  description: string | null;
+  notes: string | null;
+  expense_date: string;
+  status: ExpenseStatus;
+  performed_by: string | null;
+  created_at: string;
+  updated_at: string;
+  category_name?: string | null;
+}
+
+export interface CreateExpenseDto {
+  category_id: string;
+  branch_id?: string | null;
+  amount: number;
+  payment_method?: string | null;
+  description?: string | null;
+  notes?: string | null;
+  expense_date?: string | null;
+}
+
+export interface ExpenseFilterDto {
+  branch_id?: string | null;
+  category_id?: string | null;
+  status?: string | null;
+  payment_method?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export type CashSessionStatus = 'OPEN' | 'CLOSED';
+
+export interface CashSession {
+  id: string;
+  branch_id: string;
+  business_date: string;
+  opening_cash: number;
+  expected_closing_cash: number | null;
+  actual_closing_cash: number | null;
+  cash_variance: number | null;
+  status: CashSessionStatus;
+  opened_at: string;
+  closed_at: string | null;
+  opened_by: string;
+  closed_by: string | null;
+  notes: string | null;
+  branch_name?: string | null;
+}
+
+export interface OpenCashSessionDto {
+  branch_id?: string | null;
+  business_date?: string | null;
+  opening_cash: number;
+  notes?: string | null;
+}
+
+export interface CloseCashSessionDto {
+  session_id: string;
+  actual_closing_cash: number;
+  notes?: string | null;
+}
+
+export type CashMovementType =
+  | 'SALE_PAYMENT'
+  | 'CUSTOMER_PAYMENT'
+  | 'SUPPLIER_PAYMENT'
+  | 'EXPENSE'
+  | 'CASH_ADJUSTMENT';
+
+export type CashMovementDirection = 'IN' | 'OUT';
+
+export interface CashMovement {
+  id: string;
+  branch_id: string;
+  session_id: string | null;
+  movement_type: CashMovementType;
+  direction: CashMovementDirection;
+  amount: number;
+  reference_id: string | null;
+  reference_number: string | null;
+  payment_method: string;
+  description: string | null;
+  performed_by: string | null;
+  created_at: string;
+}
+
+export interface CreateCashAdjustmentDto {
+  branch_id?: string | null;
+  direction: CashMovementDirection;
+  amount: number;
+  reason: string;
+}
+
+export interface CashMovementFilterDto {
+  branch_id?: string | null;
+  session_id?: string | null;
+  movement_type?: string | null;
+  direction?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface DailyCashSummaryDto {
+  session_id: string | null;
+  session_status: string;
+  business_date: string;
+  opening_cash: number;
+  cash_sales: number;
+  customer_payments: number;
+  supplier_payments: number;
+  cash_expenses: number;
+  cash_in_adjustments: number;
+  cash_out_adjustments: number;
+  total_cash_in: number;
+  total_cash_out: number;
+  expected_closing_cash: number;
+  actual_closing_cash: number | null;
+  cash_variance: number | null;
 }

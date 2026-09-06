@@ -1,24 +1,20 @@
-export type ExpenseCategory = "rent" | "salary" | "utilities" | "transport" | "purchase" | "repair" | "other";
+import {
+  Expense,
+  ExpenseCategory,
+  ExpenseStatus,
+  CreateExpenseDto,
+  ExpenseFilterDto,
+} from '@/lib/tauri/tauriClient';
 
-export type ExpenseItem = {
-  id: string;
-  date: string;
-  title: string;
-  category: ExpenseCategory;
-  amount: number;
-  paymentMethod: "cash" | "bank" | "online";
-  ledgerEntryId?: string;
-  status: "paid" | "pending" | "deleted";
-  note?: string;
-};
+export type { Expense, ExpenseCategory, ExpenseStatus, CreateExpenseDto, ExpenseFilterDto };
 
-export type ExpenseStats = {
+// Backward compatibility alias for UI
+export type ExpenseItem = Expense;
+
+export interface ExpenseStats {
   totalMonthly: number;
-  prevMonthlyExpenses: number;
-  trend: string;
-  pendingAmount: number;
-  breakdown: Record<ExpenseCategory, number>;
-  breakdownPercentages: Record<ExpenseCategory, string>;
   totalExpenses: number;
-  topCategory: ExpenseCategory;
-};
+  activeCount: number;
+  cancelledCount: number;
+  categoryBreakdown: { name: string; amount: number }[];
+}

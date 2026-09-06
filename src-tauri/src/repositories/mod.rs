@@ -1,6 +1,8 @@
 pub mod branch_repository;
+pub mod cash_repository;
 pub mod catalog_repository;
 pub mod customer_repository;
+pub mod expense_repository;
 pub mod inventory_repository;
 pub mod product_repository;
 pub mod purchase_repository;
@@ -10,8 +12,10 @@ pub mod supplier_repository;
 pub mod user_repository;
 
 pub use branch_repository::{BranchRepository, OrganizationDashboardStats};
+pub use cash_repository::SQLiteCashRepository;
 pub use catalog_repository::SQLiteCatalogRepository;
 pub use customer_repository::SQLiteCustomerRepository;
+pub use expense_repository::SQLiteExpenseRepository;
 pub use inventory_repository::SQLiteInventoryRepository;
 pub use product_repository::SQLiteProductRepository;
 pub use purchase_repository::SQLitePurchaseRepository;

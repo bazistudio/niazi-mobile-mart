@@ -3,12 +3,13 @@ import { ExpenseStatsCards, ExpensesTable, ExpenseCreateModal, ExpenseFilters, u
 import { ReceiptText, Plus } from 'lucide-react';
 
 export const ExpensesPage: React.FC = () => {
-  const { fetchExpenses } = useExpensesStore();
+  const { fetchExpenses, fetchCategories } = useExpensesStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     fetchExpenses();
-  }, [fetchExpenses]);
+    fetchCategories();
+  }, [fetchExpenses, fetchCategories]);
 
   return (
     <div className="flex flex-col gap-6 sm:gap-8 w-full max-w-7xl mx-auto pb-12">

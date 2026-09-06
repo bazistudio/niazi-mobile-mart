@@ -105,6 +105,7 @@ pub struct CompletePurchaseDto {
     pub items: Vec<PurchaseItemDto>,
     pub discount: Option<i64>,
     pub paid_amount: Option<i64>,
+    pub payment_method: Option<String>,
     pub notes: Option<String>,
 }
 

@@ -4,6 +4,7 @@ use uuid::Uuid;
 use crate::db::connection::DatabaseConnection;
 use crate::db::errors::DbError;
 use crate::db::transaction::with_transaction;
+use crate::domain::cash::{CashMovement, CashMovementDirection, CashMovementType};
 use crate::domain::customer::{CustomerLedgerEntry, CustomerLedgerEntryType};
 use crate::domain::inventory::{StockMovement, StockMovementType};
 use crate::domain::organization::DEFAULT_MAIN_BRANCH_ID;
@@ -13,8 +14,8 @@ use crate::domain::sales::{
 };
 use crate::errors::{AppError, AppResult};
 use crate::repositories::{
-    BranchRepository, SQLiteCustomerRepository, SQLiteInventoryRepository, SQLiteProductRepository,
-    SQLiteSaleRepository,
+    BranchRepository, SQLiteCashRepository, SQLiteCustomerRepository, SQLiteInventoryRepository,
+    SQLiteProductRepository, SQLiteSaleRepository,
 };
 
 #[derive(Clone)]
@@ -290,7 +291,7 @@ impl SaleService {
                     id: Uuid::new_v4().to_string(),
                     sale_id: sale_id.clone(),
                     amount: recorded_paid,
-                    payment_method: p_method,
+                    payment_method: p_method.clone(),
                     reference_number: None,
                     notes: None,
                     created_at: now.clone(),
@@ -298,6 +299,27 @@ impl SaleService {
 
                 SQLiteSaleRepository::insert_sale_payment_in_tx(tx, &payment)?;
                 sale_payments.push(payment);
+
+                // If payment method is CASH, record authoritative Cash Movement IN
+                if p_method == "CASH" {
+                    let open_session_id = SQLiteCashRepository::get_open_session_id_in_tx(tx, &branch_id)?;
+                    let cash_movement = CashMovement {
+                        id: Uuid::new_v4().to_string(),
+                        session_id: open_session_id,
+                        branch_id: branch_id.clone(),
+                        movement_type: CashMovementType::SalePayment,
+                        direction: CashMovementDirection::In,
+                        amount: recorded_paid,
+                        reference_id: Some(sale_id.clone()),
+                        reference_number: Some(invoice_number.clone()),
+                        payment_method: "CASH".to_string(),
+                        description: format!("Cash Sale {}", invoice_number),
+                        performed_by: uid.clone(),
+                        performed_by_name: None,
+                        created_at: now.clone(),
+                    };
+                    SQLiteCashRepository::insert_movement_in_tx(tx, &cash_movement)?;
+                }
             }
 
             Ok(SaleResultDto {

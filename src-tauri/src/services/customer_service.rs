@@ -4,25 +4,31 @@ use uuid::Uuid;
 use crate::db::connection::DatabaseConnection;
 use crate::db::errors::DbError;
 use crate::db::transaction::with_transaction;
+use crate::domain::cash::{CashMovement, CashMovementDirection, CashMovementType};
 use crate::domain::customer::{
     AllocatedSaleDto, CreateCustomerDto, Customer, CustomerDetailDto, CustomerFilter,
     CustomerLedgerEntry, CustomerLedgerEntryType, CustomerPaymentResultDto, CustomerStatementDto,
     CustomerSummaryDto, RecordCustomerPaymentDto, UpdateCustomerDto,
 };
+use crate::domain::organization::DEFAULT_MAIN_BRANCH_ID;
 use crate::domain::sales::PaymentStatus;
 use crate::errors::{AppError, AppResult};
-use crate::repositories::{SQLiteCustomerRepository, SQLiteSaleRepository};
+use crate::repositories::{
+    BranchRepository, SQLiteCashRepository, SQLiteCustomerRepository, SQLiteSaleRepository,
+};
 
 #[derive(Clone)]
 pub struct CustomerService {
     db: DatabaseConnection,
     customer_repo: SQLiteCustomerRepository,
+    branch_repo: BranchRepository,
 }
 
 impl CustomerService {
     pub fn new(db: DatabaseConnection) -> Self {
         Self {
             customer_repo: SQLiteCustomerRepository::new(db.clone()),
+            branch_repo: BranchRepository::new(db.clone()),
             db,
         }
     }
@@ -166,6 +172,11 @@ impl CustomerService {
         let uid = user_id.map(|s| s.to_string());
         let now = Utc::now().to_rfc3339();
 
+        let branch_id = match self.branch_repo.get_main_branch().await? {
+            Some(b) => b.id,
+            None => DEFAULT_MAIN_BRANCH_ID.to_string(),
+        };
+
         let result = with_transaction(&self.db, move |tx| {
             // 1. Authoritative current outstanding balance
             let current_balance = SQLiteCustomerRepository::calculate_outstanding_balance_in_tx(tx, &cid)?;
@@ -199,7 +210,7 @@ impl CustomerService {
                 credit: amount,
                 balance_after: new_balance,
                 description: ledger_desc,
-                performed_by: uid,
+                performed_by: uid.clone(),
                 created_at: now.clone(),
             };
 
@@ -247,6 +258,27 @@ impl CustomerService {
                 });
 
                 remaining_to_allocate -= alloc;
+            }
+
+            // 6. If payment method is CASH, record authoritative Cash Movement IN
+            if p_method == "CASH" {
+                let open_session_id = SQLiteCashRepository::get_open_session_id_in_tx(tx, &branch_id)?;
+                let cash_movement = CashMovement {
+                    id: Uuid::new_v4().to_string(),
+                    session_id: open_session_id,
+                    branch_id: branch_id.clone(),
+                    movement_type: CashMovementType::CustomerPayment,
+                    direction: CashMovementDirection::In,
+                    amount,
+                    reference_id: Some(payment_id.clone()),
+                    reference_number: Some(receipt_number.clone()),
+                    payment_method: "CASH".to_string(),
+                    description: format!("Customer Payment Receipt {}", receipt_number),
+                    performed_by: uid,
+                    performed_by_name: None,
+                    created_at: now.clone(),
+                };
+                SQLiteCashRepository::insert_movement_in_tx(tx, &cash_movement)?;
             }
 
             Ok(CustomerPaymentResultDto {

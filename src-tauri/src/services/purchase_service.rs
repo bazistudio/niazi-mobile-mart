@@ -5,6 +5,7 @@ use uuid::Uuid;
 use crate::db::connection::DatabaseConnection;
 use crate::db::errors::DbError;
 use crate::db::transaction::with_transaction;
+use crate::domain::cash::{CashMovement, CashMovementDirection, CashMovementType};
 use crate::domain::inventory::{StockMovement, StockMovementType};
 use crate::domain::organization::DEFAULT_MAIN_BRANCH_ID;
 use crate::domain::purchases::{
@@ -17,7 +18,9 @@ use crate::domain::supplier::{
 };
 use crate::errors::{AppError, AppResult};
 use crate::repositories::inventory_repository::SQLiteInventoryRepository;
-use crate::repositories::{SQLitePurchaseRepository, SQLiteSupplierRepository};
+use crate::repositories::{
+    SQLiteCashRepository, SQLitePurchaseRepository, SQLiteSupplierRepository,
+};
 
 #[derive(Clone)]
 pub struct PurchaseService {
@@ -252,6 +255,8 @@ impl PurchaseService {
 
             SQLitePurchaseRepository::insert_purchase_in_tx(tx, &purchase)?;
 
+            let p_method = dto.payment_method.as_deref().unwrap_or("CASH").trim().to_uppercase();
+
             // 7. Insert Purchase Lines & Update Stock & Snapshot
             let mut domain_lines = Vec::with_capacity(prepared_lines.len());
 
@@ -317,6 +322,27 @@ impl PurchaseService {
             }
 
             SQLitePurchaseRepository::insert_purchase_lines_in_tx(tx, &domain_lines)?;
+
+            // 7b. If paid_amount > 0 and payment method is CASH, record Cash Movement OUT
+            if paid_amount > 0 && p_method == "CASH" {
+                let open_session_id = SQLiteCashRepository::get_open_session_id_in_tx(tx, &branch_id)?;
+                let cash_movement = CashMovement {
+                    id: Uuid::new_v4().to_string(),
+                    session_id: open_session_id,
+                    branch_id: branch_id.clone(),
+                    movement_type: CashMovementType::SupplierPayment,
+                    direction: CashMovementDirection::Out,
+                    amount: paid_amount,
+                    reference_id: Some(purchase_id.clone()),
+                    reference_number: Some(purchase_number.clone()),
+                    payment_method: "CASH".to_string(),
+                    description: format!("Purchase Payment {}", purchase_number),
+                    performed_by: user_id_owned.clone(),
+                    performed_by_name: None,
+                    created_at: now.clone(),
+                };
+                SQLiteCashRepository::insert_movement_in_tx(tx, &cash_movement)?;
+            }
 
             // 8. If credit > 0, insert Supplier Ledger DEBIT
             let supplier_balance_after = if credit_amount > 0 {
@@ -473,11 +499,32 @@ impl PurchaseService {
                     dto.payment_method,
                     dto.reference_number.as_deref().unwrap_or(&receipt_number)
                 ),
-                performed_by: user_id_owned,
-                created_at: now,
+                performed_by: user_id_owned.clone(),
+                created_at: now.clone(),
             };
 
             SQLiteSupplierRepository::insert_ledger_entry_in_tx(tx, &ledger_entry)?;
+
+            // 6. If payment method is CASH, record authoritative Cash Movement OUT
+            if dto.payment_method.trim().to_uppercase() == "CASH" {
+                let open_session_id = SQLiteCashRepository::get_open_session_id_in_tx(tx, DEFAULT_MAIN_BRANCH_ID)?;
+                let cash_movement = CashMovement {
+                    id: Uuid::new_v4().to_string(),
+                    session_id: open_session_id,
+                    branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                    movement_type: CashMovementType::SupplierPayment,
+                    direction: CashMovementDirection::Out,
+                    amount: dto.amount,
+                    reference_id: Some(payment_id.clone()),
+                    reference_number: Some(receipt_number.clone()),
+                    payment_method: "CASH".to_string(),
+                    description: format!("Supplier Payment Receipt {}", receipt_number),
+                    performed_by: user_id_owned,
+                    performed_by_name: None,
+                    created_at: now,
+                };
+                SQLiteCashRepository::insert_movement_in_tx(tx, &cash_movement)?;
+            }
 
             Ok(SupplierPaymentResultDto {
                 payment_id,
@@ -597,6 +644,7 @@ pub mod tests {
                     }],
                     discount: Some(10000), // Total = 290,000
                     paid_amount: Some(290000), // Fully paid cash purchase
+                    payment_method: Some("CASH".to_string()),
                     notes: Some("Cash shipment".to_string()),
                 },
             )
@@ -671,6 +719,7 @@ pub mod tests {
                     }],
                     discount: None,
                     paid_amount: Some(20000), // 30,000 credit
+                    payment_method: Some("CASH".to_string()),
                     notes: None,
                 },
             )
@@ -699,6 +748,7 @@ pub mod tests {
                     }],
                     discount: None,
                     paid_amount: Some(0), // 80k credit -> exceeds 100k limit!
+                    payment_method: None,
                     notes: None,
                 },
             )
@@ -743,6 +793,7 @@ pub mod tests {
                     }],
                     discount: None,
                     paid_amount: Some(0),
+                    payment_method: None,
                     notes: None,
                 },
             )
@@ -764,6 +815,7 @@ pub mod tests {
                     }],
                     discount: None,
                     paid_amount: Some(0),
+                    payment_method: None,
                     notes: None,
                 },
             )
@@ -855,6 +907,7 @@ pub mod tests {
                     }],
                     discount: None,
                     paid_amount: None,
+                    payment_method: None,
                     notes: None,
                 },
             )

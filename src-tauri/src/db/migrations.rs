@@ -423,6 +423,108 @@ pub const MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_supplier_ledger_entry_type ON supplier_ledger_entries(entry_type);
         "#,
     },
+    Migration {
+        version: 7,
+        name: "007_cash_management_and_daily_closing",
+        up: r#"
+        -- Expense Categories table
+        CREATE TABLE IF NOT EXISTS expense_categories (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            description TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_categories_name ON expense_categories(name COLLATE NOCASE);
+        CREATE INDEX IF NOT EXISTS idx_expense_categories_is_active ON expense_categories(is_active);
+
+        -- Seed standard operational expense categories
+        INSERT OR IGNORE INTO expense_categories (id, name, description, is_active, created_at, updated_at) VALUES
+            ('e0000001-0000-0000-0000-000000000001', 'Rent', 'Store rent and premises lease', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+            ('e0000001-0000-0000-0000-000000000002', 'Electricity', 'Electricity bills and power charges', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+            ('e0000001-0000-0000-0000-000000000003', 'Internet', 'Broadband and mobile data communication', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+            ('e0000001-0000-0000-0000-000000000004', 'Staff Salary', 'Employee salaries, wages, and bonuses', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+            ('e0000001-0000-0000-0000-000000000005', 'Transport', 'Logistics, delivery, and travel expenses', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+            ('e0000001-0000-0000-0000-000000000006', 'Maintenance', 'Shop repairs, equipment and tool upkeep', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+            ('e0000001-0000-0000-0000-000000000007', 'Office Supplies', 'Packaging, stationery, and store supplies', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+            ('e0000001-0000-0000-0000-000000000008', 'Miscellaneous', 'General sundry and tea/refreshments', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+
+        -- Atomic sequential counter table for collision-safe expense numbering
+        INSERT OR IGNORE INTO counters (name, value) VALUES ('expense_number', 0);
+
+        -- Expenses table
+        CREATE TABLE IF NOT EXISTS expenses (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            expense_number TEXT NOT NULL UNIQUE,
+            category_id TEXT NOT NULL REFERENCES expense_categories(id) ON DELETE RESTRICT,
+            branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+            amount INTEGER NOT NULL CHECK(amount > 0),
+            payment_method TEXT NOT NULL,
+            description TEXT NOT NULL,
+            notes TEXT,
+            expense_date TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'COMPLETED' CHECK(status IN ('COMPLETED', 'CANCELLED')),
+            performed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_expense_number ON expenses(expense_number);
+        CREATE INDEX IF NOT EXISTS idx_expenses_category_id ON expenses(category_id);
+        CREATE INDEX IF NOT EXISTS idx_expenses_branch_id ON expenses(branch_id);
+        CREATE INDEX IF NOT EXISTS idx_expenses_status ON expenses(status);
+        CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
+        CREATE INDEX IF NOT EXISTS idx_expenses_created_at ON expenses(created_at);
+
+        -- Daily Cash Sessions
+        CREATE TABLE IF NOT EXISTS cash_sessions (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+            business_date TEXT NOT NULL,
+            opening_cash INTEGER NOT NULL DEFAULT 0 CHECK(opening_cash >= 0),
+            expected_closing_cash INTEGER,
+            actual_closing_cash INTEGER,
+            cash_variance INTEGER,
+            status TEXT NOT NULL DEFAULT 'OPEN' CHECK(status IN ('OPEN', 'CLOSED')),
+            opened_at TEXT NOT NULL,
+            closed_at TEXT,
+            opened_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+            closed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+            notes TEXT
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_session_per_branch ON cash_sessions(branch_id) WHERE status = 'OPEN';
+        CREATE INDEX IF NOT EXISTS idx_cash_sessions_branch_id ON cash_sessions(branch_id);
+        CREATE INDEX IF NOT EXISTS idx_cash_sessions_business_date ON cash_sessions(business_date);
+        CREATE INDEX IF NOT EXISTS idx_cash_sessions_status ON cash_sessions(status);
+        CREATE INDEX IF NOT EXISTS idx_cash_sessions_opened_at ON cash_sessions(opened_at);
+
+        -- Append-only Auditable Cash Movements
+        CREATE TABLE IF NOT EXISTS cash_movements (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            session_id TEXT REFERENCES cash_sessions(id) ON DELETE SET NULL,
+            branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+            movement_type TEXT NOT NULL CHECK(movement_type IN ('SALE_PAYMENT', 'CUSTOMER_PAYMENT', 'SUPPLIER_PAYMENT', 'EXPENSE', 'CASH_ADJUSTMENT')),
+            direction TEXT NOT NULL CHECK(direction IN ('IN', 'OUT')),
+            amount INTEGER NOT NULL CHECK(amount > 0),
+            reference_id TEXT,
+            reference_number TEXT,
+            payment_method TEXT NOT NULL DEFAULT 'CASH',
+            description TEXT NOT NULL,
+            performed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_cash_movements_session_id ON cash_movements(session_id);
+        CREATE INDEX IF NOT EXISTS idx_cash_movements_branch_id ON cash_movements(branch_id);
+        CREATE INDEX IF NOT EXISTS idx_cash_movements_type ON cash_movements(movement_type);
+        CREATE INDEX IF NOT EXISTS idx_cash_movements_direction ON cash_movements(direction);
+        CREATE INDEX IF NOT EXISTS idx_cash_movements_created_at ON cash_movements(created_at);
+        CREATE INDEX IF NOT EXISTS idx_cash_movements_reference_id ON cash_movements(reference_id);
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction
@@ -499,11 +601,11 @@ mod tests {
         // Enable foreign keys
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
 
-        // 1. First run applies migrations (6 total: Core, Product/Inventory, Auth Security, Sales/Invoices, Customers/Ledger, Suppliers/Purchasing)
+        // 1. First run applies migrations (7 total: Core, Product/Inventory, Auth Security, Sales/Invoices, Customers/Ledger, Suppliers/Purchasing, Cash Management/Closing)
         let count = MigrationRunner::run(&mut conn).unwrap();
-        assert_eq!(count, 6);
+        assert_eq!(count, 7);
 
-        // Verify permanent tables exist (5 from Phase 6 + 6 from Phase 7 + 4 from Phase 14 + 2 from Phase 15 + 4 from Phase 16 = 21 tables)
+        // Verify permanent tables exist (5 from Phase 6 + 6 from Phase 7 + 4 from Phase 14 + 2 from Phase 15 + 4 from Phase 16 + 4 from Phase 17 = 25 tables)
         let tables_count: i64 = conn
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN (
@@ -511,13 +613,14 @@ mod tests {
                     'categories', 'brands', 'units', 'products', 'stock', 'stock_movements',
                     'counters', 'sales', 'sale_lines', 'sale_payments',
                     'customers', 'customer_ledger_entries',
-                    'suppliers', 'purchases', 'purchase_lines', 'supplier_ledger_entries'
+                    'suppliers', 'purchases', 'purchase_lines', 'supplier_ledger_entries',
+                    'expense_categories', 'expenses', 'cash_sessions', 'cash_movements'
                 )",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(tables_count, 21);
+        assert_eq!(tables_count, 25);
 
         // Verify users table has recovery_key_hash and must_change_password
         let user_cols: Vec<String> = {
@@ -822,5 +925,75 @@ mod tests {
             |r| r.get(0),
         ).unwrap();
         assert_eq!(payable_balance, 30000);
+    }
+
+    #[test]
+    fn test_migration_007_cash_management_and_expenses() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+
+        MigrationRunner::run(&mut conn).unwrap();
+
+        // 1. Verify expense_number counter initialized
+        let exp_counter: i64 = conn
+            .query_row("SELECT value FROM counters WHERE name = 'expense_number'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(exp_counter, 0);
+
+        // 2. Verify seeded default expense categories (8 categories)
+        let cat_count: i64 = conn
+            .query_row("SELECT count(*) FROM expense_categories WHERE is_active = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(cat_count, 8);
+
+        // 3. Verify unique category name constraint
+        let dup_cat = conn.execute(
+            "INSERT INTO expense_categories (id, name, description, is_active, created_at, updated_at)
+             VALUES ('e0000002-0000-0000-0000-000000000001', 'Rent', 'Duplicate Rent', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        );
+        assert!(dup_cat.is_err(), "Duplicate category name (case-insensitive) must be rejected");
+
+        // 4. Verify expenses insert & constraints
+        conn.execute(
+            "INSERT INTO expenses (id, expense_number, category_id, branch_id, amount, payment_method, description, status, created_at, updated_at, expense_date)
+             VALUES ('55555555-5555-5555-5555-555555555555', 'EXP-000001', 'e0000001-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 25000, 'CASH', 'Monthly Shop Rent', 'COMPLETED', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        let dup_exp = conn.execute(
+            "INSERT INTO expenses (id, expense_number, category_id, branch_id, amount, payment_method, description, status, created_at, updated_at, expense_date)
+             VALUES ('66666666-6666-6666-6666-666666666666', 'EXP-000001', 'e0000001-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 15000, 'CASH', 'Another Expense', 'COMPLETED', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        );
+        assert!(dup_exp.is_err(), "Duplicate expense_number must be rejected");
+
+        // 5. Verify cash_sessions and single OPEN session per branch constraint
+        conn.execute(
+            "INSERT INTO cash_sessions (id, branch_id, business_date, opening_cash, status, opened_at)
+             VALUES ('77777777-7777-7777-7777-777777777777', '00000000-0000-0000-0000-000000000002', '2026-01-01', 20000, 'OPEN', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        let dup_open_session = conn.execute(
+            "INSERT INTO cash_sessions (id, branch_id, business_date, opening_cash, status, opened_at)
+             VALUES ('88888888-8888-8888-8888-888888888888', '00000000-0000-0000-0000-000000000002', '2026-01-01', 10000, 'OPEN', '2026-01-01T01:00:00Z')",
+            [],
+        );
+        assert!(dup_open_session.is_err(), "Multiple OPEN sessions for the same branch must be rejected by unique index");
+
+        // 6. Verify cash_movements insert
+        conn.execute(
+            "INSERT INTO cash_movements (id, session_id, branch_id, movement_type, direction, amount, reference_id, reference_number, payment_method, description, created_at)
+             VALUES ('99999999-9999-9999-9999-999999999999', '77777777-7777-7777-7777-777777777777', '00000000-0000-0000-0000-000000000002', 'EXPENSE', 'OUT', 25000, '55555555-5555-5555-5555-555555555555', 'EXP-000001', 'CASH', 'Monthly Shop Rent', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        let total_out: i64 = conn.query_row(
+            "SELECT COALESCE(SUM(amount), 0) FROM cash_movements WHERE session_id = '77777777-7777-7777-7777-777777777777' AND direction = 'OUT'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(total_out, 25000);
     }
 }
