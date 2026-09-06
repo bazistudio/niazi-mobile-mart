@@ -1,5 +1,3 @@
-import axiosInstance from '@/lib/api/axios';
-
 // ===========================
 // TYPES
 // ===========================
@@ -45,22 +43,49 @@ export interface ThemeUpdatePayload {
 // API CALLS
 // ===========================
 
+import { DEFAULT_THEME } from './applyTheme';
+
+const THEME_STORAGE_KEY = 'niazi_desktop_theme';
+
 export const themeApi = {
   /**
-   * Fetches the resolved theme for the current user.
-   * Backend handles Single Shop vs. Organization inheritance transparently.
+   * Fetches the local theme preferences for desktop presentation.
    */
   getCurrentTheme: async (): Promise<Theme> => {
-    const res = await axiosInstance.get<{ success: boolean; data: Theme }>('/api/v1/theme/current');
-    return res.data.data;
+    try {
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem(THEME_STORAGE_KEY);
+        if (saved) {
+          return JSON.parse(saved);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to read theme from local storage', e);
+    }
+    return DEFAULT_THEME as unknown as Theme;
   },
 
   /**
-   * Updates the theme for the current organization.
-   * Only sends the fields that changed.
+   * Updates the desktop theme preferences locally.
    */
   updateTheme: async (payload: ThemeUpdatePayload): Promise<Theme> => {
-    const res = await axiosInstance.patch<{ success: boolean; data: Theme }>('/api/v1/theme', payload);
-    return res.data.data;
+    const current = await themeApi.getCurrentTheme();
+    const updated: Theme = {
+      ...current,
+      ...payload,
+      colors: {
+        ...current.colors,
+        ...(payload.colors || {}),
+      },
+      typography: {
+        mode: payload.typography?.mode || current.typography?.mode || 'auto',
+      },
+      source: current.source || 'organization',
+      themeVersion: (current.themeVersion || 1) + 1,
+    };
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(updated));
+    }
+    return updated;
   },
 };

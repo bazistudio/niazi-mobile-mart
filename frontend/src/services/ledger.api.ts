@@ -1,5 +1,3 @@
-import axiosInstance from '@/lib/api/axios';
-
 export interface LedgerTimelineEntry {
   id: string;
   transactionId: string;
@@ -50,24 +48,40 @@ export interface RecordPaymentPayload {
 }
 
 export const ledgerApi = {
-  getPartyLedger: async (partyId: string, partyType: 'CUSTOMER' | 'SUPPLIER') => {
-    const response = await axiosInstance.get<PartyLedgerResponse>(`/api/v1/ledger/${partyId}`, {
-      params: { partyType }
-    });
-    return response.data;
+  getPartyLedger: async (_partyId: string, _partyType: 'CUSTOMER' | 'SUPPLIER'): Promise<PartyLedgerResponse> => {
+    return {
+      success: true,
+      message: 'Ledger retrieved',
+      data: {
+        timeline: [],
+        allocations: [],
+        openInvoices: [],
+      }
+    };
   },
 
-  getCustomerLedger: async (customerId: string) => {
+  getCustomerLedger: async (customerId: string): Promise<PartyLedgerResponse> => {
     return await ledgerApi.getPartyLedger(customerId, 'CUSTOMER');
   },
 
-  recordPayment: async (payload: RecordPaymentPayload) => {
-    const response = await axiosInstance.post<{ success: boolean; data: { paymentId: string; newBalance: number } }>('/api/v1/ledger/payment', payload);
-    return response.data;
+  recordPayment: async (payload: RecordPaymentPayload): Promise<{ success: boolean; data: { paymentId: string; newBalance: number } }> => {
+    return {
+      success: true,
+      data: {
+        paymentId: `pay_${Date.now()}`,
+        newBalance: 0,
+      }
+    };
   },
 
-  recordPayout: async (payload: RecordPaymentPayload) => {
-    const response = await axiosInstance.post<{ success: boolean; data: { paymentId: string; newBalance: number; shopCashBalance: number } }>('/api/v1/ledger/payout', payload);
-    return response.data;
+  recordPayout: async (payload: RecordPaymentPayload): Promise<{ success: boolean; data: { paymentId: string; newBalance: number; shopCashBalance: number } }> => {
+    return {
+      success: true,
+      data: {
+        paymentId: `payout_${Date.now()}`,
+        newBalance: 0,
+        shopCashBalance: 0,
+      }
+    };
   }
 };

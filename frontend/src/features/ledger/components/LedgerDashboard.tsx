@@ -7,25 +7,24 @@ import { customerApi } from '@/services/customer.api';
 import { supplierApi } from '@/services/supplier.api';
 import { Search, ArrowLeft, Building2, User, Wallet, History, FileText, Download, Receipt } from 'lucide-react';
 import { LedgerBook } from './LedgerBook'; // We will create this
-import { useTenantQueryKeys } from '@/lib/react-query/useTenantQueryKeys';
+import { queryKeys } from '@/lib/react-query/queryKeys';
 import { partyApi } from '@/services/party.api';
 import { expensesApi } from '@/features/expenses/services/expenses.api';
 import { Users } from 'lucide-react';
 
 export const LedgerDashboard: React.FC = () => {
-  const keys = useTenantQueryKeys();
   const { selectedParty, setSelectedParty } = useLedger();
   const [directoryTab, setDirectoryTab] = useState<'CUSTOMER' | 'SUPPLIER' | 'PARTY' | 'EXPENSE'>('CUSTOMER');
   const [searchTerm, setSearchTerm] = useState('');
 
   // Fetch directories
   const { data: customersData, isLoading: isLoadingCustomers } = useQuery({
-    queryKey: keys.customers,
+    queryKey: queryKeys.customers.all,
     queryFn: () => customerApi.getCustomers(1, 1000)
   });
 
   const { data: suppliersData, isLoading: isLoadingSuppliers } = useQuery({
-    queryKey: keys.suppliers,
+    queryKey: queryKeys.suppliers.all,
     queryFn: () => supplierApi.getSuppliers(1, 1000)
   });
 

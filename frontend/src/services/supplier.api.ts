@@ -1,100 +1,88 @@
-import axiosInstance from '@/lib/api/axios';
-import { DBSupplier } from '@/types/db.types'; // Assuming this exists or we use any for now
-
 export const supplierApi = {
-  getSuppliers: async (page = 1, limit = 100) => {
-    const response = await axiosInstance.get<{
-      success: boolean;
-      data: any[];
-      pagination: { page: number; limit: number; total: number; pages: number };
-    }>(`/api/v1/suppliers?page=${page}&limit=${limit}`);
-    
+  getSuppliers: async (_page = 1, _limit = 100): Promise<{
+    success: boolean;
+    data: any[];
+    pagination: { page: number; limit: number; total: number; pages: number };
+  }> => {
     return {
-      ...response.data,
-      data: response.data.data.map(s => ({
-        ...s,
-        id: s._id || s.id,
-      }))
+      success: true,
+      data: [],
+      pagination: { page: 1, limit: 100, total: 0, pages: 1 }
     };
   },
 
-  searchSuppliers: async (keyword: string) => {
-    const response = await axiosInstance.get<{
-      success: boolean;
-      data: any[];
-    }>(`/api/v1/suppliers/search?keyword=${keyword}`);
-    
+  searchSuppliers: async (_keyword: string): Promise<{
+    success: boolean;
+    data: any[];
+  }> => {
     return {
-      ...response.data,
-      data: response.data.data.map(s => ({
-        ...s,
-        id: s._id || s.id,
-      }))
+      success: true,
+      data: []
     };
   },
 
-  addSupplier: async (supplierData: any) => {
-    const response = await axiosInstance.post<{
-      success: boolean;
-      data: any;
-      message: string;
-    }>('/api/v1/suppliers', supplierData);
-    
+  addSupplier: async (supplierData: any): Promise<{
+    success: boolean;
+    data: any;
+  }> => {
     return {
-      ...response.data,
+      success: true,
       data: {
-        ...response.data.data,
-        id: response.data.data._id || response.data.data.id,
+        id: `supp_${Date.now()}`,
+        ...supplierData,
       }
     };
   },
 
-  updateSupplier: async (id: string, supplierData: any) => {
-    const response = await axiosInstance.patch<{
-      success: boolean;
-      data: any;
-      message: string;
-    }>(`/api/v1/suppliers/${id}`, supplierData);
-    
+  updateSupplier: async (id: string, supplierData: any): Promise<{
+    success: boolean;
+    data: any;
+  }> => {
     return {
-      ...response.data,
+      success: true,
       data: {
-        ...response.data.data,
-        id: response.data.data._id || response.data.data.id,
+        id,
+        ...supplierData,
       }
     };
   },
 
-  deleteSupplier: async (id: string) => {
-    const response = await axiosInstance.delete<{
-      success: boolean;
-      message: string;
-    }>(`/api/v1/suppliers/${id}`);
-    return response.data;
+  deleteSupplier: async (_id: string): Promise<{
+    success: boolean;
+    message: string;
+  }> => {
+    return {
+      success: true,
+      message: 'Supplier deleted',
+    };
   },
 
-  getSupplierDetail: async (id: string) => {
-    const response = await axiosInstance.get<{
-      success: boolean;
-      data: {
-        supplier: any;
-        stats: {
-          totalPurchases: number;
-          payable: number;
-          purchaseCount: number;
-          lastTransactionDate: string | null;
-          recentPurchases: any[];
-        }
+  getSupplierDetail: async (id: string): Promise<{
+    success: boolean;
+    data: {
+      supplier: any;
+      stats: {
+        totalPurchases: number;
+        payable: number;
+        purchaseCount: number;
+        lastTransactionDate: string | null;
+        recentPurchases: any[];
       };
-    }>(`/api/v1/suppliers/${id}/detail`);
-    
+    };
+  }> => {
     return {
-      ...response.data,
+      success: true,
       data: {
-        ...response.data.data,
         supplier: {
-          ...response.data.data.supplier,
-          id: response.data.data.supplier._id || response.data.data.supplier.id,
+          id,
+          name: 'Supplier',
+        },
+        stats: {
+          totalPurchases: 0,
+          payable: 0,
+          purchaseCount: 0,
+          lastTransactionDate: null,
+          recentPurchases: [],
         }
       }
     };

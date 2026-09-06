@@ -7,21 +7,20 @@ import { supplierApi } from '@/services/supplier.api';
 import { useNavigate } from 'react-router-dom';
 import { SupplierFormDrawer } from './modals/AddSupplierDrawer';
 import toast from 'react-hot-toast';
-import { useTenantQueryKeys } from '@/lib/react-query/useTenantQueryKeys';
+import { queryKeys } from '@/lib/react-query/queryKeys';
 import { invalidateQueries } from '@/lib/react-query/invalidate';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 
 export const SuppliersTab = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const keys = useTenantQueryKeys();
   const { user } = useAuthStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<any>(null);
 
   const { data: supplierResponse, isLoading } = useQuery({
-    queryKey: keys.suppliers,
+    queryKey: queryKeys.suppliers.all,
     queryFn: () => supplierApi.getSuppliers(),
     staleTime: 30000,
     retry: 1,

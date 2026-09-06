@@ -5,12 +5,12 @@ import { ChevronDown, Building, Store, Loader2, Check } from 'lucide-react';
 import { useOrganizationStore, Shop } from '@/store/useOrganizationStore';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 import { useNavigate } from 'react-router-dom';
-import api from '@/lib/api/axios';
+import { tauriClient, Branch } from '@/lib/tauri/tauriClient';
 
 export const ShopSwitcher = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [shops, setShops] = useState<Shop[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
@@ -45,53 +45,48 @@ export const ShopSwitcher = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
-  // Fetch shops when dropdown first opens
+  // Fetch branches via Tauri IPC when dropdown first opens
   useEffect(() => {
-    if (isOpen && activeOrganizationId && shops.length === 0) {
-      const fetchShops = async () => {
+    if (isOpen && branches.length === 0) {
+      const fetchBranches = async () => {
         try {
-          const res = await api.get(`/api/v1/shops`);
-          if (res.data?.success) setShops(res.data.data);
+          const list = await tauriClient.branchList();
+          setBranches(list);
+          if (list.length > 0 && !activeShop) {
+            setActiveShop({
+              _id: list[0].id,
+              name: list[0].name,
+              organizationId: list[0].organization_id,
+              status: list[0].is_active ? 'active' : 'inactive',
+            });
+          }
         } catch (error) {
-          console.error('Failed to load shops', error);
+          console.error('Failed to load branches from SQLite', error);
         }
       };
-      fetchShops();
+      fetchBranches();
     }
-  }, [isOpen, activeOrganizationId]);
+  }, [isOpen, branches.length, activeShop, setActiveShop]);
 
-  if (!activeOrganizationId || (user as any)?.accountType === 'SINGLE_SHOP') return null;
-
-  const handleContextSwitch = async (shopId: string | null, path: string) => {
-    const prevContext = { viewMode, activeShop };
-
+  const handleContextSwitch = (branch: Branch | null, path: string) => {
     setIsLoading(true);
     setIsOpen(false);
 
-    setActiveContext(activeOrganizationId!, shopId);
-    if (shopId) {
-      const selected = shops.find((s) => s._id === shopId);
-      if (selected) setActiveShop(selected);
+    if (branch) {
+      setActiveContext(branch.organization_id, branch.id);
+      setActiveShop({
+        _id: branch.id,
+        name: branch.name,
+        organizationId: branch.organization_id,
+        status: branch.is_active ? 'active' : 'inactive',
+      });
     } else {
+      setActiveContext(activeOrganizationId || '00000000-0000-0000-0000-000000000001', null);
       setActiveShop(null);
     }
 
-    try {
-      await api.post('/api/v1/auth/switch-context', {
-        organizationId: activeOrganizationId,
-        shopId,
-      });
-      navigate(path);
-    } catch (error) {
-      console.error('Failed to switch context', error);
-      setActiveContext(
-        activeOrganizationId!,
-        prevContext.viewMode === 'shop' ? prevContext.activeShop?._id || null : null
-      );
-      setActiveShop(prevContext.activeShop);
-    } finally {
-      setIsLoading(false);
-    }
+    navigate(path);
+    setIsLoading(false);
   };
 
   const displayLabel =
@@ -160,22 +155,22 @@ export const ShopSwitcher = () => {
             {/* Divider */}
             <div className="border-t border-border my-1" />
 
-            {/* Individual shops */}
-            {shops.length === 0 ? (
+            {/* Individual branches */}
+            {branches.length === 0 ? (
               <div className="flex items-center justify-center gap-2 px-3 py-3 text-sm text-text-muted">
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Loading shops…
+                Loading branches…
               </div>
             ) : (
-              shops.map((shop) => {
-                const isSelected = activeShop?._id === shop._id;
+              branches.map((branch) => {
+                const isSelected = activeShop?._id === branch.id;
                 return (
                   <button
-                    key={shop._id}
+                    key={branch.id}
                     type="button"
                     role="option"
                     aria-selected={isSelected}
-                    onClick={() => handleContextSwitch(shop._id, '/dashboard/shop-admin')}
+                    onClick={() => handleContextSwitch(branch, '/dashboard/shop-admin')}
                     className={`w-full flex items-center gap-3 px-3 py-2 text-sm text-left transition-colors duration-fast ${
                       isSelected
                         ? 'bg-primary/10 text-primary font-medium'
@@ -183,7 +178,7 @@ export const ShopSwitcher = () => {
                     }`}
                   >
                     <Store className="w-4 h-4 flex-shrink-0" />
-                    <span className="flex-1 truncate">{shop.name}</span>
+                    <span className="flex-1 truncate">{branch.name} ({branch.code})</span>
                     {isSelected && (
                       <Check className="w-3.5 h-3.5 flex-shrink-0 text-primary" />
                     )}

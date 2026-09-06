@@ -13,10 +13,9 @@ import { DailySalesModal } from './DailySalesModal';
 import { useQuery } from '@tanstack/react-query';
 import { dashboardApi } from '@/services/dashboard.api';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import { useTenantQueryKeys } from '@/lib/react-query/useTenantQueryKeys';
+import { queryKeys } from '@/lib/react-query/queryKeys';
 
 export const ShopAdminDashboard = () => {
-  const keys = useTenantQueryKeys();
   const [filter, setFilter] = useState<'today' | 'week' | 'month'>('today');
   const [isDailySalesModalOpen, setIsDailySalesModalOpen] = useState(false);
 
@@ -45,7 +44,7 @@ export const ShopAdminDashboard = () => {
     isLoading: isMetricsLoading,
     refetch: refetchMetrics,
   } = useQuery({
-    queryKey: keys.dashboard,
+    queryKey: queryKeys.dashboard,
     queryFn: () => dashboardApi.getMetrics(),
     staleTime: 30000,
     retry: 1,

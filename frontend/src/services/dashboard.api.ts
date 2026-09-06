@@ -1,4 +1,4 @@
-import axiosInstance from '@/lib/api/axios';
+import { isTauriEnvironment, tauriClient } from '@/lib/tauri/tauriClient';
 
 export interface DashboardMetrics {
   summary: {
@@ -56,19 +56,66 @@ export interface HourlyBreakdownData {
 }
 
 export const dashboardApi = {
-  getMetrics: async () => {
-    const response = await axiosInstance.get<{
-      success: boolean;
-      data: DashboardMetrics;
-    }>('/api/v1/dashboard/metrics');
-    return response.data;
-  },
-  getHourlyBreakdown: async (params?: { date?: string }) => {
-    const response = await axiosInstance.get<{
-      success: boolean;
-      data: HourlyBreakdownData;
-    }>('/api/v1/dashboard/hourly-breakdown', { params });
-    return response.data;
-  }
-};
+  getMetrics: async (): Promise<{ success: boolean; data: DashboardMetrics }> => {
+    if (isTauriEnvironment()) {
+      const stats = await tauriClient.organizationGetDashboardStats();
+      return {
+        success: true,
+        data: {
+          summary: {
+            revenue: {
+              today: 0,
+              thisMonth: 0,
+              total: 0,
+              growth: 0,
+            },
+            profit: {
+              today: 0,
+              thisMonth: 0,
+              total: 0,
+            },
+            orders: {
+              today: 0,
+              total: 0,
+            },
+            inventory: {
+              totalProducts: stats.product_count,
+              lowStockItems: stats.low_stock_count,
+            },
+            customers: {
+              total: 0,
+              pendingPayments: 0,
+              totalRefunds: 0,
+            },
+          },
+          topProducts: [],
+        },
+      };
+    }
 
+    return {
+      success: true,
+      data: {
+        summary: {
+          revenue: { today: 0, thisMonth: 0, total: 0, growth: 0 },
+          profit: { today: 0, thisMonth: 0, total: 0 },
+          orders: { today: 0, total: 0 },
+          inventory: { totalProducts: 0, lowStockItems: 0 },
+          customers: { total: 0, pendingPayments: 0, totalRefunds: 0 },
+        },
+        topProducts: [],
+      },
+    };
+  },
+
+  getHourlyBreakdown: async (_params?: { date?: string }): Promise<{ success: boolean; data: HourlyBreakdownData }> => {
+    return {
+      success: true,
+      data: {
+        hourlySales: [],
+        categorySales: [],
+        topProduct: null,
+      },
+    };
+  },
+};

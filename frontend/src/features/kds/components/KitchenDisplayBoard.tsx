@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { salesApi } from '@/services/sales.api';
-import { useTenantQueryKeys } from '@/lib/react-query/useTenantQueryKeys';
+import { queryKeys } from '@/lib/react-query/queryKeys';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
 import { usePrintStore } from '@/lib/printer';
@@ -73,7 +73,6 @@ function formatElapsedTime(minutes: number): string {
 
 export const KitchenDisplayBoard: React.FC = () => {
   const queryClient = useQueryClient();
-  const keys = useTenantQueryKeys();
   const { user } = useAuthStore();
   const { settings, shopHeader, fetchSettings } = usePrinterStore();
   const { openPreview } = usePrintStore();
@@ -107,7 +106,7 @@ export const KitchenDisplayBoard: React.FC = () => {
     refetch, 
     error 
   } = useQuery({
-    queryKey: keys.ordersToday,
+    queryKey: queryKeys.ordersToday,
     queryFn: () => salesApi.getOrders({ limit: 50 }),
     refetchInterval: autoRefreshInterval > 0 ? autoRefreshInterval : false,
     staleTime: 5000,
@@ -128,7 +127,7 @@ export const KitchenDisplayBoard: React.FC = () => {
     mutationFn: ({ orderId, status }: { orderId: string; status: string }) => 
       salesApi.updateOrderStatus(orderId, status),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: keys.ordersToday });
+      queryClient.invalidateQueries({ queryKey: queryKeys.ordersToday });
       const label = variables.status === 'cooking' ? 'Preparing' : variables.status === 'ready' ? 'Ready for Pickup' : 'Completed';
       toast.success(`Order status updated to ${label}`);
     },

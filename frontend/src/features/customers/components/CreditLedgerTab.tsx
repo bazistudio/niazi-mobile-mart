@@ -9,17 +9,16 @@ import { LedgerTable } from './ledger/LedgerTable';
 import { ReceivePaymentModal } from './ledger/ReceivePaymentModal';
 import { MessageCircle } from 'lucide-react';
 import { format } from 'date-fns';
-import { useTenantQueryKeys } from '@/lib/react-query/useTenantQueryKeys';
+import { queryKeys } from '@/lib/react-query/queryKeys';
 
 export const CreditLedgerTab = () => {
-  const keys = useTenantQueryKeys();
   const [selectedMonth, setSelectedMonth] = useState('All Time'); // Simplified for V1
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
 
   // 1. Fetch Customers
   const { data: customerResponse } = useQuery({
-    queryKey: keys.customers,
+    queryKey: queryKeys.customers.all,
     queryFn: () => customerApi.getCustomers(),
     staleTime: 30000,
     retry: 1,
@@ -41,7 +40,7 @@ export const CreditLedgerTab = () => {
 
   // 2. Fetch Ledger Entries for selected customer
   const { data: ledgerResponse } = useQuery({
-    queryKey: keys.ledger('CUSTOMER', selectedCustomerId!),
+    queryKey: queryKeys.ledger('CUSTOMER', selectedCustomerId!),
     queryFn: () => ledgerApi.getCustomerLedger(selectedCustomerId!),
     enabled: !!selectedCustomerId,
     staleTime: 30000,

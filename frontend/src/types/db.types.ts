@@ -82,7 +82,7 @@ export interface DBReconciliation {
 
 export interface DBCustomer {
   id: string;
-  _id?: string; // Mongoose ID
+  _id?: string; // Legacy ID compatibility
   accountCode: string;
   name: string;
   mobile: string;

@@ -1,5 +1,5 @@
 import React from 'react';
-import { DashboardData } from '@/lib/api/organization.api';
+import { DashboardData } from '@/features/organization/types/dashboard.types';
 import { Store, Users } from 'lucide-react';
 
 export const ShopUsageCard = ({ shops, employees }: { shops: DashboardData['shops'], employees: DashboardData['employees'] }) => {

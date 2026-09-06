@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { tauriClient, isTauriEnvironment } from "@/lib/tauri/tauriClient";
-import axios from "@/lib/api/axios";
 import {
   User,
   Lock,
@@ -67,11 +66,7 @@ export function SignupPage() {
           password: formData.password,
         });
       } else {
-        await axios.post("/api/v1/auth/signup", {
-          name: cleanName,
-          username: cleanUsername,
-          password: formData.password,
-        });
+        throw new Error("Desktop application requires Tauri runtime environment.");
       }
 
       // Successful registration results in PENDING status

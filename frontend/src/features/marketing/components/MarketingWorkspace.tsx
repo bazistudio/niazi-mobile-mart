@@ -20,8 +20,8 @@ import {
   Copy
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { queryKeys } from '@/lib/react-query/queryKeys';
 import { customerApi } from '@/services/customer.api';
-import { useTenantQueryKeys } from '@/lib/react-query/useTenantQueryKeys';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { DBCustomer } from '@/types/db.types';
 import toast from 'react-hot-toast';
@@ -64,7 +64,6 @@ const DEFAULT_TEMPLATES: MessageTemplate[] = [
 ];
 
 export const MarketingWorkspace: React.FC = () => {
-  const keys = useTenantQueryKeys();
   const activeShop = useOrganizationStore(state => state.activeShop);
 
   const [channel, setChannel] = useState<ChannelType>('sms');
@@ -77,7 +76,7 @@ export const MarketingWorkspace: React.FC = () => {
 
   // Fetch real customer database
   const { data: customerResponse, isLoading, error } = useQuery({
-    queryKey: keys.customers,
+    queryKey: queryKeys.customers.all,
     queryFn: () => customerApi.getCustomers(1, 300),
     staleTime: 60000,
   });

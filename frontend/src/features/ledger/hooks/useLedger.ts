@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ledgerApi } from '@/services/ledger.api';
-import { useTenantQueryKeys } from '@/lib/react-query/useTenantQueryKeys';
+import { queryKeys } from '@/lib/react-query/queryKeys';
 
 export type PartyType = 'CUSTOMER' | 'SUPPLIER';
 
@@ -19,7 +19,6 @@ export function useLedger(initialParty?: SelectedParty | null) {
   const [selectedParty, setSelectedParty] = useState<SelectedParty | null>(initialParty || null);
   const [activeTab, setActiveTab] = useState<LedgerBookTab>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const keys = useTenantQueryKeys();
 
   // Sync state with incoming props
   React.useEffect(() => {
@@ -30,7 +29,7 @@ export function useLedger(initialParty?: SelectedParty | null) {
 
   // Fetch Ledger data for selected party
   const { data: ledgerResponse, isLoading: isLedgerLoading, refetch: refetchLedger } = useQuery({
-    queryKey: keys.ledger(selectedParty?.type, selectedParty?.id),
+    queryKey: queryKeys.ledger(selectedParty?.type, selectedParty?.id),
     queryFn: () => ledgerApi.getPartyLedger(selectedParty!.id, selectedParty!.type),
     enabled: !!selectedParty,
   });

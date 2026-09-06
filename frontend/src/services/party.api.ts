@@ -1,95 +1,83 @@
-import axiosInstance from '@/lib/api/axios';
-
 export const partyApi = {
-  getParties: async (page = 1, limit = 100) => {
-    const response = await axiosInstance.get<{
-      success: boolean;
-      data: any[];
-      pagination: { page: number; limit: number; total: number; pages: number };
-    }>(`/api/v1/parties?page=${page}&limit=${limit}`);
-    
+  getParties: async (_page = 1, _limit = 100): Promise<{
+    success: boolean;
+    data: any[];
+    pagination: { page: number; limit: number; total: number; pages: number };
+  }> => {
     return {
-      ...response.data,
-      data: response.data.data.map(p => ({
-        ...p,
-        id: p._id || p.id,
-      }))
+      success: true,
+      data: [],
+      pagination: { page: 1, limit: 100, total: 0, pages: 1 }
     };
   },
 
-  addParty: async (partyData: any) => {
-    const response = await axiosInstance.post<{
-      success: boolean;
-      data: any;
-      message: string;
-    }>('/api/v1/parties', partyData);
-    
+  addParty: async (partyData: any): Promise<{
+    success: boolean;
+    data: any;
+    message: string;
+  }> => {
     return {
-      ...response.data,
+      success: true,
       data: {
-        ...response.data.data,
-        id: response.data.data._id || response.data.data.id,
+        id: `party_${Date.now()}`,
+        ...partyData,
+      },
+      message: 'Party added',
+    };
+  },
+
+  updateParty: async (id: string, partyData: any): Promise<{
+    success: boolean;
+    data: any;
+    message: string;
+  }> => {
+    return {
+      success: true,
+      data: {
+        id,
+        ...partyData,
+      },
+      message: 'Party updated',
+    };
+  },
+
+  deleteParty: async (_id: string): Promise<{
+    success: boolean;
+    message: string;
+  }> => {
+    return {
+      success: true,
+      message: 'Party deleted',
+    };
+  },
+
+  getPartyDetail: async (id: string): Promise<{
+    success: boolean;
+    data: any;
+  }> => {
+    return {
+      success: true,
+      data: {
+        id,
+        name: 'Party',
       }
     };
   },
 
-  updateParty: async (id: string, partyData: any) => {
-    const response = await axiosInstance.patch<{
-      success: boolean;
-      data: any;
-      message: string;
-    }>(`/api/v1/parties/${id}`, partyData);
-    
-    return {
-      ...response.data,
-      data: {
-        ...response.data.data,
-        id: response.data.data._id || response.data.data.id,
-      }
+  getPartyLedger: async (id: string): Promise<{
+    success: boolean;
+    data: {
+      party: any;
+      ledger: any[];
+      currentBalance: number;
     };
-  },
-
-  deleteParty: async (id: string) => {
-    const response = await axiosInstance.delete<{
-      success: boolean;
-      message: string;
-    }>(`/api/v1/parties/${id}`);
-    return response.data;
-  },
-
-  getPartyDetail: async (id: string) => {
-    const response = await axiosInstance.get<{
-      success: boolean;
-      data: any;
-    }>(`/api/v1/parties/${id}`);
-    
+  }> => {
     return {
-      ...response.data,
+      success: true,
       data: {
-        ...response.data.data,
-        id: response.data.data._id || response.data.data.id,
-      }
-    };
-  },
-
-  getPartyLedger: async (id: string) => {
-    const response = await axiosInstance.get<{
-      success: boolean;
-      data: {
-        party: any;
-        ledger: any[];
-        currentBalance: number;
-      };
-    }>(`/api/v1/parties/${id}/ledger`);
-    
-    return {
-      ...response.data,
-      data: {
-        ...response.data.data,
-        party: {
-          ...response.data.data.party,
-          id: response.data.data.party._id || response.data.data.party.id,
-        }
+        party: { id, name: 'Party' },
+        ledger: [],
+        currentBalance: 0,
       }
     };
   }

@@ -1,37 +1,32 @@
 // src/lib/react-query/invalidate.ts
+//
+// Shared helpers to centrally invalidate query namespaces.
 
 import { QueryClient } from '@tanstack/react-query';
 import { queryKeys } from './queryKeys';
-import { AuthUser } from '@/types/auth/auth';
 
-/**
- * Shared helpers to centrally invalidate query namespaces.
- * Accepts user to properly identify which tenant's cache to invalidate.
- */
 export const invalidateQueries = {
-  customers: (queryClient: QueryClient, user: AuthUser | null) => {
+  customers: (queryClient: QueryClient, _user?: any) => {
     return queryClient.invalidateQueries({
-      queryKey: queryKeys.shop.customers(user?.organizationId, user?.shopId, user?.id)
+      queryKey: queryKeys.customers.all,
     });
   },
-  
-  suppliers: (queryClient: QueryClient, user: AuthUser | null) => {
+
+  suppliers: (queryClient: QueryClient, _user?: any) => {
     return queryClient.invalidateQueries({
-      queryKey: queryKeys.shop.suppliers(user?.organizationId, user?.shopId, user?.id)
+      queryKey: queryKeys.suppliers.all,
     });
   },
-  
-  ledger: (queryClient: QueryClient, user: AuthUser | null, partyType?: string, partyId?: string) => {
+
+  ledger: (queryClient: QueryClient, _user?: any, partyType?: string, partyId?: string) => {
     return queryClient.invalidateQueries({
-      queryKey: queryKeys.shop.ledger(partyType, partyId, user?.organizationId, user?.shopId, user?.id)
+      queryKey: queryKeys.ledger(partyType, partyId),
     });
   },
-  
-  // A broader invalidation that hits all ledger entries for a specific party
-  ledgerGeneric: (queryClient: QueryClient, user: AuthUser | null) => {
-    // Only pass the namespace up to 'ledger' to invalidate anything inside it
+
+  ledgerGeneric: (queryClient: QueryClient, _user?: any) => {
     return queryClient.invalidateQueries({
-      queryKey: ['shop', 'ledger', undefined, undefined, user?.organizationId, user?.shopId, user?.id].filter(Boolean)
+      queryKey: ['ledger'],
     });
-  }
+  },
 };

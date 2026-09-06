@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Loader2 } from 'lucide-react';
-import { createOrganizationShop } from '@/lib/api/organization.api';
+import { shopApi } from '@/services/shop.api';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 
 interface AddShopModalProps {
@@ -28,21 +28,16 @@ export const AddShopModal: React.FC<AddShopModalProps> = ({ isOpen, onClose, onS
       setError('Shop Name is required');
       return;
     }
-    
-    if (!user?.organizationId) {
-      setError('Organization context missing');
-      return;
-    }
 
     try {
       setLoading(true);
       setError(null);
-      await createOrganizationShop(user.organizationId, formData);
+      await shopApi.createShop(formData);
       onSuccess();
       onClose();
       setFormData({ name: '', phone: '', address: '', city: '' });
     } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Failed to create shop');
+      setError(err?.response?.data?.message || err?.message || 'Failed to create shop');
     } finally {
       setLoading(false);
     }

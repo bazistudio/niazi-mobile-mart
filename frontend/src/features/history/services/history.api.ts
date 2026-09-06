@@ -1,19 +1,23 @@
 import { HistoryItem, HistoryStats, HistoryFilterParams, LedgerTraceItem } from '../types/history.types';
-import axiosInstance from '@/lib/api/axios';
 
 export const historyApi = {
-  getHistory: async (filters: HistoryFilterParams): Promise<{ data: HistoryItem[], total: number }> => {
-    const { data } = await axiosInstance.get('/api/v1/history', { params: filters });
-    return data;
+  getHistory: async (_filters: HistoryFilterParams): Promise<{ data: HistoryItem[], total: number }> => {
+    return {
+      data: [],
+      total: 0,
+    };
   },
 
   getStats: async (): Promise<HistoryStats> => {
-    const { data } = await axiosInstance.get('/api/v1/history/stats');
-    return data;
+    return {
+      totalTransactions: 0,
+      totalSales: 0,
+      totalReturns: 0,
+      totalVoids: 0,
+    };
   },
 
-  getLedgerTrace: async (id: string): Promise<LedgerTraceItem[]> => {
-    const { data } = await axiosInstance.get(`/api/v1/history/trace/${id}`);
-    return data;
+  getLedgerTrace: async (_id: string): Promise<LedgerTraceItem[]> => {
+    return [];
   }
 };

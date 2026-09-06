@@ -1,5 +1,5 @@
 import React from 'react';
-import { DashboardData } from '@/lib/api/organization.api';
+import { DashboardData } from '@/features/organization/types/dashboard.types';
 import { AlertTriangle, Activity, Package } from 'lucide-react';
 
 export const InventoryAlertCard = ({ inventory }: { inventory: DashboardData['inventory'] }) => {

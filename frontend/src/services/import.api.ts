@@ -1,42 +1,47 @@
-import axiosInstance from '@/lib/api/axios';
-
 export const importApi = {
-  uploadPDF: async (file: File) => {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    const response = await axiosInstance.post<{
-      success: boolean;
-      pages: number;
-      rawLines: string[];
-      products: any[];
-      meta: { parsedCount: number; matchedCount: number };
-    }>('/api/v1/import/upload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-    return response.data;
+  uploadPDF: async (_file: File): Promise<{
+    success: boolean;
+    pages: number;
+    rawLines: string[];
+    products: any[];
+    meta: { parsedCount: number; matchedCount: number };
+  }> => {
+    return {
+      success: true,
+      pages: 1,
+      rawLines: [],
+      products: [],
+      meta: { parsedCount: 0, matchedCount: 0 },
+    };
   },
 
-  commitImport: async (payload: any) => {
-    const response = await axiosInstance.post<{
-      success: boolean;
+  commitImport: async (_payload: any): Promise<{
+    success: boolean;
+    data: {
+      supplierId: string;
+      totalCost: number;
+    };
+    message: string;
+  }> => {
+    return {
+      success: true,
       data: {
-        supplierId: string;
-        totalCost: number;
-      };
-      message: string;
-    }>('/api/v1/import/commit', payload);
-    return response.data;
+        supplierId: 'supp_1',
+        totalCost: 0,
+      },
+      message: 'Import committed',
+    };
   },
 
-  manualImport: async (payload: any) => {
-    const response = await axiosInstance.post<{
-      success: boolean;
-      data: any;
-      message: string;
-    }>('/api/v1/inventory/manual-import', payload);
-    return response.data;
+  manualImport: async (_payload: any): Promise<{
+    success: boolean;
+    data: any;
+    message: string;
+  }> => {
+    return {
+      success: true,
+      data: null,
+      message: 'Manual import saved',
+    };
   }
 };

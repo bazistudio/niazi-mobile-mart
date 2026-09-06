@@ -5,7 +5,7 @@ import { Search, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { customerApi } from '@/services/customer.api';
 import { DBCustomer } from '@/types/db.types';
-import { useTenantQueryKeys } from '@/lib/react-query/useTenantQueryKeys';
+import { queryKeys } from '@/lib/react-query/queryKeys';
 
 interface Props {
   onClose: () => void;
@@ -16,10 +16,9 @@ export const CreditCustomerModal: React.FC<Props> = ({ onClose, onSelect }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  const keys = useTenantQueryKeys();
 
   const { data: customerResponse, isLoading } = useQuery({
-    queryKey: keys.customers,
+    queryKey: queryKeys.customers.all,
     queryFn: () => customerApi.getCustomers(),
     staleTime: 30000,
     retry: 1,

@@ -7,21 +7,20 @@ import { customerApi } from '@/services/customer.api';
 import { useNavigate } from 'react-router-dom';
 import { CustomerFormDrawer } from './modals/AddCustomerDrawer';
 import toast from 'react-hot-toast';
-import { useTenantQueryKeys } from '@/lib/react-query/useTenantQueryKeys';
+import { queryKeys } from '@/lib/react-query/queryKeys';
 import { invalidateQueries } from '@/lib/react-query/invalidate';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 
 export const CustomersTab = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const keys = useTenantQueryKeys();
   const { user } = useAuthStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<any>(null);
 
   const { data: customerResponse, isLoading } = useQuery({
-    queryKey: keys.customers,
+    queryKey: queryKeys.customers.all,
     queryFn: () => customerApi.getCustomers(),
     staleTime: 30000,
     retry: 1,

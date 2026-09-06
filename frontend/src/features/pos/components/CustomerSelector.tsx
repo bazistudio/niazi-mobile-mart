@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { customerApi } from '@/services/customer.api';
 import { salesApi } from '@/services/sales.api';
 import { usePosStore, SaleCustomer } from '../store/usePosStore';
-import { useTenantQueryKeys } from '@/lib/react-query/useTenantQueryKeys';
+import { queryKeys } from '@/lib/react-query/queryKeys';
 import { DBCustomer } from '@/types/db.types';
 
 export const CustomerSelector: React.FC = () => {
@@ -26,13 +26,11 @@ export const CustomerSelector: React.FC = () => {
     ? activeSession.customer
     : null;
 
-  const keys = useTenantQueryKeys();
-
   // ──────────────────────────────────────────────────────────────────────────
   // 1. Customer Search Query
   // ──────────────────────────────────────────────────────────────────────────
   const { data: customerResponse, isLoading: isCustomersLoading } = useQuery({
-    queryKey: keys.customerSearch(searchTerm),
+    queryKey: queryKeys.customers.search(searchTerm),
     queryFn: () => customerApi.searchCustomers(searchTerm),
     enabled: searchMode === 'customer' && searchTerm.trim().length > 0,
     staleTime: 60000,

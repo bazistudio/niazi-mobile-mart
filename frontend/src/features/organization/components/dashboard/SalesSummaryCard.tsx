@@ -1,5 +1,5 @@
 import React from 'react';
-import { DashboardData } from '@/lib/api/organization.api';
+import { DashboardData } from '@/features/organization/types/dashboard.types';
 import { TrendingUp, DollarSign } from 'lucide-react';
 
 export const SalesSummaryCard = ({ sales }: { sales: DashboardData['sales'] }) => {

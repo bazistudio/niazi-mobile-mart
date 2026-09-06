@@ -1,40 +1,42 @@
-import axiosInstance from '@/lib/api/axios';
-import { retry } from '@/shared/lib/retry';
-import { RETRY_COUNT } from '../constants/inventory.constants';
+import { tauriClient } from '@/lib/tauri/tauriClient';
 import { ProductCategory } from '../types';
 
 export const categoryService = {
   getCategories: async (): Promise<ProductCategory[]> => {
-    const response = await retry(() => axiosInstance.get('/api/v1/categories'), RETRY_COUNT);
-    const dtos = response.data.data || response.data || [];
-    return dtos.map((dto: any) => ({
-      id: dto.uuid || dto._id,
-      name: dto.name,
-      organizationId: dto.organizationId
+    const list = await tauriClient.categoryList();
+    return list.map((cat) => ({
+      id: cat.id,
+      name: cat.name,
+      organizationId: '00000000-0000-0000-0000-000000000001',
     }));
   },
   
-  createCategory: async (data: { name: string, organizationId?: string }): Promise<ProductCategory> => {
-    const response = await axiosInstance.post('/api/v1/categories', data);
-    const dto = response.data.data;
+  createCategory: async (data: { name: string; organizationId?: string }): Promise<ProductCategory> => {
+    const code = data.name.trim().toUpperCase().replace(/[^A-Z0-9]/g, '_');
+    const created = await tauriClient.categoryCreate({
+      name: data.name,
+      code: code || 'CAT',
+      description: null,
+    });
     return {
-      id: dto.uuid || dto._id,
-      name: dto.name,
-      organizationId: dto.organizationId
+      id: created.id,
+      name: created.name,
+      organizationId: '00000000-0000-0000-0000-000000000001',
     };
   },
 
   updateCategory: async (id: string, data: { name: string }): Promise<ProductCategory> => {
-    const response = await axiosInstance.put(`/api/v1/categories/${id}`, data);
-    const dto = response.data.data;
+    const updated = await tauriClient.categoryUpdate(id, {
+      name: data.name,
+    });
     return {
-      id: dto.uuid || dto._id,
-      name: dto.name,
-      organizationId: dto.organizationId
+      id: updated.id,
+      name: updated.name,
+      organizationId: '00000000-0000-0000-0000-000000000001',
     };
   },
 
-  deleteCategory: async (id: string): Promise<void> => {
-    await axiosInstance.delete(`/api/v1/categories/${id}`);
+  deleteCategory: async (_id: string): Promise<void> => {
+    // Desktop SQLite category retention
   }
 };

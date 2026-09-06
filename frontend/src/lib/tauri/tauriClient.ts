@@ -525,7 +525,75 @@ export const tauriClient = {
     }
     return [];
   },
+
+  // ── Organization & Branch Operations ──────────────────────────────────────
+  async branchList(): Promise<Branch[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Branch[]>('branch_list');
+    }
+    return [
+      {
+        id: '00000000-0000-0000-0000-000000000002',
+        organization_id: '00000000-0000-0000-0000-000000000001',
+        name: 'Main Branch',
+        code: 'MAIN',
+        is_active: true,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      },
+    ];
+  },
+
+  async branchGetMain(): Promise<Branch | null> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Branch | null>('branch_get_main');
+    }
+    return {
+      id: '00000000-0000-0000-0000-000000000002',
+      organization_id: '00000000-0000-0000-0000-000000000001',
+      name: 'Main Branch',
+      code: 'MAIN',
+      is_active: true,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    };
+  },
+
+  async organizationGetDashboardStats(): Promise<OrganizationDashboardStats> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<OrganizationDashboardStats>('organization_get_dashboard_stats');
+    }
+    return {
+      product_count: 0,
+      category_count: 0,
+      active_staff_count: 1,
+      low_stock_count: 0,
+      active_branch_count: 1,
+    };
+  },
 };
+
+// ── Type Definitions for Organization & Branch ──────────────────────────────
+export interface Branch {
+  id: string;
+  organization_id: string;
+  name: string;
+  code: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrganizationDashboardStats {
+  product_count: number;
+  category_count: number;
+  active_staff_count: number;
+  low_stock_count: number;
+  active_branch_count: number;
+}
 
 // ── Type Definitions for Catalog & Inventory Foundation ─────────────────────
 export interface Category {

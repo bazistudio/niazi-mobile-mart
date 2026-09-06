@@ -1,5 +1,3 @@
-import api from './axios';
-
 export interface DashboardData {
   organization: {
     name: string;
@@ -33,22 +31,3 @@ export interface DashboardData {
     date: string;
   }>;
 }
-
-export const getOrganizationDashboard = async (orgId: string): Promise<DashboardData> => {
-  const response = await api.get(`/api/v1/organizations/${orgId}/dashboard`);
-  return response.data.data;
-};
-
-export const createOrganizationShop = async (orgId: string, payload: {
-  name: string;
-  phone?: string;
-  address?: string;
-  city?: string;
-}) => {
-  const response = await api.post(`/api/v1/shops`, {
-    ...payload,
-    organizationId: orgId
-  });
-  return response.data.data;
-};
-

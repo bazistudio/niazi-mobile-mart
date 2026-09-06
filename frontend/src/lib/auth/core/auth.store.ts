@@ -4,7 +4,6 @@ import { create } from "zustand";
 import { AuthUser } from "@/types/auth/auth";
 import { AuthSession } from "@/types/auth/session";
 import { setSession, clearSession } from "@/lib/auth/core/auth.session";
-import axiosInstance from "@/lib/api/axios";
 import { getQueryClient } from "@/components/providers/ReactQueryProvider";
 import { isTauriEnvironment, tauriClient } from "@/lib/tauri/tauriClient";
 
@@ -66,10 +65,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       } catch (err) {
         console.warn("[Tauri authLogout error]", err);
       }
-    } else {
-      try {
-        await axiosInstance.post("/api/v1/auth/logout");
-      } catch { /* ignore */ }
     }
     clearSession();
     getQueryClient().clear();

@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "@/lib/auth/core/auth.store";
 import { loginUser } from "@/lib/auth/core/auth.client";
+import { tauriClient } from "@/lib/tauri/tauriClient";
 import type { LoginFormData } from "@/lib/auth/auth.schema";
 import {
   Mail,
@@ -141,10 +142,6 @@ export function LoginForm() {
                   onClick={() => {
                     setMode("forgot");
                     setError(null);
-                    setForgotError(null);
-                    if (formData.identifier) {
-                      setForgotIdentifier(formData.identifier);
-                    }
                   }}
                   className="text-xs font-medium text-[#006970] hover:text-[#004f54] hover:underline transition-colors focus:outline-none cursor-pointer"
                 >

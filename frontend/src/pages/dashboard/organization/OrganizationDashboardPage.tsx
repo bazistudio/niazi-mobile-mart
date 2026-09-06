@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
-import { getOrganizationDashboard, DashboardData } from '@/lib/api/organization.api';
-import { CreateShopWizard } from '@/features/organization/components/onboarding/CreateShopWizard';
+import { tauriClient, OrganizationDashboardStats } from '@/lib/tauri/tauriClient';
 import { SubscriptionCard } from '@/features/organization/components/dashboard/SubscriptionCard';
 import { ShopUsageCard } from '@/features/organization/components/dashboard/ShopUsageCard';
 import { SalesSummaryCard } from '@/features/organization/components/dashboard/SalesSummaryCard';
@@ -12,7 +11,7 @@ import { Loader2 } from 'lucide-react';
 export function OrganizationDashboardPage() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [stats, setStats] = useState<OrganizationDashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,22 +19,18 @@ export function OrganizationDashboardPage() {
     try {
       setLoading(true);
       setError(null);
-      if (!user?.organizationId) throw new Error('Organization ID not found in session');
-      
-      const dashboardData = await getOrganizationDashboard(user.organizationId);
-      setData(dashboardData);
+      const dashboardStats = await tauriClient.organizationGetDashboardStats();
+      setStats(dashboardStats);
     } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Failed to load dashboard');
+      setError(err.message || 'Failed to load dashboard metrics from SQLite');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (user) {
-      fetchDashboard();
-    }
-  }, [user]);
+    fetchDashboard();
+  }, []);
 
   if (loading) {
     return (
@@ -49,21 +44,29 @@ export function OrganizationDashboardPage() {
     return <div className="p-8 text-red-500">Error: {error}</div>;
   }
 
-  if (!data) return null;
-
-  // Onboarding Flow Check
-  if (data.shops.current === 0) {
-    return (
-      <div className="p-4 lg:p-8 bg-gray-50 dark:bg-gray-900 min-h-full">
-        <CreateShopWizard 
-          organizationId={user!.organizationId!} 
-          onSuccess={() => {
-            fetchDashboard();
-          }} 
-        />
-      </div>
-    );
-  }
+  const data = {
+    organization: {
+      name: 'Niazi Mobile Mart',
+      code: 'MAIN',
+      owner: user?.name || 'Administrator',
+    },
+    shops: {
+      current: stats?.active_branch_count || 1,
+      limit: 'Unlimited' as const,
+    },
+    employees: {
+      total: stats?.active_staff_count || 1,
+    },
+    sales: {
+      today: 0,
+      month: 0,
+      total: 0,
+    },
+    inventory: {
+      lowStockProducts: stats?.low_stock_count || 0,
+    },
+    recentActivity: [],
+  };
 
   return (
     <div className="p-4 lg:p-8 max-w-7xl mx-auto space-y-6 bg-gray-50/50 dark:bg-gray-950/50 min-h-full">

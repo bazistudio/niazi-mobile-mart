@@ -5,7 +5,6 @@ import { SettingsInput } from '@/features/settings/components/SettingsInput';
 import { SettingsSelect } from '@/features/settings/components/SettingsSelect';
 import { SettingsToggle } from '@/features/settings/components/SettingsToggle';
 import { Button } from '@/components/ui/Button';
-import axiosInstance from '@/lib/api/axios';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 import toast from 'react-hot-toast';
@@ -63,30 +62,26 @@ export const GeneralSettingsPage: React.FC = () => {
 
   useEffect(() => {
     let isMounted = true;
-    const loadSettings = async () => {
+    const loadSettings = () => {
       try {
         setIsLoading(true);
-        const res = await axiosInstance.get('/api/v1/settings');
-        if (isMounted && res.data) {
-          const data = res.data;
+        const saved = typeof window !== 'undefined' ? localStorage.getItem('niazi_desktop_settings') : null;
+        if (isMounted && saved) {
+          const data = JSON.parse(saved);
           setSettings(prev => ({
             ...prev,
             business: {
               ...prev.business,
-              name: data.shopHeader?.name || activeShop?.name || prev.business.name,
-              address: data.shopHeader?.address || (activeShop as any)?.address || prev.business.address,
-              phone: data.shopHeader?.phone || (activeShop as any)?.phone || prev.business.phone,
-              email: data.shopHeader?.email || (activeShop as any)?.email || prev.business.email,
-              logoUrl: data.shopHeader?.logoUrl || prev.business.logoUrl,
+              ...data.business,
             },
             preferences: {
               ...prev.preferences,
-              language: data.language === 'ur' ? 'Urdu' : data.language === 'ar' ? 'Arabic' : 'English',
+              ...data.preferences,
             }
           }));
         }
       } catch (err: any) {
-        console.error('Failed to load shop settings:', err);
+        console.error('Failed to load shop settings from local storage:', err);
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -120,18 +115,14 @@ export const GeneralSettingsPage: React.FC = () => {
   const handleSave = async () => {
     try {
       setIsSaving(true);
-      await axiosInstance.put('/api/v1/settings', {
-        shopHeader: {
-          name: settings.business.name,
-          address: settings.business.address,
-          phone: settings.business.phone,
-          email: settings.business.email,
-          logoUrl: settings.business.logoUrl,
-        },
-        language: settings.preferences.language.toLowerCase().startsWith('ur') ? 'ur' : settings.preferences.language.toLowerCase().startsWith('ar') ? 'ar' : 'en'
-      });
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('niazi_desktop_settings', JSON.stringify({
+          business: settings.business,
+          preferences: settings.preferences,
+        }));
+      }
       setHasChanges(false);
-      toast.success('Settings saved successfully');
+      toast.success('Settings saved locally');
     } catch (err: any) {
       console.error('Failed to save settings:', err);
       toast.error(err.response?.data?.message || err.message || 'Failed to save settings');

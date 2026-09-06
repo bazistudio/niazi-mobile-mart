@@ -76,6 +76,10 @@ pub fn run() {
             commands::inventory::inventory_get_stock,
             commands::inventory::inventory_get_movements,
             commands::inventory::inventory_get_low_stock,
+            // Organization & Branch Commands
+            commands::organization::branch_list,
+            commands::organization::branch_get_main,
+            commands::organization::organization_get_dashboard_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Niazi Mobile Mart Tauri application");

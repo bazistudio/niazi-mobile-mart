@@ -6,7 +6,7 @@ use tokio::sync::RwLock;
 use crate::db::connection::DatabaseConnection;
 use crate::domain::access_control::StaffAccessProfile;
 use crate::domain::user::{User, UserRole};
-use crate::repositories::SQLiteUserRepository;
+use crate::repositories::{BranchRepository, SQLiteUserRepository};
 use crate::services::{CatalogService, InventoryService, ProductService};
 
 /// Native application session context owned and strictly enforced by Rust
@@ -42,6 +42,7 @@ pub struct AppState {
     pub session: Arc<RwLock<SessionContext>>,
     pub db: DatabaseConnection,
     pub user_repo: SQLiteUserRepository,
+    pub branch_repo: BranchRepository,
     pub catalog_service: CatalogService,
     pub product_service: ProductService,
     pub inventory_service: InventoryService,
@@ -52,6 +53,7 @@ impl AppState {
     /// Creates AppState with an existing DatabaseConnection
     pub fn new(app_version: impl Into<String>, db: DatabaseConnection) -> Self {
         let user_repo = SQLiteUserRepository::new(db.clone());
+        let branch_repo = BranchRepository::new(db.clone());
         let catalog_service = CatalogService::new(db.clone());
         let product_service = ProductService::new(db.clone());
         let inventory_service = InventoryService::new(db.clone());
@@ -61,6 +63,7 @@ impl AppState {
             session: Arc::new(RwLock::new(SessionContext::default())),
             db,
             user_repo,
+            branch_repo,
             catalog_service,
             product_service,
             inventory_service,

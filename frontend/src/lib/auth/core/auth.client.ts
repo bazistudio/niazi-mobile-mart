@@ -1,9 +1,8 @@
 // /lib/auth/core/auth.client.ts
 
-import axiosInstance from "@/lib/api/axios";
 import { AuthUser } from "@/types/auth/auth";
 import { AuthSession } from "@/types/auth/session";
-import { getDeviceId, setSession, clearSession } from "./auth.session";
+import { setSession, clearSession } from "./auth.session";
 import { isTauriEnvironment, tauriClient } from "@/lib/tauri/tauriClient";
 
 export interface LoginResponse {
@@ -13,24 +12,11 @@ export interface LoginResponse {
   expiresIn?: number; // seconds
 }
 
-// ─── Cookie helpers (for browser dev fallback) ──────────────────────────────
-
-function setTokenCookie(token: string, expiresIn: number) {
-  if (typeof document === "undefined") return;
-  document.cookie = `tp_token=${token}; path=/; max-age=${expiresIn}; SameSite=Lax`;
-}
-
-function clearTokenCookie() {
-  if (typeof document === "undefined") return;
-  document.cookie = "tp_token=; path=/; max-age=0; SameSite=Lax";
-}
-
 // ─── Main login ─────────────────────────────────────────────────────────────
 
 /**
  * MAIN LOGIN FUNCTION (CORE ENTRY POINT)
  * In Tauri desktop mode: routes directly to native Rust auth commands.
- * In browser mode: falls back to HTTP API.
  */
 export async function loginUser(identifier: string, password: string) {
   if (isTauriEnvironment()) {
@@ -63,36 +49,7 @@ export async function loginUser(identifier: string, password: string) {
     };
   }
 
-  // Web Browser Fallback
-  const res = await axiosInstance.post("/api/v1/auth/login", {
-    email: identifier,
-    password,
-    deviceId: getDeviceId(),
-  });
-
-  const data: LoginResponse = res.data.data;
-
-  if (!data?.token || !data?.user) {
-    throw new Error("Invalid login response");
-  }
-
-  const expiresIn = data.expiresIn ?? 3600;
-  const expiresAt = Date.now() + expiresIn * 1000;
-
-  const session: AuthSession = {
-    expiresAt,
-    deviceId: getDeviceId(),
-    user: data.user,
-  };
-
-  setSession(session);
-  setTokenCookie(data.token, expiresIn);
-
-  return {
-    user: data.user,
-    token: data.token,
-    session,
-  };
+  throw new Error("Desktop application requires Tauri runtime environment. Please launch via native desktop app.");
 }
 
 // ─── Logout ─────────────────────────────────────────────────────────────────
@@ -102,14 +59,13 @@ export async function loginUser(identifier: string, password: string) {
  */
 export function logoutUser() {
   clearSession();
-  clearTokenCookie();
   if (isTauriEnvironment()) {
     tauriClient.authLogout().catch(console.error);
   }
 }
 
 /**
- * GET ME (fetch current user via Tauri or cookie)
+ * GET ME (fetch current user via Tauri)
  */
 export async function getMeUser() {
   if (isTauriEnvironment()) {
@@ -129,6 +85,5 @@ export async function getMeUser() {
     };
   }
 
-  const res = await axiosInstance.get("/api/v1/auth/me");
-  return res.data.data;
+  return null;
 }

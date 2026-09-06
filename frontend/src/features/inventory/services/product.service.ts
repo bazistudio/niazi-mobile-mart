@@ -1,68 +1,65 @@
-import axiosInstance from '@/lib/api/axios';
-import { retry } from '@/shared/lib/retry';
-import { RETRY_COUNT } from '../constants/inventory.constants';
+import { tauriClient } from '@/lib/tauri/tauriClient';
 import { InventoryProduct, PaginationParams } from '../types';
 
 export const productService = {
   getProducts: async (params: PaginationParams): Promise<{ products: InventoryProduct[], total: number }> => {
-    const query = new URLSearchParams();
-    if (params.page) query.append('page', params.page.toString());
-    if (params.limit) query.append('limit', params.limit.toString());
-    if (params.search) query.append('search', params.search);
-    if (params.categoryId) query.append('categoryId', params.categoryId);
-    if (params.brandId) query.append('brandId', params.brandId);
-    if (params.companyId) query.append('companyId', params.companyId);
-    if (params.colorId) query.append('colorId', params.colorId);
-    if (params.qualityId) query.append('qualityId', params.qualityId);
+    const items = await tauriClient.productList({
+      search: params.search,
+      category_id: params.categoryId,
+      brand_id: params.brandId,
+      is_active: true,
+    });
 
-    const response = await retry(() => axiosInstance.get(`/api/v1/products/my-products?${query.toString()}`), RETRY_COUNT);
-    const data = response.data;
-    
-    // The backend might return { data: [], pagination: {} } or { products: [], total: 0 }
-    // Adjusting based on standard V4 response: { data: [...], pagination: { total, ... } }
-    const items = data.data || data.products || [];
-    const total = data.pagination?.total || data.total || 0;
-    
+    const mapped = items.map((p) => {
+      const minStock = p.low_stock_threshold ?? 5;
+      return {
+        id: p.id,
+        name: p.name,
+        sku: p.sku || '',
+        category: 'Catalog Item',
+        categoryId: p.category_id,
+        brand: '',
+        brandId: p.brand_id || undefined,
+        stock: 0,
+        minStockThreshold: minStock,
+        price: p.sale_price,
+        purchasePrice: p.purchase_price,
+        status: 'HEALTHY' as const,
+      };
+    });
+
     return {
-      products: items.map((p: any) => {
-        // Backend now provides flat *Name fields (categoryName, brandName, etc.)
-        // Fall back to old nested approach for backwards compatibility
-        const cat = p.categoryName || p.categoryId?.name || p.category?.name || 'Uncategorized';
-        const brand = p.brandName || p.brandId?.name || p.brand?.name || '';
-        const company = p.companyName || p.companyId?.name || p.company?.name || '';
-        const color = p.colorName || p.colorId?.name || p.color?.name || '';
-        const quality = p.qualityName || p.qualityId?.name || p.quality?.name || '';
-        
-        const stock = p.quantity ?? p.currentStock ?? 0;
-        const minStock = p.minStock ?? p.minimumStock ?? 0;
-        
-        return {
-          id: p._id,
-          name: p.name,
-          sku: p.sku || '',
-          category: cat,
-          categoryId: p.categoryId,
-          brand: brand,
-          brandId: p.brandId,
-          company: company,
-          companyId: p.companyId,
-          color: color,
-          colorId: p.colorId,
-          quality: quality,
-          qualityId: p.qualityId,
-          stock: stock,
-          minStockThreshold: minStock,
-          price: p.price ?? p.salePrice ?? 0,
-          purchasePrice: p.purchasePrice ?? 0,
-          status: stock > minStock ? 'HEALTHY' : stock > 0 ? 'LOW_STOCK' : 'OUT_OF_STOCK',
-        };
-      }) as InventoryProduct[],
-      total,
+      products: mapped,
+      total: mapped.length,
     };
   },
 
   createProduct: async (productData: any): Promise<InventoryProduct> => {
-    const response = await axiosInstance.post('/api/v1/products', productData);
-    return response.data.product;
+    const created = await tauriClient.productCreate({
+      name: productData.name,
+      sku: productData.sku || `SKU-${Date.now()}`,
+      barcode: productData.barcode || null,
+      category_id: productData.categoryId || productData.category_id || '00000000-0000-0000-0000-000000000001',
+      brand_id: productData.brandId || productData.brand_id || null,
+      unit_id: productData.unitId || productData.unit_id || '00000000-0000-0000-0000-000000000001',
+      purchase_price: Math.round(Number(productData.purchasePrice || productData.purchase_price || 0)),
+      sale_price: Math.round(Number(productData.price || productData.sale_price || 0)),
+      low_stock_threshold: Number(productData.lowStockThreshold || productData.minStock || 5),
+      description: productData.description || null,
+    });
+
+    return {
+      id: created.id,
+      name: created.name,
+      sku: created.sku,
+      category: 'Catalog Item',
+      categoryId: created.category_id,
+      stock: 0,
+      minStockThreshold: created.low_stock_threshold,
+      price: created.sale_price,
+      purchasePrice: created.purchase_price,
+      status: 'HEALTHY',
+    };
   }
 };
+

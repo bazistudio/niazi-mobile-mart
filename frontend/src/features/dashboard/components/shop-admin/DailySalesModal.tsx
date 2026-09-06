@@ -7,7 +7,6 @@ import { useSearchParams } from 'react-router-dom';
 import { usePrintStore } from '@/lib/printer';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
 import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
-import { useTenantQueryKeys } from '@/lib/react-query/useTenantQueryKeys';
 import toast from 'react-hot-toast';
 
 interface DailySalesModalProps {
@@ -20,7 +19,6 @@ export const DailySalesModal = ({ isOpen, onClose }: DailySalesModalProps) => {
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const keys = useTenantQueryKeys();
   
   const searchParams = useSearchParams();
   const searchInvoice = searchParams.get('invoice');
