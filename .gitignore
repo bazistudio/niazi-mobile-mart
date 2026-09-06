@@ -9,8 +9,10 @@ node_modules/
 # Frontend builds
 frontend/dist/
 frontend/build/
+frontend/out/
 **/dist/
 **/build/
+**/out/
 
 # Environment configs
 .env
