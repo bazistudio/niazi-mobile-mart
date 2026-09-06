@@ -992,6 +992,87 @@ export const tauriClient = {
     }
     throw new Error('Tauri environment required');
   },
+
+  // ── Returns & Stock Reversal Domain (Phase 18) ─────────────────────────────
+  async salesReturnGetReturnable(saleId: string): Promise<SaleReturnableInfoDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SaleReturnableInfoDto>('sales_return_get_returnable', { saleId });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async salesReturnCreate(dto: CreateSalesReturnDto): Promise<SalesReturnResultDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SalesReturnResultDto>('sales_return_create', { dto });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async salesReturnGet(id: string): Promise<SalesReturnDetailDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SalesReturnDetailDto>('sales_return_get', { id });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async salesReturnList(filter?: SalesReturnFilterDto): Promise<SalesReturn[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SalesReturn[]>('sales_return_list', { filter });
+    }
+    return [];
+  },
+
+  async salesReturnGetBySale(saleId: string): Promise<SalesReturn[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SalesReturn[]>('sales_return_get_by_sale', { saleId });
+    }
+    return [];
+  },
+
+  async purchaseReturnGetReturnable(purchaseId: string): Promise<PurchaseReturnableInfoDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<PurchaseReturnableInfoDto>('purchase_return_get_returnable', { purchaseId });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async purchaseReturnCreate(dto: CreatePurchaseReturnDto): Promise<PurchaseReturnResultDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<PurchaseReturnResultDto>('purchase_return_create', { dto });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async purchaseReturnGet(id: string): Promise<PurchaseReturnDetailDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<PurchaseReturnDetailDto>('purchase_return_get', { id });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async purchaseReturnList(filter?: PurchaseReturnFilterDto): Promise<PurchaseReturn[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<PurchaseReturn[]>('purchase_return_list', { filter });
+    }
+    return [];
+  },
+
+  async purchaseReturnGetByPurchase(purchaseId: string): Promise<PurchaseReturn[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<PurchaseReturn[]>('purchase_return_get_by_purchase', { purchaseId });
+    }
+    return [];
+  },
 };
 
 // ── Type Definitions for Organization & Branch ──────────────────────────────
@@ -1753,3 +1834,186 @@ export interface DailyCashSummaryDto {
   actual_closing_cash: number | null;
   cash_variance: number | null;
 }
+
+// ── Type Definitions for Returns & Stock Reversal (Phase 18) ──────────────────
+export type SalesRefundMethod = 'CASH' | 'CUSTOMER_CREDIT';
+export type PurchaseSettlementMethod = 'CASH' | 'SUPPLIER_CREDIT';
+export type ReturnStatus = 'COMPLETED' | 'CANCELLED';
+
+export interface SalesReturn {
+  id: string;
+  return_number: string;
+  sale_id: string;
+  branch_id: string;
+  customer_id: string | null;
+  customer_name_snapshot: string | null;
+  total_amount: number;
+  refund_method: SalesRefundMethod;
+  status: ReturnStatus;
+  reason: string | null;
+  notes: string | null;
+  performed_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SalesReturnLine {
+  id: string;
+  return_id: string;
+  sale_line_id: string;
+  product_id: string;
+  product_name_snapshot: string;
+  sku_snapshot: string;
+  unit_price: number;
+  quantity: number;
+  return_amount: number;
+  created_at: string;
+}
+
+export interface SalesReturnDetailDto {
+  sales_return: SalesReturn;
+  lines: SalesReturnLine[];
+  original_invoice_number: string;
+}
+
+export interface SaleReturnableLineDto {
+  sale_line_id: string;
+  product_id: string;
+  product_name: string;
+  sku: string;
+  original_unit_price: number;
+  original_quantity: number;
+  already_returned_quantity: number;
+  returnable_quantity: number;
+}
+
+export interface SaleReturnableInfoDto {
+  sale_id: string;
+  invoice_number: string;
+  branch_id: string;
+  customer_id: string | null;
+  customer_name: string | null;
+  sale_status: string;
+  lines: SaleReturnableLineDto[];
+}
+
+export interface CreateSalesReturnLineDto {
+  sale_line_id: string;
+  quantity: number;
+}
+
+export interface CreateSalesReturnDto {
+  sale_id: string;
+  lines: CreateSalesReturnLineDto[];
+  refund_method: string;
+  reason?: string | null;
+  notes?: string | null;
+}
+
+export interface SalesReturnResultDto {
+  sales_return: SalesReturn;
+  lines: SalesReturnLine[];
+  customer_balance_after: number | null;
+  cash_refunded: number | null;
+}
+
+export interface SalesReturnFilterDto {
+  branch_id?: string | null;
+  customer_id?: string | null;
+  sale_id?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  status?: string | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface PurchaseReturn {
+  id: string;
+  return_number: string;
+  purchase_id: string;
+  branch_id: string;
+  supplier_id: string | null;
+  supplier_name_snapshot: string | null;
+  total_amount: number;
+  settlement_method: PurchaseSettlementMethod;
+  status: ReturnStatus;
+  reason: string | null;
+  notes: string | null;
+  performed_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PurchaseReturnLine {
+  id: string;
+  return_id: string;
+  purchase_line_id: string;
+  product_id: string;
+  product_name_snapshot: string;
+  sku_snapshot: string;
+  unit_cost: number;
+  quantity: number;
+  return_amount: number;
+  created_at: string;
+}
+
+export interface PurchaseReturnDetailDto {
+  purchase_return: PurchaseReturn;
+  lines: PurchaseReturnLine[];
+  original_purchase_number: string;
+}
+
+export interface PurchaseReturnableLineDto {
+  purchase_line_id: string;
+  product_id: string;
+  product_name: string;
+  sku: string;
+  original_unit_cost: number;
+  original_quantity: number;
+  already_returned_quantity: number;
+  returnable_quantity: number;
+  current_available_stock: number;
+}
+
+export interface PurchaseReturnableInfoDto {
+  purchase_id: string;
+  purchase_number: string;
+  branch_id: string;
+  supplier_id: string | null;
+  supplier_name: string | null;
+  purchase_status: string;
+  lines: PurchaseReturnableLineDto[];
+}
+
+export interface CreatePurchaseReturnLineDto {
+  purchase_line_id: string;
+  quantity: number;
+}
+
+export interface CreatePurchaseReturnDto {
+  purchase_id: string;
+  lines: CreatePurchaseReturnLineDto[];
+  settlement_method: string;
+  reason?: string | null;
+  notes?: string | null;
+}
+
+export interface PurchaseReturnResultDto {
+  purchase_return: PurchaseReturn;
+  lines: PurchaseReturnLine[];
+  supplier_payable_after: number | null;
+  cash_settled: number | null;
+}
+
+export interface PurchaseReturnFilterDto {
+  branch_id?: string | null;
+  supplier_id?: string | null;
+  purchase_id?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  status?: string | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+

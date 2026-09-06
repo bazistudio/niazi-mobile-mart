@@ -6,8 +6,10 @@ pub mod expense;
 pub mod inventory;
 pub mod organization;
 pub mod product;
+pub mod purchase_return;
 pub mod purchases;
 pub mod sales;
+pub mod sales_return;
 pub mod supplier;
 pub mod user;
 
@@ -47,4 +49,13 @@ pub use cash::{
     CashMovement, CashMovementDirection, CashMovementFilterDto, CashMovementType, CashSession,
     CashSessionStatus, CloseCashSessionDto, CreateCashAdjustmentDto, DailyCashSummaryDto,
     OpenCashSessionDto,
+};
+pub use sales_return::{
+    CreateSalesReturnDto, CreateSalesReturnLineDto, SaleReturnableInfoDto, SaleReturnableLineDto,
+    SalesRefundMethod, SalesReturn, SalesReturnDetailDto, SalesReturnLine, SalesReturnStatus,
+};
+pub use purchase_return::{
+    CreatePurchaseReturnDto, CreatePurchaseReturnLineDto, PurchaseReturn, PurchaseReturnDetailDto,
+    PurchaseReturnLine, PurchaseReturnStatus, PurchaseReturnableInfoDto,
+    PurchaseReturnableLineDto, PurchaseSettlementMethod,
 };

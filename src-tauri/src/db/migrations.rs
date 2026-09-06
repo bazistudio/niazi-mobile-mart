@@ -525,6 +525,101 @@ pub const MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_cash_movements_reference_id ON cash_movements(reference_id);
         "#,
     },
+    Migration {
+        version: 8,
+        name: "008_returns_and_stock_reversal",
+        up: r#"
+        -- Counters for sequential sales and purchase return numbers
+        INSERT OR IGNORE INTO counters (name, value) VALUES ('sales_return_number', 0);
+        INSERT OR IGNORE INTO counters (name, value) VALUES ('purchase_return_number', 0);
+
+        -- Sales Returns header table
+        CREATE TABLE IF NOT EXISTS sales_returns (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            return_number TEXT NOT NULL UNIQUE,
+            sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE RESTRICT,
+            branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+            customer_id TEXT REFERENCES customers(id) ON DELETE SET NULL,
+            customer_name_snapshot TEXT,
+            total_amount INTEGER NOT NULL CHECK(total_amount > 0),
+            refund_method TEXT NOT NULL CHECK(refund_method IN ('CASH', 'CUSTOMER_CREDIT')),
+            status TEXT NOT NULL DEFAULT 'COMPLETED' CHECK(status IN ('COMPLETED', 'CANCELLED')),
+            reason TEXT,
+            notes TEXT,
+            performed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_returns_number ON sales_returns(return_number);
+        CREATE INDEX IF NOT EXISTS idx_sales_returns_sale_id ON sales_returns(sale_id);
+        CREATE INDEX IF NOT EXISTS idx_sales_returns_branch_id ON sales_returns(branch_id);
+        CREATE INDEX IF NOT EXISTS idx_sales_returns_customer_id ON sales_returns(customer_id);
+        CREATE INDEX IF NOT EXISTS idx_sales_returns_created_at ON sales_returns(created_at);
+        CREATE INDEX IF NOT EXISTS idx_sales_returns_status ON sales_returns(status);
+
+        -- Sales Return Lines table
+        CREATE TABLE IF NOT EXISTS sales_return_lines (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            return_id TEXT NOT NULL REFERENCES sales_returns(id) ON DELETE CASCADE,
+            sale_line_id TEXT NOT NULL REFERENCES sale_lines(id) ON DELETE RESTRICT,
+            product_id TEXT NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+            product_name_snapshot TEXT NOT NULL,
+            sku_snapshot TEXT NOT NULL,
+            unit_price INTEGER NOT NULL CHECK(unit_price >= 0),
+            quantity INTEGER NOT NULL CHECK(quantity > 0),
+            return_amount INTEGER NOT NULL CHECK(return_amount >= 0),
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sales_return_lines_return_id ON sales_return_lines(return_id);
+        CREATE INDEX IF NOT EXISTS idx_sales_return_lines_sale_line_id ON sales_return_lines(sale_line_id);
+        CREATE INDEX IF NOT EXISTS idx_sales_return_lines_product_id ON sales_return_lines(product_id);
+
+        -- Purchase Returns header table
+        CREATE TABLE IF NOT EXISTS purchase_returns (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            return_number TEXT NOT NULL UNIQUE,
+            purchase_id TEXT NOT NULL REFERENCES purchases(id) ON DELETE RESTRICT,
+            branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+            supplier_id TEXT REFERENCES suppliers(id) ON DELETE RESTRICT,
+            supplier_name_snapshot TEXT,
+            total_amount INTEGER NOT NULL CHECK(total_amount > 0),
+            settlement_method TEXT NOT NULL CHECK(settlement_method IN ('CASH', 'SUPPLIER_CREDIT')),
+            status TEXT NOT NULL DEFAULT 'COMPLETED' CHECK(status IN ('COMPLETED', 'CANCELLED')),
+            reason TEXT,
+            notes TEXT,
+            performed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_purchase_returns_number ON purchase_returns(return_number);
+        CREATE INDEX IF NOT EXISTS idx_purchase_returns_purchase_id ON purchase_returns(purchase_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_returns_branch_id ON purchase_returns(branch_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_returns_supplier_id ON purchase_returns(supplier_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_returns_created_at ON purchase_returns(created_at);
+        CREATE INDEX IF NOT EXISTS idx_purchase_returns_status ON purchase_returns(status);
+
+        -- Purchase Return Lines table
+        CREATE TABLE IF NOT EXISTS purchase_return_lines (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            return_id TEXT NOT NULL REFERENCES purchase_returns(id) ON DELETE CASCADE,
+            purchase_line_id TEXT NOT NULL REFERENCES purchase_lines(id) ON DELETE RESTRICT,
+            product_id TEXT NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+            product_name_snapshot TEXT NOT NULL,
+            sku_snapshot TEXT NOT NULL,
+            unit_cost INTEGER NOT NULL CHECK(unit_cost >= 0),
+            quantity INTEGER NOT NULL CHECK(quantity > 0),
+            return_amount INTEGER NOT NULL CHECK(return_amount >= 0),
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_purchase_return_lines_return_id ON purchase_return_lines(return_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_return_lines_purchase_line_id ON purchase_return_lines(purchase_line_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_return_lines_product_id ON purchase_return_lines(product_id);
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction
@@ -601,11 +696,11 @@ mod tests {
         // Enable foreign keys
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
 
-        // 1. First run applies migrations (7 total: Core, Product/Inventory, Auth Security, Sales/Invoices, Customers/Ledger, Suppliers/Purchasing, Cash Management/Closing)
+        // 1. First run applies migrations (8 total: Core, Product/Inventory, Auth Security, Sales/Invoices, Customers/Ledger, Suppliers/Purchasing, Cash Management/Closing, Returns/Stock Reversal)
         let count = MigrationRunner::run(&mut conn).unwrap();
-        assert_eq!(count, 7);
+        assert_eq!(count, 8);
 
-        // Verify permanent tables exist (5 from Phase 6 + 6 from Phase 7 + 4 from Phase 14 + 2 from Phase 15 + 4 from Phase 16 + 4 from Phase 17 = 25 tables)
+        // Verify permanent tables exist (5 from Phase 6 + 6 from Phase 7 + 4 from Phase 14 + 2 from Phase 15 + 4 from Phase 16 + 4 from Phase 17 + 4 from Phase 18 = 29 tables)
         let tables_count: i64 = conn
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN (
@@ -614,13 +709,14 @@ mod tests {
                     'counters', 'sales', 'sale_lines', 'sale_payments',
                     'customers', 'customer_ledger_entries',
                     'suppliers', 'purchases', 'purchase_lines', 'supplier_ledger_entries',
-                    'expense_categories', 'expenses', 'cash_sessions', 'cash_movements'
+                    'expense_categories', 'expenses', 'cash_sessions', 'cash_movements',
+                    'sales_returns', 'sales_return_lines', 'purchase_returns', 'purchase_return_lines'
                 )",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(tables_count, 25);
+        assert_eq!(tables_count, 29);
 
         // Verify users table has recovery_key_hash and must_change_password
         let user_cols: Vec<String> = {
@@ -995,5 +1091,90 @@ mod tests {
             |r| r.get(0),
         ).unwrap();
         assert_eq!(total_out, 25000);
+    }
+
+    #[test]
+    fn test_migration_008_returns_schema() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+
+        let applied = MigrationRunner::run(&mut conn).unwrap();
+        assert_eq!(applied, 8);
+
+        // 1. Verify counters for sales and purchase returns
+        let sr_counter: i64 = conn
+            .query_row("SELECT value FROM counters WHERE name = 'sales_return_number'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(sr_counter, 0);
+
+        let pr_counter: i64 = conn
+            .query_row("SELECT value FROM counters WHERE name = 'purchase_return_number'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(pr_counter, 0);
+
+        // 2. Verify sales_returns table columns
+        let mut stmt = conn.prepare("PRAGMA table_info(sales_returns)").unwrap();
+        let sr_cols: Vec<String> = stmt
+            .query_map([], |row| row.get(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        assert!(sr_cols.contains(&"id".to_string()));
+        assert!(sr_cols.contains(&"return_number".to_string()));
+        assert!(sr_cols.contains(&"sale_id".to_string()));
+        assert!(sr_cols.contains(&"branch_id".to_string()));
+        assert!(sr_cols.contains(&"customer_id".to_string()));
+        assert!(sr_cols.contains(&"total_amount".to_string()));
+        assert!(sr_cols.contains(&"refund_method".to_string()));
+        assert!(sr_cols.contains(&"status".to_string()));
+
+        // 3. Verify sales_return_lines table columns
+        let mut stmt = conn.prepare("PRAGMA table_info(sales_return_lines)").unwrap();
+        let srl_cols: Vec<String> = stmt
+            .query_map([], |row| row.get(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        assert!(srl_cols.contains(&"id".to_string()));
+        assert!(srl_cols.contains(&"return_id".to_string()));
+        assert!(srl_cols.contains(&"sale_line_id".to_string()));
+        assert!(srl_cols.contains(&"product_id".to_string()));
+        assert!(srl_cols.contains(&"quantity".to_string()));
+        assert!(srl_cols.contains(&"return_amount".to_string()));
+
+        // 4. Verify purchase_returns table columns
+        let mut stmt = conn.prepare("PRAGMA table_info(purchase_returns)").unwrap();
+        let pr_cols: Vec<String> = stmt
+            .query_map([], |row| row.get(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        assert!(pr_cols.contains(&"id".to_string()));
+        assert!(pr_cols.contains(&"return_number".to_string()));
+        assert!(pr_cols.contains(&"purchase_id".to_string()));
+        assert!(pr_cols.contains(&"branch_id".to_string()));
+        assert!(pr_cols.contains(&"supplier_id".to_string()));
+        assert!(pr_cols.contains(&"total_amount".to_string()));
+        assert!(pr_cols.contains(&"settlement_method".to_string()));
+        assert!(pr_cols.contains(&"status".to_string()));
+
+        // 5. Verify purchase_return_lines table columns
+        let mut stmt = conn.prepare("PRAGMA table_info(purchase_return_lines)").unwrap();
+        let prl_cols: Vec<String> = stmt
+            .query_map([], |row| row.get(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        assert!(prl_cols.contains(&"id".to_string()));
+        assert!(prl_cols.contains(&"return_id".to_string()));
+        assert!(prl_cols.contains(&"purchase_line_id".to_string()));
+        assert!(prl_cols.contains(&"product_id".to_string()));
+        assert!(prl_cols.contains(&"unit_cost".to_string()));
+        assert!(prl_cols.contains(&"quantity".to_string()));
+        assert!(prl_cols.contains(&"return_amount".to_string()));
     }
 }

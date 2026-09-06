@@ -9,7 +9,7 @@ use crate::domain::user::{User, UserRole};
 use crate::repositories::{BranchRepository, SQLiteUserRepository};
 use crate::services::{
     CashService, CatalogService, CustomerService, ExpenseService, InventoryService, ProductService,
-    PurchaseService, SaleService, SupplierService,
+    PurchaseReturnService, PurchaseService, SaleService, SalesReturnService, SupplierService,
 };
 
 /// Native application session context owned and strictly enforced by Rust
@@ -55,6 +55,8 @@ pub struct AppState {
     pub purchase_service: PurchaseService,
     pub expense_service: ExpenseService,
     pub cash_service: CashService,
+    pub sales_return_service: SalesReturnService,
+    pub purchase_return_service: PurchaseReturnService,
     pub is_initialized: Arc<RwLock<bool>>,
 }
 
@@ -72,6 +74,8 @@ impl AppState {
         let purchase_service = PurchaseService::new(db.clone());
         let expense_service = ExpenseService::new(db.clone());
         let cash_service = CashService::new(db.clone());
+        let sales_return_service = SalesReturnService::new(db.clone());
+        let purchase_return_service = PurchaseReturnService::new(db.clone());
 
         Self {
             app_version: app_version.into(),
@@ -88,6 +92,8 @@ impl AppState {
             purchase_service,
             expense_service,
             cash_service,
+            sales_return_service,
+            purchase_return_service,
             is_initialized: Arc::new(RwLock::new(true)),
         }
     }

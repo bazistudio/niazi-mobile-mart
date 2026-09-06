@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { HistoryStatsCards, HistoryFilters, HistoryTable, HistoryTimeline, useHistoryStore } from '@/features/history';
-import { History as HistoryIcon, LayoutList, GripVertical } from 'lucide-react';
+import { SalesReturnsTable } from '@/features/returns/SalesReturnsTable';
+import { PurchaseReturnsTable } from '@/features/returns/PurchaseReturnsTable';
+import { History as HistoryIcon, LayoutList, GripVertical, RotateCcw } from 'lucide-react';
 
 export function HistoryPage() {
   const { fetchHistory, fetchStats } = useHistoryStore();
   const [viewMode, setViewMode] = useState<'table' | 'timeline'>('table');
+  const [activeTab, setActiveTab] = useState<'transactions' | 'sales_returns' | 'purchase_returns'>('transactions');
 
   useEffect(() => {
     fetchStats();
@@ -22,32 +25,77 @@ export function HistoryPage() {
             </h1>
           </div>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Comprehensive audit log of all sales, purchases, and ledger movements.
+            Comprehensive audit log of all sales, purchases, returns, and ledger movements.
           </p>
         </div>
-        
-        <div className="flex items-center bg-white dark:bg-gray-800 rounded-lg p-1 border border-gray-200 dark:border-gray-700 shadow-sm">
-          <button
-            onClick={() => setViewMode('table')}
-            className={`p-1.5 rounded-md flex items-center transition-colors cursor-pointer ${viewMode === 'table' ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
-            title="Table View"
-          >
-            <LayoutList className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setViewMode('timeline')}
-            className={`p-1.5 rounded-md flex items-center transition-colors cursor-pointer ${viewMode === 'timeline' ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
-            title="Timeline View"
-          >
-            <GripVertical className="w-4 h-4" />
-          </button>
-        </div>
+
+        {activeTab === 'transactions' && (
+          <div className="flex items-center bg-white dark:bg-gray-800 rounded-lg p-1 border border-gray-200 dark:border-gray-700 shadow-sm">
+            <button
+              onClick={() => setViewMode('table')}
+              className={`p-1.5 rounded-md flex items-center transition-colors cursor-pointer ${viewMode === 'table' ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+              title="Table View"
+            >
+              <LayoutList className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setViewMode('timeline')}
+              className={`p-1.5 rounded-md flex items-center transition-colors cursor-pointer ${viewMode === 'timeline' ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+              title="Timeline View"
+            >
+              <GripVertical className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
-      <HistoryStatsCards />
-      <HistoryFilters />
-      
-      {viewMode === 'table' ? <HistoryTable /> : <HistoryTimeline />}
+      {/* Tabs */}
+      <div className="flex items-center gap-2 border-b border-gray-200 dark:border-gray-700">
+        <button
+          onClick={() => setActiveTab('transactions')}
+          className={`pb-3 px-4 text-sm font-bold border-b-2 transition-colors cursor-pointer ${
+            activeTab === 'transactions'
+              ? 'border-[#006970] text-[#006970]'
+              : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+          }`}
+        >
+          All Activity
+        </button>
+        <button
+          onClick={() => setActiveTab('sales_returns')}
+          className={`pb-3 px-4 text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 ${
+            activeTab === 'sales_returns'
+              ? 'border-[#e76f51] text-[#e76f51]'
+              : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+          }`}
+        >
+          <RotateCcw className="w-4 h-4 text-[#e76f51]" />
+          Sales Returns
+        </button>
+        <button
+          onClick={() => setActiveTab('purchase_returns')}
+          className={`pb-3 px-4 text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 ${
+            activeTab === 'purchase_returns'
+              ? 'border-[#2a9d8f] text-[#2a9d8f]'
+              : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+          }`}
+        >
+          <RotateCcw className="w-4 h-4 text-[#2a9d8f]" />
+          Purchase Returns
+        </button>
+      </div>
+
+      {activeTab === 'transactions' && (
+        <>
+          <HistoryStatsCards />
+          <HistoryFilters />
+          {viewMode === 'table' ? <HistoryTable /> : <HistoryTimeline />}
+        </>
+      )}
+
+      {activeTab === 'sales_returns' && <SalesReturnsTable />}
+
+      {activeTab === 'purchase_returns' && <PurchaseReturnsTable />}
 
       <div className="flex items-center justify-between mt-4">
         <span className="text-sm text-gray-500">Showing all records for selected filters</span>

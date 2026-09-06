@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, Transaction};
+use rusqlite::{params, Connection};
 
 use crate::db::connection::DatabaseConnection;
 use crate::db::errors::{DbError, DbResult};
@@ -23,8 +23,8 @@ impl SQLiteInventoryRepository {
     }
 
     /// Reads current stock quantity inside an active transaction
-    pub fn get_stock_in_tx(tx: &Transaction<'_>, product_id: &str, branch_id: &str) -> DbResult<i64> {
-        Self::get_stock_internal(tx, product_id, branch_id)
+    pub fn get_stock_in_tx(conn: &Connection, product_id: &str, branch_id: &str) -> DbResult<i64> {
+        Self::get_stock_internal(conn, product_id, branch_id)
     }
 
     fn get_stock_internal(conn: &Connection, product_id: &str, branch_id: &str) -> DbResult<i64> {
@@ -43,7 +43,7 @@ impl SQLiteInventoryRepository {
 
     /// Upserts current stock quantity inside an active transaction
     pub fn set_stock_in_tx(
-        tx: &Transaction<'_>,
+        conn: &Connection,
         product_id: &str,
         branch_id: &str,
         quantity: i64,
@@ -53,7 +53,7 @@ impl SQLiteInventoryRepository {
             return Err(DbError::ConstraintViolation("Stock quantity cannot be negative".to_string()));
         }
 
-        tx.execute(
+        conn.execute(
             "INSERT INTO stock (product_id, branch_id, quantity, updated_at)
              VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(product_id, branch_id) DO UPDATE SET
@@ -67,7 +67,7 @@ impl SQLiteInventoryRepository {
     }
 
     /// Inserts an immutable stock movement record inside an active transaction
-    pub fn insert_movement_in_tx(tx: &Transaction<'_>, movement: &StockMovement) -> DbResult<()> {
+    pub fn insert_movement_in_tx(conn: &Connection, movement: &StockMovement) -> DbResult<()> {
         if movement.quantity <= 0 {
             return Err(DbError::ConstraintViolation("Movement quantity must be greater than 0".to_string()));
         }
@@ -78,7 +78,7 @@ impl SQLiteInventoryRepository {
             return Err(DbError::ConstraintViolation("Previous stock cannot be negative".to_string()));
         }
 
-        tx.execute(
+        conn.execute(
             "INSERT INTO stock_movements (id, product_id, branch_id, movement_type, quantity, previous_stock, resulting_stock, reason, performed_by, reference_id, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![

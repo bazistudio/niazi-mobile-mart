@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { MoreHorizontal, FileText, Activity, Printer, Download, User } from 'lucide-react';
+import { MoreHorizontal, FileText, Activity, Printer, Download, User, RotateCcw } from 'lucide-react';
 import { HistoryItem } from '../types/history.types';
 import { InvoicePreviewModal } from './InvoicePreviewModal';
 import { LedgerTraceModal } from './LedgerTraceModal';
+import { SalesReturnModal } from '@/features/returns/SalesReturnModal';
+import { PurchaseReturnModal } from '@/features/returns/PurchaseReturnModal';
 import { usePrintStore } from '@/lib/printer';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
 import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
@@ -15,6 +17,8 @@ export const HistoryRowActions: React.FC<Props> = ({ item }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showTrace, setShowTrace] = useState(false);
+  const [showSalesReturn, setShowSalesReturn] = useState(false);
+  const [showPurchaseReturn, setShowPurchaseReturn] = useState(false);
 
   const { openPreview } = usePrintStore();
   const { settings, shopHeader } = usePrinterStore();
@@ -82,6 +86,27 @@ export const HistoryRowActions: React.FC<Props> = ({ item }) => {
                 <Activity className="w-4 h-4 text-emerald-500" />
                 Ledger Trace (Audit)
               </button>
+
+              {item.type === 'sale' && (
+                <button
+                  onClick={() => { setIsOpen(false); setShowSalesReturn(true); }}
+                  className="w-full text-left px-4 py-2.5 text-sm text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/30 flex items-center gap-3 font-medium transition-colors border-b border-gray-100 dark:border-gray-700"
+                >
+                  <RotateCcw className="w-4 h-4 text-[#e76f51]" />
+                  Return Sale Items
+                </button>
+              )}
+
+              {item.type === 'purchase' && (
+                <button
+                  onClick={() => { setIsOpen(false); setShowPurchaseReturn(true); }}
+                  className="w-full text-left px-4 py-2.5 text-sm text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 flex items-center gap-3 font-medium transition-colors border-b border-gray-100 dark:border-gray-700"
+                >
+                  <RotateCcw className="w-4 h-4 text-[#2a9d8f]" />
+                  Return to Supplier
+                </button>
+              )}
+
               <button
                 onClick={handlePrint}
                 className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3 font-medium transition-colors"
@@ -111,6 +136,12 @@ export const HistoryRowActions: React.FC<Props> = ({ item }) => {
       )}
       {showTrace && (
         <LedgerTraceModal item={item} onClose={() => setShowTrace(false)} />
+      )}
+      {showSalesReturn && (
+        <SalesReturnModal saleId={item.id} onClose={() => setShowSalesReturn(false)} />
+      )}
+      {showPurchaseReturn && (
+        <PurchaseReturnModal purchaseId={item.id} onClose={() => setShowPurchaseReturn(false)} />
       )}
     </div>
   );

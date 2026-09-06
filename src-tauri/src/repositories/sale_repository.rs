@@ -104,6 +104,42 @@ impl SQLiteSaleRepository {
         Ok(())
     }
 
+    /// Reads lines for a sale inside transaction
+    pub fn get_sale_lines_in_tx(conn: &Connection, sale_id: &str) -> DbResult<Vec<SaleLine>> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, sale_id, product_id, product_name_snapshot, sku_snapshot,
+                        unit_price, cost_price_snapshot, quantity, discount, line_total, created_at
+                 FROM sale_lines WHERE sale_id = ?1 ORDER BY created_at ASC, id ASC",
+            )
+            .map_err(|e| DbError::QueryError(format!("Failed to prepare sale lines query: {e}")))?;
+
+        let rows = stmt
+            .query_map(params![sale_id], |row| {
+                Ok(SaleLine {
+                    id: row.get(0)?,
+                    sale_id: row.get(1)?,
+                    product_id: row.get(2)?,
+                    product_name_snapshot: row.get(3)?,
+                    sku_snapshot: row.get(4)?,
+                    unit_price: row.get(5)?,
+                    cost_price_snapshot: row.get(6)?,
+                    quantity: row.get(7)?,
+                    discount: row.get(8)?,
+                    line_total: row.get(9)?,
+                    created_at: row.get(10)?,
+                })
+            })
+            .map_err(|e| DbError::QueryError(format!("Failed to query sale lines: {e}")))?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r.map_err(|e| DbError::QueryError(format!("Error reading sale line: {e}")))?);
+        }
+
+        Ok(list)
+    }
+
     /// Inserts a sale payment record inside transaction
     pub fn insert_sale_payment_in_tx(conn: &Connection, payment: &SalePayment) -> DbResult<()> {
         conn.execute(
@@ -220,39 +256,7 @@ impl SQLiteSaleRepository {
     pub async fn get_sale_lines(&self, sale_id: &str) -> AppResult<Vec<SaleLine>> {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
-
-        let mut stmt = guard
-            .prepare(
-                "SELECT id, sale_id, product_id, product_name_snapshot, sku_snapshot,
-                        unit_price, cost_price_snapshot, quantity, discount, line_total, created_at
-                 FROM sale_lines WHERE sale_id = ?1 ORDER BY created_at ASC, id ASC",
-            )
-            .map_err(|e| AppError::Database(format!("Failed to prepare sale lines query: {e}")))?;
-
-        let rows = stmt
-            .query_map(params![sale_id], |row| {
-                Ok(SaleLine {
-                    id: row.get(0)?,
-                    sale_id: row.get(1)?,
-                    product_id: row.get(2)?,
-                    product_name_snapshot: row.get(3)?,
-                    sku_snapshot: row.get(4)?,
-                    unit_price: row.get(5)?,
-                    cost_price_snapshot: row.get(6)?,
-                    quantity: row.get(7)?,
-                    discount: row.get(8)?,
-                    line_total: row.get(9)?,
-                    created_at: row.get(10)?,
-                })
-            })
-            .map_err(|e| AppError::Database(format!("Failed to query sale lines: {e}")))?;
-
-        let mut list = Vec::new();
-        for r in rows {
-            list.push(r.map_err(|e| AppError::Database(format!("Row error: {e}")))?);
-        }
-
-        Ok(list)
+        Self::get_sale_lines_in_tx(&guard, sale_id).map_err(AppError::from)
     }
 
     pub async fn get_sale_payments(&self, sale_id: &str) -> AppResult<Vec<SalePayment>> {

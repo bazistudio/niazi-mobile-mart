@@ -134,6 +134,17 @@ pub fn run() {
             commands::cash::cash_adjustment_create,
             commands::cash::cash_movement_list,
             commands::cash::cash_get_daily_summary,
+            // Sales & Purchase Return Commands (Phase 18)
+            commands::sales_return::sales_return_get_returnable,
+            commands::sales_return::sales_return_create,
+            commands::sales_return::sales_return_get,
+            commands::sales_return::sales_return_list,
+            commands::sales_return::sales_return_get_by_sale,
+            commands::purchase_return::purchase_return_get_returnable,
+            commands::purchase_return::purchase_return_create,
+            commands::purchase_return::purchase_return_get,
+            commands::purchase_return::purchase_return_list,
+            commands::purchase_return::purchase_return_get_by_purchase,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Niazi Mobile Mart Tauri application");

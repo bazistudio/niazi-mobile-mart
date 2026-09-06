@@ -101,6 +101,81 @@ impl SQLitePurchaseRepository {
         Ok(())
     }
 
+    /// Reads a purchase header by ID inside transaction
+    pub fn get_by_id_in_tx(conn: &Connection, id: &str) -> DbResult<Option<Purchase>> {
+        let res = conn.query_row(
+            "SELECT id, purchase_number, supplier_id, branch_id, subtotal, discount,
+                    total_amount, paid_amount, credit_amount, payment_status, status,
+                    notes, performed_by, created_at, updated_at
+             FROM purchases WHERE id = ?1",
+            params![id],
+            |row| {
+                let pay_str: String = row.get(9)?;
+                let status_str: String = row.get(10)?;
+
+                Ok(Purchase {
+                    id: row.get(0)?,
+                    purchase_number: row.get(1)?,
+                    supplier_id: row.get(2)?,
+                    branch_id: row.get(3)?,
+                    subtotal: row.get(4)?,
+                    discount: row.get(5)?,
+                    total_amount: row.get(6)?,
+                    paid_amount: row.get(7)?,
+                    credit_amount: row.get(8)?,
+                    payment_status: PurchasePaymentStatus::from_str(&pay_str)
+                        .unwrap_or(PurchasePaymentStatus::Unpaid),
+                    status: PurchaseStatus::from_str(&status_str).unwrap_or(PurchaseStatus::Completed),
+                    notes: row.get(11)?,
+                    performed_by: row.get(12)?,
+                    created_at: row.get(13)?,
+                    updated_at: row.get(14)?,
+                })
+            },
+        );
+
+        match res {
+            Ok(p) => Ok(Some(p)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(DbError::QueryError(format!("Failed to query purchase by id: {e}"))),
+        }
+    }
+
+    /// Reads lines for a purchase inside transaction
+    pub fn get_purchase_lines_in_tx(conn: &Connection, purchase_id: &str) -> DbResult<Vec<PurchaseLine>> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, purchase_id, product_id, product_name_snapshot, sku_snapshot,
+                        quantity, unit_cost, discount, line_total, created_at
+                 FROM purchase_lines WHERE purchase_id = ?1 ORDER BY created_at ASC, id ASC",
+            )
+            .map_err(|e| DbError::QueryError(format!("Failed to prepare purchase lines query: {e}")))?;
+
+        let rows = stmt
+            .query_map(params![purchase_id], |row| {
+                Ok(PurchaseLine {
+                    id: row.get(0)?,
+                    purchase_id: row.get(1)?,
+                    product_id: row.get(2)?,
+                    product_name_snapshot: row.get(3)?,
+                    sku_snapshot: row.get(4)?,
+                    quantity: row.get(5)?,
+                    unit_cost: row.get(6)?,
+                    discount: row.get(7)?,
+                    line_total: row.get(8)?,
+                    created_at: row.get(9)?,
+                })
+            })
+            .map_err(|e| DbError::QueryError(format!("Failed to query purchase lines: {e}")))?;
+
+        let mut lines = Vec::new();
+        for r in rows {
+            lines.push(r.map_err(|e| DbError::QueryError(format!("Error reading purchase line: {e}")))?);
+        }
+
+        Ok(lines)
+    }
+
     /// Retrieves all unpaid or partially paid purchases for a supplier, ordered FIFO (created_at ASC)
     pub fn get_unpaid_or_partial_purchases_in_tx(
         conn: &Connection,
