@@ -1,48 +1,52 @@
 import React, { useState } from 'react';
 import { OrganizationPageShell } from '@/features/dashboard/components/organization/OrganizationPageShell';
 import { 
-  Users, 
+  BookOpen, 
   Store, 
-  ShieldCheck, 
-  CheckCircle2, 
-  KeyRound, 
-  Activity,
+  UserCheck, 
+  Truck, 
+  ArrowDownLeft, 
+  ArrowUpRight, 
+  Receipt, 
+  Scale,
   Search,
-  Plus
+  Download
 } from 'lucide-react';
 
-export function StaffManagementPage() {
-  const [activeTab, setActiveTab] = useState('all');
+export function OrganizationLedgerPage() {
+  const [activeTab, setActiveTab] = useState('org');
 
-  const employeeSections = [
-    { id: 'all', label: 'All Employees', icon: Users, desc: 'Central directory of all employees across organization branches.' },
-    { id: 'branch', label: 'Branch Allocation', icon: Store, desc: 'Staff deployment, primary work shop, and branch transfers.' },
-    { id: 'role', label: 'Roles', icon: ShieldCheck, desc: 'Assigned job titles, supervisory responsibilities, and hierarchies.' },
-    { id: 'status', label: 'Status', icon: CheckCircle2, desc: 'Active employment status, leave schedules, and probation tracking.' },
-    { id: 'permissions', label: 'Permissions', icon: KeyRound, desc: 'Cross-branch access permissions and security clearances.' },
-    { id: 'activity', label: 'Activity', icon: Activity, desc: 'Shift clock-ins, register sign-ons, and audit logs per employee.' },
+  const ledgerSections = [
+    { id: 'org', label: 'Organization Ledger', icon: BookOpen, desc: 'Enterprise chart of accounts and consolidated general ledger.' },
+    { id: 'branches', label: 'Branch Ledgers', icon: Store, desc: 'Shop-specific sub-ledgers and inter-branch balance accounts.' },
+    { id: 'customers', label: 'Customer Ledger', icon: UserCheck, desc: 'Central customer credit, debit lines, and outstanding balances.' },
+    { id: 'suppliers', label: 'Supplier Ledger', icon: Truck, desc: 'Vendor payables, procurement dues, and payment records.' },
+    { id: 'receivables', label: 'Receivables', icon: ArrowDownLeft, desc: 'Pending enterprise receivables and credit aging buckets.' },
+    { id: 'payables', label: 'Payables', icon: ArrowUpRight, desc: 'Upcoming liabilities, vendor terms, and pending settlements.' },
+    { id: 'transactions', label: 'Transactions', icon: Receipt, desc: 'Consolidated double-entry transaction journal across branches.' },
+    { id: 'balance', label: 'Balance Summary', icon: Scale, desc: 'Consolidated trial balance and organization liquidity summary.' },
   ];
 
-  const currentSection = employeeSections.find((s) => s.id === activeTab) || employeeSections[0];
+  const currentSection = ledgerSections.find((s) => s.id === activeTab) || ledgerSections[0];
 
   return (
     <OrganizationPageShell
-      title="Organization Employees"
-      description="Organization-wide employee management across all branches and stores."
-      badge="Workforce Management"
+      title="Organization Ledger"
+      description="Consolidated financial ledger overview and cross-branch accounts reconciliation."
+      badge="Financial Control"
       action={
         <button
           disabled
-          className="flex items-center gap-2 px-3.5 py-2 bg-primary/20 text-primary border border-primary/30 rounded-lg text-xs font-medium cursor-not-allowed shadow-sm"
+          className="flex items-center gap-2 px-3.5 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-medium text-gray-400 cursor-not-allowed shadow-sm"
         >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Invite Employee</span>
+          <Download className="w-3.5 h-3.5" />
+          <span>Export Ledger</span>
         </button>
       }
     >
       {/* Tab Navigation */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-gray-200 dark:border-gray-800">
-        {employeeSections.map((sec) => {
+        {ledgerSections.map((sec) => {
           const Icon = sec.icon;
           const isActive = activeTab === sec.id;
           return (
@@ -62,14 +66,14 @@ export function StaffManagementPage() {
         })}
       </div>
 
-      {/* Filter / Search Bar */}
+      {/* Control / Filter Bar */}
       <div className="bg-white dark:bg-gray-800/90 rounded-xl p-4 border border-gray-200/80 dark:border-gray-700/80 shadow-sm flex flex-col md:flex-row items-center justify-between gap-3">
         <div className="flex items-center gap-2 w-full md:w-auto flex-1 max-w-md">
           <div className="relative w-full">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
-              placeholder={`Search ${currentSection.label.toLowerCase()}...`}
+              placeholder={`Search ${currentSection.label.toLowerCase()} entries...`}
               disabled
               className="w-full pl-9 pr-4 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-500 cursor-not-allowed"
             />
@@ -77,28 +81,28 @@ export function StaffManagementPage() {
         </div>
 
         <div className="flex items-center gap-2 text-xs text-gray-500">
-          <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md">Branches: All</span>
-          <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md">Status: All Statuses</span>
+          <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md">Currency: PKR</span>
+          <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md">Fiscal Year: Current</span>
         </div>
       </div>
 
       {/* Main Empty State View */}
       <div className="bg-white dark:bg-gray-800/90 rounded-xl p-12 border border-gray-200/80 dark:border-gray-700/80 shadow-sm text-center">
         <div className="w-14 h-14 rounded-full bg-primary/10 mx-auto flex items-center justify-center text-primary mb-4">
-          <Users className="w-7 h-7" />
+          <BookOpen className="w-7 h-7" />
         </div>
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {currentSection.label} Directory
+          {currentSection.label}
         </h3>
         <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto mt-1.5 leading-relaxed">
           {currentSection.desc}
         </p>
-        <p className="text-xs text-gray-400 dark:text-gray-500 mt-4 italic">
-          Organization-wide employees across all branches will appear here once the central staff connector is active.
-        </p>
+        <div className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-xs text-gray-500">
+          <span>Consolidated ledger statements and cross-branch reconciliation will appear here.</span>
+        </div>
       </div>
     </OrganizationPageShell>
   );
 }
 
-export default StaffManagementPage;
+export default OrganizationLedgerPage;

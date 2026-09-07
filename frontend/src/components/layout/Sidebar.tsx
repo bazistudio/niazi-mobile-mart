@@ -9,6 +9,7 @@ import { usePermissions } from '../../lib/auth/usePermissions';
 import { Menu, ChevronLeft } from 'lucide-react';
 
 export const Sidebar = () => {
+  // Active route & permission-based sidebar navigation (supports all 17 Organization pages)
   const { pathname } = useLocation();
   const { hasPermission } = usePermissions();
   const [isCollapsed, setIsCollapsed] = useState(false);

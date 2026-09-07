@@ -20,6 +20,7 @@ export function DashboardRedirectPage() {
       case "SUPER_ADMIN":
       case "MULTI_ADMIN":
       case "OWNER":
+      case "ADMIN":
         if ((user as any).accountType === "ORGANIZATION" || !(user as any).shopId) {
           navigate("/dashboard/organization", { replace: true });
         } else {
@@ -27,7 +28,6 @@ export function DashboardRedirectPage() {
         }
         break;
       case "SHOP_ADMIN":
-      case "ADMIN":
       case "MANAGER":
       case "CASHIER":
       case "STAFF":

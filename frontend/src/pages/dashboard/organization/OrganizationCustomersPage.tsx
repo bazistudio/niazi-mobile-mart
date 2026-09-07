@@ -1,48 +1,48 @@
 import React, { useState } from 'react';
 import { OrganizationPageShell } from '@/features/dashboard/components/organization/OrganizationPageShell';
 import { 
-  Users, 
+  UserCheck, 
+  Activity, 
+  CreditCard, 
+  ShoppingCart, 
   Store, 
-  ShieldCheck, 
-  CheckCircle2, 
-  KeyRound, 
-  Activity,
+  History,
   Search,
   Plus
 } from 'lucide-react';
 
-export function StaffManagementPage() {
+export function OrganizationCustomersPage() {
   const [activeTab, setActiveTab] = useState('all');
 
-  const employeeSections = [
-    { id: 'all', label: 'All Employees', icon: Users, desc: 'Central directory of all employees across organization branches.' },
-    { id: 'branch', label: 'Branch Allocation', icon: Store, desc: 'Staff deployment, primary work shop, and branch transfers.' },
-    { id: 'role', label: 'Roles', icon: ShieldCheck, desc: 'Assigned job titles, supervisory responsibilities, and hierarchies.' },
-    { id: 'status', label: 'Status', icon: CheckCircle2, desc: 'Active employment status, leave schedules, and probation tracking.' },
-    { id: 'permissions', label: 'Permissions', icon: KeyRound, desc: 'Cross-branch access permissions and security clearances.' },
-    { id: 'activity', label: 'Activity', icon: Activity, desc: 'Shift clock-ins, register sign-ons, and audit logs per employee.' },
+  const customerSections = [
+    { id: 'all', label: 'All Customers', icon: UserCheck, desc: 'Central organization customer profiles, contact info, and registration status.' },
+    { id: 'activity', label: 'Customer Activity', icon: Activity, desc: 'Recent purchase activity, engagement timestamps, and active loyalty.' },
+    { id: 'balances', label: 'Customer Balances', icon: CreditCard, desc: 'Outstanding balances, credit limits, and aging ledger summary.' },
+    { id: 'purchases', label: 'Customer Purchases', icon: ShoppingCart, desc: 'Historical customer orders and sales volumes across branches.' },
+    { id: 'branches', label: 'Branch Activity', icon: Store, desc: 'Breakdown of customer visits and shopping frequency per branch.' },
+    { id: 'history', label: 'Customer History', icon: History, desc: 'Comprehensive transaction history, refunds, and payment adjustments.' },
   ];
 
-  const currentSection = employeeSections.find((s) => s.id === activeTab) || employeeSections[0];
+  const currentSection = customerSections.find((s) => s.id === activeTab) || customerSections[0];
 
   return (
     <OrganizationPageShell
-      title="Organization Employees"
-      description="Organization-wide employee management across all branches and stores."
-      badge="Workforce Management"
+      title="Organization Customers"
+      description="Unified customer directory, cross-branch activity, and credit balances across the organization."
+      badge="Customer Registry"
       action={
         <button
           disabled
           className="flex items-center gap-2 px-3.5 py-2 bg-primary/20 text-primary border border-primary/30 rounded-lg text-xs font-medium cursor-not-allowed shadow-sm"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span>Invite Employee</span>
+          <span>Add Customer</span>
         </button>
       }
     >
       {/* Tab Navigation */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-gray-200 dark:border-gray-800">
-        {employeeSections.map((sec) => {
+        {customerSections.map((sec) => {
           const Icon = sec.icon;
           const isActive = activeTab === sec.id;
           return (
@@ -77,28 +77,27 @@ export function StaffManagementPage() {
         </div>
 
         <div className="flex items-center gap-2 text-xs text-gray-500">
-          <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md">Branches: All</span>
-          <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md">Status: All Statuses</span>
+          <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md">Filter: All Branches</span>
         </div>
       </div>
 
       {/* Main Empty State View */}
       <div className="bg-white dark:bg-gray-800/90 rounded-xl p-12 border border-gray-200/80 dark:border-gray-700/80 shadow-sm text-center">
         <div className="w-14 h-14 rounded-full bg-primary/10 mx-auto flex items-center justify-center text-primary mb-4">
-          <Users className="w-7 h-7" />
+          <UserCheck className="w-7 h-7" />
         </div>
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {currentSection.label} Directory
+          {currentSection.label}
         </h3>
         <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto mt-1.5 leading-relaxed">
           {currentSection.desc}
         </p>
         <p className="text-xs text-gray-400 dark:text-gray-500 mt-4 italic">
-          Organization-wide employees across all branches will appear here once the central staff connector is active.
+          Consolidated customer registry across all branches will appear here.
         </p>
       </div>
     </OrganizationPageShell>
   );
 }
 
-export default StaffManagementPage;
+export default OrganizationCustomersPage;

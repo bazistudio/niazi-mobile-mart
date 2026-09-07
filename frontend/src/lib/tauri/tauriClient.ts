@@ -920,7 +920,7 @@ export const tauriClient = {
     return [];
   },
 
-  async expenseCancel(id: string): Promise<Expense> {
+  async expenseCancel(id: string, _reason?: string): Promise<Expense> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Expense>('expense_cancel', { id });

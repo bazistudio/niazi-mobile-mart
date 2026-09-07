@@ -25,8 +25,8 @@ export const expensesApi = {
     return await tauriClient.expenseCreate(dto);
   },
 
-  cancelExpense: async (id: string, reason?: string): Promise<Expense> => {
-    return await tauriClient.expenseCancel(id, reason);
+  cancelExpense: async (id: string, _reason?: string): Promise<Expense> => {
+    return await tauriClient.expenseCancel(id);
   },
 
   getExpenses: async (filter?: ExpenseFilterDto): Promise<Expense[]> => {

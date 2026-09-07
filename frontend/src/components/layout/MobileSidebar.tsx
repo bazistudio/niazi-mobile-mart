@@ -14,6 +14,7 @@ interface MobileSidebarProps {
 }
 
 export const MobileSidebar = ({ isOpen, setIsOpen }: MobileSidebarProps) => {
+  // Mobile drawer navigation (supports all 17 Organization pages)
   const { pathname } = useLocation();
   const { hasPermission } = usePermissions();
   const closeButtonRef = useRef<HTMLButtonElement>(null);

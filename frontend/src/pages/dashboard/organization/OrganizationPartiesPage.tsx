@@ -1,48 +1,50 @@
 import React, { useState } from 'react';
 import { OrganizationPageShell } from '@/features/dashboard/components/organization/OrganizationPageShell';
 import { 
+  Contact2, 
+  UserCheck, 
+  Truck, 
   Users, 
-  Store, 
-  ShieldCheck, 
-  CheckCircle2, 
-  KeyRound, 
-  Activity,
+  Scale, 
+  Receipt, 
+  History,
   Search,
   Plus
 } from 'lucide-react';
 
-export function StaffManagementPage() {
+export function OrganizationPartiesPage() {
   const [activeTab, setActiveTab] = useState('all');
 
-  const employeeSections = [
-    { id: 'all', label: 'All Employees', icon: Users, desc: 'Central directory of all employees across organization branches.' },
-    { id: 'branch', label: 'Branch Allocation', icon: Store, desc: 'Staff deployment, primary work shop, and branch transfers.' },
-    { id: 'role', label: 'Roles', icon: ShieldCheck, desc: 'Assigned job titles, supervisory responsibilities, and hierarchies.' },
-    { id: 'status', label: 'Status', icon: CheckCircle2, desc: 'Active employment status, leave schedules, and probation tracking.' },
-    { id: 'permissions', label: 'Permissions', icon: KeyRound, desc: 'Cross-branch access permissions and security clearances.' },
-    { id: 'activity', label: 'Activity', icon: Activity, desc: 'Shift clock-ins, register sign-ons, and audit logs per employee.' },
+  const partySections = [
+    { id: 'all', label: 'All Parties', icon: Contact2, desc: 'Consolidated commercial contacts across customers, vendors, and strategic partners.' },
+    { id: 'customers', label: 'Customers', icon: UserCheck, desc: 'Registered customer parties with linked retail and wholesale accounts.' },
+    { id: 'suppliers', label: 'Suppliers', icon: Truck, desc: 'Commercial supplier entities with active trade accounts.' },
+    { id: 'other', label: 'Other Parties', icon: Users, desc: 'Third-party logistics, contractors, and secondary commercial contacts.' },
+    { id: 'balances', label: 'Balances', icon: Scale, desc: 'Net credit/debit balances across all commercial relationships.' },
+    { id: 'transactions', label: 'Transactions', icon: Receipt, desc: 'Commercial transaction entries and payment allocation history.' },
+    { id: 'history', label: 'History', icon: History, desc: 'Chronological party engagement and account activity log.' },
   ];
 
-  const currentSection = employeeSections.find((s) => s.id === activeTab) || employeeSections[0];
+  const currentSection = partySections.find((s) => s.id === activeTab) || partySections[0];
 
   return (
     <OrganizationPageShell
-      title="Organization Employees"
-      description="Organization-wide employee management across all branches and stores."
-      badge="Workforce Management"
+      title="Parties & Stakeholders"
+      description="Unified organization directory of commercial parties, business partners, customers, and suppliers."
+      badge="Party Directory"
       action={
         <button
           disabled
           className="flex items-center gap-2 px-3.5 py-2 bg-primary/20 text-primary border border-primary/30 rounded-lg text-xs font-medium cursor-not-allowed shadow-sm"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span>Invite Employee</span>
+          <span>New Party</span>
         </button>
       }
     >
       {/* Tab Navigation */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-gray-200 dark:border-gray-800">
-        {employeeSections.map((sec) => {
+        {partySections.map((sec) => {
           const Icon = sec.icon;
           const isActive = activeTab === sec.id;
           return (
@@ -77,15 +79,14 @@ export function StaffManagementPage() {
         </div>
 
         <div className="flex items-center gap-2 text-xs text-gray-500">
-          <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md">Branches: All</span>
-          <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md">Status: All Statuses</span>
+          <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md">Scope: Entire Enterprise</span>
         </div>
       </div>
 
       {/* Main Empty State View */}
       <div className="bg-white dark:bg-gray-800/90 rounded-xl p-12 border border-gray-200/80 dark:border-gray-700/80 shadow-sm text-center">
         <div className="w-14 h-14 rounded-full bg-primary/10 mx-auto flex items-center justify-center text-primary mb-4">
-          <Users className="w-7 h-7" />
+          <Contact2 className="w-7 h-7" />
         </div>
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
           {currentSection.label} Directory
@@ -94,11 +95,11 @@ export function StaffManagementPage() {
           {currentSection.desc}
         </p>
         <p className="text-xs text-gray-400 dark:text-gray-500 mt-4 italic">
-          Organization-wide employees across all branches will appear here once the central staff connector is active.
+          Consolidated party profiles, contact hierarchies, and combined balances will appear here.
         </p>
       </div>
     </OrganizationPageShell>
   );
 }
 
-export default StaffManagementPage;
+export default OrganizationPartiesPage;

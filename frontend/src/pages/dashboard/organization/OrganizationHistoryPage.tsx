@@ -1,48 +1,42 @@
 import React, { useState } from 'react';
 import { OrganizationPageShell } from '@/features/dashboard/components/organization/OrganizationPageShell';
 import { 
-  Users, 
+  History, 
+  ShoppingCart, 
+  Package, 
   Store, 
-  ShieldCheck, 
-  CheckCircle2, 
-  KeyRound, 
-  Activity,
+  UserCheck, 
+  Truck, 
+  Users, 
+  Receipt,
   Search,
-  Plus
+  Calendar
 } from 'lucide-react';
 
-export function StaffManagementPage() {
-  const [activeTab, setActiveTab] = useState('all');
+export function OrganizationHistoryPage() {
+  const [activeTab, setActiveTab] = useState('sales');
 
-  const employeeSections = [
-    { id: 'all', label: 'All Employees', icon: Users, desc: 'Central directory of all employees across organization branches.' },
-    { id: 'branch', label: 'Branch Allocation', icon: Store, desc: 'Staff deployment, primary work shop, and branch transfers.' },
-    { id: 'role', label: 'Roles', icon: ShieldCheck, desc: 'Assigned job titles, supervisory responsibilities, and hierarchies.' },
-    { id: 'status', label: 'Status', icon: CheckCircle2, desc: 'Active employment status, leave schedules, and probation tracking.' },
-    { id: 'permissions', label: 'Permissions', icon: KeyRound, desc: 'Cross-branch access permissions and security clearances.' },
-    { id: 'activity', label: 'Activity', icon: Activity, desc: 'Shift clock-ins, register sign-ons, and audit logs per employee.' },
+  const historySections = [
+    { id: 'sales', label: 'Sales History', icon: Receipt, desc: 'Historical customer sales and checkout records across all branches.' },
+    { id: 'purchase', label: 'Purchase History', icon: ShoppingCart, desc: 'Historical vendor orders and goods received notes.' },
+    { id: 'inventory', label: 'Inventory History', icon: Package, desc: 'Historical stock adjustments, write-offs, and batch histories.' },
+    { id: 'branch', label: 'Branch History', icon: Store, desc: 'Historical branch opening, status updates, and transfer records.' },
+    { id: 'customer', label: 'Customer History', icon: UserCheck, desc: 'Historical customer orders, returns, and payment settlements.' },
+    { id: 'supplier', label: 'Supplier History', icon: Truck, desc: 'Historical supplier transactions, returns, and payables history.' },
+    { id: 'employee', label: 'Employee History', icon: Users, desc: 'Historical staffing assignments, role changes, and shift summaries.' },
   ];
 
-  const currentSection = employeeSections.find((s) => s.id === activeTab) || employeeSections[0];
+  const currentSection = historySections.find((s) => s.id === activeTab) || historySections[0];
 
   return (
     <OrganizationPageShell
-      title="Organization Employees"
-      description="Organization-wide employee management across all branches and stores."
-      badge="Workforce Management"
-      action={
-        <button
-          disabled
-          className="flex items-center gap-2 px-3.5 py-2 bg-primary/20 text-primary border border-primary/30 rounded-lg text-xs font-medium cursor-not-allowed shadow-sm"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Invite Employee</span>
-        </button>
-      }
+      title="Organization History"
+      description="Consolidated historical business activity and operational records across all organization branches (distinct from security Audit Logs)."
+      badge="Event Archives"
     >
       {/* Tab Navigation */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-gray-200 dark:border-gray-800">
-        {employeeSections.map((sec) => {
+        {historySections.map((sec) => {
           const Icon = sec.icon;
           const isActive = activeTab === sec.id;
           return (
@@ -62,7 +56,7 @@ export function StaffManagementPage() {
         })}
       </div>
 
-      {/* Filter / Search Bar */}
+      {/* Filter / Search Bar (Placeholder) */}
       <div className="bg-white dark:bg-gray-800/90 rounded-xl p-4 border border-gray-200/80 dark:border-gray-700/80 shadow-sm flex flex-col md:flex-row items-center justify-between gap-3">
         <div className="flex items-center gap-2 w-full md:w-auto flex-1 max-w-md">
           <div className="relative w-full">
@@ -76,29 +70,34 @@ export function StaffManagementPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-gray-500">
-          <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md">Branches: All</span>
-          <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md">Status: All Statuses</span>
+        <div className="flex items-center gap-2 w-full md:w-auto">
+          <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-500">
+            <Calendar className="w-3.5 h-3.5 text-gray-400" />
+            <span>All Dates</span>
+          </div>
+          <div className="px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-500">
+            <span>All Branches</span>
+          </div>
         </div>
       </div>
 
-      {/* Main Empty State View */}
+      {/* History Records Container (Empty State) */}
       <div className="bg-white dark:bg-gray-800/90 rounded-xl p-12 border border-gray-200/80 dark:border-gray-700/80 shadow-sm text-center">
         <div className="w-14 h-14 rounded-full bg-primary/10 mx-auto flex items-center justify-center text-primary mb-4">
-          <Users className="w-7 h-7" />
+          <History className="w-7 h-7" />
         </div>
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {currentSection.label} Directory
+          {currentSection.label} Records
         </h3>
         <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto mt-1.5 leading-relaxed">
           {currentSection.desc}
         </p>
         <p className="text-xs text-gray-400 dark:text-gray-500 mt-4 italic">
-          Organization-wide employees across all branches will appear here once the central staff connector is active.
+          Historical event records will appear here as business operations occur across branches.
         </p>
       </div>
     </OrganizationPageShell>
   );
 }
 
-export default StaffManagementPage;
+export default OrganizationHistoryPage;

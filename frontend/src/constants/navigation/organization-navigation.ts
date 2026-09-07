@@ -1,56 +1,42 @@
 import { 
-  Building, 
+  LayoutDashboard,
   Store, 
   Users, 
-  Settings, 
-  Activity, 
-  PieChart,
-  Truck,
-  Shield,
-  TrendingUp,
-  Receipt,
-  FileBarChart,
-  Package,
-  ArrowRightLeft,
-  AlertTriangle,
+  Activity,
+  BarChart3,
   History,
-  Bell,
-  CreditCard,
-  Sliders,
-  Wallet
+  Briefcase,
+  BookOpen,
+  LineChart,
+  Share2,
+  Package,
+  UserCheck,
+  Truck,
+  Contact2,
+  Settings
 } from 'lucide-react';
-import { PERMISSIONS } from '../permissions';
+import { NavigationGroup } from '../../types/navigation';
 
-export const organizationNavigation = [
+export const organizationNavigation: NavigationGroup[] = [
   {
-    label: 'Overview',
     items: [
-      { name: 'Dashboard', href: '/dashboard/organization', icon: Building, permission: PERMISSIONS.ORG_VIEW },
-    ],
-  },
-  {
-    label: 'Operations',
-    items: [
-      { name: 'Shops', href: '/dashboard/organization/shops', icon: Store, permission: PERMISSIONS.SHOPS_VIEW_ALL },
-    ],
-  },
-  {
-    label: 'People',
-    items: [
-      { name: 'Employees', href: '/dashboard/organization/staff', icon: Users, permission: PERMISSIONS.USERS_VIEW },
-    ],
-  },
-  {
-    label: 'Activity',
-    items: [
-      { name: 'Audit Logs', href: '/dashboard/organization/audit-logs', icon: Activity, permission: PERMISSIONS.ORG_SETTINGS_MANAGE },
-    ],
-  },
-  {
-    label: 'Settings',
-    items: [
-      { name: 'Organization Profile', href: '/dashboard/organization/settings', icon: Settings, permission: PERMISSIONS.ORG_SETTINGS_MANAGE },
+      { name: 'Dashboard', href: '/dashboard/organization', icon: LayoutDashboard },
+      { name: 'Shops', href: '/dashboard/organization/shops', icon: Store },
+      { name: 'Employees', href: '/dashboard/organization/employees', icon: Users },
+      { name: 'Audit Log', href: '/dashboard/organization/audit-logs', icon: Activity },
+      { name: 'Reports', href: '/dashboard/organization/reports', icon: BarChart3 },
+      { name: 'History', href: '/dashboard/organization/history', icon: History },
+      { name: 'Business', href: '/dashboard/organization/business', icon: Briefcase },
+      { name: 'Ledger', href: '/dashboard/organization/ledger', icon: BookOpen },
+      { name: 'Analytics', href: '/dashboard/organization/analytics', icon: LineChart },
+      { name: 'Social', href: '/dashboard/organization/social', icon: Share2 },
+      { name: 'Products', href: '/dashboard/organization/products', icon: Package },
+      { name: 'Customers', href: '/dashboard/organization/customers', icon: UserCheck },
+      { name: 'Suppliers', href: '/dashboard/organization/suppliers', icon: Truck },
+      { name: 'Parties', href: '/dashboard/organization/parties', icon: Contact2 },
+      { name: 'Settings', href: '/dashboard/organization/settings', icon: Settings },
     ],
   },
 ];
 
+export default organizationNavigation;

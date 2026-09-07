@@ -58,7 +58,7 @@ export async function loginUser(identifier: string, password: string) {
     name: isAdmin ? "Fizikhan (Admin)" : "Staff Member",
     username: cleanId || "admin",
     email: `${cleanId || "admin"}@local`,
-    role: isAdmin ? "ADMIN" : "STAFF",
+    role: isAdmin ? "OWNER" : "STAFF",
     status: "active",
     mustChangePassword: false,
     permissions: [

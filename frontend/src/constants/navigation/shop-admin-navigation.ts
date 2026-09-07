@@ -16,6 +16,7 @@ import {
   ChefHat,
   Megaphone,
   Coins,
+  Building2,
 } from 'lucide-react';
 import { NavigationGroup } from '../../types/navigation';
 
@@ -23,6 +24,7 @@ export const shopAdminNavigation: NavigationGroup[] = [
   {
     items: [
       { name: 'Dashboard', href: '/dashboard/shop-admin', icon: LayoutDashboard },
+      { name: 'Organization Control (17 Pages)', href: '/dashboard/organization', icon: Building2 },
     ],
   },
   {

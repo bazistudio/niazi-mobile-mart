@@ -38,6 +38,23 @@ export const VALID_ROUTES = [
 
   // Organization
   '/dashboard/organization',
+  '/dashboard/organization/shops',
+  '/dashboard/organization/employees',
+  '/dashboard/organization/staff',
+  '/dashboard/organization/audit-logs',
+  '/dashboard/organization/profile',
+  '/dashboard/organization/roles',
+  '/dashboard/organization/reports',
+  '/dashboard/organization/history',
+  '/dashboard/organization/business',
+  '/dashboard/organization/ledger',
+  '/dashboard/organization/analytics',
+  '/dashboard/organization/social',
+  '/dashboard/organization/products',
+  '/dashboard/organization/customers',
+  '/dashboard/organization/suppliers',
+  '/dashboard/organization/parties',
+  '/dashboard/organization/settings',
 ] as const;
 
 export type ValidRoute = typeof VALID_ROUTES[number];
