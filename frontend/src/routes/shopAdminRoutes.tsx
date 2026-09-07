@@ -1,5 +1,7 @@
 import React from 'react';
 import { Route } from 'react-router-dom';
+import { PermissionGuard } from '@/components/auth/PermissionGuard';
+import { PERMISSIONS } from '@/constants/permissions';
 import { ShopAdminDashboard } from '@/features/dashboard/components/shop-admin/ShopAdminDashboard';
 import { POSPage } from '@/pages/dashboard/shop-admin/POSPage';
 import { ProductsPage } from '@/pages/dashboard/shop-admin/ProductsPage';
@@ -36,56 +38,89 @@ import { WorkforcePage } from '@/pages/dashboard/shop-admin/settings/WorkforcePa
 
 export const shopAdminCoreRoutes = (
   <>
-    {/* Batch 3: Core */}
+    {/* Base Dashboard Overview — Accessible to all authenticated shop staff */}
     <Route index element={<ShopAdminDashboard />} />
-    <Route path="pos" element={<POSPage />} />
-    <Route path="products" element={<ProductsPage />} />
-    
-    {/* Inventory Workspace with Nested Tabs */}
-    <Route path="inventory" element={<InventoryWorkspaceLayout />}>
-      <Route index element={<InventoryProductsPage />} />
-      <Route path="stock" element={<InventoryStockPage />} />
-      <Route path="import" element={<InventoryImportPage />} />
+    <Route path="profile" element={<ProfilePage />} />
+
+    {/* Point of Sale & Kitchen Display */}
+    <Route element={<PermissionGuard requiredPermission={PERMISSIONS.POS_USE} />}>
+      <Route path="pos" element={<POSPage />} />
+      <Route path="kds" element={<KdsPage />} />
     </Route>
 
-    {/* Direct alias routes */}
-    <Route path="stock" element={<StockPage />} />
-    <Route path="import" element={<ImportPage />} />
+    {/* Products Catalog */}
+    <Route element={<PermissionGuard requiredPermission={PERMISSIONS.PRODUCTS_VIEW} />}>
+      <Route path="products" element={<ProductsPage />} />
+    </Route>
 
-    {/* Batch 4: Sales, History, Customers, Suppliers, Parties */}
-    <Route path="sales" element={<SalesPage />} />
-    <Route path="history" element={<HistoryPage />} />
-    
-    <Route path="customers" element={<CustomersPage />} />
-    <Route path="customers/:id" element={<CustomerDetailPage />} />
+    {/* Inventory Workspace with Nested Tabs & Direct Alias Routes */}
+    <Route element={<PermissionGuard requiredPermission={PERMISSIONS.INVENTORY_VIEW} />}>
+      <Route path="inventory" element={<InventoryWorkspaceLayout />}>
+        <Route index element={<InventoryProductsPage />} />
+        <Route path="stock" element={<InventoryStockPage />} />
+        <Route path="import" element={<InventoryImportPage />} />
+      </Route>
+      <Route path="stock" element={<StockPage />} />
+      <Route path="import" element={<ImportPage />} />
+    </Route>
 
-    <Route path="suppliers" element={<SuppliersPage />} />
-    <Route path="suppliers/:id" element={<SupplierDetailPage />} />
+    {/* Sales Analytics */}
+    <Route element={<PermissionGuard requiredPermission={PERMISSIONS.SALES_VIEW} />}>
+      <Route path="sales" element={<SalesPage />} />
+    </Route>
 
-    <Route path="parties" element={<PartiesPage />} />
-    <Route path="parties/:id" element={<PartyDetailPage />} />
+    {/* Activity & Operational Reports History */}
+    <Route element={<PermissionGuard requiredPermission={PERMISSIONS.REPORTS_VIEW} />}>
+      <Route path="history" element={<HistoryPage />} />
+      <Route path="marketing" element={<MarketingPage />} />
+    </Route>
 
-    {/* Batch 5: Operations */}
-    <Route path="repairs" element={<RepairsPage />} />
-    <Route path="repairs/:id" element={<RepairDetailPage />} />
-    <Route path="expenses" element={<ExpensesPage />} />
-    <Route path="cash" element={<CashManagementPage />} />
-    <Route path="cash-management" element={<CashManagementPage />} />
-    <Route path="business-ledger" element={<BusinessLedgerPage />} />
-    <Route path="kds" element={<KdsPage />} />
-    <Route path="marketing" element={<MarketingPage />} />
+    {/* Parties, Customers & Suppliers */}
+    <Route element={<PermissionGuard requiredPermission={PERMISSIONS.PARTIES_VIEW} />}>
+      <Route path="customers" element={<CustomersPage />} />
+      <Route path="customers/:id" element={<CustomerDetailPage />} />
+      <Route path="suppliers" element={<SuppliersPage />} />
+      <Route path="suppliers/:id" element={<SupplierDetailPage />} />
+      <Route path="parties" element={<PartiesPage />} />
+      <Route path="parties/:id" element={<PartyDetailPage />} />
+    </Route>
 
-    {/* Batch 6: Settings, Profile & Audit */}
-    <Route path="profile" element={<ProfilePage />} />
-    <Route path="audit" element={<AuditPage />} />
+    {/* Repairs & Services */}
+    <Route element={<PermissionGuard requiredPermission={PERMISSIONS.REPAIRS_VIEW} />}>
+      <Route path="repairs" element={<RepairsPage />} />
+      <Route path="repairs/:id" element={<RepairDetailPage />} />
+    </Route>
 
-    <Route path="settings" element={<SettingsLayout />}>
-      <Route index element={<GeneralSettingsPage />} />
-      <Route path="appearance" element={<ShopAppearanceNoticePage />} />
-      <Route path="backup" element={<ShopBackupNoticePage />} />
-      <Route path="printer" element={<PrinterPage />} />
-      <Route path="roles" element={<RolesSettingsPage />} />
-      <Route path="users" element={<WorkforcePage />} />
+    {/* Financial Management: Cash, Business Ledger & Expenses */}
+    <Route element={<PermissionGuard requiredPermission={PERMISSIONS.FINANCE_VIEW} />}>
+      <Route path="cash" element={<CashManagementPage />} />
+      <Route path="cash-management" element={<CashManagementPage />} />
+      <Route path="business-ledger" element={<BusinessLedgerPage />} />
+    </Route>
+
+    <Route element={<PermissionGuard requiredPermission={PERMISSIONS.EXPENSES_VIEW} />}>
+      <Route path="expenses" element={<ExpensesPage />} />
+    </Route>
+
+    {/* Audit & Compliance Panel — Org Admin & Cross-Shop View */}
+    <Route element={<PermissionGuard requiredPermission={PERMISSIONS.SHOPS_VIEW_ALL} />}>
+      <Route path="audit" element={<AuditPage />} />
+    </Route>
+
+    {/* Settings Hierarchy */}
+    <Route element={<PermissionGuard requiredPermission={PERMISSIONS.SETTINGS_VIEW} />}>
+      <Route path="settings" element={<SettingsLayout />}>
+        <Route index element={<GeneralSettingsPage />} />
+        <Route path="appearance" element={<ShopAppearanceNoticePage />} />
+        <Route path="backup" element={<ShopBackupNoticePage />} />
+        <Route path="printer" element={<PrinterPage />} />
+        <Route path="roles" element={<RolesSettingsPage />} />
+
+        {/* High-security Workforce Management: Requires USERS_VIEW and USERS_MANAGE */}
+        <Route element={<PermissionGuard requiredPermissions={[PERMISSIONS.USERS_VIEW, PERMISSIONS.USERS_MANAGE]} fallbackPath="/dashboard/shop-admin/settings" />}>
+          <Route path="users" element={<WorkforcePage />} />
+        </Route>
+      </Route>
     </Route>
   </>
 );

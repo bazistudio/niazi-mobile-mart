@@ -1,6 +1,6 @@
 [package]
 name = "niazi-mobile-mart"
-version = "5.0.3"
+version = "1.0.1"
 description = "Niazi Mobile Mart - Desktop ERP & POS"
 authors = ["Niazi Mobile Mart"]
 edition = "2021"

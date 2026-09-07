@@ -16,9 +16,24 @@ pub async fn profit_get_period(
     branch_id: Option<String>,
 ) -> AppResult<PeriodProfitabilityDto> {
     AuthService::require_permission(&state, Some("reports"), None).await?;
+    let target_branch = if let Some(ref bid) = branch_id {
+        Some(AuthService::require_branch_access(&state, Some(bid)).await?)
+    } else {
+        let authorized_branch = AuthService::require_branch_access(&state, None).await?;
+        let session = state.get_session().await;
+        let is_org_admin = match session.role {
+            Some(crate::domain::user::UserRole::Admin) => true,
+            _ => session.access_profile.as_ref().map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+        };
+        if !is_org_admin {
+            Some(authorized_branch)
+        } else {
+            None
+        }
+    };
     state
         .profit_service
-        .get_period_profitability(start_date, end_date, branch_id)
+        .get_period_profitability(start_date, end_date, target_branch)
         .await
 }
 
@@ -30,9 +45,24 @@ pub async fn profit_get_daily(
     branch_id: Option<String>,
 ) -> AppResult<Vec<DailyProfitabilityDto>> {
     AuthService::require_permission(&state, Some("reports"), None).await?;
+    let target_branch = if let Some(ref bid) = branch_id {
+        Some(AuthService::require_branch_access(&state, Some(bid)).await?)
+    } else {
+        let authorized_branch = AuthService::require_branch_access(&state, None).await?;
+        let session = state.get_session().await;
+        let is_org_admin = match session.role {
+            Some(crate::domain::user::UserRole::Admin) => true,
+            _ => session.access_profile.as_ref().map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+        };
+        if !is_org_admin {
+            Some(authorized_branch)
+        } else {
+            None
+        }
+    };
     state
         .profit_service
-        .get_daily_profitability(start_date, end_date, branch_id)
+        .get_daily_profitability(start_date, end_date, target_branch)
         .await
 }
 
@@ -45,9 +75,24 @@ pub async fn profit_get_product(
     branch_id: Option<String>,
 ) -> AppResult<Vec<ProductProfitabilityDto>> {
     AuthService::require_permission(&state, Some("reports"), None).await?;
+    let target_branch = if let Some(ref bid) = branch_id {
+        Some(AuthService::require_branch_access(&state, Some(bid)).await?)
+    } else {
+        let authorized_branch = AuthService::require_branch_access(&state, None).await?;
+        let session = state.get_session().await;
+        let is_org_admin = match session.role {
+            Some(crate::domain::user::UserRole::Admin) => true,
+            _ => session.access_profile.as_ref().map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+        };
+        if !is_org_admin {
+            Some(authorized_branch)
+        } else {
+            None
+        }
+    };
     state
         .profit_service
-        .get_product_profitability(product_id, start_date, end_date, branch_id)
+        .get_product_profitability(product_id, start_date, end_date, target_branch)
         .await
 }
 
@@ -57,6 +102,10 @@ pub async fn profit_get_sale(
     sale_id: String,
 ) -> AppResult<Option<SaleProfitabilityDto>> {
     AuthService::require_permission(&state, Some("reports"), None).await?;
+    let sale = state.sale_service.get_sale_by_id(&sale_id).await?;
+    if let Some(ref s) = sale {
+        AuthService::require_branch_access(&state, Some(&s.branch_id)).await?;
+    }
     state.profit_service.get_sale_profitability(&sale_id).await
 }
 
@@ -67,8 +116,23 @@ pub async fn profit_get_dashboard_summary(
 ) -> AppResult<DashboardProfitSummaryDto> {
     // Both shop_admin and staff can view dashboard KPIs
     AuthService::require_permission(&state, None, None).await?;
+    let target_branch = if let Some(ref bid) = branch_id {
+        Some(AuthService::require_branch_access(&state, Some(bid)).await?)
+    } else {
+        let authorized_branch = AuthService::require_branch_access(&state, None).await?;
+        let session = state.get_session().await;
+        let is_org_admin = match session.role {
+            Some(crate::domain::user::UserRole::Admin) => true,
+            _ => session.access_profile.as_ref().map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+        };
+        if !is_org_admin {
+            Some(authorized_branch)
+        } else {
+            None
+        }
+    };
     state
         .profit_service
-        .get_dashboard_profit_summary(branch_id)
+        .get_dashboard_profit_summary(target_branch)
         .await
 }

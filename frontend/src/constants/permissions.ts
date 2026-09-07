@@ -47,6 +47,10 @@ export const PERMISSIONS = {
   // Reports & Analytics
   REPORTS_VIEW: 'reports.view', // Single shop reports
   REPORTS_VIEW_ALL: 'reports.view.all', // Consolidated cross-shop reports
+
+  // Repairs & Services
+  REPAIRS_VIEW: 'repairs.view',
+  REPAIRS_MANAGE: 'repairs.manage',
 } as const;
 
 export type PermissionKey = typeof PERMISSIONS[keyof typeof PERMISSIONS];
@@ -61,5 +65,6 @@ export const PERMISSION_METADATA: Record<string, { label: string; description?: 
   [PERMISSIONS.INVENTORY_EDIT]: { label: "Edit Inventory" },
   [PERMISSIONS.USERS_VIEW]: { label: "View Users" },
   [PERMISSIONS.USERS_MANAGE]: { label: "Manage Users" },
-  // ... can be expanded
+  [PERMISSIONS.REPAIRS_VIEW]: { label: "View Repairs" },
+  [PERMISSIONS.REPAIRS_MANAGE]: { label: "Manage Repairs" },
 };

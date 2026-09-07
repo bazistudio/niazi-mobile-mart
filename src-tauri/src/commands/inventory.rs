@@ -11,9 +11,11 @@ use crate::state::AppState;
 #[tauri::command]
 pub async fn inventory_increase(
     state: State<'_, AppState>,
-    dto: IncreaseStockDto,
+    mut dto: IncreaseStockDto,
 ) -> AppResult<i64> {
     AuthService::require_permission(&state, Some("inventory"), Some("inventory:write")).await?;
+    let authorized_branch = AuthService::require_branch_access(&state, Some(&dto.branch_id)).await?;
+    dto.branch_id = authorized_branch;
     let session = state.get_session().await;
     state
         .inventory_service
@@ -24,9 +26,11 @@ pub async fn inventory_increase(
 #[tauri::command]
 pub async fn inventory_decrease(
     state: State<'_, AppState>,
-    dto: DecreaseStockDto,
+    mut dto: DecreaseStockDto,
 ) -> AppResult<i64> {
     AuthService::require_permission(&state, Some("inventory"), Some("inventory:write")).await?;
+    let authorized_branch = AuthService::require_branch_access(&state, Some(&dto.branch_id)).await?;
+    dto.branch_id = authorized_branch;
     let session = state.get_session().await;
     state
         .inventory_service
@@ -35,8 +39,10 @@ pub async fn inventory_decrease(
 }
 
 #[tauri::command]
-pub async fn inventory_adjust(state: State<'_, AppState>, dto: AdjustStockDto) -> AppResult<i64> {
+pub async fn inventory_adjust(state: State<'_, AppState>, mut dto: AdjustStockDto) -> AppResult<i64> {
     AuthService::require_permission(&state, Some("inventory"), Some("inventory:adjust")).await?;
+    let authorized_branch = AuthService::require_branch_access(&state, Some(&dto.branch_id)).await?;
+    dto.branch_id = authorized_branch;
     let session = state.get_session().await;
     state
         .inventory_service
@@ -50,6 +56,16 @@ pub async fn inventory_transfer(
     dto: TransferStockDto,
 ) -> AppResult<()> {
     AuthService::require_permission(&state, Some("inventory"), Some("inventory:transfer")).await?;
+    // Both source and destination branches must be validated
+    AuthService::require_branch_access(&state, Some(&dto.from_branch_id)).await?;
+    // Destination branch must also exist and be within the authorized organization
+    let all_branches = state.branch_repo.list_branches().await?;
+    if !all_branches.iter().any(|b| b.id == dto.to_branch_id) {
+        return Err(crate::errors::AppError::NotFound(format!(
+            "Destination branch '{}' does not exist",
+            dto.to_branch_id
+        )));
+    }
     let session = state.get_session().await;
     state
         .inventory_service
@@ -64,7 +80,8 @@ pub async fn inventory_get_stock(
     branch_id: String,
 ) -> AppResult<i64> {
     AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await?;
-    state.inventory_service.get_stock(&product_id, &branch_id).await
+    let authorized_branch = AuthService::require_branch_access(&state, Some(&branch_id)).await?;
+    state.inventory_service.get_stock(&product_id, &authorized_branch).await
 }
 
 #[tauri::command]
@@ -75,9 +92,23 @@ pub async fn inventory_get_movements(
     limit: Option<u32>,
 ) -> AppResult<Vec<StockMovement>> {
     AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await?;
+    let target_branch = if let Some(ref bid) = branch_id {
+        Some(AuthService::require_branch_access(&state, Some(bid)).await?)
+    } else {
+        let session = state.get_session().await;
+        let is_org_admin = match session.role {
+            Some(crate::domain::user::UserRole::Admin) => true,
+            _ => session.access_profile.as_ref().map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+        };
+        if !is_org_admin {
+            Some(AuthService::require_branch_access(&state, None).await?)
+        } else {
+            None
+        }
+    };
     state
         .inventory_service
-        .list_movements(product_id.as_deref(), branch_id.as_deref(), limit.unwrap_or(50))
+        .list_movements(product_id.as_deref(), target_branch.as_deref(), limit.unwrap_or(50))
         .await
 }
 
@@ -87,7 +118,8 @@ pub async fn inventory_get_low_stock(
     branch_id: String,
 ) -> AppResult<Vec<LowStockItemDto>> {
     AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await?;
-    state.inventory_service.get_low_stock(&branch_id).await
+    let authorized_branch = AuthService::require_branch_access(&state, Some(&branch_id)).await?;
+    state.inventory_service.get_low_stock(&authorized_branch).await
 }
 
 #[cfg(test)]

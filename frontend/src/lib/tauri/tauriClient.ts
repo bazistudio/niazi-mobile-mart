@@ -90,7 +90,7 @@ export const tauriClient = {
     return {
       status: 'ok',
       app_name: 'Niazi Mobile Mart (Web Fallback)',
-      version: '5.0.3',
+      version: '1.0.1',
       engine: 'Browser Runtime (Development)',
       timestamp_ms: Date.now(),
     };

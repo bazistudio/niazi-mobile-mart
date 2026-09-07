@@ -5,7 +5,10 @@ export type UserRole =
   | "OWNER"
   | "ADMIN"
   | "MANAGER"
+  | "ACCOUNTANT"
+  | "SALESMAN"
   | "CASHIER"
+  | "REPAIR_MECHANIC"
   | "STAFF";
 
 export interface AuthUser {

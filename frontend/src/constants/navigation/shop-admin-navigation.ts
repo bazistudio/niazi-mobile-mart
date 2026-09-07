@@ -19,6 +19,7 @@ import {
   Building2,
 } from 'lucide-react';
 import { NavigationGroup } from '../../types/navigation';
+import { PERMISSIONS } from '../permissions';
 
 export const shopAdminNavigation: NavigationGroup[] = [
   {
@@ -30,44 +31,44 @@ export const shopAdminNavigation: NavigationGroup[] = [
   {
     label: 'Sales',
     items: [
-      { name: 'POS', href: '/dashboard/shop-admin/pos', icon: MonitorPlay, permission: 'POS_ACCESS' },
-      { name: 'Sales Analytics', href: '/dashboard/shop-admin/sales', icon: BarChart3, permission: 'VIEW_REPORTS' },
+      { name: 'POS', href: '/dashboard/shop-admin/pos', icon: MonitorPlay, permission: PERMISSIONS.POS_USE },
+      { name: 'Sales Analytics', href: '/dashboard/shop-admin/sales', icon: BarChart3, permission: PERMISSIONS.SALES_VIEW },
     ],
   },
   {
     label: 'Inventory',
     items: [
-      { name: 'Products & Stock', href: '/dashboard/shop-admin/inventory', icon: Tags, permission: 'VIEW_PRODUCTS' },
+      { name: 'Products & Stock', href: '/dashboard/shop-admin/inventory', icon: Tags, permission: PERMISSIONS.PRODUCTS_VIEW },
     ],
   },
   {
     label: 'Operations',
     items: [
-      { name: 'Cash Management', href: '/dashboard/shop-admin/cash', icon: Coins, permission: 'VIEW_REPORTS' },
-      { name: 'Expenses', href: '/dashboard/shop-admin/expenses', icon: Receipt, permission: 'VIEW_EXPENSES' },
-      { name: 'Kitchen Display (KDS)', href: '/dashboard/shop-admin/kds', icon: ChefHat, permission: 'POS_ACCESS' },
-      { name: 'Marketing & Broadcasts', href: '/dashboard/shop-admin/marketing', icon: Megaphone, permission: 'VIEW_REPORTS' },
-      { name: 'Repairs', href: '/dashboard/shop-admin/repairs', icon: Wrench },
+      { name: 'Cash Management', href: '/dashboard/shop-admin/cash', icon: Coins, permission: PERMISSIONS.FINANCE_VIEW },
+      { name: 'Expenses', href: '/dashboard/shop-admin/expenses', icon: Receipt, permission: PERMISSIONS.EXPENSES_VIEW },
+      { name: 'Kitchen Display (KDS)', href: '/dashboard/shop-admin/kds', icon: ChefHat, permission: PERMISSIONS.POS_USE },
+      { name: 'Marketing & Broadcasts', href: '/dashboard/shop-admin/marketing', icon: Megaphone, permission: PERMISSIONS.REPORTS_VIEW },
+      { name: 'Repairs', href: '/dashboard/shop-admin/repairs', icon: Wrench, permission: PERMISSIONS.REPAIRS_VIEW },
     ],
   },
   {
     label: 'Ledger',
     items: [
-      { name: 'Customers', href: '/dashboard/shop-admin/customers', icon: Users },
-      { name: 'Suppliers', href: '/dashboard/shop-admin/suppliers', icon: Truck, permission: 'VIEW_PRODUCTS' },
-      { name: 'Parties', href: '/dashboard/shop-admin/parties', icon: Users, permission: 'VIEW_LEDGER' },
-      { name: 'Business Ledger', href: '/dashboard/shop-admin/business-ledger', icon: BookOpen, permission: 'VIEW_LEDGER' },
+      { name: 'Customers', href: '/dashboard/shop-admin/customers', icon: Users, permission: PERMISSIONS.PARTIES_VIEW },
+      { name: 'Suppliers', href: '/dashboard/shop-admin/suppliers', icon: Truck, permission: PERMISSIONS.PARTIES_VIEW },
+      { name: 'Parties', href: '/dashboard/shop-admin/parties', icon: Users, permission: PERMISSIONS.PARTIES_VIEW },
+      { name: 'Business Ledger', href: '/dashboard/shop-admin/business-ledger', icon: BookOpen, permission: PERMISSIONS.FINANCE_VIEW },
     ],
   },
   {
     label: 'Reports',
     items: [
-      { name: 'History', href: '/dashboard/shop-admin/history', icon: History, permission: 'VIEW_REPORTS' },
+      { name: 'History', href: '/dashboard/shop-admin/history', icon: History, permission: PERMISSIONS.REPORTS_VIEW },
     ],
   },
   {
     items: [
-      { name: 'Settings', href: '/dashboard/shop-admin/settings', icon: Settings, permission: 'MANAGE_SETTINGS' },
+      { name: 'Settings', href: '/dashboard/shop-admin/settings', icon: Settings, permission: PERMISSIONS.SETTINGS_VIEW },
     ],
   },
   // Dev-only — not rendered in production

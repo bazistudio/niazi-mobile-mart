@@ -90,7 +90,15 @@ impl AdminService {
             ));
         }
 
-        if session.role != Some(UserRole::Admin) {
+        let is_admin = match session.role {
+            Some(UserRole::Admin) => true,
+            _ => session
+                .access_profile
+                .as_ref()
+                .map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+        };
+
+        if !is_admin {
             return Err(AppError::Forbidden(
                 "Access denied: Administrative privileges required".to_string(),
             ));

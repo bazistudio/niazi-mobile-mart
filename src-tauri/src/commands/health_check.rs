@@ -56,7 +56,7 @@ mod tests {
         let hr = HealthResponse {
             status: "ok".to_string(),
             app_name: "Niazi Mobile Mart".to_string(),
-            version: "5.0.3".to_string(),
+            version: "1.0.1".to_string(),
             engine: "Tauri 2 + Rust Native".to_string(),
             timestamp_ms: 1700000000,
         };

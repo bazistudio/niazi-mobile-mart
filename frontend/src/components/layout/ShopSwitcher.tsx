@@ -45,19 +45,32 @@ export const ShopSwitcher = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
+  const isOrgAdmin =
+    user?.role === 'OWNER' ||
+    user?.role === 'SUPER_ADMIN' ||
+    user?.role === 'MULTI_ADMIN' ||
+    user?.role === 'ADMIN';
+
   // Fetch branches via Tauri IPC when dropdown first opens
   useEffect(() => {
     if (isOpen && branches.length === 0) {
       const fetchBranches = async () => {
         try {
           const list = await tauriClient.branchList();
-          setBranches(list);
-          if (list.length > 0 && !activeShop) {
+          // Filter branches: Org Admin sees all branches; branch users see ONLY their assigned branch
+          const userBranchId = (user as any)?.branchId || (user as any)?.shopId;
+          const accessible = isOrgAdmin
+            ? list
+            : list.filter((b) => !userBranchId || b.id === userBranchId);
+
+          setBranches(accessible);
+
+          if (accessible.length > 0 && !activeShop) {
             setActiveShop({
-              _id: list[0].id,
-              name: list[0].name,
-              organizationId: list[0].organization_id,
-              status: list[0].is_active ? 'active' : 'inactive',
+              _id: accessible[0].id,
+              name: accessible[0].name,
+              organizationId: accessible[0].organization_id,
+              status: accessible[0].is_active ? 'active' : 'inactive',
             });
           }
         } catch (error) {
@@ -66,9 +79,20 @@ export const ShopSwitcher = () => {
       };
       fetchBranches();
     }
-  }, [isOpen, branches.length, activeShop, setActiveShop]);
+  }, [isOpen, branches.length, activeShop, setActiveShop, isOrgAdmin, user]);
 
   const handleContextSwitch = (branch: Branch | null, path: string) => {
+    // Prevent non-admin users from switching to All Shops
+    if (!branch && !isOrgAdmin) {
+      return;
+    }
+
+    // Prevent non-admin users from switching to a branch other than their assigned one
+    const userBranchId = (user as any)?.branchId || (user as any)?.shopId;
+    if (branch && !isOrgAdmin && userBranchId && branch.id !== userBranchId) {
+      return;
+    }
+
     setIsLoading(true);
     setIsOpen(false);
 
@@ -133,27 +157,29 @@ export const ShopSwitcher = () => {
           </div>
 
           <div className="py-1 max-h-72 overflow-y-auto custom-scrollbar">
-            {/* All Shops option */}
-            <button
-              type="button"
-              role="option"
-              aria-selected={viewMode === 'organization'}
-              onClick={() => handleContextSwitch(null, '/dashboard/organization')}
-              className={`w-full flex items-center gap-3 px-3 py-2 text-sm text-left transition-colors duration-fast ${
-                viewMode === 'organization'
-                  ? 'bg-primary/10 text-primary font-medium'
-                  : 'text-text-secondary hover:bg-surface-hover'
-              }`}
-            >
-              <Building className="w-4 h-4 flex-shrink-0" />
-              <span className="flex-1 truncate">All Shops</span>
-              {viewMode === 'organization' && (
-                <Check className="w-3.5 h-3.5 flex-shrink-0 text-primary" />
-              )}
-            </button>
-
-            {/* Divider */}
-            <div className="border-t border-border my-1" />
+            {/* All Shops option (Organization Admin only) */}
+            {isOrgAdmin && (
+              <>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={viewMode === 'organization'}
+                  onClick={() => handleContextSwitch(null, '/dashboard/organization')}
+                  className={`w-full flex items-center gap-3 px-3 py-2 text-sm text-left transition-colors duration-fast ${
+                    viewMode === 'organization'
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'text-text-secondary hover:bg-surface-hover'
+                  }`}
+                >
+                  <Building className="w-4 h-4 flex-shrink-0" />
+                  <span className="flex-1 truncate">All Shops</span>
+                  {viewMode === 'organization' && (
+                    <Check className="w-3.5 h-3.5 flex-shrink-0 text-primary" />
+                  )}
+                </button>
+                <div className="border-t border-border my-1" />
+              </>
+            )}
 
             {/* Individual branches */}
             {branches.length === 0 ? (

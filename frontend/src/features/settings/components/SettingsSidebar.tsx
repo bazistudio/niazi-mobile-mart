@@ -1,21 +1,31 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Settings, Users, Printer, Building2 } from 'lucide-react';
+import { usePermissions } from '@/lib/auth/usePermissions';
+import { PERMISSIONS } from '@/constants/permissions';
 
 const navItems = [
-  { name: 'General', href: '/dashboard/shop-admin/settings', icon: Settings },
-  { name: 'Workforce', href: '/dashboard/shop-admin/settings/users', icon: Users },
-  { name: 'Printer', href: '/dashboard/shop-admin/settings/printer', icon: Printer },
+  { name: 'General', href: '/dashboard/shop-admin/settings', icon: Settings, permission: PERMISSIONS.SETTINGS_VIEW },
+  { name: 'Workforce', href: '/dashboard/shop-admin/settings/users', icon: Users, permission: PERMISSIONS.USERS_MANAGE },
+  { name: 'Printer', href: '/dashboard/shop-admin/settings/printer', icon: Printer, permission: PERMISSIONS.SETTINGS_VIEW },
 ];
 
 export const SettingsSidebar: React.FC = () => {
   const location = useLocation();
   const pathname = location.pathname;
+  const { hasPermission, role } = usePermissions();
+
+  const isOrgAdmin = role === 'OWNER' || role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'ADMIN';
+
+  const visibleNavItems = navItems.filter((item) => {
+    if (item.permission && !hasPermission(item.permission)) return false;
+    return true;
+  });
 
   return (
     <div className="w-56 flex-shrink-0">
       <nav className="flex flex-col gap-0.5" aria-label="Settings navigation">
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const Icon = item.icon;
           const isActive =
             item.href === '/dashboard/shop-admin/settings'
@@ -51,19 +61,21 @@ export const SettingsSidebar: React.FC = () => {
         })}
       </nav>
 
-      {/* Organization Admin Settings Link */}
-      <div className="mt-6 pt-4 border-t border-border">
-        <div className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-          Enterprise Scope
+      {/* Organization Admin Settings Link (Only visible to Organization Admin roles) */}
+      {isOrgAdmin && (
+        <div className="mt-6 pt-4 border-t border-border">
+          <div className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+            Enterprise Scope
+          </div>
+          <Link
+            to="/dashboard/organization/settings"
+            className="group flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-text-secondary hover:text-primary hover:bg-primary/5 transition-colors"
+          >
+            <Building2 className="w-4 h-4 text-text-muted group-hover:text-primary shrink-0" />
+            <span>Organization Settings</span>
+          </Link>
         </div>
-        <Link
-          to="/dashboard/organization/settings"
-          className="group flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-text-secondary hover:text-primary hover:bg-primary/5 transition-colors"
-        >
-          <Building2 className="w-4 h-4 text-text-muted group-hover:text-primary shrink-0" />
-          <span>Organization Settings</span>
-        </Link>
-      </div>
+      )}
     </div>
   );
 };

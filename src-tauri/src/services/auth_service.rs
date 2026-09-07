@@ -300,6 +300,21 @@ impl AuthService {
             ));
         }
 
+        let is_org_admin = match session.role {
+            Some(crate::domain::user::UserRole::Admin) => true,
+            _ => {
+                if let Some(ref profile) = session.access_profile {
+                    profile.allowed_pages.iter().any(|p| p == "*")
+                } else {
+                    false
+                }
+            }
+        };
+
+        if is_org_admin {
+            return Ok(());
+        }
+
         let profile = match &session.access_profile {
             Some(p) => p,
             None => {
@@ -357,6 +372,95 @@ impl AuthService {
         }
 
         Ok(())
+    }
+
+    /// Authoritative backend enforcement of branch access.
+    /// - Organization Admin (Admin role or '*' access) can access ANY branch within the organization.
+    /// - Normal staff can ONLY access their explicitly authorized branch.
+    /// Returns the authorized branch ID as a clean String.
+    pub async fn require_branch_access(
+        app_state: &AppState,
+        requested_branch_id: Option<&str>,
+    ) -> AppResult<String> {
+        let session = app_state.get_session().await;
+        if !session.is_authenticated {
+            return Err(AppError::Unauthorized(
+                "Authentication required to perform branch-scoped operations".to_string(),
+            ));
+        }
+
+        if session.is_locked {
+            return Err(AppError::Locked(
+                "Terminal is locked. Please enter your PIN to resume.".to_string(),
+            ));
+        }
+
+        let is_org_admin = match session.role {
+            Some(crate::domain::user::UserRole::Admin) => true,
+            _ => {
+                if let Some(ref profile) = session.access_profile {
+                    profile.allowed_pages.iter().any(|p| p == "*")
+                } else {
+                    false
+                }
+            }
+        };
+
+        let target_branch_id = match requested_branch_id.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(bid) => bid.to_string(),
+            None => match app_state.branch_repo.get_main_branch().await? {
+                Some(b) => b.id,
+                None => crate::domain::organization::DEFAULT_MAIN_BRANCH_ID.to_string(),
+            },
+        };
+
+        // 1. Verify that the target branch actually exists in the database
+        let all_branches = app_state.branch_repo.list_branches().await?;
+        let branch_exists = all_branches.iter().any(|b| b.id == target_branch_id);
+        if !branch_exists {
+            return Err(AppError::NotFound(format!(
+                "Requested branch '{target_branch_id}' does not exist"
+            )));
+        }
+
+        // 2. Organization Admin has unrestricted access across all existing organization branches
+        if is_org_admin {
+            return Ok(target_branch_id);
+        }
+
+        // 3. Normal staff must only access their assigned branch
+        let user_id = session.user_id.as_deref().unwrap_or_default();
+        let user_branch_id = {
+            let conn_arc = app_state.db.inner();
+            let guard = conn_arc.lock().await;
+            guard
+                .query_row(
+                    "SELECT branch_id FROM users WHERE id = ?1",
+                    rusqlite::params![user_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .map_err(|e| AppError::Database(format!("Failed to retrieve user branch: {e}")))?
+        };
+
+        let authorized_branch = match user_branch_id {
+            Some(bid) if !bid.trim().is_empty() => bid,
+            _ => {
+                // If user has no specific branch assigned, default to canonical main branch
+                match app_state.branch_repo.get_main_branch().await? {
+                    Some(b) => b.id,
+                    None => crate::domain::organization::DEFAULT_MAIN_BRANCH_ID.to_string(),
+                }
+            }
+        };
+
+        if authorized_branch != target_branch_id {
+            return Err(AppError::Forbidden(
+                "Access denied: You are not authorized to operate on or view data for this branch"
+                    .to_string(),
+            ));
+        }
+
+        Ok(target_branch_id)
     }
 }
 

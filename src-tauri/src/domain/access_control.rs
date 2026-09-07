@@ -132,19 +132,81 @@ impl StaffAccessProfile {
         }
     }
 
-    /// Validates if a page route is permitted
+    /// Validates if a page route or canonical permission is permitted
     pub fn has_page_access(&self, page: &str) -> bool {
         let clean = page.trim().trim_start_matches('/').to_lowercase();
         self.allowed_pages.iter().any(|p| {
-            p == "*" || p.to_lowercase() == clean || clean.starts_with(&format!("{}/", p.to_lowercase()))
+            let p_lower = p.to_lowercase();
+            if p_lower == "*" || p_lower == clean || clean.starts_with(&format!("{p_lower}/")) {
+                return true;
+            }
+            // Canonical mapping: "pos.use" matches "pos", "inventory.view" matches "inventory"
+            if clean.starts_with(&format!("{p_lower}.")) || p_lower.starts_with(&format!("{clean}.")) {
+                return true;
+            }
+            // Canonical domain aliases
+            if (p_lower == "customers" || p_lower == "suppliers") && (clean == "parties" || clean.starts_with("parties.")) {
+                return true;
+            }
+            if p_lower == "parties" && (clean == "customers" || clean == "suppliers" || clean.starts_with("customers.") || clean.starts_with("suppliers.")) {
+                return true;
+            }
+            if (p_lower == "cash" || p_lower == "cash_management" || p_lower == "expenses") && (clean == "finance" || clean.starts_with("finance.")) {
+                return true;
+            }
+            if p_lower == "inventory" && (clean == "products" || clean.starts_with("products.")) {
+                return true;
+            }
+            if p_lower == "products" && (clean == "inventory" || clean.starts_with("inventory.")) {
+                return true;
+            }
+            if p_lower == "pos" && (clean == "sales" || clean.starts_with("sales.")) {
+                return true;
+            }
+            if p_lower == "sales" && (clean == "pos" || clean.starts_with("pos.")) {
+                return true;
+            }
+            false
         })
     }
 
-    /// Validates if a specific action permission is granted
+    /// Validates if a specific action permission or canonical permission is granted
     pub fn has_action_access(&self, action: &str) -> bool {
         let clean = action.trim().to_lowercase();
         self.allowed_actions.iter().any(|a| {
-            a == "*" || a.to_lowercase() == clean
+            let a_lower = a.to_lowercase();
+            if a_lower == "*" || a_lower == clean {
+                return true;
+            }
+            // Canonical action aliases
+            if a_lower == "pos:sale" && (clean == "pos.use" || clean == "pos:sale") {
+                return true;
+            }
+            if a_lower == "pos:refund" && (clean == "pos.void_sale" || clean == "sales.manage" || clean == "pos:refund") {
+                return true;
+            }
+            if a_lower == "stock:adjust" && (clean == "inventory.edit" || clean == "inventory:adjust" || clean == "stock:adjust") {
+                return true;
+            }
+            if a_lower == "stock:transfer" && (clean == "inventory.edit" || clean == "inventory:transfer" || clean == "stock:transfer") {
+                return true;
+            }
+            if (a_lower == "product:create" || a_lower == "product:edit") && (clean == "products.manage" || clean == "inventory.edit" || clean == "inventory:write") {
+                return true;
+            }
+            if a_lower == "inventory:read" && (clean == "inventory.view" || clean == "products.view" || clean == "inventory:read") {
+                return true;
+            }
+            if a_lower == "inventory:write" && (clean == "inventory.edit" || clean == "products.manage" || clean == "inventory:write") {
+                return true;
+            }
+            if a_lower == "inventory:adjust" && (clean == "inventory.edit" || clean == "inventory:adjust") {
+                return true;
+            }
+            if a_lower == "inventory:transfer" && (clean == "inventory.edit" || clean == "inventory:transfer") {
+                return true;
+            }
+            false
         })
     }
 
