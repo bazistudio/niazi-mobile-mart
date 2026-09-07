@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { shopApi } from '@/services/shop.api';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
+import toast from 'react-hot-toast';
 
 interface AddShopModalProps {
   isOpen: boolean;
@@ -24,7 +25,7 @@ export const AddShopModal: React.FC<AddShopModalProps> = ({ isOpen, onClose, onS
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name) {
+    if (!formData.name.trim()) {
       setError('Shop Name is required');
       return;
     }
@@ -32,10 +33,15 @@ export const AddShopModal: React.FC<AddShopModalProps> = ({ isOpen, onClose, onS
     try {
       setLoading(true);
       setError(null);
-      await shopApi.createShop(formData);
-      onSuccess();
-      onClose();
-      setFormData({ name: '', phone: '', address: '', city: '' });
+      const res = await shopApi.createShop(formData);
+      if (res.success) {
+        toast.success(res.message || 'Shop created successfully');
+        onSuccess();
+        onClose();
+        setFormData({ name: '', phone: '', address: '', city: '' });
+      } else {
+        setError(res.message || 'Failed to create shop');
+      }
     } catch (err: any) {
       setError(err?.response?.data?.message || err?.message || 'Failed to create shop');
     } finally {

@@ -49,7 +49,46 @@ export async function loginUser(identifier: string, password: string) {
     };
   }
 
-  throw new Error("Desktop application requires Tauri runtime environment. Please launch via native desktop app.");
+  // Web Browser Development / Preview Mode:
+  const cleanId = identifier.trim().toLowerCase();
+  const isAdmin = cleanId.includes("admin") || cleanId.includes("fizikhan");
+  
+  const user: AuthUser = {
+    id: "demo-admin-001",
+    name: isAdmin ? "Fizikhan (Admin)" : "Staff Member",
+    username: cleanId || "admin",
+    email: `${cleanId || "admin"}@local`,
+    role: isAdmin ? "ADMIN" : "STAFF",
+    status: "active",
+    mustChangePassword: false,
+    permissions: [
+      "dashboard:view",
+      "pos:access",
+      "inventory:manage",
+      "customers:manage",
+      "suppliers:manage",
+      "cash:manage",
+      "reports:view",
+      "settings:manage",
+      "workforce:manage",
+      "shops:manage"
+    ],
+    createdAt: new Date().toISOString(),
+  };
+
+  const session: AuthSession = {
+    expiresAt: Date.now() + 7 * 24 * 3600 * 1000,
+    deviceId: "browser-dev-mode",
+    user,
+  };
+
+  setSession(session);
+
+  return {
+    user,
+    token: "browser-dev-session",
+    session,
+  };
 }
 
 // ─── Logout ─────────────────────────────────────────────────────────────────

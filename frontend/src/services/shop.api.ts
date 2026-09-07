@@ -26,6 +26,36 @@ const CANONICAL_BRANCH: ShopData = {
   planId: 'single-branch-erp',
 };
 
+const STORAGE_KEY = 'niazi_erp_shops';
+
+function getStoredShops(): ShopData[] {
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to parse stored shops', err);
+  }
+  if (typeof window !== 'undefined') {
+    saveStoredShops([CANONICAL_BRANCH]);
+  }
+  return [CANONICAL_BRANCH];
+}
+
+function saveStoredShops(shops: ShopData[]) {
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(shops));
+    }
+  } catch (err) {
+    console.warn('Failed to save stored shops to localStorage', err);
+  }
+}
+
 export const shopApi = {
   getMyShop: async (): Promise<{ success: boolean; data: ShopData; message: string }> => {
     if (isTauriEnvironment()) {
@@ -53,48 +83,59 @@ export const shopApi = {
         console.warn('Failed to load main branch via Tauri IPC', err);
       }
     }
+    const list = getStoredShops();
     return {
       success: true,
-      data: CANONICAL_BRANCH,
-      message: 'Canonical branch loaded',
+      data: list[0] || CANONICAL_BRANCH,
+      message: 'Active branch loaded',
     };
   },
 
-  getAllShops: async (_params?: { status?: string }): Promise<{ success: boolean; data: ShopData[]; message: string }> => {
+  getAllShops: async (params?: { status?: string }): Promise<{ success: boolean; data: ShopData[]; message: string }> => {
+    let list = getStoredShops();
+
     if (isTauriEnvironment()) {
       try {
         const branches = await tauriClient.branchList();
-        const data: ShopData[] = branches.map((b) => ({
-          _id: b.id,
-          name: b.name,
-          ownerName: 'Niazi Admin',
-          phone: '0300-1234567',
-          email: 'admin@niazimobilemart.local',
-          address: 'Main Branch Location',
-          city: 'Mianwali',
-          cashBalance: 0,
-          status: b.is_active ? 'active' : 'inactive',
-          planId: 'single-branch-erp',
-        }));
-        return {
-          success: true,
-          data,
-          message: 'Branches loaded from SQLite',
-        };
+        if (branches && branches.length > 0) {
+          branches.forEach((b) => {
+            if (!list.some((s) => s._id === b.id)) {
+              list.push({
+                _id: b.id,
+                name: b.name,
+                ownerName: 'Niazi Admin',
+                phone: '0300-1234567',
+                email: 'admin@niazimobilemart.local',
+                address: 'Main Branch Location',
+                city: 'Mianwali',
+                cashBalance: 0,
+                status: b.is_active ? 'active' : 'inactive',
+                planId: 'single-branch-erp',
+              });
+            }
+          });
+          saveStoredShops(list);
+        }
       } catch (err) {
         console.warn('Failed to load branch list via Tauri IPC', err);
       }
     }
+
+    if (params?.status) {
+      const filterStatus = params.status.toLowerCase();
+      list = list.filter((s) => s.status.toLowerCase() === filterStatus);
+    }
+
     return {
       success: true,
-      data: [CANONICAL_BRANCH],
-      message: 'Canonical branch loaded',
+      data: list,
+      message: 'Shops loaded successfully',
     };
   },
 
   getShopById: async (shopId: string): Promise<{ success: boolean; data: ShopData; message: string }> => {
-    const res = await shopApi.getAllShops();
-    const found = res.data.find((s) => s._id === shopId) || CANONICAL_BRANCH;
+    const list = getStoredShops();
+    const found = list.find((s) => s._id === shopId) || list[0] || CANONICAL_BRANCH;
     return {
       success: true,
       data: found,
@@ -103,43 +144,89 @@ export const shopApi = {
   },
 
   createShop: async (payload: Partial<ShopData>): Promise<{ success: boolean; data: ShopData; message: string }> => {
+    const list = getStoredShops();
+    const newId = typeof crypto !== 'undefined' && crypto.randomUUID 
+      ? crypto.randomUUID() 
+      : `shop-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+    const newShop: ShopData = {
+      _id: newId,
+      name: payload.name?.trim() || 'New Shop Branch',
+      ownerName: payload.ownerName?.trim() || 'Niazi Admin',
+      phone: payload.phone?.trim() || '',
+      email: payload.email?.trim() || '',
+      address: payload.address?.trim() || '',
+      city: payload.city?.trim() || '',
+      cashBalance: payload.cashBalance || 0,
+      status: payload.status || 'active',
+      planId: 'multi-branch-erp',
+    };
+
+    list.push(newShop);
+    saveStoredShops(list);
+
     return {
       success: true,
-      data: {
-        ...CANONICAL_BRANCH,
+      data: newShop,
+      message: 'Shop created successfully',
+    };
+  },
+
+  updateShop: async (shopId: string, payload: Partial<ShopData>): Promise<{ success: boolean; data: ShopData; message: string }> => {
+    const list = getStoredShops();
+    const index = list.findIndex((s) => s._id === shopId);
+    if (index !== -1) {
+      list[index] = {
+        ...list[index],
         ...payload,
-        _id: CANONICAL_BRANCH._id,
-      },
-      message: 'Branch management locked to permanent single branch in offline ERP.',
+        _id: shopId,
+      };
+      saveStoredShops(list);
+      return {
+        success: true,
+        data: list[index],
+        message: 'Shop updated successfully',
+      };
+    }
+    return {
+      success: false,
+      data: CANONICAL_BRANCH,
+      message: 'Shop not found',
     };
   },
 
-  updateShop: async (_shopId: string, payload: Partial<ShopData>): Promise<{ success: boolean; data: ShopData; message: string }> => {
+  toggleShopStatus: async (shopId: string, status: 'active' | 'suspended' | 'inactive'): Promise<{ success: boolean; data: ShopData; message: string }> => {
+    const list = getStoredShops();
+    const index = list.findIndex((s) => s._id === shopId);
+    if (index !== -1) {
+      list[index].status = status;
+      saveStoredShops(list);
+      return {
+        success: true,
+        data: list[index],
+        message: `Shop status set to ${status}`,
+      };
+    }
     return {
-      success: true,
-      data: {
-        ...CANONICAL_BRANCH,
-        ...payload,
-      },
-      message: 'Branch updated',
+      success: false,
+      data: CANONICAL_BRANCH,
+      message: 'Shop not found',
     };
   },
 
-  toggleShopStatus: async (_shopId: string, status: 'active' | 'suspended' | 'inactive'): Promise<{ success: boolean; data: ShopData; message: string }> => {
+  deleteShop: async (shopId: string): Promise<{ success: boolean; message: string }> => {
+    const list = getStoredShops();
+    if (list.length <= 1) {
+      return {
+        success: false,
+        message: 'Cannot delete the only remaining shop branch.',
+      };
+    }
+    const filtered = list.filter((s) => s._id !== shopId);
+    saveStoredShops(filtered);
     return {
       success: true,
-      data: {
-        ...CANONICAL_BRANCH,
-        status,
-      },
-      message: `Branch status set to ${status}`,
-    };
-  },
-
-  deleteShop: async (_shopId: string): Promise<{ success: boolean; message: string }> => {
-    return {
-      success: true,
-      message: 'Cannot delete permanent branch in single-branch ERP.',
+      message: 'Shop deleted successfully',
     };
   },
 };

@@ -57,7 +57,7 @@ export const ShopAdminDashboard = () => {
     isLoading: isHourlyLoading,
     refetch: refetchHourly,
   } = useQuery({
-    queryKey: keys.dashboard ? [...keys.dashboard, 'hourly-breakdown'] : ['dashboard', 'hourly-breakdown'],
+    queryKey: [...queryKeys.dashboard, 'hourly-breakdown'],
     queryFn: () => dashboardApi.getHourlyBreakdown(),
     staleTime: 30000,
     retry: 1,

@@ -7,6 +7,7 @@ import { useSearchParams } from 'react-router-dom';
 import { usePrintStore } from '@/lib/printer';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
 import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
+import { queryKeys } from '@/lib/react-query/queryKeys';
 import toast from 'react-hot-toast';
 
 interface DailySalesModalProps {
@@ -20,7 +21,7 @@ export const DailySalesModal = ({ isOpen, onClose }: DailySalesModalProps) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   
-  const searchParams = useSearchParams();
+  const [searchParams] = useSearchParams();
   const searchInvoice = searchParams.get('invoice');
 
   const { openPreview } = usePrintStore();
@@ -86,7 +87,7 @@ export const DailySalesModal = ({ isOpen, onClose }: DailySalesModalProps) => {
   const { startDate, endDate } = getDates();
 
   const { data: salesResponse, isLoading, error } = useQuery({
-    queryKey: keys.sales(dateFilter, startDate, endDate, debouncedSearch),
+    queryKey: queryKeys.sales(dateFilter, startDate, endDate, debouncedSearch),
     queryFn: () => {
       const cleanSearch = debouncedSearch.trim().toUpperCase().replace(/^ORD-/, '');
       const queryOrderNumber = cleanSearch ? `ORD-${cleanSearch}` : undefined;

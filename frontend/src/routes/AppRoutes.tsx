@@ -8,13 +8,21 @@ import { authRoutes } from './authRoutes';
 import { organizationRoutes } from './organizationRoutes';
 import { shopAdminCoreRoutes } from './shopAdminRoutes';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { StorefrontLayout } from '@/features/storefront/components/StorefrontLayout';
+import { HomePage } from '@/pages/storefront/HomePage';
+import { ProductsPage } from '@/pages/storefront/ProductsPage';
+import { AboutPage } from '@/pages/storefront/AboutPage';
+import { ContactPage } from '@/pages/storefront/ContactPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 
 export const AppRoutes: React.FC = () => {
   return (
     <Routes>
-      {/* Root redirect */}
-      <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      {/* Public Storefront Routes */}
+      <Route path="/" element={<StorefrontLayout><HomePage /></StorefrontLayout>} />
+      <Route path="/products" element={<StorefrontLayout><ProductsPage /></StorefrontLayout>} />
+      <Route path="/about" element={<StorefrontLayout><AboutPage /></StorefrontLayout>} />
+      <Route path="/contact" element={<StorefrontLayout><ContactPage /></StorefrontLayout>} />
 
       {/* Public-Only Authentication Routes */}
       {authRoutes}
