@@ -29,7 +29,7 @@ export const RoleSelect: React.FC<RoleSelectProps> = ({
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selected = e.target.value;
     if (selected === CREATE_NEW_ROLE_VALUE) {
-      navigate('/dashboard/shop-admin/settings/roles');
+      navigate('/dashboard/organization/settings?tab=roles');
       return;
     }
     onChange(selected);

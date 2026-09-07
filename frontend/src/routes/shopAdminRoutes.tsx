@@ -28,8 +28,8 @@ import { ProfilePage } from '@/pages/dashboard/shop-admin/ProfilePage';
 import { AuditPage } from '@/pages/dashboard/shop-admin/AuditPage';
 import { SettingsLayout } from '@/pages/dashboard/shop-admin/settings/SettingsLayout';
 import { GeneralSettingsPage } from '@/pages/dashboard/shop-admin/settings/GeneralSettingsPage';
-import { AppearancePage } from '@/pages/dashboard/shop-admin/settings/AppearancePage';
-import { BackupRestorePage } from '@/pages/dashboard/shop-admin/settings/BackupRestorePage';
+import { ShopAppearanceNoticePage } from '@/pages/dashboard/shop-admin/settings/ShopAppearanceNoticePage';
+import { ShopBackupNoticePage } from '@/pages/dashboard/shop-admin/settings/ShopBackupNoticePage';
 import { PrinterPage } from '@/pages/dashboard/shop-admin/settings/PrinterPage';
 import { RolesSettingsPage } from '@/pages/dashboard/shop-admin/settings/RolesSettingsPage';
 import { WorkforcePage } from '@/pages/dashboard/shop-admin/settings/WorkforcePage';
@@ -81,8 +81,8 @@ export const shopAdminCoreRoutes = (
 
     <Route path="settings" element={<SettingsLayout />}>
       <Route index element={<GeneralSettingsPage />} />
-      <Route path="appearance" element={<AppearancePage />} />
-      <Route path="backup" element={<BackupRestorePage />} />
+      <Route path="appearance" element={<ShopAppearanceNoticePage />} />
+      <Route path="backup" element={<ShopBackupNoticePage />} />
       <Route path="printer" element={<PrinterPage />} />
       <Route path="roles" element={<RolesSettingsPage />} />
       <Route path="users" element={<WorkforcePage />} />

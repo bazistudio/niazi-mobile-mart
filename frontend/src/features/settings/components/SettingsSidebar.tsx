@@ -1,16 +1,11 @@
-'use client';
-
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Settings, Users, Shield, Palette, Printer, Database } from 'lucide-react';
+import { Settings, Users, Printer, Building2 } from 'lucide-react';
 
 const navItems = [
   { name: 'General', href: '/dashboard/shop-admin/settings', icon: Settings },
   { name: 'Workforce', href: '/dashboard/shop-admin/settings/users', icon: Users },
-  { name: 'Roles & Access', href: '/dashboard/shop-admin/settings/roles', icon: Shield },
-  { name: 'Appearance', href: '/dashboard/shop-admin/settings/appearance', icon: Palette },
   { name: 'Printer', href: '/dashboard/shop-admin/settings/printer', icon: Printer },
-  { name: 'Backup & Restore', href: '/dashboard/shop-admin/settings/backup', icon: Database },
 ];
 
 export const SettingsSidebar: React.FC = () => {
@@ -55,6 +50,20 @@ export const SettingsSidebar: React.FC = () => {
           );
         })}
       </nav>
+
+      {/* Organization Admin Settings Link */}
+      <div className="mt-6 pt-4 border-t border-border">
+        <div className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+          Enterprise Scope
+        </div>
+        <Link
+          to="/dashboard/organization/settings"
+          className="group flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-text-secondary hover:text-primary hover:bg-primary/5 transition-colors"
+        >
+          <Building2 className="w-4 h-4 text-text-muted group-hover:text-primary shrink-0" />
+          <span>Organization Settings</span>
+        </Link>
+      </div>
     </div>
   );
 };

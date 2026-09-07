@@ -41,6 +41,7 @@ export const VALID_ROUTES = [
   '/dashboard/organization/shops',
   '/dashboard/organization/employees',
   '/dashboard/organization/staff',
+  '/dashboard/organization/repairs',
   '/dashboard/organization/audit-logs',
   '/dashboard/organization/profile',
   '/dashboard/organization/roles',

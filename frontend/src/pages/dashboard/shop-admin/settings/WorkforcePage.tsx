@@ -272,7 +272,7 @@ export const WorkforcePage: React.FC = () => {
               <div className="bg-warning/10 border border-warning/30 p-3 rounded-lg">
                 <label className="text-xs font-medium text-warning">Assigned Role</label>
                 <p className="text-sm font-bold mt-1 mb-3">{selectedStaff.roleName || 'Staff'}</p>
-                <Link to="/dashboard/shop-admin/settings/roles" className="text-xs bg-surface border border-border px-3 py-1.5 rounded shadow-sm hover:bg-surface-hover transition-colors font-medium inline-block">
+                <Link to="/dashboard/organization/settings?tab=roles" className="text-xs bg-surface border border-border px-3 py-1.5 rounded shadow-sm hover:bg-surface-hover transition-colors font-medium inline-block">
                   Manage Role & Permissions
                 </Link>
               </div>

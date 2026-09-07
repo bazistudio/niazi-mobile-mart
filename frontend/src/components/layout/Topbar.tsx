@@ -13,36 +13,26 @@ import { useInventoryUIStore } from '@/features/inventory/store/inventory-ui.sto
 import { useTerminalStore } from '@/store/useTerminalStore';
 
 interface TopbarProps {
-  setMobileMenuOpen: (isOpen: boolean) => void;
+  setMobileMenuOpen?: (isOpen: boolean) => void;
 }
 
 /** Shared icon-button style for topbar action buttons */
 const topbarIconBtn =
-  'hidden md:inline-flex items-center justify-center w-9 h-9 rounded-md border border-border bg-surface text-text-muted hover:bg-surface-hover hover:text-text-primary transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring';
+  'inline-flex items-center justify-center w-9 h-9 rounded-md border border-border bg-surface text-text-muted hover:bg-surface-hover hover:text-text-primary transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring';
 
-export const Topbar = ({ setMobileMenuOpen }: TopbarProps) => {
+export const Topbar = ({ setMobileMenuOpen }: TopbarProps = {}) => {
   const forceSync = selectForceSync();
   const inventoryStatus = selectStatus();
   const isSyncing = inventoryStatus === 'loading';
   const lockTerminal = useTerminalStore((s) => s.lockTerminal);
 
   return (
-    <header className="sticky top-0 z-[var(--z-fixed)] flex h-12 flex-shrink-0 bg-surface/90 backdrop-blur-md border-b border-border transition-colors duration-fast">
-      {/* Mobile menu toggle */}
-      <button
-        type="button"
-        className="border-r border-border px-4 text-text-muted hover:text-text-primary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring lg:hidden transition-colors duration-fast"
-        onClick={() => setMobileMenuOpen(true)}
-        aria-label="Open sidebar"
-      >
-        <Menu className="h-5 w-5" aria-hidden="true" />
-      </button>
-
-      <div className="flex flex-1 items-center justify-between px-3 sm:px-4 lg:px-6 gap-3 min-w-0">
+    <header className="sticky top-0 z-30 flex h-12 flex-shrink-0 bg-surface/95 backdrop-blur-md border-b border-border transition-colors duration-fast">
+      <div className="flex flex-1 items-center justify-between px-4 lg:px-6 gap-3 min-w-0">
         {/* Left: Search + ShopSwitcher */}
         <div className="flex flex-1 min-w-0 max-w-2xl items-center gap-3">
           <SearchInput placeholder="Search products, customers, invoices…" />
-          <div className="hidden md:block">
+          <div className="block">
             <ShopSwitcher />
           </div>
         </div>
@@ -55,7 +45,7 @@ export const Topbar = ({ setMobileMenuOpen }: TopbarProps) => {
             className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-primary-hover active:bg-primary-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-1 transition-all duration-fast"
           >
             <ShoppingCart className="h-3.5 w-3.5" aria-hidden="true" />
-            <span className="hidden sm:inline">New Sale</span>
+            <span>New Sale</span>
           </Link>
 
           {/* Add Product */}
@@ -110,7 +100,7 @@ export const Topbar = ({ setMobileMenuOpen }: TopbarProps) => {
           <button
             type="button"
             aria-label="View notifications"
-            className="relative hidden sm:inline-flex items-center justify-center w-9 h-9 rounded-md text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="relative inline-flex items-center justify-center w-9 h-9 rounded-md text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
             <Bell className="h-4 w-4" aria-hidden="true" />
             {/* Notification dot */}

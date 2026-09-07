@@ -6,7 +6,11 @@ import { Store, MapPin, Phone, CheckCircle, XCircle, Edit, Trash2, Power, AlertT
 import { Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-export function ShopsManagementPage() {
+interface ShopsManagementPageProps {
+  embedded?: boolean;
+}
+
+export function ShopsManagementPage({ embedded = false }: ShopsManagementPageProps = {}) {
   const [shops, setShops] = useState<ShopData[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -65,20 +69,37 @@ export function ShopsManagementPage() {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Shops Management</h1>
-          <p className="text-sm text-gray-500 mt-1">Manage all branches within your organization</p>
+    <div className={embedded ? "w-full space-y-4" : "p-6 max-w-7xl mx-auto"}>
+      {!embedded && (
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Shops Management</h1>
+            <p className="text-sm text-gray-500 mt-1">Manage all branches within your organization</p>
+          </div>
+          <button 
+            onClick={() => setIsAddModalOpen(true)}
+            className="bg-[#006970] text-white px-4 py-2 flex items-center gap-2 rounded-md hover:bg-[#005a60] transition-colors shadow-sm cursor-pointer"
+          >
+            <Store className="w-4 h-4" />
+            Add Shop
+          </button>
         </div>
-        <button 
-          onClick={() => setIsAddModalOpen(true)}
-          className="bg-[#006970] text-white px-4 py-2 flex items-center gap-2 rounded-md hover:bg-[#005a60] transition-colors shadow-sm cursor-pointer"
-        >
-          <Store className="w-4 h-4" />
-          Add Shop
-        </button>
-      </div>
+      )}
+      {embedded && (
+        <div className="flex justify-between items-center bg-gray-50 dark:bg-gray-900/60 p-4 rounded-lg border border-gray-200/80 dark:border-gray-700/80">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Active Branches & Retail Outlets</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Create or manage physical store branches connected to this enterprise.</p>
+          </div>
+          <button 
+            onClick={() => setIsAddModalOpen(true)}
+            className="bg-[#006970] text-white px-3.5 py-1.5 flex items-center gap-2 rounded-lg hover:bg-[#005a60] transition-colors shadow-sm cursor-pointer text-xs font-medium"
+          >
+            <Store className="w-3.5 h-3.5" />
+            <span>Add Branch</span>
+          </button>
+        </div>
+      )}
 
       <AddShopModal 
         isOpen={isAddModalOpen} 

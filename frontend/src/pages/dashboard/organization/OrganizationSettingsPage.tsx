@@ -2,6 +2,11 @@ import React from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { OrganizationPageShell } from '@/features/dashboard/components/organization/OrganizationPageShell';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
+import { AppearancePage } from '@/pages/dashboard/shop-admin/settings/AppearancePage';
+import { PrinterSettingsPage } from '@/features/settings/printer/PrinterSettingsPage';
+import { RoleAccessPage } from '@/features/settings/components/RoleAccessPage';
+import { BackupRestorePage } from '@/pages/dashboard/shop-admin/settings/BackupRestorePage';
+import { ShopsManagementPage } from '@/pages/dashboard/organization/ShopsManagementPage';
 import { 
   Settings, 
   Building2, 
@@ -13,16 +18,12 @@ import {
   Database, 
   HardDrive, 
   Cpu,
-  KeyRound,
-  UserCheck,
-  Network,
-  Grid3X3,
-  Clock,
   Mail,
   Phone,
   MapPin,
-  Sliders,
-  Save
+  Save,
+  Palette,
+  Printer
 } from 'lucide-react';
 
 export function OrganizationSettingsPage() {
@@ -32,51 +33,20 @@ export function OrganizationSettingsPage() {
 
   const settingsCategories = [
     { id: 'profile', label: 'Organization Profile', icon: Building2, desc: 'Enterprise legal entity details, business identity, and headquarters contacts.' },
-    { id: 'roles', label: 'Roles & Permissions', icon: ShieldCheck, desc: 'Organization-wide role templates, access matrix, and cross-branch permissions.' },
+    { id: 'branches', label: 'Shops & Branches', icon: Store, desc: 'Create and configure physical retail branches, store locations, and operational statuses.' },
+    { id: 'appearance', label: 'Appearance', icon: Palette, desc: 'Theme presets, color customization, dark/light mode, and UI contrast standards.' },
+    { id: 'printer', label: 'Printer', icon: Printer, desc: 'Hardware-agnostic POS print engine, receipt layouts, invoice templates, and shop branding.' },
+    { id: 'roles', label: 'Roles & Access', icon: ShieldCheck, desc: 'Organization-wide role templates, access matrix, and cross-branch permissions.' },
+    { id: 'backup', label: 'Backup & Restore', icon: Database, desc: 'Automated SQLite database snapshots, encryption keys, and recovery points.' },
     { id: 'general', label: 'General', icon: Settings, desc: 'Enterprise localization, default date formats, and regional standards.' },
-    { id: 'branches', label: 'Branches', icon: Store, desc: 'Global branch policies, mandatory shifts, and branch operational windows.' },
     { id: 'users', label: 'Users', icon: Users, desc: 'Enterprise user account lifecycle, session limits, and inactivity policies.' },
     { id: 'security', label: 'Security', icon: Lock, desc: 'Two-factor authentication, master password rotation, and IP allowlisting.' },
     { id: 'notifications', label: 'Notifications', icon: Bell, desc: 'System alert routing, low-stock threshold triggers, and managerial alerts.' },
-    { id: 'backup', label: 'Backup', icon: Database, desc: 'Automated SQLite database snapshots, encryption keys, and offsite storage.' },
     { id: 'data', label: 'Data', icon: HardDrive, desc: 'Data retention schedules, archiving policies, and compliance export utilities.' },
     { id: 'application', label: 'Application', icon: Cpu, desc: 'Tauri native desktop runtime preferences, hardware acceleration, and logging verbosity.' },
   ];
 
   const currentCategory = settingsCategories.find((c) => c.id === currentTab) || settingsCategories[0];
-
-  const roleSections = [
-    {
-      icon: ShieldCheck,
-      title: 'Organization Roles',
-      description: 'Define multi-branch role definitions, supervisory privileges, and enterprise hierarchy tiers.',
-      status: 'Coming soon',
-    },
-    {
-      icon: KeyRound,
-      title: 'Permissions',
-      description: 'Configure granular permission sets across POS, inventory, finance, and system settings.',
-      status: 'Coming soon',
-    },
-    {
-      icon: UserCheck,
-      title: 'Role Assignments',
-      description: 'Delegate cross-branch roles to organization managers and branch supervisors.',
-      status: 'Coming soon',
-    },
-    {
-      icon: Network,
-      title: 'Branch Access',
-      description: 'Define shop-level boundary constraints and branch access scopes for staff members.',
-      status: 'Coming soon',
-    },
-    {
-      icon: Grid3X3,
-      title: 'Permission Matrix',
-      description: 'Comprehensive role-vs-permission matrix for centralized compliance auditing.',
-      status: 'Coming soon',
-    },
-  ];
 
   return (
     <OrganizationPageShell
@@ -140,7 +110,7 @@ export function OrganizationSettingsPage() {
             </span>
           </div>
 
-          {/* TAB 1: Organization Profile (Moved into Settings) */}
+          {/* TAB 1: Organization Profile */}
           {currentCategory.id === 'profile' && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -263,59 +233,49 @@ export function OrganizationSettingsPage() {
             </div>
           )}
 
-          {/* TAB 2: Roles & Permissions (Updated with full Roles management sections) */}
-          {currentCategory.id === 'roles' && (
-            <div className="space-y-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {roleSections.map((sec) => {
-                  const Icon = sec.icon;
-                  return (
-                    <div
-                      key={sec.title}
-                      className="bg-white dark:bg-gray-800/90 rounded-xl p-5 border border-gray-200/80 dark:border-gray-700/80 shadow-sm flex flex-col justify-between"
-                    >
-                      <div>
-                        <div className="flex items-center justify-between mb-3">
-                          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                            <Icon className="w-5 h-5" />
-                          </div>
-                          <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                            {sec.status}
-                          </span>
-                        </div>
-                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white">
-                          {sec.title}
-                        </h4>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
-                          {sec.description}
-                        </p>
-                      </div>
-                      <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700/60 flex items-center gap-1.5 text-xs text-gray-400">
-                        <Clock className="w-3.5 h-3.5" />
-                        <span>Planned security control</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+          {/* TAB 2: Appearance */}
+          {currentCategory.id === 'appearance' && (
+            <div className="bg-white dark:bg-gray-800/90 rounded-xl p-6 border border-gray-200/80 dark:border-gray-700/80 shadow-sm">
+              <AppearancePage />
+            </div>
+          )}
 
-              {/* Roles Empty State Box */}
-              <div className="bg-white dark:bg-gray-800/90 rounded-xl p-8 border border-gray-200/80 dark:border-gray-700/80 shadow-sm text-center">
-                <div className="w-12 h-12 rounded-full bg-primary/10 mx-auto flex items-center justify-center text-primary mb-3">
-                  <ShieldCheck className="w-6 h-6" />
-                </div>
-                <h4 className="text-base font-semibold text-gray-900 dark:text-white">
-                  Organization Role Configuration Center
-                </h4>
-                <p className="text-xs text-gray-500 dark:text-gray-400 max-w-lg mx-auto mt-1 leading-relaxed">
-                  Organization-level role templates, cross-branch permissions, and assignment matrices will be editable here once the role service is linked.
-                </p>
-              </div>
+          {/* TAB 3: Printer */}
+          {currentCategory.id === 'printer' && (
+            <div className="bg-white dark:bg-gray-800/90 rounded-xl p-6 border border-gray-200/80 dark:border-gray-700/80 shadow-sm">
+              <PrinterSettingsPage />
+            </div>
+          )}
+
+          {/* TAB 4: Roles & Access */}
+          {currentCategory.id === 'roles' && (
+            <div className="bg-white dark:bg-gray-800/90 rounded-xl p-6 border border-gray-200/80 dark:border-gray-700/80 shadow-sm">
+              <RoleAccessPage />
+            </div>
+          )}
+
+          {/* TAB: Shops & Branches */}
+          {(currentCategory.id === 'branches' || currentCategory.id === 'shops') && (
+            <div className="bg-white dark:bg-gray-800/90 rounded-xl p-6 border border-gray-200/80 dark:border-gray-700/80 shadow-sm">
+              <ShopsManagementPage embedded={true} />
+            </div>
+          )}
+
+          {/* TAB: Backup & Restore */}
+          {currentCategory.id === 'backup' && (
+            <div className="bg-white dark:bg-gray-800/90 rounded-xl p-6 border border-gray-200/80 dark:border-gray-700/80 shadow-sm">
+              <BackupRestorePage />
             </div>
           )}
 
           {/* OTHER TABS: Generic Category Shell */}
-          {currentCategory.id !== 'profile' && currentCategory.id !== 'roles' && (
+          {currentCategory.id !== 'profile' && 
+           currentCategory.id !== 'branches' && 
+           currentCategory.id !== 'shops' && 
+           currentCategory.id !== 'appearance' && 
+           currentCategory.id !== 'printer' && 
+           currentCategory.id !== 'roles' && 
+           currentCategory.id !== 'backup' && (
             <div className="bg-white dark:bg-gray-800/90 rounded-xl p-12 border border-gray-200/80 dark:border-gray-700/80 shadow-sm flex flex-col justify-between min-h-[380px]">
               <div className="py-12 text-center">
                 <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-gray-700 mx-auto flex items-center justify-center text-gray-400 mb-3">

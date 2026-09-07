@@ -5,6 +5,7 @@ import { OrganizationDashboardLayout } from '@/features/dashboard/components/org
 import { OrganizationDashboardPage } from '@/pages/dashboard/organization/OrganizationDashboardPage';
 import { ShopsManagementPage } from '@/pages/dashboard/organization/ShopsManagementPage';
 import { StaffManagementPage } from '@/pages/dashboard/organization/StaffManagementPage';
+import { OrganizationRepairsPage } from '@/pages/dashboard/organization/OrganizationRepairsPage';
 import { OrganizationRolesPage } from '@/pages/dashboard/organization/OrganizationRolesPage';
 import { AuditLogsPage } from '@/pages/dashboard/organization/AuditLogsPage';
 import { OrganizationReportsPage } from '@/pages/dashboard/organization/OrganizationReportsPage';
@@ -26,12 +27,15 @@ export const organizationRoutes = (
       {/* 1. Dashboard */}
       <Route index element={<OrganizationDashboardPage />} />
       
-      {/* 2. Shops */}
-      <Route path="shops" element={<ShopsManagementPage />} />
+      {/* 2. Shops (Moved to Settings) */}
+      <Route path="shops" element={<Navigate to="/dashboard/organization/settings?tab=branches" replace />} />
       
       {/* 3. Employees (with legacy staff alias) */}
       <Route path="employees" element={<StaffManagementPage />} />
       <Route path="staff" element={<Navigate to="/dashboard/organization/employees" replace />} />
+
+      {/* Repairs */}
+      <Route path="repairs" element={<OrganizationRepairsPage />} />
       
       {/* 4. Audit Log */}
       <Route path="audit-logs" element={<AuditLogsPage />} />

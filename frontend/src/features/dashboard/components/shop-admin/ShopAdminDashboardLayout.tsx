@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useLocation, Outlet } from 'react-router-dom';
 import { Sidebar } from '@/components/layout/Sidebar';
-import { MobileSidebar } from '@/components/layout/MobileSidebar';
 import { Topbar } from '@/components/layout/Topbar';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { LockScreenOverlay } from '@/components/layout/LockScreenOverlay';
@@ -14,7 +13,6 @@ interface ShopAdminDashboardLayoutProps {
 }
 
 export const ShopAdminDashboardLayout = ({ children }: ShopAdminDashboardLayoutProps) => {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const location = useLocation();
   const pathname = location.pathname;
   
@@ -25,24 +23,21 @@ export const ShopAdminDashboardLayout = ({ children }: ShopAdminDashboardLayoutP
   useDashboardShortcuts();
 
   return (
-    <div className="flex flex-1 h-full w-full min-h-0 overflow-hidden bg-background relative">
+    <div className="flex h-screen w-screen overflow-hidden bg-background relative">
       {/* Terminal Fast PIN Lock Screen Overlay */}
       <LockScreenOverlay />
 
-      {/* Mobile Sidebar */}
-      <MobileSidebar isOpen={mobileMenuOpen} setIsOpen={setMobileMenuOpen} />
-
-      {/* Desktop Sidebar */}
+      {/* Permanent Desktop Sidebar (Locked on the left) */}
       <Sidebar />
 
-      {/* Main Content Area */}
-      <div className="flex w-0 flex-1 flex-col transition-all duration-200 min-h-0 overflow-hidden">
-        {/* Topbar: Suppressed inside POS to provide an immersive cashier terminal */}
+      {/* Main Content Column */}
+      <div className="flex flex-1 flex-col h-screen min-w-0 overflow-hidden">
+        {/* Topbar: Locked at top (Suppressed inside POS to provide immersive cashier view) */}
         {!pathname?.includes('/pos') && (
-          <Topbar setMobileMenuOpen={setMobileMenuOpen} />
+          <Topbar />
         )}
 
-        {/* Dashboard Content Area */}
+        {/* Scrollable Content Container (The ONLY container that scrolls) */}
         <DashboardShell variant={pathname?.includes('/pos') ? 'pos' : 'default'}>
           {children || <Outlet />}
         </DashboardShell>
@@ -55,4 +50,3 @@ export const ShopAdminDashboardLayout = ({ children }: ShopAdminDashboardLayoutP
 };
 
 export default ShopAdminDashboardLayout;
-

@@ -20,9 +20,9 @@ export const Sidebar = () => {
       : shopAdminNavigation;
 
   return (
-    <div
-      className={`hidden lg:flex lg:flex-col flex-shrink-0 z-[var(--z-fixed)] bg-surface border-r border-border h-full min-h-screen overflow-y-auto overflow-x-hidden custom-scrollbar transition-[width] duration-normal ease-standard ${
-        isCollapsed ? 'lg:w-[60px]' : 'lg:w-64'
+    <aside
+      className={`flex flex-col flex-shrink-0 z-30 bg-surface border-r border-border h-screen sticky top-0 overflow-y-auto overflow-x-hidden custom-scrollbar transition-[width] duration-normal ease-standard select-none ${
+        isCollapsed ? 'w-[60px]' : 'w-64'
       }`}
     >
       {/* Logo / Header */}
@@ -126,7 +126,7 @@ export const Sidebar = () => {
           );
         })}
       </nav>
-    </div>
+    </aside>
   );
 };
 
