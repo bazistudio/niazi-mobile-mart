@@ -526,6 +526,16 @@ export const tauriClient = {
     return 0;
   },
 
+  async inventoryGetStockMap(branchId: string): Promise<Record<string, number>> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<Record<string, number>>('inventory_get_stock_map', {
+        branchId,
+      });
+    }
+    return {};
+  },
+
   async inventoryGetMovements(
     productId?: string,
     branchId?: string,

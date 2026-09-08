@@ -6,6 +6,7 @@ import { InventoryProduct, InventoryAdjustmentType } from '../types';
 import { stockService } from '../stock/stock.service';
 import { useInventoryStore } from '../core/inventory.store';
 import { usePermissions } from '@/lib/auth/usePermissions';
+import { PERMISSIONS } from '@/constants/permissions';
 import toast from 'react-hot-toast';
 
 interface QuickStockAdjustModalProps {
@@ -22,7 +23,7 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
   onSuccess
 }) => {
   const { hasPermission } = usePermissions();
-  const canManageInventory = hasPermission('MANAGE_INVENTORY') || hasPermission('inventory.manage');
+  const canManageInventory = hasPermission(PERMISSIONS.INVENTORY_EDIT);
   const fetchProducts = useInventoryStore(state => state.fetchProducts);
 
   const [direction, setDirection] = useState<'increase' | 'decrease'>('increase');
@@ -47,7 +48,7 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canManageInventory) {
-      toast.error('Permission denied: MANAGE_INVENTORY required.');
+      toast.error('Permission denied: inventory.edit permission required.');
       return;
     }
 

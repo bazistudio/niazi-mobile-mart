@@ -22,6 +22,29 @@ impl SQLiteInventoryRepository {
         Self::get_stock_internal(&guard, product_id, branch_id).map_err(AppError::from)
     }
 
+    /// Returns a map of product_id -> quantity for all products in the specified branch
+    pub async fn get_stock_map(&self, branch_id: &str) -> AppResult<std::collections::HashMap<String, i64>> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        let mut stmt = guard
+            .prepare("SELECT product_id, quantity FROM stock WHERE branch_id = ?1")
+            .map_err(|e| AppError::Database(format!("Failed to prepare stock map query: {e}")))?;
+
+        let iter = stmt
+            .query_map(params![branch_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(|e| AppError::Database(format!("Failed to query stock map: {e}")))?;
+
+        let mut map = std::collections::HashMap::new();
+        for item in iter {
+            let (pid, qty) = item.map_err(|e| AppError::Database(format!("Stock map row error: {e}")))?;
+            map.insert(pid, qty);
+        }
+        Ok(map)
+    }
+
     /// Reads current stock quantity inside an active transaction
     pub fn get_stock_in_tx(conn: &Connection, product_id: &str, branch_id: &str) -> DbResult<i64> {
         Self::get_stock_internal(conn, product_id, branch_id)

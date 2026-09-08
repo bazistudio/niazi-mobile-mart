@@ -3,6 +3,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MoreVertical, Edit2, Trash2, Eye } from 'lucide-react';
 import { InventoryProduct } from '@/features/inventory/types';
+import { usePermissions } from '@/lib/auth/usePermissions';
+import { PERMISSIONS } from '@/constants/permissions';
 
 interface ProductActionsProps {
   product: InventoryProduct;
@@ -13,6 +15,10 @@ interface ProductActionsProps {
 }
 
 export const ProductActions = ({ product, onView, onEdit, onDelete, onAdjustStock }: ProductActionsProps) => {
+  const { hasPermission } = usePermissions();
+  const canManageProducts = hasPermission(PERMISSIONS.PRODUCTS_MANAGE);
+  const canAdjustStock = hasPermission(PERMISSIONS.INVENTORY_EDIT);
+
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -51,14 +57,16 @@ export const ProductActions = ({ product, onView, onEdit, onDelete, onAdjustStoc
             <Eye className="h-3.5 w-3.5 text-gray-400" />
             View Details
           </button>
-          <button
-            onClick={() => handleAction(() => onEdit(product))}
-            className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-          >
-            <Edit2 className="h-3.5 w-3.5 text-blue-400" />
-            Edit Product
-          </button>
-          {onAdjustStock && (
+          {canManageProducts && (
+            <button
+              onClick={() => handleAction(() => onEdit(product))}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            >
+              <Edit2 className="h-3.5 w-3.5 text-blue-400" />
+              Edit Product
+            </button>
+          )}
+          {canAdjustStock && onAdjustStock && (
             <button
               onClick={() => handleAction(() => onAdjustStock(product))}
               className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-colors font-medium"
@@ -67,14 +75,18 @@ export const ProductActions = ({ product, onView, onEdit, onDelete, onAdjustStoc
               Quick Adjust Stock
             </button>
           )}
-          <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
-          <button
-            onClick={() => handleAction(() => onDelete(product))}
-            className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            Delete
-          </button>
+          {canManageProducts && (
+            <>
+              <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
+              <button
+                onClick={() => handleAction(() => onDelete(product))}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

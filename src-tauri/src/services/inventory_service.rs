@@ -260,6 +260,10 @@ impl InventoryService {
         self.repo.get_stock(product_id, branch_id).await
     }
 
+    pub async fn get_stock_map(&self, branch_id: &str) -> AppResult<std::collections::HashMap<String, i64>> {
+        self.repo.get_stock_map(branch_id).await
+    }
+
     pub async fn list_movements(
         &self,
         product_id: Option<&str>,

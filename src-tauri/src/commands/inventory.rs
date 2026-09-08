@@ -85,6 +85,16 @@ pub async fn inventory_get_stock(
 }
 
 #[tauri::command]
+pub async fn inventory_get_stock_map(
+    state: State<'_, AppState>,
+    branch_id: String,
+) -> AppResult<std::collections::HashMap<String, i64>> {
+    AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await?;
+    let authorized_branch = AuthService::require_branch_access(&state, Some(&branch_id)).await?;
+    state.inventory_service.get_stock_map(&authorized_branch).await
+}
+
+#[tauri::command]
 pub async fn inventory_get_movements(
     state: State<'_, AppState>,
     product_id: Option<String>,

@@ -3,6 +3,16 @@
 import { tauriClient } from '@/lib/tauri/tauriClient';
 import { PaginatedProductsDTO, AdjustStockResponseDTO, ProductCategoryDTO, UpdateProductDTO, CheckDuplicateResponseDTO, ProductDTO } from '../dto/inventory.dto';
 import { InventoryAdjustmentType, PaginationParams } from '../types';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
+
+function getActiveBranchId(): string {
+  const store = useOrganizationStore.getState();
+  const branchId = store.activeShop?._id || store.activeShop?.id || store.activeShopId;
+  if (!branchId) {
+    throw new Error('No active branch selected. Please select a shop/branch before performing stock operations.');
+  }
+  return branchId;
+}
 
 export const inventoryApi = {
   getProducts: async (params: PaginationParams): Promise<PaginatedProductsDTO> => {
@@ -11,6 +21,18 @@ export const inventoryApi = {
       category_id: params.category && params.category !== 'all' ? params.category : undefined,
       is_active: true,
     });
+
+    // Obtain active branch stock map if branch context is available
+    let stockMap: Record<string, number> = {};
+    const store = useOrganizationStore.getState();
+    const branchId = store.activeShop?._id || store.activeShop?.id || store.activeShopId;
+    if (branchId) {
+      try {
+        stockMap = await tauriClient.inventoryGetStockMap(branchId);
+      } catch (err) {
+        console.warn('[inventoryApi.getProducts] Failed to fetch branch stock map', err);
+      }
+    }
 
     const products: ProductDTO[] = items.map((p) => ({
       _id: p.id,
@@ -23,7 +45,7 @@ export const inventoryApi = {
       purchasePrice: p.purchase_price,
       averageCost: p.average_cost,
       lastPurchaseCost: p.purchase_price,
-      quantity: 0,
+      quantity: stockMap[p.id] ?? 0,
       lowStockThreshold: p.low_stock_threshold,
       description: p.description || undefined,
       status: 'active',
@@ -46,13 +68,25 @@ export const inventoryApi = {
   adjustStock: async (
     productId: string, 
     quantity: number, 
-    _type: InventoryAdjustmentType, 
+    type: InventoryAdjustmentType, 
     reason?: string
   ): Promise<AdjustStockResponseDTO> => {
+    const branchId = getActiveBranchId();
+
+    // Determine target quantity based on adjustment type
+    let targetQuantity = quantity;
+    if (type === InventoryAdjustmentType.INCREASE || type === InventoryAdjustmentType.RESTOCK) {
+      const currentStock = await tauriClient.inventoryGetStock(productId, branchId);
+      targetQuantity = currentStock + quantity;
+    } else if (type === InventoryAdjustmentType.DECREASE || type === InventoryAdjustmentType.DAMAGE) {
+      const currentStock = await tauriClient.inventoryGetStock(productId, branchId);
+      targetQuantity = currentStock - quantity;
+    }
+
     const newStock = await tauriClient.inventoryAdjust({
       product_id: productId,
-      branch_id: '00000000-0000-0000-0000-000000000002',
-      target_quantity: quantity,
+      branch_id: branchId,
+      target_quantity: targetQuantity,
       reason: reason || 'Manual Adjustment',
     });
 
@@ -63,7 +97,7 @@ export const inventoryApi = {
       adjustment: {
         _id: `adj-${Date.now()}`,
         productId,
-        type: _type,
+        type,
         quantity,
         previousStock: 0,
         newStock,
@@ -160,6 +194,12 @@ export const inventoryApi = {
       description,
     });
 
+    let currentStock = 0;
+    try {
+      const branchId = getActiveBranchId();
+      currentStock = await tauriClient.inventoryGetStock(updated.id, branchId);
+    } catch {}
+
     const product: ProductDTO = {
       _id: updated.id,
       name: updated.name,
@@ -168,7 +208,7 @@ export const inventoryApi = {
       category: updated.category_id,
       price: updated.sale_price,
       purchasePrice: updated.purchase_price,
-      quantity: 0,
+      quantity: currentStock,
       lowStockThreshold: updated.low_stock_threshold,
       description: updated.description || undefined,
       status: 'active',

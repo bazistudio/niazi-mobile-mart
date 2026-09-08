@@ -6,6 +6,7 @@ import {
   DEFAULT_ROLE_PERMISSIONS,
   ROLE_PERMISSION_DECISIONS,
   PERMISSION_METADATA,
+  PermissionKey,
 } from '@/constants/permissions';
 
 export function mapRoleIdToStaffRole(roleId: string): StaffRole {
@@ -48,8 +49,132 @@ export function mapStaffRoleToDisplay(role: string): { roleId: string; roleName:
 }
 
 // ─── Browser Fallback Storage ────────────────────────────────────────────────
+export const ROLE_PERMISSION_GRANTS_STORAGE_KEY = 'nmm_role_permission_grants_v1';
 const BROWSER_STAFF_STORAGE_KEY = 'nmm_browser_staff_users';
 const BROWSER_ROLES_STORAGE_KEY = 'nmm_browser_custom_roles';
+
+type RolePermissionChangeListener = () => void;
+const rolePermissionListeners = new Set<RolePermissionChangeListener>();
+
+export function onRolePermissionsChange(listener: RolePermissionChangeListener): () => void {
+  rolePermissionListeners.add(listener);
+  return () => {
+    rolePermissionListeners.delete(listener);
+  };
+}
+
+function notifyRolePermissionsChange() {
+  rolePermissionListeners.forEach((fn) => {
+    try {
+      fn();
+    } catch (e) {
+      console.error('[RolePermissions] Listener error', e);
+    }
+  });
+}
+
+export function normalizeRoleKey(roleId: string): string {
+  return (roleId || '').toLowerCase().trim();
+}
+
+export function getAllRolePermissionGrants(): Record<string, Record<string, boolean>> {
+  try {
+    if (typeof window === 'undefined') return {};
+    const raw = localStorage.getItem(ROLE_PERMISSION_GRANTS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return {};
+    }
+    return parsed;
+  } catch (err) {
+    console.warn('[getAllRolePermissionGrants] Corrupted storage, returning empty', err);
+    return {};
+  }
+}
+
+export function getRolePermissionGrants(roleId: string): Record<string, boolean> {
+  const all = getAllRolePermissionGrants();
+  const key = normalizeRoleKey(roleId);
+  const grants = all[key];
+  if (typeof grants !== 'object' || grants === null || Array.isArray(grants)) {
+    return {};
+  }
+  const sanitized: Record<string, boolean> = {};
+  for (const [permKey, val] of Object.entries(grants)) {
+    if (val === true) {
+      sanitized[permKey] = true;
+    }
+  }
+  return sanitized;
+}
+
+export function saveRolePermissionGrants(
+  roleId: string,
+  grants: Record<string, boolean>
+): void {
+  const staffRole = mapRoleIdToStaffRole(roleId);
+  const roleDecisions = ROLE_PERMISSION_DECISIONS[staffRole];
+  const allCanonical = new Set<string>(Object.values(PERMISSIONS));
+
+  const validGrantsToSave: Record<string, boolean> = {};
+
+  for (const [permKey, isEnabled] of Object.entries(grants)) {
+    // Only process explicit truthy grants; false or absent means revoked
+    if (!isEnabled) continue;
+
+    // 1. Verify existence in canonical registry
+    if (!allCanonical.has(permKey)) {
+      throw new Error(`Permission "${permKey}" does not exist in canonical registry.`);
+    }
+
+    // 2. Determine policy state for role
+    const decision = roleDecisions ? roleDecisions[permKey as PermissionKey] : undefined;
+
+    // 3. Reject non-INDIVIDUAL persistence
+    if (decision === 'ADMIN_ONLY') {
+      throw new Error(`Permission "${permKey}" is reserved for administrators.`);
+    }
+    if (decision === 'REJECT') {
+      throw new Error(
+        `Permission "${permKey}" cannot be granted to ${roleId} because its policy is REJECT.`
+      );
+    }
+    if (decision === 'SELECT') {
+      throw new Error(
+        `Permission "${permKey}" is a default SELECT permission and cannot be saved as an individual grant.`
+      );
+    }
+    if (decision !== 'INDIVIDUAL') {
+      throw new Error(
+        `Permission "${permKey}" does not have an INDIVIDUAL policy for ${roleId}.`
+      );
+    }
+
+    validGrantsToSave[permKey] = true;
+  }
+
+  // Persist to storage
+  const all = getAllRolePermissionGrants();
+  const key = normalizeRoleKey(roleId);
+
+  if (Object.keys(validGrantsToSave).length === 0) {
+    delete all[key];
+  } else {
+    all[key] = validGrantsToSave;
+  }
+
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(ROLE_PERMISSION_GRANTS_STORAGE_KEY, JSON.stringify(all));
+    }
+  } catch (err) {
+    console.error('[saveRolePermissionGrants] Failed to write to localStorage', err);
+    throw err;
+  }
+
+  notifyRolePermissionsChange();
+}
 
 function getBrowserStaff(): StaffUser[] {
   try {
@@ -381,8 +506,26 @@ export const settingsApi = {
 
   updateStaffStatus: async (id: string, status: 'active' | 'suspended' | 'inactive'): Promise<StaffUser> => {
     if (isTauriEnvironment()) {
-      if (status === 'active') return settingsApi.approveStaff(id);
-      if (status === 'inactive' || status === 'suspended') return settingsApi.rejectStaff(id);
+      const isActivating = status === 'active';
+      const u = await tauriClient.adminUpdateUser({
+        user_id: id,
+        status: isActivating ? ('ACTIVE' as any) : ('DISABLED' as any),
+        is_active: isActivating,
+      });
+      const display = mapStaffRoleToDisplay(u.role);
+      return {
+        id: u.id,
+        _id: u.id,
+        name: u.name,
+        username: u.username,
+        email: `${u.username}@local`,
+        roleId: display.roleId,
+        roleName: display.roleName,
+        hasPin: u.has_pin,
+        status: (u.status ? u.status.toLowerCase() : (u.is_active ? 'active' : 'inactive')) as any,
+        mustChangePassword: u.must_change_password,
+        createdAt: u.created_at,
+      };
     }
     const staff = getBrowserStaff();
     const idx = staff.findIndex((u) => u.id === id || u._id === id);
@@ -451,12 +594,30 @@ export const settingsApi = {
   // ─── Roles ──────────────────────────────────────────────────────────────────
   getRoles: async (): Promise<RoleWithPermissions[]> => {
     const custom = getBrowserCustomRoles();
-    return [...CANONICAL_ROLES, ...custom];
+    const canonicalWithPersistedGrants: RoleWithPermissions[] = CANONICAL_ROLES.map((canonical) => {
+      const staffRole = mapRoleIdToStaffRole(canonical._id);
+      const defaultPerms = buildRolePermissionsMap(staffRole);
+      const grants = getRolePermissionGrants(canonical._id);
+
+      const effectivePerms: Record<string, boolean> = { ...defaultPerms };
+      for (const [permKey, isGranted] of Object.entries(grants)) {
+        if (isGranted) {
+          effectivePerms[permKey] = true;
+        }
+      }
+
+      return {
+        ...canonical,
+        permissions: effectivePerms,
+        permissionCount: Object.values(effectivePerms).filter(Boolean).length,
+      };
+    });
+    return [...canonicalWithPersistedGrants, ...custom];
   },
 
   getRoleById: async (id: string): Promise<RoleWithPermissions> => {
     const roles = await settingsApi.getRoles();
-    const found = roles.find((r) => r._id === id);
+    const found = roles.find((r) => r._id === id || normalizeRoleKey(r._id) === normalizeRoleKey(id));
     if (found) return found;
     return roles[0];
   },
@@ -493,15 +654,44 @@ export const settingsApi = {
       saveBrowserCustomRoles(custom);
       return custom[idx];
     }
-    const canonical = CANONICAL_ROLES.find((r) => r._id === id);
+
+    const canonical = CANONICAL_ROLES.find(
+      (r) => r._id === id || normalizeRoleKey(r._id) === normalizeRoleKey(id)
+    );
+    const roleId = canonical ? canonical._id : normalizeRoleKey(id);
+    const staffRole = mapRoleIdToStaffRole(roleId);
+    const roleDecisions = ROLE_PERMISSION_DECISIONS[staffRole] || {};
+
+    if (data.permissions) {
+      // Extract ONLY permissions where decision is INDIVIDUAL
+      const individualGrantsToSave: Record<string, boolean> = {};
+      for (const [permKey, isEnabled] of Object.entries(data.permissions)) {
+        const decision = roleDecisions[permKey as PermissionKey];
+        if (decision === 'INDIVIDUAL' && isEnabled === true) {
+          individualGrantsToSave[permKey] = true;
+        }
+      }
+      saveRolePermissionGrants(roleId, individualGrantsToSave);
+    }
+
+    const defaultPerms = buildRolePermissionsMap(staffRole);
+    const grants = getRolePermissionGrants(roleId);
+    const effectivePerms: Record<string, boolean> = { ...defaultPerms };
+    for (const [permKey, isGranted] of Object.entries(grants)) {
+      if (isGranted) {
+        effectivePerms[permKey] = true;
+      }
+    }
+
     return {
-      _id: id,
+      _id: roleId,
       organizationId: '00000000-0000-0000-0000-000000000001',
-      name: data.name || canonical?.name || 'Role',
+      name: data.name || canonical?.name || roleId,
       description: data.description !== undefined ? data.description : canonical?.description || '',
-      isSystem: canonical?.isSystem ?? false,
-      permissions: data.permissions || canonical?.permissions || {},
-      createdAt: new Date().toISOString(),
+      isSystem: canonical?.isSystem ?? true,
+      permissions: effectivePerms,
+      createdAt: canonical?.createdAt || '2026-01-01T00:00:00.000Z',
+      updatedAt: new Date().toISOString(),
     };
   },
 

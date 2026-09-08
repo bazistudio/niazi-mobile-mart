@@ -10,7 +10,7 @@ import {
   PERMISSION_METADATA,
 } from '@/constants/permissions';
 import { mapRoleIdToStaffRole } from '../services/settings.api';
-import { Shield, Lock, CheckCircle2, UserCheck, XCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { Shield, Lock, CheckCircle2, UserCheck, XCircle, AlertCircle, Loader2, Circle } from 'lucide-react';
 
 interface PermissionMatrixProps {
   /** Current permission state: { [permissionKey]: boolean } */
@@ -129,8 +129,18 @@ export const PermissionMatrix: React.FC<PermissionMatrixProps> = ({
                     ? 'ADMIN_ONLY'
                     : 'SELECT';
 
-                  const isEnabled = permissions[permKey] ?? (decision === 'SELECT');
-                  const isBlocked = decision === 'REJECT' || decision === 'ADMIN_ONLY';
+                  // Determine effective state
+                  const isIndividual = decision === 'INDIVIDUAL';
+                  const isSelect = decision === 'SELECT';
+                  const isReject = decision === 'REJECT';
+                  const isAdminOnly = decision === 'ADMIN_ONLY';
+
+                  // Explicit grant for individual, always true for SELECT, always false for REJECT and ADMIN_ONLY
+                  const isEnabled = isSelect
+                    ? true
+                    : isIndividual
+                    ? !!permissions[permKey]
+                    : false;
 
                   return (
                     <div
@@ -155,60 +165,105 @@ export const PermissionMatrix: React.FC<PermissionMatrixProps> = ({
 
                       {/* Decision Badges & Controls */}
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        {decision === 'ADMIN_ONLY' && (
-                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                        {isAdminOnly && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20"
+                            title="This permission is reserved for organization administrators."
+                          >
                             <Lock className="w-3 h-3" />
-                            Admin Only
+                            🔒 Admin Only
                           </span>
                         )}
 
-                        {decision === 'REJECT' && (
-                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
-                            <XCircle className="w-3 h-3" />
-                            Denied
+                        {isReject && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
+                            title="This permission is permanently denied for this role."
+                          >
+                            <Lock className="w-3 h-3" />
+                            🔒 Denied
                           </span>
                         )}
 
-                        {decision === 'INDIVIDUAL' && (
-                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                            <UserCheck className="w-3 h-3" />
-                            Individual Grant
-                          </span>
-                        )}
-
-                        {decision === 'SELECT' && (
-                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                        {isSelect && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                            title="Default permission for this role."
+                          >
                             <CheckCircle2 className="w-3 h-3" />
-                            Default
+                            ✓ Default
+                          </span>
+                        )}
+
+                        {isIndividual && isEnabled && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                            title="Individually granted permission for this role."
+                          >
+                            <CheckCircle2 className="w-3 h-3" />
+                            ✓ Granted
+                          </span>
+                        )}
+
+                        {isIndividual && !isEnabled && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-neutral-500/10 text-neutral-600 dark:text-neutral-400 border border-neutral-500/20"
+                            title="Discretionary permission not currently granted."
+                          >
+                            <Circle className="w-3 h-3" />
+                            ○ Not Granted
                           </span>
                         )}
 
                         {/* Interactive Toggle for editable mode */}
                         {!readOnly && onToggle && (
-                          <button
-                            type="button"
-                            disabled={isBlocked}
-                            onClick={() => !isBlocked && onToggle(permKey)}
-                            title={
-                              isBlocked
-                                ? `${decision} permissions cannot be modified for this role.`
-                                : `Toggle ${perm.key}`
-                            }
-                            className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                              isBlocked
-                                ? 'opacity-40 cursor-not-allowed bg-neutral-300 dark:bg-neutral-700'
-                                : isEnabled
-                                ? 'bg-primary'
-                                : 'bg-neutral-300 dark:bg-neutral-700'
-                            }`}
-                            aria-label={`Toggle ${perm.label}`}
-                          >
-                            <span
-                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                                isEnabled && !isBlocked ? 'translate-x-4' : 'translate-x-0'
-                              }`}
-                            />
-                          </button>
+                          <>
+                            {isIndividual ? (
+                              <button
+                                type="button"
+                                onClick={() => onToggle(permKey)}
+                                title={
+                                  isEnabled
+                                    ? `Revoke individual grant for ${perm.label || perm.key}`
+                                    : `Grant individual permission for ${perm.label || perm.key}`
+                                }
+                                className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                  isEnabled ? 'bg-primary' : 'bg-neutral-300 dark:bg-neutral-700'
+                                }`}
+                                aria-label={`Toggle ${perm.label}`}
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                                    isEnabled ? 'translate-x-4' : 'translate-x-0'
+                                  }`}
+                                />
+                              </button>
+                            ) : isSelect ? (
+                              <button
+                                type="button"
+                                disabled={true}
+                                title="Default permission for this role. Cannot be revoked through individual role overrides."
+                                className="relative inline-flex h-5 w-9 flex-shrink-0 cursor-not-allowed opacity-60 rounded-full border-2 border-transparent bg-primary focus:outline-none"
+                                aria-label={`${perm.label} (Default)`}
+                              >
+                                <span className="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 translate-x-4 transition duration-200 ease-in-out" />
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={true}
+                                title={
+                                  isAdminOnly
+                                    ? 'This permission is reserved for organization administrators.'
+                                    : 'This permission is permanently denied for this role.'
+                                }
+                                className="relative inline-flex h-5 w-9 flex-shrink-0 cursor-not-allowed opacity-30 rounded-full border-2 border-transparent bg-neutral-300 dark:bg-neutral-700 focus:outline-none"
+                                aria-label={`${perm.label} (Locked)`}
+                              >
+                                <span className="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 translate-x-0 transition duration-200 ease-in-out" />
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>

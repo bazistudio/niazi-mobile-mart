@@ -6,6 +6,8 @@ import { InventoryProduct, SortField, SortDirection, InventoryAdjustmentType } f
 import { StockStatus } from './stock.types';
 import { selectSortConfig, selectSetSort, selectFetchProducts } from '@/features/inventory/core/inventory.selectors';
 import { inventoryApi } from '../api/inventory.api';
+import { usePermissions } from '@/lib/auth/usePermissions';
+import { PERMISSIONS } from '@/constants/permissions';
 
 interface StockTableProps {
   products: InventoryProduct[];
@@ -20,6 +22,9 @@ function SortIcon({ field, activeField, direction }: { field: SortField; activeF
 }
 
 export const StockTable = ({ products, isLoading }: StockTableProps) => {
+  const { hasPermission } = usePermissions();
+  const canAdjustStock = hasPermission(PERMISSIONS.INVENTORY_EDIT);
+
   const sort = selectSortConfig();
   const setSort = selectSetSort();
   const fetchProducts = selectFetchProducts();
@@ -35,6 +40,7 @@ export const StockTable = ({ products, isLoading }: StockTableProps) => {
   };
 
   const startEdit = (product: InventoryProduct) => {
+    if (!canAdjustStock) return;
     setEditingId(product.id);
     setEditValue(String(product.stock));
   };
@@ -129,7 +135,7 @@ export const StockTable = ({ products, isLoading }: StockTableProps) => {
                 </code>
               </td>
               <td className="px-4 py-1.5">
-                {editingId === product.id ? (
+                {editingId === product.id && canAdjustStock ? (
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
@@ -145,13 +151,15 @@ export const StockTable = ({ products, isLoading }: StockTableProps) => {
                   </div>
                 ) : (
                   <span
-                    className={`font-semibold cursor-pointer hover:text-[#006970] dark:hover:text-[#00B4BB] transition-colors inline-block px-2 py-1 border border-transparent hover:border-[#006970]/30 rounded ${
+                    className={`font-semibold transition-colors inline-block px-2 py-1 border border-transparent rounded ${
+                      canAdjustStock ? 'cursor-pointer hover:text-[#006970] dark:hover:text-[#00B4BB] hover:border-[#006970]/30' : ''
+                    } ${
                       product.status === StockStatus.OUT_OF_STOCK ? 'text-red-600 dark:text-red-400' :
                       product.status === StockStatus.LOW_STOCK ? 'text-amber-600 dark:text-amber-400' :
                       'text-gray-900 dark:text-white'
                     }`}
                     onClick={() => startEdit(product)}
-                    title="Click to adjust stock"
+                    title={canAdjustStock ? 'Click to adjust stock' : undefined}
                   >
                     {product.stock} {product.unit}
                   </span>

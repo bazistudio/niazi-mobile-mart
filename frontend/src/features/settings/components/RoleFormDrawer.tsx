@@ -7,6 +7,9 @@ import { Input } from '@/components/ui/Input';
 import { PermissionMatrix } from './PermissionMatrix';
 import { Role, CreateRoleDto, UpdateRoleDto } from '../types/role.types';
 import { useCreateRole, useUpdateRole } from '../hooks/useRoles';
+import { mapRoleIdToStaffRole, getRolePermissionGrants } from '../services/settings.api';
+import { ROLE_PERMISSION_DECISIONS } from '@/constants/permissions';
+import { usePermissionsStore } from '@/lib/auth/usePermissions';
 import toast from 'react-hot-toast';
 
 interface RoleFormDrawerProps {
@@ -36,7 +39,33 @@ export const RoleFormDrawer: React.FC<RoleFormDrawerProps> = ({
       if (editingRole) {
         setName(editingRole.name);
         setDescription(editingRole.description || '');
-        setPermissions(editingRole.permissions || {});
+
+        const staffRole = mapRoleIdToStaffRole(editingRole._id);
+        const roleDecisions = ROLE_PERMISSION_DECISIONS[staffRole];
+
+        if (roleDecisions) {
+          // Canonical role editing initialization per Section 11:
+          // Step 1: Canonical role policy is in roleDecisions
+          // Step 2 & 3: SELECT -> true, INDIVIDUAL -> load from persisted grants
+          const persistedGrants = getRolePermissionGrants(editingRole._id);
+
+          // Step 4: Construct effective editing state:
+          // SELECT -> ON, INDIVIDUAL -> persisted grant state (true if persisted, false otherwise), REJECT/ADMIN_ONLY -> OFF
+          const initialPermissions: Record<string, boolean> = {};
+          for (const [permKey, decision] of Object.entries(roleDecisions)) {
+            if (decision === 'SELECT') {
+              initialPermissions[permKey] = true;
+            } else if (decision === 'INDIVIDUAL') {
+              initialPermissions[permKey] = persistedGrants[permKey] === true;
+            } else {
+              initialPermissions[permKey] = false;
+            }
+          }
+          setPermissions(initialPermissions);
+        } else {
+          // Custom role
+          setPermissions(editingRole.permissions || {});
+        }
       } else {
         setName('');
         setDescription('');
@@ -71,7 +100,8 @@ export const RoleFormDrawer: React.FC<RoleFormDrawerProps> = ({
           permissions,
         };
         await updateRole.mutateAsync({ id: editingRole._id, data });
-        toast.success('Role updated successfully');
+        usePermissionsStore.getState().invalidate();
+        toast.success('Role permissions updated successfully.');
       } else {
         const data: CreateRoleDto = {
           name: trimmedName,

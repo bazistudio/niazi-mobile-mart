@@ -16,8 +16,13 @@ import { InventoryFilters } from '@/components/inventory/InventoryFilters';
 import { ProductTable } from './ProductTable';
 import { ErrorState } from '@/shared/components/error-state/ErrorState';
 import { LoadingState } from '@/shared/components/loading-state/LoadingState';
+import { usePermissions } from '@/lib/auth/usePermissions';
+import { PERMISSIONS } from '@/constants/permissions';
 
 export const ProductListWidget = () => {
+  const { hasPermission } = usePermissions();
+  const canManageProducts = hasPermission(PERMISSIONS.PRODUCTS_MANAGE);
+
   const fetchProducts = selectFetchProducts();
   const forceSync = selectForceSync();
   const products = selectProducts();
@@ -54,13 +59,15 @@ export const ProductListWidget = () => {
             Sync Now
           </button>
           
-          <Link
-            to="/dashboard/shop-admin/products/new"
-            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-white bg-[#006970] hover:bg-[#005a60] rounded-lg transition-colors"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add Product
-          </Link>
+          {canManageProducts && (
+            <Link
+              to="/dashboard/shop-admin/products/new"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-white bg-[#006970] hover:bg-[#005a60] rounded-lg transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add Product
+            </Link>
+          )}
         </div>
       </div>
 

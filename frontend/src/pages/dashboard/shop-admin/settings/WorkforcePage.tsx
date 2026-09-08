@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Users, UserCheck, UserX, Key, Ban, Eye, Edit, Loader2, AlertCircle, CheckCircle, XCircle, KeyRound } from 'lucide-react';
+import { Users, UserCheck, UserX, Key, Ban, Eye, Edit, Loader2, AlertCircle, CheckCircle, XCircle, KeyRound, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { KpiCard } from '@/features/settings/components/KpiCard';
 import { SettingsCard } from '@/features/settings/components/SettingsCard';
@@ -7,6 +7,9 @@ import { DataTable, TableColumn } from '@/components/common/DataTable';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { SlideOverDrawer } from '@/components/ui/SlideOverDrawer';
+import { UserFormDrawer } from '@/features/settings/components/UserFormDrawer';
+import { usePermissions } from '@/lib/auth/usePermissions';
+import { PERMISSIONS } from '@/constants/permissions';
 import {
   useStaff,
   useUpdateStaffStatus,
@@ -20,6 +23,9 @@ import { useOrganizationStore } from '@/store/useOrganizationStore';
 import toast from 'react-hot-toast';
 
 export const WorkforcePage: React.FC = () => {
+  const { hasPermission } = usePermissions();
+  const canManageUsers = hasPermission(PERMISSIONS.USERS_MANAGE);
+
   const { data: staffList = [], isLoading, isError, error } = useStaff();
   const updateStatus = useUpdateStaffStatus();
   const resetPin = useResetStaffPin();
@@ -31,6 +37,10 @@ export const WorkforcePage: React.FC = () => {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [selectedStaff, setSelectedStaff] = useState<StaffUser | null>(null);
   const [drawerMode, setDrawerMode] = useState<'view' | 'edit'>('view');
+
+  // Add / Edit user form drawer state
+  const [isUserFormOpen, setIsUserFormOpen] = useState(false);
+  const [editingStaffUser, setEditingStaffUser] = useState<StaffUser | null>(null);
 
   // Admin password reset modal state
   const [resetModalStaff, setResetModalStaff] = useState<StaffUser | null>(null);
@@ -79,10 +89,13 @@ export const WorkforcePage: React.FC = () => {
   };
 
   const handleAction = async (staff: StaffUser, mode: 'view' | 'edit' | 'pin' | 'disable' | 'reset-pwd') => {
-    if (mode === 'view' || mode === 'edit') {
+    if (mode === 'view') {
       setSelectedStaff(staff);
-      setDrawerMode(mode);
+      setDrawerMode('view');
       setIsDrawerOpen(true);
+    } else if (mode === 'edit') {
+      setEditingStaffUser(staff);
+      setIsUserFormOpen(true);
     } else if (mode === 'reset-pwd') {
       setResetModalStaff(staff);
       setTempPassword('');
@@ -104,37 +117,48 @@ export const WorkforcePage: React.FC = () => {
     }
   };
 
-  const renderActionMenu = (row: StaffUser) => (
-    <div className="flex items-center gap-2">
-      {row.status === 'pending' ? (
-        <>
-          <button
-            onClick={() => handleApprove(row)}
-            className="flex items-center gap-1 px-2 py-1 text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg transition-colors cursor-pointer border border-emerald-200"
-            title="Approve Staff Member"
-          >
-            <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
-            <span>Approve</span>
-          </button>
-          <button
-            onClick={() => handleReject(row)}
-            className="flex items-center gap-1 px-2 py-1 text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100 rounded-lg transition-colors cursor-pointer border border-red-200"
-            title="Reject Staff Member"
-          >
-            <XCircle className="h-3.5 w-3.5 text-red-600" />
-            <span>Reject</span>
-          </button>
-        </>
-      ) : (
-        <>
+  const renderActionMenu = (row: StaffUser) => {
+    if (!canManageUsers) {
+      return (
+        <div className="flex items-center gap-2">
           <button onClick={() => handleAction(row, 'view')} className="text-text-muted hover:text-primary transition-colors cursor-pointer" title="View Profile"><Eye className="h-4 w-4" /></button>
-          <button onClick={() => handleAction(row, 'reset-pwd')} className="text-text-muted hover:text-primary transition-colors cursor-pointer" title="Reset Password (Forced Change)"><KeyRound className="h-4 w-4" /></button>
-          <button onClick={() => handleAction(row, 'pin')} className="text-text-muted hover:text-primary transition-colors cursor-pointer" title="Reset PIN"><Key className="h-4 w-4" /></button>
-          <button onClick={() => handleAction(row, 'disable')} className="text-text-muted hover:text-warning transition-colors cursor-pointer" title={row.status === 'active' ? 'Disable Account' : 'Enable Account'}><Ban className="h-4 w-4" /></button>
-        </>
-      )}
-    </div>
-  );
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex items-center gap-2">
+        {row.status === 'pending' ? (
+          <>
+            <button
+              onClick={() => handleApprove(row)}
+              className="flex items-center gap-1 px-2 py-1 text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg transition-colors cursor-pointer border border-emerald-200"
+              title="Approve Staff Member"
+            >
+              <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
+              <span>Approve</span>
+            </button>
+            <button
+              onClick={() => handleReject(row)}
+              className="flex items-center gap-1 px-2 py-1 text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100 rounded-lg transition-colors cursor-pointer border border-red-200"
+              title="Reject Staff Member"
+            >
+              <XCircle className="h-3.5 w-3.5 text-red-600" />
+              <span>Reject</span>
+            </button>
+          </>
+        ) : (
+          <>
+            <button onClick={() => handleAction(row, 'view')} className="text-text-muted hover:text-primary transition-colors cursor-pointer" title="View Profile"><Eye className="h-4 w-4" /></button>
+            <button onClick={() => handleAction(row, 'edit')} className="text-text-muted hover:text-primary transition-colors cursor-pointer" title="Edit Employee Profile"><Edit className="h-4 w-4" /></button>
+            <button onClick={() => handleAction(row, 'reset-pwd')} className="text-text-muted hover:text-primary transition-colors cursor-pointer" title="Reset Password (Forced Change)"><KeyRound className="h-4 w-4" /></button>
+            <button onClick={() => handleAction(row, 'pin')} className="text-text-muted hover:text-primary transition-colors cursor-pointer" title="Reset PIN"><Key className="h-4 w-4" /></button>
+            <button onClick={() => handleAction(row, 'disable')} className="text-text-muted hover:text-warning transition-colors cursor-pointer" title={row.status === 'active' ? 'Disable Account' : 'Enable Account'}><Ban className="h-4 w-4" /></button>
+          </>
+        )}
+      </div>
+    );
+  };
 
   const getStatusBadge = (status: string, mustChangePassword?: boolean) => {
     switch (status.toLowerCase()) {
@@ -176,7 +200,7 @@ export const WorkforcePage: React.FC = () => {
   return (
     <div className="flex flex-col gap-8 w-full max-w-5xl mx-auto pb-12">
       {/* Header */}
-      <div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div
             className="w-10 h-10 rounded-xl flex items-center justify-center"
@@ -191,6 +215,19 @@ export const WorkforcePage: React.FC = () => {
             </p>
           </div>
         </div>
+        {canManageUsers && (
+          <Button
+            variant="primary"
+            size="sm"
+            leftIcon={<Plus className="w-4 h-4" />}
+            onClick={() => {
+              setEditingStaffUser(null);
+              setIsUserFormOpen(true);
+            }}
+          >
+            Add Staff
+          </Button>
+        )}
       </div>
 
       {/* Section 1: Overview Cards */}
@@ -351,6 +388,16 @@ export const WorkforcePage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Add / Edit Staff Drawer */}
+      <UserFormDrawer
+        isOpen={isUserFormOpen}
+        onClose={() => {
+          setIsUserFormOpen(false);
+          setEditingStaffUser(null);
+        }}
+        editingStaff={editingStaffUser}
+      />
     </div>
   );
 };
