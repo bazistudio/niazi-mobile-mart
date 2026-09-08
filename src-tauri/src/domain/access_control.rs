@@ -107,6 +107,134 @@ impl StaffAccessProfile {
         }
     }
 
+    /// Creates branch/shop admin access profile with full branch operational authority
+    pub fn shop_admin_default() -> Self {
+        Self {
+            allowed_pages: vec![
+                "dashboard".to_string(),
+                "pos".to_string(),
+                "products".to_string(),
+                "inventory".to_string(),
+                "sales".to_string(),
+                "purchases".to_string(),
+                "customers".to_string(),
+                "suppliers".to_string(),
+                "parties".to_string(),
+                "repairs".to_string(),
+                "expenses".to_string(),
+                "cash".to_string(),
+                "reports".to_string(),
+                "settings".to_string(),
+            ],
+            allowed_actions: vec![
+                "pos:sale".to_string(),
+                "pos:hold".to_string(),
+                "pos:discount".to_string(),
+                "pos:override".to_string(),
+                "pos:refund".to_string(),
+                "pos:void".to_string(),
+                "stock:adjust".to_string(),
+                "stock:transfer".to_string(),
+                "product:create".to_string(),
+                "product:edit".to_string(),
+                "reports:export".to_string(),
+                "expense:create".to_string(),
+                "cash:manage".to_string(),
+            ],
+            limits: StaffOperationalLimits {
+                max_discount_percent: 25.0,
+                can_price_override: true,
+                can_refund: true,
+                can_void_sale: true,
+                can_view_profit: true,
+            },
+        }
+    }
+
+    /// Creates accountant access profile focused on financial & ledger management
+    pub fn accountant_default() -> Self {
+        Self {
+            allowed_pages: vec![
+                "dashboard".to_string(),
+                "sales".to_string(),
+                "purchases".to_string(),
+                "customers".to_string(),
+                "suppliers".to_string(),
+                "parties".to_string(),
+                "expenses".to_string(),
+                "cash".to_string(),
+                "reports".to_string(),
+                "business-ledger".to_string(),
+            ],
+            allowed_actions: vec![
+                "reports:export".to_string(),
+                "expense:create".to_string(),
+                "cash:audit".to_string(),
+                "ledger:view".to_string(),
+            ],
+            limits: StaffOperationalLimits {
+                max_discount_percent: 0.0,
+                can_price_override: false,
+                can_refund: false,
+                can_void_sale: false,
+                can_view_profit: true,
+            },
+        }
+    }
+
+    /// Creates salesman access profile for POS and sales intake
+    pub fn salesman_default() -> Self {
+        Self {
+            allowed_pages: vec![
+                "pos".to_string(),
+                "dashboard".to_string(),
+                "products".to_string(),
+                "sales".to_string(),
+                "customers".to_string(),
+                "repairs".to_string(),
+            ],
+            allowed_actions: vec![
+                "pos:sale".to_string(),
+                "pos:hold".to_string(),
+                "pos:discount".to_string(),
+                "order:create".to_string(),
+                "order:read".to_string(),
+            ],
+            limits: StaffOperationalLimits {
+                max_discount_percent: 5.0,
+                can_price_override: false,
+                can_refund: false,
+                can_void_sale: false,
+                can_view_profit: false,
+            },
+        }
+    }
+
+    /// Creates repair mechanic access profile focused on device service jobs
+    pub fn repair_mechanic_default() -> Self {
+        Self {
+            allowed_pages: vec![
+                "dashboard".to_string(),
+                "repairs".to_string(),
+                "customers".to_string(),
+                "products".to_string(),
+            ],
+            allowed_actions: vec![
+                "repair:create".to_string(),
+                "repair:update".to_string(),
+                "repair:diagnose".to_string(),
+                "repair:parts".to_string(),
+            ],
+            limits: StaffOperationalLimits {
+                max_discount_percent: 0.0,
+                can_price_override: false,
+                can_refund: false,
+                can_void_sale: false,
+                can_view_profit: false,
+            },
+        }
+    }
+
     /// Creates base staff profile
     pub fn staff_default() -> Self {
         Self {

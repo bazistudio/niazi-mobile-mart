@@ -6,15 +6,27 @@ use super::access_control::StaffAccessProfile;
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum UserRole {
     Admin,
+    #[serde(alias = "BRANCH_ADMIN", alias = "shop_admin", alias = "branch_admin")]
+    ShopAdmin,
+    #[serde(alias = "manager")]
     Manager,
+    #[serde(alias = "accountant")]
+    Accountant,
+    #[serde(alias = "salesman")]
+    Salesman,
+    #[serde(alias = "cashier")]
     Cashier,
+    #[serde(alias = "repair_mechanic", alias = "MECHANIC", alias = "mechanic")]
+    RepairMechanic,
+    #[serde(alias = "staff")]
     Staff,
+    #[serde(alias = "public_user")]
     PublicUser,
 }
 
 impl UserRole {
     pub fn is_internal(&self) -> bool {
-        matches!(self, Self::Admin | Self::Manager | Self::Cashier | Self::Staff)
+        !matches!(self, Self::PublicUser)
     }
 
     pub fn is_public(&self) -> bool {
@@ -26,8 +38,12 @@ impl std::fmt::Display for UserRole {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             UserRole::Admin => write!(f, "ADMIN"),
+            UserRole::ShopAdmin => write!(f, "SHOP_ADMIN"),
             UserRole::Manager => write!(f, "MANAGER"),
+            UserRole::Accountant => write!(f, "ACCOUNTANT"),
+            UserRole::Salesman => write!(f, "SALESMAN"),
             UserRole::Cashier => write!(f, "CASHIER"),
+            UserRole::RepairMechanic => write!(f, "REPAIR_MECHANIC"),
             UserRole::Staff => write!(f, "STAFF"),
             UserRole::PublicUser => write!(f, "PUBLIC_USER"),
         }

@@ -23,6 +23,7 @@ export function FirstAdminBootstrapPage() {
     username: "",
     password: "",
     confirmPassword: "",
+    pin: "",
   });
 
   const [showPassword, setShowPassword] = useState(false);
@@ -79,6 +80,11 @@ export function FirstAdminBootstrapPage() {
       setError("Passwords do not match.");
       return;
     }
+    const cleanPin = formData.pin.trim();
+    if (cleanPin && (cleanPin.length !== 4 || !/^\d{4}$/.test(cleanPin))) {
+      setError("PIN must be exactly 4 digits (or leave blank).");
+      return;
+    }
 
     setLoading(true);
 
@@ -87,6 +93,7 @@ export function FirstAdminBootstrapPage() {
         name: formData.name.trim(),
         username: formData.username.trim(),
         password: formData.password,
+        pin: cleanPin || undefined,
       });
 
       setRecoveryKey(response.recovery_key);
@@ -252,6 +259,27 @@ export function FirstAdminBootstrapPage() {
                       className="w-full pl-9 pr-3 py-2 text-sm bg-slate-50/50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#006970] focus:ring-1 focus:ring-[#006970] transition-all"
                     />
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    Terminal PIN (Optional 4 digits)
+                  </label>
+                  <div className="relative">
+                    <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input
+                      type="password"
+                      name="pin"
+                      maxLength={4}
+                      value={formData.pin}
+                      onChange={handleChange}
+                      placeholder="e.g. 2256"
+                      className="w-full pl-9 pr-3 py-2 text-sm bg-slate-50/50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#006970] focus:ring-1 focus:ring-[#006970] transition-all"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Used for rapid POS lock screen and terminal PIN authentication.
+                  </p>
                 </div>
 
                 <div className="pt-2">

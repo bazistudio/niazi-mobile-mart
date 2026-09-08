@@ -36,6 +36,8 @@ pub struct BootstrapAdminPayload {
     pub name: String,
     pub username: String,
     pub password: String,
+    #[serde(default)]
+    pub pin: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -48,7 +50,8 @@ pub struct BootstrapAdminResponse {
 pub struct CreateUserPayload {
     pub name: String,
     pub username: String,
-    pub login_key: String,
+    #[serde(default)]
+    pub login_key: Option<String>,
     pub pin: Option<String>,
     pub role: UserRole,
     pub access_profile: Option<StaffAccessProfile>,
@@ -154,13 +157,24 @@ impl AdminService {
         let recovery_key_hash = hash_credential(&plaintext_recovery_key)?;
         let password_hash = hash_credential(payload.password.trim())?;
 
+        let pin_hash = if let Some(pin) = payload.pin.filter(|p| !p.trim().is_empty()) {
+            let clean = pin.trim();
+            if clean.len() == 4 && clean.chars().all(|c| c.is_ascii_digit()) {
+                Some(hash_credential(clean)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let now = Utc::now().to_rfc3339();
         let admin_user = User {
             id: Uuid::new_v4().to_string(),
             name: clean_name.to_string(),
             username: clean_username,
             login_key_hash: password_hash,
-            pin_hash: None,
+            pin_hash,
             role: UserRole::Admin,
             status: UserStatus::Active,
             is_active: true,
@@ -415,20 +429,13 @@ impl AdminService {
             return Err(AppError::Validation("Username is required".to_string()));
         }
 
-        if payload.login_key.trim().len() < 6 {
-            return Err(AppError::Validation(
-                "Login key must be at least 6 characters long".to_string(),
-            ));
-        }
-
         if repo.find_by_username(&clean_username).await?.is_some() {
             return Err(AppError::Conflict(format!(
                 "Staff account with username '{clean_username}' already exists"
             )));
         }
 
-        let login_key_hash = hash_credential(&payload.login_key)?;
-        let pin_hash = if let Some(pin) = payload.pin.filter(|p| !p.trim().is_empty()) {
+        let pin_hash = if let Some(pin) = payload.pin.as_deref().filter(|p| !p.trim().is_empty()) {
             let clean = pin.trim();
             if clean.len() != 4 || !clean.chars().all(|c| c.is_ascii_digit()) {
                 return Err(AppError::Validation(
@@ -440,10 +447,25 @@ impl AdminService {
             None
         };
 
+        let raw_key = payload.login_key.as_deref().unwrap_or("").trim();
+        let effective_key = if raw_key.len() >= 6 {
+            raw_key.to_string()
+        } else if let Some(ref pin) = payload.pin.as_ref().filter(|p| !p.trim().is_empty()) {
+            format!("Niazi@{}", pin.trim())
+        } else {
+            "Niazi@123".to_string()
+        };
+
+        let login_key_hash = hash_credential(&effective_key)?;
+
         let profile = payload.access_profile.unwrap_or_else(|| match payload.role {
             UserRole::Admin => StaffAccessProfile::admin_unlimited(),
+            UserRole::ShopAdmin => StaffAccessProfile::shop_admin_default(),
             UserRole::Manager => StaffAccessProfile::manager_default(),
+            UserRole::Accountant => StaffAccessProfile::accountant_default(),
+            UserRole::Salesman => StaffAccessProfile::salesman_default(),
             UserRole::Cashier => StaffAccessProfile::cashier_default(),
+            UserRole::RepairMechanic => StaffAccessProfile::repair_mechanic_default(),
             UserRole::Staff => StaffAccessProfile::staff_default(),
             UserRole::PublicUser => StaffAccessProfile::public_user_restricted(),
         });
@@ -588,12 +610,14 @@ mod tests {
                 name: "Niazi Admin".to_string(),
                 username: "admin".to_string(),
                 password: "SecureAdminPassword2026!".to_string(),
+                pin: Some("2256".to_string()),
             },
         )
         .await
         .expect("First admin bootstrap should succeed");
 
         assert_eq!(res.user.role, UserRole::Admin);
+        assert!(res.user.has_pin);
         assert!(res.recovery_key.starts_with("NZRCV-"));
         assert_eq!(res.recovery_key.len(), 25); // "NZRCV-XXXX-XXXX-XXXX-XXXX"
 
@@ -605,6 +629,7 @@ mod tests {
                 name: "Attacker".to_string(),
                 username: "attacker".to_string(),
                 password: "Password123!".to_string(),
+                pin: None,
             },
         )
         .await;
@@ -643,6 +668,7 @@ mod tests {
                 name: "Main Admin".to_string(),
                 username: "main_admin".to_string(),
                 password: "AdminPassword123!".to_string(),
+                pin: None,
             },
         )
         .await
@@ -708,6 +734,66 @@ mod tests {
 
         let staff_record = repo.find_by_id(&staff.id).await.unwrap().unwrap();
         assert!(staff_record.must_change_password);
+    }
+
+    #[tokio::test]
+    async fn test_create_user_with_pin_and_canonical_roles() {
+        let state = AppState::in_memory("5.0.3");
+        let repo = &state.user_repo;
+
+        // Bootstrap admin
+        AdminService::bootstrap_first_admin(
+            repo,
+            BootstrapAdminPayload {
+                name: "Admin".to_string(),
+                username: "admin_super".to_string(),
+                password: "AdminPassword123!".to_string(),
+                pin: Some("9999".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+
+        // Login as admin
+        crate::services::auth_service::AuthService::login(
+            repo,
+            &state,
+            "admin_super",
+            "AdminPassword123!",
+        )
+        .await
+        .unwrap();
+
+        // Create Branch Admin user with PIN
+        let branch_admin = AdminService::create_user(
+            repo,
+            &state,
+            CreateUserPayload {
+                name: "Branch Lead".to_string(),
+                username: "branch_lead".to_string(),
+                login_key: None,
+                pin: Some("2256".to_string()),
+                role: UserRole::ShopAdmin,
+                access_profile: None,
+            },
+        )
+        .await
+        .expect("Should create branch admin");
+
+        assert_eq!(branch_admin.role, UserRole::ShopAdmin);
+        assert_eq!(branch_admin.status, UserStatus::Active);
+        assert!(branch_admin.has_pin);
+
+        // Authenticate using 4-digit PIN!
+        let login_state = AppState::in_memory("5.0.3");
+        let login_res = crate::services::auth_service::AuthService::login(
+            repo,
+            &login_state,
+            "branch_lead",
+            "2256",
+        )
+        .await;
+        assert!(login_res.is_ok(), "User should be able to log in with 4-digit PIN");
     }
 }
 

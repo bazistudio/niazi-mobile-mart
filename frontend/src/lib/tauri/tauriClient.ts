@@ -11,7 +11,17 @@ export interface HealthResponse {
   timestamp_ms: number;
 }
 
-export type StaffRole = 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF';
+export type StaffRole =
+  | 'ADMIN'
+  | 'SHOP_ADMIN'
+  | 'BRANCH_ADMIN'
+  | 'MANAGER'
+  | 'ACCOUNTANT'
+  | 'SALESMAN'
+  | 'CASHIER'
+  | 'REPAIR_MECHANIC'
+  | 'STAFF'
+  | 'PUBLIC_USER';
 
 export interface StaffOperationalLimits {
   max_discount_percent: number;
@@ -46,6 +56,7 @@ export interface BootstrapAdminPayload {
   name: string;
   username: string;
   password: string;
+  pin?: string;
 }
 
 export interface BootstrapAdminResponse {
@@ -281,7 +292,7 @@ export const tauriClient = {
   async adminCreateUser(payload: {
     name: string;
     username: string;
-    login_key: string;
+    login_key?: string;
     pin?: string;
     role: StaffRole;
     access_profile?: StaffAccessProfile;
@@ -289,6 +300,21 @@ export const tauriClient = {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<SanitizedUser>('admin_create_user', { payload });
+    }
+    throw new Error('Tauri environment required');
+  },
+
+  async adminUpdateUser(payload: {
+    user_id: string;
+    name?: string;
+    role?: StaffRole;
+    status?: 'ACTIVE' | 'DISABLED' | 'PENDING' | 'REJECTED';
+    is_active?: boolean;
+    access_profile?: StaffAccessProfile;
+  }): Promise<SanitizedUser> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SanitizedUser>('admin_update_user', { payload });
     }
     throw new Error('Tauri environment required');
   },

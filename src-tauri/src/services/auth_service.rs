@@ -75,8 +75,15 @@ impl AuthService {
             }
         }
 
-        // Verify Argon2id hash
-        if !verify_credential(login_key, &user.login_key_hash) {
+        // Verify Argon2id hash against password OR terminal PIN
+        let password_valid = verify_credential(login_key, &user.login_key_hash);
+        let pin_valid = user
+            .pin_hash
+            .as_deref()
+            .map(|h| verify_credential(login_key, h))
+            .unwrap_or(false);
+
+        if !password_valid && !pin_valid {
             user.failed_login_attempts += 1;
             if user.failed_login_attempts >= 5 {
                 // 15 minute temporary lockout
@@ -84,7 +91,7 @@ impl AuthService {
             }
             repo.save(user).await?;
             return Err(AppError::Unauthorized(
-                "Invalid credentials. Please verify your username and login key.".to_string(),
+                "Invalid credentials. Please verify your username and login key or PIN.".to_string(),
             ));
         }
 

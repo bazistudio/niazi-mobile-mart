@@ -291,10 +291,14 @@ impl SQLiteUserRepository {
     /// Helper to map a combined user + access_profile SQL row into a domain User entity
     fn map_user_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
         let role_str: String = row.get(5)?;
-        let role = match role_str.as_str() {
-            "ADMIN" => UserRole::Admin,
+        let role = match role_str.to_uppercase().as_str() {
+            "ADMIN" | "OWNER" | "SUPER_ADMIN" | "MULTI_ADMIN" => UserRole::Admin,
+            "SHOP_ADMIN" | "BRANCH_ADMIN" => UserRole::ShopAdmin,
             "MANAGER" => UserRole::Manager,
+            "ACCOUNTANT" => UserRole::Accountant,
+            "SALESMAN" => UserRole::Salesman,
             "CASHIER" => UserRole::Cashier,
+            "REPAIR_MECHANIC" | "MECHANIC" => UserRole::RepairMechanic,
             "PUBLIC_USER" => UserRole::PublicUser,
             _ => UserRole::Staff,
         };
@@ -332,8 +336,12 @@ impl SQLiteUserRepository {
         } else {
             match role {
                 UserRole::Admin => StaffAccessProfile::admin_unlimited(),
+                UserRole::ShopAdmin => StaffAccessProfile::shop_admin_default(),
                 UserRole::Manager => StaffAccessProfile::manager_default(),
+                UserRole::Accountant => StaffAccessProfile::accountant_default(),
+                UserRole::Salesman => StaffAccessProfile::salesman_default(),
                 UserRole::Cashier => StaffAccessProfile::cashier_default(),
+                UserRole::RepairMechanic => StaffAccessProfile::repair_mechanic_default(),
                 UserRole::Staff => StaffAccessProfile::staff_default(),
                 UserRole::PublicUser => StaffAccessProfile::public_user_restricted(),
             }
