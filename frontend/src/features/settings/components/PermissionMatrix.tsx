@@ -1,12 +1,16 @@
 'use client';
 
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo } from 'react';
 import { useGroupedPermissions } from '../hooks/usePermissions';
-import { Shield, Loader2 } from 'lucide-react';
-
-const ACTION_COLUMNS = ['view', 'create', 'update', 'delete', 'export', 'approve'] as const;
-
-export type ActionColumn = (typeof ACTION_COLUMNS)[number];
+import {
+  PERMISSIONS,
+  PermissionKey,
+  PermissionDecision,
+  ROLE_PERMISSION_DECISIONS,
+  PERMISSION_METADATA,
+} from '@/constants/permissions';
+import { mapRoleIdToStaffRole } from '../services/settings.api';
+import { Shield, Lock, CheckCircle2, UserCheck, XCircle, AlertCircle, Loader2 } from 'lucide-react';
 
 interface PermissionMatrixProps {
   /** Current permission state: { [permissionKey]: boolean } */
@@ -15,112 +19,33 @@ interface PermissionMatrixProps {
   onToggle?: (permissionKey: string) => void;
   /** Read-only mode disables all checkboxes */
   readOnly?: boolean;
-  /** Whether to show the action column header row */
-  showActions?: boolean;
+  /** Optional role ID being viewed or edited (e.g. 'accountant', 'manager', 'cashier') */
+  roleId?: string;
 }
-
-const ACTION_LABELS: Record<ActionColumn, string> = {
-  view: 'View',
-  create: 'Create',
-  update: 'Update',
-  delete: 'Delete',
-  export: 'Export',
-  approve: 'Approve',
-};
 
 export const PermissionMatrix: React.FC<PermissionMatrixProps> = ({
   permissions,
   onToggle,
   readOnly = false,
-  showActions = true,
+  roleId,
 }) => {
   const { grouped, modules, isLoading, error } = useGroupedPermissions();
 
-  // Build a map of module -> action -> permission keys
-  const moduleActionMap = useMemo(() => {
-    const map: Record<string, Record<string, string[]>> = {};
-    for (const [module, perms] of Object.entries(grouped)) {
-      map[module] = {};
-      for (const perm of perms) {
-        if (!map[module][perm.action]) {
-          map[module][perm.action] = [];
-        }
-        map[module][perm.action].push(perm.key);
-      }
-    }
-    return map;
-  }, [grouped]);
+  const normalizedRole = useMemo(() => {
+    if (!roleId) return null;
+    return mapRoleIdToStaffRole(roleId);
+  }, [roleId]);
 
-  // Check if all permissions for a module+action are enabled
-  const isActionEnabled = useCallback(
-    (module: string, action: string): boolean | 'mixed' => {
-      const keys = moduleActionMap[module]?.[action];
-      if (!keys || keys.length === 0) return false;
-      const enabled = keys.filter((k) => permissions[k]);
-      if (enabled.length === 0) return false;
-      if (enabled.length === keys.length) return true;
-      return 'mixed';
-    },
-    [moduleActionMap, permissions]
-  );
-
-  // Check if all permissions in a module are enabled
-  const isModuleAllEnabled = useCallback(
-    (module: string): boolean | 'mixed' => {
-      const actions = moduleActionMap[module];
-      if (!actions) return false;
-      const allKeys = Object.values(actions).flat();
-      if (allKeys.length === 0) return false;
-      const enabled = allKeys.filter((k) => permissions[k]);
-      if (enabled.length === 0) return false;
-      if (enabled.length === allKeys.length) return true;
-      return 'mixed';
-    },
-    [moduleActionMap, permissions]
-  );
-
-  // Toggle all permissions in a module for a specific action
-  const handleActionToggle = useCallback(
-    (module: string, action: string) => {
-      if (readOnly || !onToggle) return;
-      const keys = moduleActionMap[module]?.[action];
-      if (!keys) return;
-      const currentState = isActionEnabled(module, action);
-      // If all are enabled, disable all; otherwise enable all
-      const newState = currentState !== true;
-      for (const key of keys) {
-        if (permissions[key] !== newState) {
-          onToggle(key);
-        }
-      }
-    },
-    [moduleActionMap, isActionEnabled, permissions, onToggle, readOnly]
-  );
-
-  // Toggle all permissions in a module
-  const handleModuleToggle = useCallback(
-    (module: string) => {
-      if (readOnly || !onToggle) return;
-      const actions = moduleActionMap[module];
-      if (!actions) return;
-      const currentState = isModuleAllEnabled(module);
-      const newState = currentState !== true;
-      for (const keys of Object.values(actions)) {
-        for (const key of keys) {
-          if (permissions[key] !== newState) {
-            onToggle(key);
-          }
-        }
-      }
-    },
-    [moduleActionMap, isModuleAllEnabled, permissions, onToggle, readOnly]
-  );
+  const roleDecisions = useMemo(() => {
+    if (!normalizedRole) return null;
+    return ROLE_PERMISSION_DECISIONS[normalizedRole] || null;
+  }, [normalizedRole]);
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="w-6 h-6 animate-spin text-primary" aria-hidden="true" />
-        <span className="ml-2 text-sm text-text-secondary">Loading permissions...</span>
+        <span className="ml-2 text-sm text-text-secondary">Loading canonical permissions...</span>
       </div>
     );
   }
@@ -145,138 +70,155 @@ export const PermissionMatrix: React.FC<PermissionMatrixProps> = ({
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border">
-      <table className="w-full text-sm" role="grid" aria-label="Permission matrix">
-        <thead>
-          <tr className="bg-surface-hover border-b border-border">
-            <th className="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider w-48">
-              Module
-            </th>
-            {showActions &&
-              ACTION_COLUMNS.map((action) => (
-                <th
-                  key={action}
-                  className="px-3 py-3 text-center text-xs font-semibold text-text-secondary uppercase tracking-wider"
-                >
-                  {ACTION_LABELS[action]}
-                </th>
-              ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {modules.map((module) => {
-            const moduleState = isModuleAllEnabled(module);
-            return (
-              <tr key={module} className="hover:bg-surface-hover/50 transition-colors">
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    {!readOnly && onToggle && (
-                      <button
-                        type="button"
-                        onClick={() => handleModuleToggle(module)}
-                        className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
-                          moduleState === true
-                            ? 'bg-primary border-primary text-white'
-                            : moduleState === 'mixed'
-                            ? 'bg-primary/20 border-primary text-primary'
-                            : 'border-border hover:border-primary/50'
-                        }`}
-                        aria-label={`Toggle all ${module} permissions`}
-                        title={`Toggle all ${module} permissions`}
-                      >
-                        {moduleState === true && (
-                          <svg
-                            className="w-3 h-3"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={3}
-                          >
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                          </svg>
-                        )}
-                        {moduleState === 'mixed' && (
-                          <span className="w-2 h-0.5 bg-current rounded-full" />
-                        )}
-                      </button>
-                    )}
-                    <span className="font-medium text-text-primary">{module}</span>
-                  </div>
-                </td>
-                {showActions &&
-                  ACTION_COLUMNS.map((action) => {
-                    const actionState = isActionEnabled(module, action);
-                    const keys = moduleActionMap[module]?.[action];
-                    if (!keys || keys.length === 0) {
-                      return (
-                        <td key={action} className="px-3 py-3 text-center text-text-muted">
-                          <span className="text-xs">—</span>
-                        </td>
-                      );
-                    }
-                    return (
-                      <td key={action} className="px-3 py-3 text-center">
-                        {readOnly ? (
-                          <span
-                            className={`inline-flex items-center justify-center w-6 h-6 rounded-full ${
-                              actionState
-                                ? 'bg-success/10 text-success'
-                                : 'bg-surface-hover text-text-muted'
-                            }`}
-                            aria-label={actionState ? `${ACTION_LABELS[action]} enabled` : `${ACTION_LABELS[action]} disabled`}
-                          >
-                            {actionState ? (
-                              <svg
-                                className="w-3.5 h-3.5"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                                strokeWidth={3}
-                              >
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                              </svg>
-                            ) : (
-                              <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                            )}
+    <div className="space-y-4">
+      {/* ─── Security Model Legend ────────────────────────────────────── */}
+      <div className="bg-surface-hover/60 border border-border/70 rounded-lg p-3 text-xs">
+        <div className="font-semibold text-text-primary mb-2 flex items-center gap-1.5">
+          <Shield className="w-4 h-4 text-primary" />
+          <span>Four-State Security Model</span>
+          {normalizedRole && (
+            <span className="ml-auto font-mono text-[11px] px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+              Role: {normalizedRole}
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
+            <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+            <span className="font-medium">SELECT (Default)</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20">
+            <UserCheck className="w-3.5 h-3.5 flex-shrink-0" />
+            <span className="font-medium">INDIVIDUAL</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 bg-rose-500/10 px-2 py-1 rounded border border-rose-500/20">
+            <XCircle className="w-3.5 h-3.5 flex-shrink-0" />
+            <span className="font-medium">REJECT (Denied)</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-purple-600 dark:text-purple-400 bg-purple-500/10 px-2 py-1 rounded border border-purple-500/20">
+            <Lock className="w-3.5 h-3.5 flex-shrink-0" />
+            <span className="font-medium">ADMIN ONLY</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Permission Modules List ──────────────────────────────────── */}
+      <div className="space-y-3">
+        {modules.map((moduleName) => {
+          const perms = grouped[moduleName] || [];
+          return (
+            <div
+              key={moduleName}
+              className="rounded-lg border border-border bg-surface overflow-hidden shadow-xs"
+            >
+              <div className="bg-surface-hover/80 px-4 py-2 border-b border-border flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-text-primary">
+                  {moduleName}
+                </span>
+                <span className="text-[11px] text-text-muted">
+                  {perms.length} permission{perms.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+              <div className="divide-y divide-border/60">
+                {perms.map((perm) => {
+                  const permKey = perm.key as PermissionKey;
+                  const metadata = PERMISSION_METADATA[permKey];
+                  const decision: PermissionDecision = roleDecisions
+                    ? roleDecisions[permKey] || (perm.adminOnly ? 'ADMIN_ONLY' : 'REJECT')
+                    : perm.adminOnly
+                    ? 'ADMIN_ONLY'
+                    : 'SELECT';
+
+                  const isEnabled = permissions[permKey] ?? (decision === 'SELECT');
+                  const isBlocked = decision === 'REJECT' || decision === 'ADMIN_ONLY';
+
+                  return (
+                    <div
+                      key={perm.key}
+                      className="px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-surface-hover/30 transition-colors"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-text-primary">
+                            {perm.label || metadata?.label || perm.key}
                           </span>
-                        ) : (
+                          <span className="font-mono text-[11px] text-text-muted">
+                            {perm.key}
+                          </span>
+                        </div>
+                        {(perm.description || metadata?.description) && (
+                          <p className="text-xs text-text-muted mt-0.5 truncate">
+                            {perm.description || metadata?.description}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Decision Badges & Controls */}
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {decision === 'ADMIN_ONLY' && (
+                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                            <Lock className="w-3 h-3" />
+                            Admin Only
+                          </span>
+                        )}
+
+                        {decision === 'REJECT' && (
+                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                            <XCircle className="w-3 h-3" />
+                            Denied
+                          </span>
+                        )}
+
+                        {decision === 'INDIVIDUAL' && (
+                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                            <UserCheck className="w-3 h-3" />
+                            Individual Grant
+                          </span>
+                        )}
+
+                        {decision === 'SELECT' && (
+                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Default
+                          </span>
+                        )}
+
+                        {/* Interactive Toggle for editable mode */}
+                        {!readOnly && onToggle && (
                           <button
                             type="button"
-                            onClick={() => handleActionToggle(module, action)}
-                            className={`w-5 h-5 rounded border flex items-center justify-center transition-colors mx-auto ${
-                              actionState === true
-                                ? 'bg-primary border-primary text-white'
-                                : actionState === 'mixed'
-                                ? 'bg-primary/20 border-primary text-primary'
-                                : 'border-border hover:border-primary/50'
+                            disabled={isBlocked}
+                            onClick={() => !isBlocked && onToggle(permKey)}
+                            title={
+                              isBlocked
+                                ? `${decision} permissions cannot be modified for this role.`
+                                : `Toggle ${perm.key}`
+                            }
+                            className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                              isBlocked
+                                ? 'opacity-40 cursor-not-allowed bg-neutral-300 dark:bg-neutral-700'
+                                : isEnabled
+                                ? 'bg-primary'
+                                : 'bg-neutral-300 dark:bg-neutral-700'
                             }`}
-                            aria-label={`${ACTION_LABELS[action]} ${module}`}
-                            title={`${ACTION_LABELS[action]} ${module}`}
+                            aria-label={`Toggle ${perm.label}`}
                           >
-                            {actionState === true && (
-                              <svg
-                                className="w-3 h-3"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                                strokeWidth={3}
-                              >
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                              </svg>
-                            )}
-                            {actionState === 'mixed' && (
-                              <span className="w-2 h-0.5 bg-current rounded-full" />
-                            )}
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                                isEnabled && !isBlocked ? 'translate-x-4' : 'translate-x-0'
+                              }`}
+                            />
                           </button>
                         )}
-                      </td>
-                    );
-                  })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 };

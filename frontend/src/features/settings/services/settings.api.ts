@@ -1,6 +1,12 @@
 import { isTauriEnvironment, tauriClient, StaffRole } from '@/lib/tauri/tauriClient';
 import { CreateRoleDto, UpdateRoleDto, Role, RoleWithPermissions, Permission } from '../types/role.types';
 import { CreateStaffDto, UpdateStaffDto, StaffUser } from '../types/staff.types';
+import {
+  PERMISSIONS,
+  DEFAULT_ROLE_PERMISSIONS,
+  ROLE_PERMISSION_DECISIONS,
+  PERMISSION_METADATA,
+} from '@/constants/permissions';
 
 export function mapRoleIdToStaffRole(roleId: string): StaffRole {
   const r = (roleId || '').toLowerCase().trim();
@@ -93,6 +99,15 @@ function saveBrowserCustomRoles(roles: RoleWithPermissions[]) {
   } catch {}
 }
 
+function buildRolePermissionsMap(roleKey: string): Record<string, boolean> {
+  const decisions = ROLE_PERMISSION_DECISIONS[roleKey] || {};
+  const map: Record<string, boolean> = {};
+  for (const [permKey, decision] of Object.entries(decisions)) {
+    map[permKey] = decision === 'SELECT';
+  }
+  return map;
+}
+
 const CANONICAL_ROLES: RoleWithPermissions[] = [
   {
     _id: 'admin',
@@ -101,9 +116,9 @@ const CANONICAL_ROLES: RoleWithPermissions[] = [
     description: 'Full unrestricted organization & multi-branch access',
     isSystem: true,
     userCount: 1,
-    permissionCount: 30,
-    permissions: { all: true },
-    createdAt: new Date().toISOString(),
+    permissionCount: Object.values(PERMISSIONS).length,
+    permissions: buildRolePermissionsMap('ADMIN'),
+    createdAt: '2026-01-01T00:00:00.000Z',
   },
   {
     _id: 'shop_admin',
@@ -112,17 +127,9 @@ const CANONICAL_ROLES: RoleWithPermissions[] = [
     description: 'Full assigned-branch management and administration',
     isSystem: true,
     userCount: 0,
-    permissionCount: 22,
-    permissions: {
-      pos: true,
-      inventory: true,
-      sales: true,
-      purchases: true,
-      finance: true,
-      reports: true,
-      settings: true,
-    },
-    createdAt: new Date().toISOString(),
+    permissionCount: DEFAULT_ROLE_PERMISSIONS.SHOP_ADMIN?.length || 0,
+    permissions: buildRolePermissionsMap('SHOP_ADMIN'),
+    createdAt: '2026-01-01T00:00:00.000Z',
   },
   {
     _id: 'manager',
@@ -131,20 +138,20 @@ const CANONICAL_ROLES: RoleWithPermissions[] = [
     description: 'Day-to-day branch operations, stock, and sales management',
     isSystem: true,
     userCount: 0,
-    permissionCount: 18,
-    permissions: { pos: true, inventory: true, sales: true, purchases: true, reports: true },
-    createdAt: new Date().toISOString(),
+    permissionCount: DEFAULT_ROLE_PERMISSIONS.MANAGER?.length || 0,
+    permissions: buildRolePermissionsMap('MANAGER'),
+    createdAt: '2026-01-01T00:00:00.000Z',
   },
   {
     _id: 'accountant',
     organizationId: '00000000-0000-0000-0000-000000000001',
     name: 'Accountant',
-    description: 'Financial records, ledgers, expenses, and business reports',
+    description: 'Financial control, ledgers, expenses, purchase bills and financial reporting',
     isSystem: true,
     userCount: 0,
-    permissionCount: 8,
-    permissions: { finance: true, expenses: true, reports: true, parties: true },
-    createdAt: new Date().toISOString(),
+    permissionCount: DEFAULT_ROLE_PERMISSIONS.ACCOUNTANT?.length || 0,
+    permissions: buildRolePermissionsMap('ACCOUNTANT'),
+    createdAt: '2026-01-01T00:00:00.000Z',
   },
   {
     _id: 'salesman',
@@ -153,9 +160,20 @@ const CANONICAL_ROLES: RoleWithPermissions[] = [
     description: 'Point of sale, customer billing, and register operations',
     isSystem: true,
     userCount: 0,
-    permissionCount: 5,
-    permissions: { pos: true, sales: true, parties: true },
-    createdAt: new Date().toISOString(),
+    permissionCount: DEFAULT_ROLE_PERMISSIONS.SALESMAN?.length || 0,
+    permissions: buildRolePermissionsMap('SALESMAN'),
+    createdAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    _id: 'cashier',
+    organizationId: '00000000-0000-0000-0000-000000000001',
+    name: 'Cashier',
+    description: 'Cash checkout, invoice issuing, and customer transactions',
+    isSystem: true,
+    userCount: 0,
+    permissionCount: DEFAULT_ROLE_PERMISSIONS.CASHIER?.length || 0,
+    permissions: buildRolePermissionsMap('CASHIER'),
+    createdAt: '2026-01-01T00:00:00.000Z',
   },
   {
     _id: 'repair_mechanic',
@@ -164,11 +182,23 @@ const CANONICAL_ROLES: RoleWithPermissions[] = [
     description: 'Device repair tracking, service ticketing, and parts scope',
     isSystem: true,
     userCount: 0,
-    permissionCount: 3,
-    permissions: { repairs: true, parties: true },
-    createdAt: new Date().toISOString(),
+    permissionCount: DEFAULT_ROLE_PERMISSIONS.REPAIR_MECHANIC?.length || 0,
+    permissions: buildRolePermissionsMap('REPAIR_MECHANIC'),
+    createdAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    _id: 'staff',
+    organizationId: '00000000-0000-0000-0000-000000000001',
+    name: 'Staff',
+    description: 'General store staff with basic catalog and terminal access',
+    isSystem: true,
+    userCount: 0,
+    permissionCount: DEFAULT_ROLE_PERMISSIONS.STAFF?.length || 0,
+    permissions: buildRolePermissionsMap('STAFF'),
+    createdAt: '2026-01-01T00:00:00.000Z',
   },
 ];
+
 
 export const settingsApi = {
   // ─── Staff ──────────────────────────────────────────────────────────────────
@@ -502,16 +532,18 @@ export const settingsApi = {
 
   // ─── Permissions ────────────────────────────────────────────────────────────
   getPermissions: async (): Promise<Permission[]> => {
-    return [
-      { key: 'pos:operate', module: 'pos', action: 'operate', description: 'Operate POS' },
-      { key: 'inventory:view', module: 'inventory', action: 'view', description: 'View Inventory' },
-      { key: 'inventory:adjust', module: 'inventory', action: 'adjust', description: 'Adjust Stock' },
-      { key: 'reports:view', module: 'reports', action: 'view', description: 'View Reports' },
-      { key: 'settings:manage', module: 'settings', action: 'manage', description: 'Manage Settings' },
-    ];
+    return Object.values(PERMISSION_METADATA).map((meta) => ({
+      key: meta.key,
+      module: meta.module,
+      action: meta.action,
+      label: meta.label,
+      description: meta.description,
+      adminOnly: meta.adminOnly,
+    }));
   },
 
   getPermissionModules: async (): Promise<string[]> => {
-    return ['pos', 'inventory', 'sales', 'reports', 'settings'];
+    const modules = new Set(Object.values(PERMISSION_METADATA).map((m) => m.module));
+    return Array.from(modules);
   },
-};
+};

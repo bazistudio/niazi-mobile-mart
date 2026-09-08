@@ -139,6 +139,7 @@ export const RoleFormDrawer: React.FC<RoleFormDrawerProps> = ({
             <PermissionMatrix
               permissions={permissions}
               onToggle={handleTogglePermission}
+              roleId={editingRole?._id}
             />
           </div>
         </div>

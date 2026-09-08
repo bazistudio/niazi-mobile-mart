@@ -1,9 +1,14 @@
+import { PermissionDecision } from '@/constants/permissions';
+
 // ─── Permission ───────────────────────────────────────────────────────────────
 export interface Permission {
   key: string;
   module: string;
   action: string;
+  label: string;
   description?: string;
+  adminOnly?: boolean;
+  decision?: PermissionDecision;
 }
 
 // ─── Role ─────────────────────────────────────────────────────────────────────

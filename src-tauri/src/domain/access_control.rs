@@ -51,32 +51,23 @@ impl StaffAccessProfile {
         Self {
             allowed_pages: vec![
                 "dashboard".to_string(),
-                "pos".to_string(),
                 "products".to_string(),
                 "inventory".to_string(),
-                "orders".to_string(),
+                "sales".to_string(),
+                "purchases".to_string(),
                 "customers".to_string(),
                 "suppliers".to_string(),
+                "parties".to_string(),
                 "repairs".to_string(),
                 "reports".to_string(),
             ],
-            allowed_actions: vec![
-                "pos:sale".to_string(),
-                "pos:discount".to_string(),
-                "pos:override".to_string(),
-                "pos:refund".to_string(),
-                "stock:adjust".to_string(),
-                "stock:transfer".to_string(),
-                "product:create".to_string(),
-                "product:edit".to_string(),
-                "reports:export".to_string(),
-            ],
+            allowed_actions: vec![],
             limits: StaffOperationalLimits {
-                max_discount_percent: 20.0,
-                can_price_override: true,
-                can_refund: true,
-                can_void_sale: true,
-                can_view_profit: true,
+                max_discount_percent: 0.0,
+                can_price_override: false,
+                can_refund: false,
+                can_void_sale: false,
+                can_view_profit: false,
             },
         }
     }
@@ -85,20 +76,21 @@ impl StaffAccessProfile {
     pub fn cashier_default() -> Self {
         Self {
             allowed_pages: vec![
-                "pos".to_string(),
                 "dashboard".to_string(),
-                "repairs".to_string(),
+                "pos".to_string(),
+                "products".to_string(),
+                "sales".to_string(),
                 "customers".to_string(),
+                "parties".to_string(),
             ],
             allowed_actions: vec![
                 "pos:sale".to_string(),
                 "pos:hold".to_string(),
-                "pos:discount".to_string(),
                 "order:create".to_string(),
                 "order:read".to_string(),
             ],
             limits: StaffOperationalLimits {
-                max_discount_percent: 5.0,
+                max_discount_percent: 0.0,
                 can_price_override: false,
                 can_refund: false,
                 can_void_sale: false,
@@ -156,28 +148,22 @@ impl StaffAccessProfile {
         Self {
             allowed_pages: vec![
                 "dashboard".to_string(),
+                "products".to_string(),
+                "inventory".to_string(),
                 "sales".to_string(),
                 "purchases".to_string(),
                 "customers".to_string(),
                 "suppliers".to_string(),
                 "parties".to_string(),
                 "expenses".to_string(),
-                "cash".to_string(),
-                "reports".to_string(),
-                "business-ledger".to_string(),
             ],
-            allowed_actions: vec![
-                "reports:export".to_string(),
-                "expense:create".to_string(),
-                "cash:audit".to_string(),
-                "ledger:view".to_string(),
-            ],
+            allowed_actions: vec![],
             limits: StaffOperationalLimits {
                 max_discount_percent: 0.0,
                 can_price_override: false,
                 can_refund: false,
                 can_void_sale: false,
-                can_view_profit: true,
+                can_view_profit: false,
             },
         }
     }
@@ -186,22 +172,21 @@ impl StaffAccessProfile {
     pub fn salesman_default() -> Self {
         Self {
             allowed_pages: vec![
-                "pos".to_string(),
                 "dashboard".to_string(),
+                "pos".to_string(),
                 "products".to_string(),
                 "sales".to_string(),
                 "customers".to_string(),
-                "repairs".to_string(),
+                "parties".to_string(),
             ],
             allowed_actions: vec![
                 "pos:sale".to_string(),
                 "pos:hold".to_string(),
-                "pos:discount".to_string(),
                 "order:create".to_string(),
                 "order:read".to_string(),
             ],
             limits: StaffOperationalLimits {
-                max_discount_percent: 5.0,
+                max_discount_percent: 0.0,
                 can_price_override: false,
                 can_refund: false,
                 can_void_sale: false,
@@ -209,6 +194,7 @@ impl StaffAccessProfile {
             },
         }
     }
+
 
     /// Creates repair mechanic access profile focused on device service jobs
     pub fn repair_mechanic_default() -> Self {
@@ -272,26 +258,26 @@ impl StaffAccessProfile {
             if clean.starts_with(&format!("{p_lower}.")) || p_lower.starts_with(&format!("{clean}.")) {
                 return true;
             }
-            // Canonical domain aliases
-            if (p_lower == "customers" || p_lower == "suppliers") && (clean == "parties" || clean.starts_with("parties.")) {
+            // Canonical domain aliases for parties
+            if (p_lower == "customers" || p_lower == "suppliers" || p_lower == "parties")
+                && (clean == "parties" || clean == "customers" || clean == "suppliers" || clean.starts_with("parties."))
+            {
                 return true;
             }
-            if p_lower == "parties" && (clean == "customers" || clean == "suppliers" || clean.starts_with("customers.") || clean.starts_with("suppliers.")) {
+            if (clean == "customers" || clean == "suppliers" || clean == "parties")
+                && (p_lower == "parties" || p_lower == "customers" || p_lower == "suppliers" || p_lower.starts_with("parties."))
+            {
                 return true;
             }
-            if (p_lower == "cash" || p_lower == "cash_management" || p_lower == "expenses") && (clean == "finance" || clean.starts_with("finance.")) {
+            // Canonical aliases for finance / cash management
+            if (p_lower == "cash" || p_lower == "cash_management" || p_lower == "business-ledger" || p_lower == "finance")
+                && (clean == "finance" || clean == "cash" || clean == "cash_management" || clean == "business-ledger" || clean.starts_with("finance."))
+            {
                 return true;
             }
-            if p_lower == "inventory" && (clean == "products" || clean.starts_with("products.")) {
-                return true;
-            }
-            if p_lower == "products" && (clean == "inventory" || clean.starts_with("inventory.")) {
-                return true;
-            }
-            if p_lower == "pos" && (clean == "sales" || clean.starts_with("sales.")) {
-                return true;
-            }
-            if p_lower == "sales" && (clean == "pos" || clean.starts_with("pos.")) {
+            if (clean == "cash" || clean == "cash_management" || clean == "business-ledger" || clean == "finance")
+                && (p_lower == "finance" || p_lower == "cash" || p_lower == "cash_management" || p_lower == "business-ledger" || p_lower.starts_with("finance."))
+            {
                 return true;
             }
             false
@@ -363,9 +349,75 @@ mod tests {
         assert!(profile.has_page_access("pos"));
         assert!(profile.has_page_access("/pos"));
         assert!(!profile.has_page_access("settings"));
+        assert!(!profile.has_page_access("inventory"));
         assert!(profile.has_action_access("pos:sale"));
         assert!(!profile.has_action_access("finance:override"));
-        assert!(profile.check_discount_limit(5.0));
-        assert!(!profile.check_discount_limit(5.1));
+        assert!(!profile.has_action_access("pos:refund"));
+        // Default max discount is 0.0 (INDIVIDUAL permission required)
+        assert!(profile.check_discount_limit(0.0));
+        assert!(!profile.check_discount_limit(0.1));
+    }
+
+    #[test]
+    fn test_accountant_access_restrictions() {
+        let profile = StaffAccessProfile::accountant_default();
+        // SELECT default pages:
+        assert!(profile.has_page_access("products"));
+        assert!(profile.has_page_access("inventory"));
+        assert!(profile.has_page_access("sales"));
+        assert!(profile.has_page_access("purchases"));
+        assert!(profile.has_page_access("expenses"));
+        assert!(profile.has_page_access("customers"));
+        // INDIVIDUAL/REJECT pages - NOT default:
+        assert!(!profile.has_page_access("pos"));
+        assert!(!profile.has_page_access("cash"));
+        assert!(!profile.has_page_access("business-ledger"));
+        assert!(!profile.has_page_access("reports"));
+        assert!(!profile.has_page_access("settings"));
+        // Actions:
+        assert!(!profile.has_action_access("expense:create"));
+        assert!(!profile.has_action_access("cash:manage"));
+        assert!(!profile.has_action_access("pos:sale"));
+        assert!(profile.check_discount_limit(0.0));
+        assert!(!profile.check_discount_limit(0.1));
+    }
+
+    #[test]
+    fn test_manager_access_restrictions() {
+        let profile = StaffAccessProfile::manager_default();
+        // SELECT default pages:
+        assert!(profile.has_page_access("products"));
+        assert!(profile.has_page_access("inventory"));
+        assert!(profile.has_page_access("sales"));
+        assert!(profile.has_page_access("purchases"));
+        assert!(profile.has_page_access("reports"));
+        assert!(profile.has_page_access("repairs"));
+        // INDIVIDUAL pages - NOT default:
+        assert!(!profile.has_page_access("pos"));
+        assert!(!profile.has_page_access("settings"));
+        assert!(!profile.has_page_access("users"));
+        // Actions - INDIVIDUAL:
+        assert!(!profile.has_action_access("pos:sale"));
+        assert!(!profile.has_action_access("pos:refund"));
+        assert!(!profile.has_action_access("stock:adjust"));
+        assert!(!profile.has_action_access("product:create"));
+        assert!(profile.check_discount_limit(0.0));
+        assert!(!profile.check_discount_limit(0.1));
+    }
+
+    #[test]
+    fn test_page_alias_security() {
+        let accountant = StaffAccessProfile::accountant_default();
+        // Expenses must NOT grant finance or cash
+        assert!(accountant.has_page_access("expenses"));
+        assert!(!accountant.has_page_access("finance"));
+        assert!(!accountant.has_page_access("cash"));
+        assert!(!accountant.has_page_access("business-ledger"));
+
+        let cashier = StaffAccessProfile::cashier_default();
+        // Products must NOT grant inventory
+        assert!(cashier.has_page_access("products"));
+        assert!(!cashier.has_page_access("inventory"));
     }
 }
+
