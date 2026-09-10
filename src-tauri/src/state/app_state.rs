@@ -12,6 +12,7 @@ use crate::services::{
     ProfitService, PurchaseReturnService, PurchaseService, SaleService, SalesReturnService, SupplierService,
 };
 
+
 /// Native application session context owned and strictly enforced by Rust
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionContext {
@@ -44,6 +45,10 @@ pub struct AppState {
     pub app_version: String,
     pub session: Arc<RwLock<SessionContext>>,
     pub db: DatabaseConnection,
+    /// PostgreSQL connection pool for Cloud Run / HTTP server mode.
+    /// Set to `Some(pool)` by `server.rs` when `DATABASE_URL` is present.
+    /// Always `None` in desktop Tauri mode.
+    pub pg_pool: Option<sqlx::PgPool>,
     pub user_repo: SQLiteUserRepository,
     pub branch_repo: BranchRepository,
     pub catalog_service: CatalogService,
@@ -83,6 +88,7 @@ impl AppState {
             app_version: app_version.into(),
             session: Arc::new(RwLock::new(SessionContext::default())),
             db,
+            pg_pool: None,  // PostgreSQL pool is None in desktop/SQLite mode
             user_repo,
             branch_repo,
             catalog_service,
@@ -159,6 +165,18 @@ impl AppState {
     pub async fn clear_session(&self) {
         let mut session = self.session.write().await;
         *session = SessionContext::default();
+    }
+
+    /// Returns a reference to the PostgreSQL pool, if available (Cloud Run / HTTP server mode).
+    /// Returns None in desktop Tauri / SQLite mode.
+    pub fn pg_pool(&self) -> Option<&sqlx::PgPool> {
+        self.pg_pool.as_ref()
+    }
+
+    /// Creates a new AppState with the PostgreSQL pool attached (used by server.rs).
+    pub fn with_pg_pool(mut self, pool: sqlx::PgPool) -> Self {
+        self.pg_pool = Some(pool);
+        self
     }
 }
 
