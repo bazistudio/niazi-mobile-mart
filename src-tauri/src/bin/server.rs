@@ -109,13 +109,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    Direct SQL in handlers is PROHIBITED.
     let app = Router::new()
         .route("/api/health", get(health_handler))
+        .route("/api/auth/login", axum::routing::post(login_handler))
+        .route("/api/auth/logout", axum::routing::post(logout_handler))
+        .route("/api/auth/me", get(me_handler))
         .layer(cors)
         .with_state(server_state);
 
     // 7. Bind and start
     let listener = tokio::net::TcpListener::bind(bind_addr).await?;
     info!("Niazi Cloud Run HTTP Server listening on http://{bind_addr}");
-    info!("  GET /api/health → {bind_addr}/api/health");
+    info!("  GET  /api/health → {bind_addr}/api/health");
+    info!("  POST /api/auth/login → {bind_addr}/api/auth/login");
+    info!("  POST /api/auth/logout → {bind_addr}/api/auth/logout");
+    info!("  GET  /api/auth/me → {bind_addr}/api/auth/me");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -126,10 +132,134 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 // ---------------------------------------------------------------------------
+// Extractor for Authenticated Request Identity
+// Reads Bearer token from Authorization header and resolves trusted identity.
+// Returns 401 Unauthorized if missing/invalid/expired.
+// ---------------------------------------------------------------------------
+
+pub struct AuthenticatedUser(pub niazi_mobile_mart_lib::domain::identity::RequestIdentity);
+
+#[axum::async_trait]
+impl axum::extract::FromRequestParts<ServerState> for AuthenticatedUser {
+    type Rejection = (StatusCode, Json<serde_json::Value>);
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &ServerState,
+    ) -> Result<Self, Self::Rejection> {
+        let auth_header = parts
+            .headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|h| h.to_str().ok());
+
+        let token = match auth_header {
+            Some(header) if header.starts_with("Bearer ") => &header[7..],
+            _ => {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "error": "UNAUTHORIZED",
+                        "message": "Missing or invalid Authorization header"
+                    })),
+                ))
+            }
+        };
+
+        match state.app_state.token_manager.resolve_identity(token).await {
+            Ok(identity) => Ok(AuthenticatedUser(identity)),
+            Err(e) => Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({
+                    "error": "UNAUTHORIZED",
+                    "message": e.to_string()
+                })),
+            )),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Route Handlers — TRANSPORT LAYER ONLY
 // Each handler must delegate business operations to a service method.
 // Direct SQL queries are PROHIBITED in this module.
 // ---------------------------------------------------------------------------
+
+#[derive(serde::Deserialize)]
+struct LoginPayload {
+    username: String,
+    password: String,
+}
+
+/// POST /api/auth/login
+async fn login_handler(
+    State(state): State<ServerState>,
+    Json(payload): Json<LoginPayload>,
+) -> impl IntoResponse {
+    use niazi_mobile_mart_lib::services::AuthService;
+
+    match AuthService::login(
+        &state.app_state.user_repo,
+        &state.app_state,
+        &payload.username,
+        &payload.password,
+    )
+    .await
+    {
+        Ok(user) => {
+            let token = state.app_state.token_manager.create_token(user.clone()).await;
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "token": token,
+                    "user": user,
+                })),
+            )
+        }
+        Err(e) => {
+            let status = match e {
+                niazi_mobile_mart_lib::errors::AppError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+                niazi_mobile_mart_lib::errors::AppError::Forbidden(_) => StatusCode::FORBIDDEN,
+                niazi_mobile_mart_lib::errors::AppError::Locked(_) => StatusCode::TOO_MANY_REQUESTS,
+                _ => StatusCode::BAD_REQUEST,
+            };
+            (
+                status,
+                Json(json!({
+                    "error": "LOGIN_FAILED",
+                    "message": e.to_string(),
+                })),
+            )
+        }
+    }
+}
+
+/// POST /api/auth/logout
+async fn logout_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+) -> impl IntoResponse {
+    // Revoke token identity from token manager
+    let _ = state.app_state.token_manager.revoke_token(&auth.0.user_id).await;
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "ok",
+            "message": format!("Logged out user {}", auth.0.username),
+        })),
+    )
+}
+
+/// GET /api/auth/me
+async fn me_handler(
+    auth: AuthenticatedUser,
+) -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(json!({
+            "identity": auth.0,
+        })),
+    )
+}
 
 /// GET /api/health
 /// Infrastructure-level health check.

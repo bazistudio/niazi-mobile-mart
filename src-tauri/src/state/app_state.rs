@@ -63,6 +63,7 @@ pub struct AppState {
     pub sales_return_service: SalesReturnService,
     pub purchase_return_service: PurchaseReturnService,
     pub profit_service: ProfitService,
+    pub token_manager: crate::services::TokenManager,
     pub is_initialized: Arc<RwLock<bool>>,
 }
 
@@ -103,7 +104,8 @@ impl AppState {
             sales_return_service,
             purchase_return_service,
             profit_service,
-            is_initialized: Arc::new(RwLock::new(true)),
+            token_manager: crate::services::TokenManager::new(),
+            is_initialized: Arc::new(RwLock::new(false)),
         }
     }
 

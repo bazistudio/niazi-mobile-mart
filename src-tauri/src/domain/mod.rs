@@ -3,6 +3,7 @@ pub mod cash;
 pub mod catalog;
 pub mod customer;
 pub mod expense;
+pub mod identity;
 pub mod inventory;
 pub mod organization;
 pub mod product;
@@ -13,6 +14,8 @@ pub mod sales;
 pub mod sales_return;
 pub mod supplier;
 pub mod user;
+
+pub use identity::RequestIdentity;
 
 pub use profit::{
     calculate_gross_margin, DailyProfitabilityDto, DashboardProfitSummaryDto, PeriodProfitabilityDto,

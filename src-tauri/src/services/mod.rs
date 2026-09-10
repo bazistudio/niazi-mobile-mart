@@ -13,6 +13,9 @@ pub mod purchase_service;
 pub mod sale_service;
 pub mod sales_return_service;
 pub mod supplier_service;
+pub mod token_service;
+
+pub use token_service::TokenManager;
 
 pub use admin_service::{
     AdminService, CreateUserPayload, ResetCredentialsPayload, UpdateUserPayload,
