@@ -58,6 +58,21 @@ impl PostgresAdapter {
         &self.pool
     }
 
+    /// Executes initial PostgreSQL schema migrations against the connection pool.
+    pub async fn run_migrations(&self) -> DbResult<()> {
+        info!("Running PostgreSQL schema migrations...");
+        let schema_sql = include_str!("../../migrations/postgres/001_initial_schema.sql");
+
+        // Execute batch SQL statements
+        sqlx::query(schema_sql)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migrations: {e}")))?;
+
+        info!("PostgreSQL schema migrations applied successfully.");
+        Ok(())
+    }
+
     /// Closes all connections in the pool gracefully.
     pub async fn close(&self) {
         self.pool.close().await;
@@ -108,6 +123,12 @@ mod tests {
             .await
             .expect("PostgreSQL pool should initialize");
 
+        // Execute migrations on live PG instance
+        adapter
+            .run_migrations()
+            .await
+            .expect("PostgreSQL migrations should succeed");
+
         // Basic connectivity check
         let row: (i64,) = sqlx::query_as("SELECT 1")
             .fetch_one(adapter.pool())
@@ -116,14 +137,14 @@ mod tests {
 
         assert_eq!(row.0, 1, "SELECT 1 must return 1");
 
-        // Validate transaction commit
+        // Validate multi-step transaction commit
         let mut tx = adapter
             .pool()
             .begin()
             .await
             .expect("Should be able to begin transaction");
 
-        sqlx::query("SELECT 1")
+        sqlx::query("INSERT INTO counters (name, value) VALUES ('test_counter', 100) ON CONFLICT (name) DO UPDATE SET value = 100")
             .execute(&mut *tx)
             .await
             .expect("Query inside transaction should work");
@@ -137,7 +158,7 @@ mod tests {
             .await
             .expect("Should be able to begin second transaction");
 
-        sqlx::query("SELECT 1")
+        sqlx::query("UPDATE counters SET value = 999 WHERE name = 'test_counter'")
             .execute(&mut *tx2)
             .await
             .expect("Query inside second transaction should work");
@@ -145,6 +166,19 @@ mod tests {
         tx2.rollback()
             .await
             .expect("Transaction rollback should succeed");
+
+        // Verify value was NOT updated to 999 (rollback succeeded)
+        let val: (i64,) = sqlx::query_as("SELECT value FROM counters WHERE name = 'test_counter'")
+            .fetch_one(adapter.pool())
+            .await
+            .expect("Select counter value should succeed");
+        assert_eq!(val.0, 100, "Rolled back change must not persist");
+
+        // Cleanup test counter
+        sqlx::query("DELETE FROM counters WHERE name = 'test_counter'")
+            .execute(adapter.pool())
+            .await
+            .ok();
 
         adapter.close().await;
     }
