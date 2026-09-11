@@ -115,6 +115,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/products/:id", get(get_product_handler))
         .route("/api/inventory", get(list_inventory_handler))
         .route("/api/sales", axum::routing::post(complete_sale_handler))
+        .route("/api/customers", get(list_customers_handler).post(create_customer_handler))
+        .route("/api/suppliers", get(list_suppliers_handler).post(create_supplier_handler))
+        .route("/api/purchases", axum::routing::post(complete_purchase_handler))
+        .route("/api/expenses", get(list_expenses_handler).post(create_expense_handler))
+        .route("/api/reports/profit", get(profit_report_handler))
         .layer(cors)
         .with_state(server_state);
 
@@ -129,6 +134,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("  POST /api/products → {bind_addr}/api/products");
     info!("  GET  /api/inventory → {bind_addr}/api/inventory");
     info!("  POST /api/sales → {bind_addr}/api/sales");
+    info!("  GET  /api/customers → {bind_addr}/api/customers");
+    info!("  POST /api/customers → {bind_addr}/api/customers");
+    info!("  GET  /api/suppliers → {bind_addr}/api/suppliers");
+    info!("  POST /api/suppliers → {bind_addr}/api/suppliers");
+    info!("  POST /api/purchases → {bind_addr}/api/purchases");
+    info!("  GET  /api/expenses → {bind_addr}/api/expenses");
+    info!("  POST /api/expenses → {bind_addr}/api/expenses");
+    info!("  GET  /api/reports/profit → {bind_addr}/api/reports/profit");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -290,8 +303,7 @@ async fn health_handler(State(state): State<ServerState>) -> impl IntoResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Domain API Handlers — TRANSPORT ONLY
-// Direct SQL is strictly prohibited. All handlers delegate to AppState services.
+// Domain API Handlers — TRANSPORT ONLY WITH STRICT SERVER-SIDE RBAC
 // ---------------------------------------------------------------------------
 
 /// GET /api/products — List products with search filter
@@ -342,7 +354,7 @@ async fn create_product_handler(
     }
 }
 
-/// GET /api/inventory — List inventory stock map per branch
+/// GET /api/inventory — List inventory stock map with strict branch isolation
 async fn list_inventory_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -352,18 +364,19 @@ async fn list_inventory_handler(
         return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
     }
 
-    let branch_id = params.get("branch_id").cloned().unwrap_or_else(|| niazi_mobile_mart_lib::domain::organization::DEFAULT_MAIN_BRANCH_ID.to_string());
-    if let Err(e) = auth.0.validate_context(None, Some(&branch_id)) {
-        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
-    }
+    let req_branch = params.get("branch_id").map(|s| s.as_str());
+    let effective_branch = match auth.0.resolve_branch(req_branch) {
+        Ok(bid) => bid,
+        Err(e) => return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()}))),
+    };
 
-    match state.app_state.inventory_service.get_stock_map(&branch_id).await {
+    match state.app_state.inventory_service.get_stock_map(&effective_branch).await {
         Ok(stock) => (StatusCode::OK, Json(json!(stock))),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
     }
 }
 
-/// POST /api/sales — Complete retail sale checkout
+/// POST /api/sales — Complete retail sale checkout with strict branch isolation
 async fn complete_sale_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -373,13 +386,178 @@ async fn complete_sale_handler(
         return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
     }
 
-    if let Err(e) = auth.0.validate_context(None, payload.branch_id.as_deref()) {
-        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
-    }
+    let effective_branch = match auth.0.resolve_branch(payload.branch_id.as_deref()) {
+        Ok(bid) => bid,
+        Err(e) => return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()}))),
+    };
+
+    let mut payload = payload;
+    payload.branch_id = Some(effective_branch);
 
     match state.app_state.sale_service.complete_sale(Some(&auth.0.user_id), payload).await {
         Ok(result) => (StatusCode::CREATED, Json(json!(result))),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "SALE_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/customers — List customers
+async fn list_customers_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Query(filter): axum::extract::Query<niazi_mobile_mart_lib::domain::customer::CustomerFilter>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("customers"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.customer_service.list_customers(filter).await {
+        Ok(customers) => (StatusCode::OK, Json(json!(customers))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// POST /api/customers — Create customer
+async fn create_customer_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::customer::CreateCustomerDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("customers"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.customer_service.create_customer(payload).await {
+        Ok(customer) => (StatusCode::CREATED, Json(json!(customer))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/suppliers — List suppliers
+async fn list_suppliers_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Query(filter): axum::extract::Query<niazi_mobile_mart_lib::domain::supplier::SupplierFilter>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("suppliers"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.supplier_service.list_suppliers(filter).await {
+        Ok(suppliers) => (StatusCode::OK, Json(json!(suppliers))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// POST /api/suppliers — Create supplier
+async fn create_supplier_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::supplier::CreateSupplierDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("suppliers"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.supplier_service.create_supplier(payload).await {
+        Ok(supplier) => (StatusCode::CREATED, Json(json!(supplier))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// POST /api/purchases — Complete purchase with strict branch isolation
+async fn complete_purchase_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::purchase::CompletePurchaseDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("purchases"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    let effective_branch = match auth.0.resolve_branch(payload.branch_id.as_deref()) {
+        Ok(bid) => bid,
+        Err(e) => return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()}))),
+    };
+
+    let mut payload = payload;
+    payload.branch_id = Some(effective_branch);
+
+    match state.app_state.purchase_service.complete_purchase(Some(&auth.0.user_id), payload).await {
+        Ok(result) => (StatusCode::CREATED, Json(json!(result))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "PURCHASE_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/expenses — List expenses with strict branch isolation
+async fn list_expenses_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Query(filter): axum::extract::Query<niazi_mobile_mart_lib::domain::expense::ExpenseFilterDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("expenses"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    let effective_branch = match auth.0.resolve_branch(filter.branch_id.as_deref()) {
+        Ok(bid) => bid,
+        Err(e) => return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()}))),
+    };
+
+    let mut filter = filter;
+    filter.branch_id = Some(effective_branch);
+
+    match state.app_state.expense_service.list_expenses(filter).await {
+        Ok(expenses) => (StatusCode::OK, Json(json!(expenses))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// POST /api/expenses — Create expense with strict branch isolation
+async fn create_expense_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::expense::CreateExpenseDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("expenses"), Some("expense:create")) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    let effective_branch = match auth.0.resolve_branch(payload.branch_id.as_deref()) {
+        Ok(bid) => bid,
+        Err(e) => return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()}))),
+    };
+
+    let mut payload = payload;
+    payload.branch_id = Some(effective_branch);
+
+    match state.app_state.expense_service.create_expense(payload, Some(&auth.0.user_id)).await {
+        Ok(expense) => (StatusCode::CREATED, Json(json!(expense))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/reports/profit — Get profit summary report with strict branch isolation
+async fn profit_report_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("reports"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    let req_branch = params.get("branch_id").map(|s| s.as_str());
+    let effective_branch = match auth.0.resolve_branch(req_branch) {
+        Ok(bid) => bid,
+        Err(e) => return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()}))),
+    };
+
+    let start_date = params.get("start_date").cloned();
+    let end_date = params.get("end_date").cloned();
+
+    match state.app_state.profit_service.get_period_profitability(start_date, end_date, Some(effective_branch)).await {
+        Ok(summary) => (StatusCode::OK, Json(json!(summary))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
     }
 }
 

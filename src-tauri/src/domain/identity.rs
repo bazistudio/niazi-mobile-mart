@@ -103,6 +103,37 @@ impl RequestIdentity {
 
         Ok(())
     }
+
+    /// Resolves and validates the effective branch ID for an operation.
+    /// Enforces strict server-side branch isolation:
+    /// - Non-admin staff bound to a branch MUST use their assigned branch.
+    /// - If non-admin staff attempts to request a different branch (client tampering), returns 403 Forbidden.
+    /// - Admins or unrestricted staff use requested branch or fall back to assigned/main branch.
+    pub fn resolve_branch(&self, requested_branch_id: Option<&str>) -> Result<String, crate::errors::AppError> {
+        let requested_clean = requested_branch_id.map(str::trim).filter(|s| !s.is_empty());
+
+        if let Some(assigned) = &self.branch_id {
+            if !self.is_admin() {
+                if let Some(req) = requested_clean {
+                    if req != assigned {
+                        return Err(crate::errors::AppError::Forbidden(
+                            "Access denied: Unauthorized cross-branch access prohibited".to_string(),
+                        ));
+                    }
+                }
+                return Ok(assigned.clone());
+            }
+        }
+
+        if let Some(req) = requested_clean {
+            self.validate_context(None, Some(req))?;
+            Ok(req.to_string())
+        } else if let Some(assigned) = &self.branch_id {
+            Ok(assigned.clone())
+        } else {
+            Ok(crate::domain::organization::DEFAULT_MAIN_BRANCH_ID.to_string())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -195,5 +226,56 @@ mod tests {
         let branch_err = identity.validate_context(None, Some("unauthorized_branch_2"));
         assert!(branch_err.is_err());
         assert!(branch_err.unwrap_err().to_string().contains("Unauthorized cross-branch access prohibited"));
+    }
+
+    #[test]
+    fn test_strict_server_branch_resolution_and_tampering_rejection() {
+        let user = SanitizedUser {
+            id: "usr_branch_a".to_string(),
+            name: "Branch A Staff".to_string(),
+            username: "staff_a".to_string(),
+            role: UserRole::Cashier,
+            status: UserStatus::Active,
+            is_active: true,
+            must_change_password: false,
+            has_pin: false,
+            access_profile: StaffAccessProfile::cashier_default(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let mut identity = RequestIdentity::from_user(&user, 1000);
+        identity.branch_id = Some("BRANCH_A".to_string());
+
+        // 1. Branch A user requesting no branch -> automatically resolves to assigned BRANCH_A
+        let res_default = identity.resolve_branch(None).unwrap();
+        assert_eq!(res_default, "BRANCH_A");
+
+        // 2. Branch A user requesting matching BRANCH_A -> OK
+        let res_match = identity.resolve_branch(Some("BRANCH_A")).unwrap();
+        assert_eq!(res_match, "BRANCH_A");
+
+        // 3. Client tampering: Branch A user attempting to request BRANCH_B -> 403 Forbidden
+        let err_tamper = identity.resolve_branch(Some("BRANCH_B"));
+        assert!(err_tamper.is_err());
+        assert!(err_tamper.unwrap_err().to_string().contains("Unauthorized cross-branch access prohibited"));
+
+        // 4. Admin user assigned to BRANCH_A attempting to request BRANCH_B -> Allowed via Admin privilege
+        let admin_user = SanitizedUser {
+            id: "usr_admin".to_string(),
+            name: "Admin User".to_string(),
+            username: "admin".to_string(),
+            role: UserRole::Admin,
+            status: UserStatus::Active,
+            is_active: true,
+            must_change_password: false,
+            has_pin: false,
+            access_profile: StaffAccessProfile::admin_unlimited(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let mut admin_identity = RequestIdentity::from_user(&admin_user, 1000);
+        admin_identity.branch_id = Some("BRANCH_A".to_string());
+
+        let admin_res = admin_identity.resolve_branch(Some("BRANCH_B")).unwrap();
+        assert_eq!(admin_res, "BRANCH_B");
     }
 }
