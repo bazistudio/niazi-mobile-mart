@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",
+    "build:web": "cross-env VITE_APP_SURFACE=web npm --prefix frontend run build",
+    "build:desktop": "cross-env VITE_APP_SURFACE=desktop npm --prefix frontend run build",
     "preview": "npm --prefix frontend run preview",
     "lint": "npm --prefix frontend run lint"
   }

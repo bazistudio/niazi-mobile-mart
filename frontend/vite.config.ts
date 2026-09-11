@@ -17,4 +17,18 @@ export default defineConfig({
   server: {
     port: 5173,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("src/features/storefront") || id.includes("src/pages/storefront")) {
+            return "storefront-web-chunk";
+          }
+          if (id.includes("node_modules/jspdf") || id.includes("node_modules/html2canvas") || id.includes("node_modules/html2pdf")) {
+            return "pdf-generation-chunk";
+          }
+        },
+      },
+    },
+  },
 });
