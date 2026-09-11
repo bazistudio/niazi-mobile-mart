@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::domain::expense::{
     CreateExpenseCategoryDto, CreateExpenseDto, Expense, ExpenseCategory, ExpenseFilterDto,
-    ExpenseStatus, ExpenseSummaryDto, UpdateExpenseDto,
+    ExpenseStatus,
 };
 use crate::errors::{AppError, AppResult};
 
@@ -100,18 +100,21 @@ impl PostgresExpenseRepository {
         let now = Utc::now().to_rfc3339();
         let p_method = dto.payment_method.clone().unwrap_or_else(|| "CASH".to_string()).to_uppercase();
 
+        let branch_id = dto.branch_id.clone().unwrap_or_else(|| "MAIN".to_string());
         let expense = Expense {
             id: exp_id.clone(),
             expense_number: exp_number.clone(),
             category_id: dto.category_id.clone(),
-            branch_id: dto.branch_id.clone(),
+            category_name: None,
+            branch_id: branch_id.clone(),
             amount: dto.amount,
             payment_method: p_method.clone(),
             description: dto.description.clone(),
             notes: dto.notes.clone(),
             expense_date: dto.expense_date.clone().unwrap_or_else(|| Utc::now().format("%Y-%m-%d").to_string()),
-            status: "COMPLETED".to_string(),
+            status: ExpenseStatus::Completed,
             performed_by: user_id.map(|s| s.to_string()),
+            performed_by_name: None,
             created_at: now.clone(),
             updated_at: now.clone(),
         };
@@ -144,7 +147,7 @@ impl PostgresExpenseRepository {
             let open_session_id: Option<String> = sqlx::query_as(
                 "SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' LIMIT 1",
             )
-            .bind(&dto.branch_id)
+            .bind(&branch_id)
             .fetch_optional(&mut *tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?
@@ -159,7 +162,7 @@ impl PostgresExpenseRepository {
             )
             .bind(mv_id)
             .bind(open_session_id.as_deref())
-            .bind(&dto.branch_id)
+            .bind(&branch_id)
             .bind(dto.amount)
             .bind(&exp_id)
             .bind(&exp_number)

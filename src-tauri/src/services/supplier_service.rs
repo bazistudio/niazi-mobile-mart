@@ -59,7 +59,7 @@ impl SupplierService {
 
         // Atomically generate supplier_code
         let supplier_code = match &self.supplier_repo {
-            SupplierRepository::Postgres(pg_repo) => pg_repo.next_supplier_code().await?,
+            SupplierRepository::Postgres(_) => format!("SUP-{:08}", Uuid::new_v4().simple()),
             SupplierRepository::SQLite(_) => {
                 let db = self.db.as_ref().expect("SQLite database connection required");
                 with_transaction(db, |tx| {
@@ -84,21 +84,18 @@ impl SupplierService {
             updated_at: now,
         };
 
-        let supplier_clone = supplier.clone();
-        with_transaction(&self.db, move |tx| {
-            SQLiteSupplierRepository::insert_supplier_in_tx(tx, &supplier_clone)
-        })
-        .await?;
-
-        Ok(supplier)
+        self.supplier_repo.create_supplier(&supplier).await
     }
 
     pub async fn get_supplier_by_id(&self, id: &str) -> AppResult<Option<Supplier>> {
-        self.supplier_repo.get_by_id(id).await
+        self.supplier_repo.get_supplier_by_id(id).await
     }
 
     pub async fn get_supplier_by_code(&self, code: &str) -> AppResult<Option<Supplier>> {
-        self.supplier_repo.get_by_code(code).await
+        match &self.supplier_repo {
+            SupplierRepository::SQLite(r) => r.get_by_code(code).await,
+            SupplierRepository::Postgres(_) => Err(AppError::Internal("Postgres get_by_code not implemented".into())),
+        }
     }
 
     pub async fn list_suppliers(&self, filter: Option<SupplierFilter>) -> AppResult<Vec<SupplierSummaryDto>> {
@@ -135,6 +132,15 @@ impl SupplierService {
 
     pub async fn get_outstanding_balance(&self, supplier_id: &str) -> AppResult<i64> {
         self.supplier_repo.get_outstanding_balance(supplier_id).await
+    }
+
+    pub async fn get_ledger(
+        &self,
+        supplier_id: &str,
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> AppResult<Vec<crate::domain::supplier::SupplierLedgerEntry>> {
+        self.supplier_repo.get_ledger(supplier_id, limit, offset).await
     }
 
     pub async fn get_statement(&self, supplier_id: &str) -> AppResult<SupplierStatementDto> {

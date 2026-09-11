@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::domain::organization::DEFAULT_MAIN_BRANCH_ID;
 use crate::domain::purchases::{
-    CompletePurchaseDto, Purchase, PurchaseFilterDto, PurchaseLine, PurchaseResultDto,
+    CompletePurchaseDto, Purchase, PurchaseFilterDto, PurchaseLine, PurchasePaymentStatus, PurchaseResultDto, PurchaseStatus,
 };
 use crate::domain::sales::PaymentStatus;
 use crate::errors::{AppError, AppResult};
@@ -74,7 +74,8 @@ impl PostgresPurchaseRepository {
             if item.quantity <= 0 {
                 return Err(AppError::Validation("Quantity must be > 0".to_string()));
             }
-            if item.unit_cost < 0 {
+            let unit_cost = item.unit_cost.unwrap_or(0);
+            if unit_cost < 0 {
                 return Err(AppError::Validation("Unit cost cannot be negative".to_string()));
             }
 
@@ -96,14 +97,14 @@ impl PostgresPurchaseRepository {
             }
 
             let disc = item.discount.unwrap_or(0).max(0);
-            let line_total = (item.unit_cost * item.quantity).saturating_sub(disc);
+            let line_total = (unit_cost * item.quantity).saturating_sub(disc);
 
             prepared_lines.push(PreparedLine {
                 product_id: prod.try_get(0).unwrap(),
                 product_name: prod.try_get(1).unwrap(),
                 sku: prod.try_get(2).unwrap(),
                 quantity: item.quantity,
-                unit_cost: item.unit_cost,
+                unit_cost,
                 discount: disc,
                 line_total,
             });
@@ -116,11 +117,11 @@ impl PostgresPurchaseRepository {
 
         let credit_amount = total_amount.saturating_sub(paid_amount);
         let payment_status = if paid_amount >= total_amount {
-            PaymentStatus::Paid
+            PurchasePaymentStatus::Paid
         } else if paid_amount > 0 {
-            PaymentStatus::PartiallyPaid
+            PurchasePaymentStatus::PartiallyPaid
         } else {
-            PaymentStatus::Unpaid
+            PurchasePaymentStatus::Unpaid
         };
 
         sqlx::query("UPDATE counters SET value = value + 1 WHERE name = 'purchase_number'")
@@ -149,7 +150,7 @@ impl PostgresPurchaseRepository {
             paid_amount,
             credit_amount,
             payment_status,
-            status: "COMPLETED".to_string(),
+            status: PurchaseStatus::Completed,
             notes: dto.notes.clone(),
             performed_by: uid.clone(),
             created_at: now.clone(),
@@ -336,7 +337,8 @@ impl PostgresPurchaseRepository {
         Ok(PurchaseResultDto {
             purchase,
             lines: inserted_lines,
-            supplier_outstanding_balance: supplier_balance_after,
+            credit_amount,
+            supplier_balance_after: supplier_balance_after.unwrap_or(0),
         })
     }
 
@@ -458,7 +460,8 @@ impl PostgresPurchaseRepository {
 
     fn map_purchase_row(row: &sqlx::postgres::PgRow) -> AppResult<Purchase> {
         let p_status_str: String = row.try_get(9).map_err(|e| AppError::Database(e.to_string()))?;
-        let payment_status = PurchasePaymentStatus::from_str(&p_status_str);
+        let payment_status = PurchasePaymentStatus::from_str(&p_status_str)
+            .unwrap_or(PurchasePaymentStatus::Unpaid);
         let status_str: String = row.try_get(10).map_err(|e| AppError::Database(e.to_string()))?;
         let status = PurchaseStatus::from_str(&status_str).unwrap_or(PurchaseStatus::Completed);
 

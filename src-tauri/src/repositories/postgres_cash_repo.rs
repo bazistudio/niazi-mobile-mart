@@ -3,8 +3,8 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::domain::cash::{
-    CashMovement, CashMovementDirection, CashMovementType, CashSession, CloseCashSessionDto,
-    OpenCashSessionDto, CreateCashAdjustmentDto,
+    CashMovement, CashMovementDirection, CashMovementType, CashSession, CashSessionStatus,
+    CloseCashSessionDto, CreateCashAdjustmentDto, OpenCashSessionDto,
 };
 use crate::errors::{AppError, AppResult};
 
@@ -23,11 +23,11 @@ impl PostgresCashRepository {
         dto: &OpenCashSessionDto,
         user_id: Option<&str>,
     ) -> AppResult<CashSession> {
-        let existing = self.get_open_session(&dto.branch_id).await?;
+        let branch_id = dto.branch_id.as_deref().unwrap_or("MAIN");
+        let existing = self.get_open_session(branch_id).await?;
         if existing.is_some() {
             return Err(AppError::Conflict(format!(
-                "An open cash session already exists for branch '{}'",
-                dto.branch_id
+                "An open cash session already exists for branch '{branch_id}'"
             )));
         }
 
@@ -37,17 +37,20 @@ impl PostgresCashRepository {
 
         let session = CashSession {
             id: session_id.clone(),
-            branch_id: dto.branch_id.clone(),
+            branch_id: branch_id.to_string(),
+            branch_name: None,
             business_date,
             opening_cash: dto.opening_cash,
             expected_closing_cash: None,
             actual_closing_cash: None,
             cash_variance: None,
-            status: "OPEN".to_string(),
+            status: CashSessionStatus::Open,
             opened_at: now.clone(),
             closed_at: None,
             opened_by: user_id.map(|s| s.to_string()),
+            opened_by_name: None,
             closed_by: None,
+            closed_by_name: None,
             notes: dto.notes.clone(),
         };
 
@@ -80,7 +83,7 @@ impl PostgresCashRepository {
             .await?
             .ok_or_else(|| AppError::NotFound(format!("Session '{}' not found", dto.session_id)))?;
 
-        if open_session.status != "OPEN" {
+        if open_session.status != CashSessionStatus::Open {
             return Err(AppError::Validation("Cash session is already closed".to_string()));
         }
 
@@ -129,17 +132,20 @@ impl PostgresCashRepository {
         Ok(CashSession {
             id: open_session.id,
             branch_id: open_session.branch_id,
+            branch_name: open_session.branch_name,
             business_date: open_session.business_date,
             opening_cash: open_session.opening_cash,
             expected_closing_cash: Some(expected),
             actual_closing_cash: Some(dto.actual_closing_cash),
             cash_variance: Some(variance),
-            status: "CLOSED".to_string(),
+            status: CashSessionStatus::Closed,
             opened_at: open_session.opened_at,
             closed_at: Some(now),
             opened_by: open_session.opened_by,
+            opened_by_name: open_session.opened_by_name,
             closed_by: user_id.map(|s| s.to_string()),
-            notes: dto.notes.or(open_session.notes),
+            closed_by_name: None,
+            notes: dto.notes.clone().or(open_session.notes),
         })
     }
 
@@ -176,26 +182,30 @@ impl PostgresCashRepository {
         dto: &CreateCashAdjustmentDto,
         user_id: Option<&str>,
     ) -> AppResult<CashMovement> {
+        let branch_id = dto.branch_id.as_deref().unwrap_or("MAIN");
         let open_session_id = self
-            .get_open_session(&dto.branch_id)
+            .get_open_session(branch_id)
             .await?
             .map(|s| s.id);
 
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
+        let direction = CashMovementDirection::from_str(&dto.direction)
+            .unwrap_or(CashMovementDirection::In);
 
         let movement = CashMovement {
             id: id.clone(),
             session_id: open_session_id.clone(),
-            branch_id: dto.branch_id.clone(),
-            movement_type: dto.movement_type,
-            direction: dto.direction,
+            branch_id: branch_id.to_string(),
+            movement_type: CashMovementType::CashAdjustment,
+            direction,
             amount: dto.amount,
-            reference_id: dto.reference_id.clone(),
-            reference_number: dto.reference_number.clone(),
-            payment_method: dto.payment_method.clone().unwrap_or_else(|| "CASH".to_string()),
-            description: dto.description.clone(),
+            reference_id: None,
+            reference_number: None,
+            payment_method: "CASH".to_string(),
+            description: dto.reason.clone(),
             performed_by: user_id.map(|s| s.to_string()),
+            performed_by_name: None,
             created_at: now.clone(),
         };
 

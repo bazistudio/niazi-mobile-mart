@@ -108,7 +108,7 @@ pub async fn customer_record_payment(
     let session = state.get_session().await;
     state
         .customer_service
-        .record_payment(session.user_id.as_deref(), dto)
+        .record_customer_payment(session.user_id.as_deref(), dto)
         .await
 }
 

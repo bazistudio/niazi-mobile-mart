@@ -143,3 +143,11 @@ pub struct PurchaseReturnDetailDto {
     pub supplier_payable_after: Option<i64>,
     pub cash_settled: Option<i64>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PurchaseReturnFilterDto {
+    pub purchase_id: Option<String>,
+    pub branch_id: Option<String>,
+    pub supplier_id: Option<String>,
+    pub limit: Option<u32>,
+}

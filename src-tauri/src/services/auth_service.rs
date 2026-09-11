@@ -108,7 +108,7 @@ impl AuthService {
 
     /// Changes password for the currently authenticated user
     pub async fn change_password(
-        repo: &SQLiteUserRepository,
+        repo: &UserRepository,
         app_state: &AppState,
         current_password: &str,
         new_password: &str,
@@ -154,7 +154,7 @@ impl AuthService {
 
     /// Forced password change when must_change_password is true
     pub async fn forced_change_password(
-        repo: &SQLiteUserRepository,
+        repo: &UserRepository,
         app_state: &AppState,
         new_password: &str,
     ) -> AppResult<()> {
@@ -193,7 +193,7 @@ impl AuthService {
 
     /// Unlocks a locked terminal using the active staff member's 4-digit PIN
     pub async fn unlock(
-        repo: &SQLiteUserRepository,
+        repo: &UserRepository,
         app_state: &AppState,
         pin: &str,
     ) -> AppResult<SessionContext> {
@@ -438,7 +438,8 @@ impl AuthService {
         // 3. Normal staff must only access their assigned branch
         let user_id = session.user_id.as_deref().unwrap_or_default();
         let user_branch_id = {
-            let conn_arc = app_state.db.inner();
+            let db = app_state.db.as_ref().expect("SQLite database connection required");
+            let conn_arc = db.inner();
             let guard = conn_arc.lock().await;
             guard
                 .query_row(

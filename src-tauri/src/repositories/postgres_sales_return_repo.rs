@@ -3,7 +3,7 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::domain::sales_return::{
-    CreateSalesReturnDto, SalesReturn, SalesReturnLine,
+    CreateSalesReturnDto, SalesReturn, SalesReturnFilterDto, SalesReturnLine,
     SalesReturnDetailDto, SalesRefundMethod, SalesReturnStatus,
 };
 use crate::errors::{AppError, AppResult};
@@ -23,7 +23,7 @@ impl PostgresSalesReturnRepository {
         dto: &CreateSalesReturnDto,
         user_id: Option<&str>,
     ) -> AppResult<SalesReturnDetailDto> {
-        if dto.items.is_empty() {
+        if dto.lines.is_empty() {
             return Err(AppError::Validation("Return cart cannot be empty".to_string()));
         }
 
@@ -63,9 +63,9 @@ impl PostgresSalesReturnRepository {
             return_amount: i64,
         }
 
-        let mut prepared_lines = Vec::with_capacity(dto.items.len());
+        let mut prepared_lines = Vec::with_capacity(dto.lines.len());
 
-        for item in &dto.items {
+        for item in &dto.lines {
             if item.quantity <= 0 {
                 return Err(AppError::Validation("Return quantity must be > 0".to_string()));
             }
@@ -114,9 +114,10 @@ impl PostgresSalesReturnRepository {
         }
 
         let total_return_amount: i64 = prepared_lines.iter().map(|l| l.return_amount).sum();
-        let refund_method = dto.refund_method.to_uppercase();
+        let refund_method = SalesRefundMethod::from_str(&dto.refund_method)
+            .map_err(|e| AppError::Validation(e))?;
 
-        if refund_method == "CUSTOMER_CREDIT" && customer_id.is_none() {
+        if refund_method == SalesRefundMethod::CustomerCredit && customer_id.is_none() {
             return Err(AppError::Validation("Customer credit refund requires a registered customer.".to_string()));
         }
 
@@ -143,8 +144,8 @@ impl PostgresSalesReturnRepository {
             customer_id: customer_id.clone(),
             customer_name_snapshot,
             total_amount: total_return_amount,
-            refund_method: refund_method.clone(),
-            status: "COMPLETED".to_string(),
+            refund_method,
+            status: SalesReturnStatus::Completed,
             reason: dto.reason.clone(),
             notes: dto.notes.clone(),
             performed_by: uid.clone(),
@@ -163,8 +164,8 @@ impl PostgresSalesReturnRepository {
         .bind(sales_return.customer_id.as_deref())
         .bind(sales_return.customer_name_snapshot.as_deref())
         .bind(sales_return.total_amount)
-        .bind(&sales_return.refund_method)
-        .bind(&sales_return.status)
+        .bind(sales_return.refund_method.as_str())
+        .bind(sales_return.status.as_str())
         .bind(sales_return.reason.as_deref())
         .bind(sales_return.notes.as_deref())
         .bind(sales_return.performed_by.as_deref())
@@ -259,7 +260,7 @@ impl PostgresSalesReturnRepository {
 
         // Refund Settlement
         let mut customer_balance_after = None;
-        if refund_method == "CASH" {
+        if refund_method == SalesRefundMethod::Cash {
             let open_session_id: Option<String> = sqlx::query_as(
                 "SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' LIMIT 1",
             )
@@ -288,7 +289,7 @@ impl PostgresSalesReturnRepository {
             .execute(&mut *tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
-        } else if refund_method == "CUSTOMER_CREDIT" {
+        } else if refund_method == SalesRefundMethod::CustomerCredit {
             let cid = customer_id.as_ref().unwrap();
             let current_outstanding: (i64,) = sqlx::query_as(
                 "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM customer_ledger_entries WHERE customer_id = $1",
@@ -324,10 +325,14 @@ impl PostgresSalesReturnRepository {
 
         tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
 
+        let cash_refunded = if sales_return.refund_method == SalesRefundMethod::Cash { Some(total_return_amount) } else { None };
+
         Ok(SalesReturnDetailDto {
             sales_return,
             lines: inserted_lines,
-            customer_outstanding_balance: customer_balance_after,
+            invoice_number,
+            customer_balance_after: customer_balance_after,
+            cash_refunded,
         })
     }
 

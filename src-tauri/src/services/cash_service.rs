@@ -80,7 +80,8 @@ impl CashService {
         let notes = dto.notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
         let opening_cash = dto.opening_cash;
 
-        let session = with_transaction(&self.db, move |tx| {
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let session = with_transaction(db, move |tx| {
             // Check if there is already an active OPEN session for this branch
             if let Some(active) = SQLiteCashRepository::get_open_session_in_tx(tx, &branch_id)? {
                 return Err(DbError::ValidationError(format!(
@@ -144,7 +145,10 @@ impl CashService {
         limit: Option<i64>,
         offset: Option<i64>,
     ) -> AppResult<Vec<CashSession>> {
-        self.cash_repo.list_sessions(branch_id, limit, offset).await
+        match &self.cash_repo {
+            CashRepository::SQLite(r) => r.list_sessions(branch_id, limit, offset).await,
+            CashRepository::Postgres(_) => Err(AppError::Internal("Postgres list_sessions not implemented".into())),
+        }
     }
 
     pub async fn close_session(
@@ -163,7 +167,8 @@ impl CashService {
         let notes = dto.notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
         let uid = user_id.map(str::to_string);
 
-        let closed_session = with_transaction(&self.db, move |tx| {
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let closed_session = with_transaction(db, move |tx| {
             let now = Utc::now().to_rfc3339();
 
             // 1. Verify session exists and is OPEN
@@ -256,7 +261,8 @@ impl CashService {
         let amount = dto.amount;
         let desc = format!("Cash Adjustment ({}): {}", direction.as_str(), reason);
 
-        let movement = with_transaction(&self.db, move |tx| {
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let movement = with_transaction(db, move |tx| {
             let now = Utc::now().to_rfc3339();
             let open_session_id = SQLiteCashRepository::get_open_session_id_in_tx(tx, &branch_id)?
                 .ok_or_else(|| DbError::ValidationError(format!(
@@ -293,7 +299,10 @@ impl CashService {
         filter: Option<CashMovementFilterDto>,
     ) -> AppResult<Vec<CashMovement>> {
         let f = filter.unwrap_or_default();
-        self.cash_repo.list_movements(&f).await
+        match &self.cash_repo {
+            CashRepository::SQLite(r) => r.list_movements(&f).await,
+            CashRepository::Postgres(_) => Err(AppError::Internal("Postgres list_movements not implemented".into())),
+        }
     }
 
     pub async fn get_daily_summary(
@@ -315,7 +324,10 @@ impl CashService {
             None => now[0..10].to_string(),
         };
 
-        self.cash_repo.get_daily_summary(&bid, &target_date).await
+        match &self.cash_repo {
+            CashRepository::SQLite(r) => r.get_daily_summary(&bid, &target_date).await,
+            CashRepository::Postgres(_) => Err(AppError::Internal("Postgres get_daily_summary not implemented".into())),
+        }
     }
 }
 

@@ -311,6 +311,21 @@ impl PurchaseService {
                     )
                     .map_err(|e| DbError::QueryError(format!("Failed to read product cost for {}: {e}", line.product_id)))?;
 
+/// Calculates deterministic weighted-average cost in whole PKR
+fn calculate_weighted_average_cost(
+    existing_stock: i64,
+    existing_avg_cost: i64,
+    new_stock: i64,
+    new_cost: i64,
+) -> i64 {
+    let total_stock = existing_stock + new_stock;
+    if total_stock <= 0 {
+        return new_cost;
+    }
+    let total_value = (existing_stock * existing_avg_cost) + (new_stock * new_cost);
+    total_value / total_stock
+}
+
                 // Calculate deterministic weighted-average cost in whole PKR
                 let new_average_cost = calculate_weighted_average_cost(
                     existing_total_stock,
@@ -443,7 +458,8 @@ impl PurchaseService {
 
         let user_id_owned = user_id.map(str::to_string);
 
-        let result = with_transaction(&self.db, move |tx| {
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let result = with_transaction(db, move |tx| {
             let now = Utc::now().to_rfc3339();
 
             // 1. Validate Supplier

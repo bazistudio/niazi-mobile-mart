@@ -49,7 +49,8 @@ impl PurchaseReturnService {
 
     /// Queries line-by-line returnable status for a purchase order
     pub async fn get_purchase_returnable_info(&self, purchase_id: &str) -> AppResult<PurchaseReturnableInfoDto> {
-        let conn_arc = self.db.inner();
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let conn_arc = db.inner();
         let guard = conn_arc.lock().await;
 
         let purchase = SQLitePurchaseRepository::get_by_id_in_tx(&guard, purchase_id)?
@@ -144,7 +145,8 @@ impl PurchaseReturnService {
         let notes_cloned = dto.notes.clone();
         let requested_lines = dto.lines.clone();
 
-        let detail = with_transaction(&self.db, move |tx| {
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let detail = with_transaction(db, move |tx| {
             // 1. Validate purchase exists and is completed
             let purchase = SQLitePurchaseRepository::get_by_id_in_tx(tx, &purchase_id)?
                 .ok_or_else(|| DbError::NotFound(format!("Purchase with id '{purchase_id}' not found")))?;
@@ -368,7 +370,10 @@ impl PurchaseReturnService {
     }
 
     pub async fn get_purchase_return(&self, id: &str) -> AppResult<Option<PurchaseReturnDetailDto>> {
-        self.repo.get_by_id(id).await
+        match &self.repo {
+            PurchaseReturnRepository::SQLite(r) => r.get_by_id(id).await,
+            PurchaseReturnRepository::Postgres(_) => Err(AppError::Internal("Postgres get_by_id not implemented".into())),
+        }
     }
 
     pub async fn list_purchase_returns(
@@ -376,14 +381,20 @@ impl PurchaseReturnService {
         branch_id: Option<&str>,
         limit: Option<i64>,
     ) -> AppResult<Vec<PurchaseReturnDetailDto>> {
-        self.repo.list_purchase_returns(branch_id, limit).await
+        match &self.repo {
+            PurchaseReturnRepository::SQLite(r) => r.list_purchase_returns(branch_id, limit).await,
+            PurchaseReturnRepository::Postgres(_) => Err(AppError::Internal("Postgres list_purchase_returns not implemented".into())),
+        }
     }
 
     pub async fn get_purchase_returns_by_purchase(
         &self,
         purchase_id: &str,
     ) -> AppResult<Vec<PurchaseReturnDetailDto>> {
-        self.repo.get_by_purchase_id(purchase_id).await
+        match &self.repo {
+            PurchaseReturnRepository::SQLite(r) => r.get_by_purchase_id(purchase_id).await,
+            PurchaseReturnRepository::Postgres(_) => Err(AppError::Internal("Postgres get_by_purchase_id not implemented".into())),
+        }
     }
 }
 

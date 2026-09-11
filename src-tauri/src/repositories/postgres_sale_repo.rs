@@ -166,7 +166,7 @@ impl PostgresSaleRepository {
 
         let now = Utc::now().to_rfc3339();
         let uid = user_id.map(|s| s.to_string());
-        let p_method = dto.payment_method.unwrap_or_else(|| "CASH".to_string()).to_uppercase();
+        let p_method = dto.payment_method.as_ref().map(|s| s.as_str()).unwrap_or("CASH").to_uppercase();
 
         // 6. Validate stock availability for all lines
         for line in &prepared_lines {
@@ -441,11 +441,16 @@ impl PostgresSaleRepository {
 
         tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
 
+        let credit_amount = (sale.total_amount - sale.paid_amount).max(0);
         Ok(SaleResultDto {
             sale,
             lines: inserted_lines,
             payments: vec![sale_payment],
-            customer_outstanding_balance: customer_balance_after,
+            credit_amount,
+            customer_balance_after,
+            cogs: 0,
+            gross_profit: 0,
+            gross_margin: 0,
         })
     }
 

@@ -3,7 +3,7 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::domain::purchase_return::{
-    CreatePurchaseReturnDto, PurchaseReturn, PurchaseReturnLine,
+    CreatePurchaseReturnDto, PurchaseReturn, PurchaseReturnFilterDto, PurchaseReturnLine,
     PurchaseReturnDetailDto, PurchaseReturnStatus, PurchaseSettlementMethod,
 };
 use crate::errors::{AppError, AppResult};
@@ -23,7 +23,7 @@ impl PostgresPurchaseReturnRepository {
         dto: &CreatePurchaseReturnDto,
         user_id: Option<&str>,
     ) -> AppResult<PurchaseReturnDetailDto> {
-        if dto.items.is_empty() {
+        if dto.lines.is_empty() {
             return Err(AppError::Validation("Return items cannot be empty".to_string()));
         }
 
@@ -70,9 +70,9 @@ impl PostgresPurchaseReturnRepository {
             return_amount: i64,
         }
 
-        let mut prepared_lines = Vec::with_capacity(dto.items.len());
+        let mut prepared_lines = Vec::with_capacity(dto.lines.len());
 
-        for item in &dto.items {
+        for item in &dto.lines {
             if item.quantity <= 0 {
                 return Err(AppError::Validation("Return quantity must be > 0".to_string()));
             }
@@ -121,7 +121,8 @@ impl PostgresPurchaseReturnRepository {
         }
 
         let total_return_amount: i64 = prepared_lines.iter().map(|l| l.return_amount).sum();
-        let settlement_method = dto.settlement_method.to_uppercase();
+        let settlement_method = PurchaseSettlementMethod::from_str(&dto.settlement_method)
+            .map_err(|e| AppError::Validation(e))?;
 
         sqlx::query("UPDATE counters SET value = value + 1 WHERE name = 'purchase_return_number'")
             .execute(&mut *tx)
@@ -143,11 +144,11 @@ impl PostgresPurchaseReturnRepository {
             return_number: return_number.clone(),
             purchase_id: purchase_id.clone(),
             branch_id: branch_id.clone(),
-            supplier_id: Some(supplier_id.clone()),
+            supplier_id: supplier_id.clone(),
             supplier_name_snapshot: supplier_name,
             total_amount: total_return_amount,
-            settlement_method: settlement_method.clone(),
-            status: "COMPLETED".to_string(),
+            settlement_method,
+            status: PurchaseReturnStatus::Completed,
             reason: dto.reason.clone(),
             notes: dto.notes.clone(),
             performed_by: uid.clone(),
@@ -163,11 +164,11 @@ impl PostgresPurchaseReturnRepository {
         .bind(&purchase_return.return_number)
         .bind(&purchase_return.purchase_id)
         .bind(&purchase_return.branch_id)
-        .bind(purchase_return.supplier_id.as_deref())
+        .bind(&purchase_return.supplier_id)
         .bind(purchase_return.supplier_name_snapshot.as_deref())
         .bind(purchase_return.total_amount)
-        .bind(&purchase_return.settlement_method)
-        .bind(&purchase_return.status)
+        .bind(purchase_return.settlement_method.as_str())
+        .bind(purchase_return.status.as_str())
         .bind(purchase_return.reason.as_deref())
         .bind(purchase_return.notes.as_deref())
         .bind(purchase_return.performed_by.as_deref())
@@ -265,7 +266,7 @@ impl PostgresPurchaseReturnRepository {
 
         // Settlement
         let mut supplier_balance_after = None;
-        if settlement_method == "CASH" {
+        if settlement_method == PurchaseSettlementMethod::Cash {
             let open_session_id: Option<String> = sqlx::query_as(
                 "SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' LIMIT 1",
             )
@@ -294,7 +295,7 @@ impl PostgresPurchaseReturnRepository {
             .execute(&mut *tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
-        } else if settlement_method == "SUPPLIER_CREDIT" {
+        } else if settlement_method == PurchaseSettlementMethod::SupplierCredit {
             let current_outstanding: (i64,) = sqlx::query_as(
                 "SELECT COALESCE(SUM(credit) - SUM(debit), 0) FROM supplier_ledger_entries WHERE supplier_id = $1",
             )
@@ -332,7 +333,9 @@ impl PostgresPurchaseReturnRepository {
         Ok(PurchaseReturnDetailDto {
             purchase_return,
             lines: inserted_lines,
-            supplier_outstanding_balance: supplier_balance_after,
+            purchase_number: purchase_number,
+            supplier_payable_after: supplier_balance_after,
+            cash_settled: if settlement_method == PurchaseSettlementMethod::Cash { Some(total_return_amount) } else { None },
         })
     }
 

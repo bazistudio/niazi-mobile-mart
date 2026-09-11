@@ -40,29 +40,27 @@ impl ProfitService {
         end_date: Option<String>,
         branch_id: Option<String>,
     ) -> AppResult<PeriodProfitabilityDto> {
-        self.profit_repo
-            .get_period_profitability(
-                start_date.as_deref(),
-                end_date.as_deref(),
-                branch_id.as_deref(),
-            )
-            .await
+        match &self.profit_repo {
+            ProfitRepository::SQLite(r) => {
+                r.get_period_profitability(start_date.as_deref(), end_date.as_deref(), branch_id.as_deref()).await
+            }
+            ProfitRepository::Postgres(_) => Err(AppError::Internal("Postgres get_period_profitability not implemented".into())),
+        }
     }
 
-    /// Fetches day-by-day profitability breakdown
+    /// Fetches daily aggregated gross profit and net margin trend
     pub async fn get_daily_profitability(
         &self,
         start_date: Option<String>,
         end_date: Option<String>,
         branch_id: Option<String>,
-    ) -> AppResult<Vec<DailyProfitabilityDto>> {
-        self.profit_repo
-            .get_daily_profitability(
-                start_date.as_deref(),
-                end_date.as_deref(),
-                branch_id.as_deref(),
-            )
-            .await
+    ) -> AppResult<Vec<crate::domain::profit::DailyProfitabilityDto>> {
+        match &self.profit_repo {
+            ProfitRepository::SQLite(r) => {
+                r.get_daily_profitability(start_date.as_deref(), end_date.as_deref(), branch_id.as_deref()).await
+            }
+            ProfitRepository::Postgres(_) => Err(AppError::Internal("Postgres get_daily_profitability not implemented".into())),
+        }
     }
 
     /// Fetches product-level profitability with historical cost snapshots and returns
@@ -73,14 +71,12 @@ impl ProfitService {
         end_date: Option<String>,
         branch_id: Option<String>,
     ) -> AppResult<Vec<ProductProfitabilityDto>> {
-        self.profit_repo
-            .get_product_profitability(
-                product_id.as_deref(),
-                start_date.as_deref(),
-                end_date.as_deref(),
-                branch_id.as_deref(),
-            )
-            .await
+        match &self.profit_repo {
+            ProfitRepository::SQLite(r) => {
+                r.get_product_profitability(product_id.as_deref(), start_date.as_deref(), end_date.as_deref(), branch_id.as_deref()).await
+            }
+            ProfitRepository::Postgres(_) => Err(AppError::Internal("Postgres get_product_profitability not implemented".into())),
+        }
     }
 
     /// Fetches realized profitability for a specific sale
@@ -88,7 +84,10 @@ impl ProfitService {
         if sale_id.trim().is_empty() {
             return Err(AppError::Validation("Sale ID cannot be empty".to_string()));
         }
-        self.profit_repo.get_sale_profitability(sale_id).await
+        match &self.profit_repo {
+            ProfitRepository::SQLite(r) => r.get_sale_profitability(sale_id).await,
+            ProfitRepository::Postgres(_) => Err(AppError::Internal("Postgres get_sale_profitability not implemented".into())),
+        }
     }
 
     /// Fetches dashboard summary cards (today, this_month, total)
@@ -96,9 +95,10 @@ impl ProfitService {
         &self,
         branch_id: Option<String>,
     ) -> AppResult<DashboardProfitSummaryDto> {
-        self.profit_repo
-            .get_dashboard_profit_summary(branch_id.as_deref())
-            .await
+        match &self.profit_repo {
+            ProfitRepository::SQLite(r) => r.get_dashboard_profit_summary(branch_id.as_deref()).await,
+            ProfitRepository::Postgres(r) => r.get_profit_summary(branch_id.as_deref(), None, None).await,
+        }
     }
 }
 

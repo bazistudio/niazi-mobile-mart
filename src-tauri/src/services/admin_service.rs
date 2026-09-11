@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::domain::access_control::StaffAccessProfile;
 use crate::domain::user::{SanitizedUser, User, UserRole, UserStatus};
 use crate::errors::{AppError, AppResult};
-use crate::repositories::SQLiteUserRepository;
+use crate::repositories::{SQLiteUserRepository, UserRepository};
 use crate::services::hasher::{hash_credential, verify_credential};
 use crate::state::AppState;
 
@@ -111,7 +111,7 @@ impl AdminService {
     }
 
     /// Checks whether first-admin bootstrap is required (count active admins == 0)
-    pub async fn check_bootstrap_status(repo: &SQLiteUserRepository) -> AppResult<bool> {
+    pub async fn check_bootstrap_status(repo: &UserRepository) -> AppResult<bool> {
         let count = repo.count_active_admins().await?;
         Ok(count == 0)
     }
@@ -119,7 +119,7 @@ impl AdminService {
     /// Creates the very first system administrator with one-time recovery key.
     /// Strictly locked if an active administrator already exists.
     pub async fn bootstrap_first_admin(
-        repo: &SQLiteUserRepository,
+        repo: &UserRepository,
         payload: BootstrapAdminPayload,
     ) -> AppResult<BootstrapAdminResponse> {
         let active_admins = repo.count_active_admins().await?;
@@ -201,7 +201,7 @@ impl AdminService {
     /// Emergency Administrator credential recovery using the one-time recovery key.
     /// Strictly consumes the recovery key upon successful password reset.
     pub async fn recover_admin_access(
-        repo: &SQLiteUserRepository,
+        repo: &UserRepository,
         app_state: &AppState,
         recovery_token: &str,
         new_password: &str,
@@ -251,7 +251,7 @@ impl AdminService {
     /// Registers a new staff account from public self-service signup.
     /// Resulting account is ALWAYS initialized in PENDING status.
     pub async fn register_staff(
-        repo: &SQLiteUserRepository,
+        repo: &UserRepository,
         payload: RegisterStaffPayload,
     ) -> AppResult<SanitizedUser> {
         let clean_username = payload.username.trim().to_lowercase();
@@ -306,7 +306,7 @@ impl AdminService {
 
     /// Approves a pending staff member account (Admin only)
     pub async fn approve_staff(
-        repo: &SQLiteUserRepository,
+        repo: &UserRepository,
         app_state: &AppState,
         user_id: &str,
     ) -> AppResult<SanitizedUser> {
@@ -332,7 +332,7 @@ impl AdminService {
 
     /// Rejects a staff member account (Admin only)
     pub async fn reject_staff(
-        repo: &SQLiteUserRepository,
+        repo: &UserRepository,
         app_state: &AppState,
         user_id: &str,
     ) -> AppResult<SanitizedUser> {
@@ -366,7 +366,7 @@ impl AdminService {
     /// Administrator resets a staff member's password to a temporary password,
     /// flagging must_change_password = true.
     pub async fn reset_staff_password(
-        repo: &SQLiteUserRepository,
+        repo: &UserRepository,
         app_state: &AppState,
         user_id: &str,
         temporary_password: &str,
@@ -408,7 +408,7 @@ impl AdminService {
 
     /// Lists all staff accounts (sanitized view)
     pub async fn list_users(
-        repo: &SQLiteUserRepository,
+        repo: &UserRepository,
         app_state: &AppState,
     ) -> AppResult<Vec<SanitizedUser>> {
         Self::ensure_admin(app_state).await?;
@@ -418,7 +418,7 @@ impl AdminService {
 
     /// Creates a new staff member account (admin only)
     pub async fn create_user(
-        repo: &SQLiteUserRepository,
+        repo: &UserRepository,
         app_state: &AppState,
         payload: CreateUserPayload,
     ) -> AppResult<SanitizedUser> {
@@ -498,7 +498,7 @@ impl AdminService {
 
     /// Updates staff member properties and access profile
     pub async fn update_user(
-        repo: &SQLiteUserRepository,
+        repo: &UserRepository,
         app_state: &AppState,
         payload: UpdateUserPayload,
     ) -> AppResult<SanitizedUser> {
@@ -546,7 +546,7 @@ impl AdminService {
 
     /// Resets staff login key or PIN
     pub async fn reset_credentials(
-        repo: &SQLiteUserRepository,
+        repo: &UserRepository,
         app_state: &AppState,
         payload: ResetCredentialsPayload,
     ) -> AppResult<()> {

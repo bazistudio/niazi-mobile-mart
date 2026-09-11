@@ -72,8 +72,10 @@ pub async fn supplier_get_ledger(
     offset: Option<i64>,
 ) -> AppResult<Vec<SupplierLedgerEntry>> {
     AuthService::require_permission(&state, Some("suppliers"), None).await?;
-    let repo = crate::repositories::SQLiteSupplierRepository::new(state.db.clone());
-    repo.get_ledger_entries(&supplier_id, limit, offset).await
+    state
+        .supplier_service
+        .get_ledger(&supplier_id, limit, offset)
+        .await
 }
 
 #[tauri::command]

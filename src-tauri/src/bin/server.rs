@@ -446,7 +446,7 @@ async fn list_suppliers_handler(
         return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
     }
 
-    match state.app_state.supplier_service.list_suppliers(filter).await {
+    match state.app_state.supplier_service.list_suppliers(Some(filter)).await {
         Ok(suppliers) => (StatusCode::OK, Json(json!(suppliers))),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
     }
@@ -472,7 +472,7 @@ async fn create_supplier_handler(
 async fn complete_purchase_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
-    Json(payload): Json<niazi_mobile_mart_lib::domain::purchase::CompletePurchaseDto>,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::purchases::CompletePurchaseDto>,
 ) -> impl IntoResponse {
     if let Err(e) = auth.0.authorize_permission(Some("purchases"), None) {
         return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
@@ -534,7 +534,7 @@ async fn create_expense_handler(
     let mut payload = payload;
     payload.branch_id = Some(effective_branch);
 
-    match state.app_state.expense_service.create_expense(payload, Some(&auth.0.user_id)).await {
+    match state.app_state.expense_service.create_expense(Some(&auth.0.user_id), payload).await {
         Ok(expense) => (StatusCode::CREATED, Json(json!(expense))),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_FAILED", "message": e.to_string()}))),
     }

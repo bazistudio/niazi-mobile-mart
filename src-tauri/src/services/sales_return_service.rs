@@ -48,7 +48,8 @@ impl SalesReturnService {
 
     /// Queries line-by-line returnable status for a sale
     pub async fn get_sale_returnable_info(&self, sale_id: &str) -> AppResult<SaleReturnableInfoDto> {
-        let conn_arc = self.db.inner();
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let conn_arc = db.inner();
         let guard = conn_arc.lock().await;
 
         let sale = SQLiteSaleRepository::get_sale_by_id_in_tx(&guard, sale_id)?
@@ -135,7 +136,8 @@ impl SalesReturnService {
         let notes_cloned = dto.notes.clone();
         let requested_lines = dto.lines.clone();
 
-        let detail = with_transaction(&self.db, move |tx| {
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let detail = with_transaction(db, move |tx| {
             // 1. Validate sale exists and is completed
             let sale = SQLiteSaleRepository::get_sale_by_id_in_tx(tx, &sale_id)?
                 .ok_or_else(|| DbError::NotFound(format!("Sale with id '{sale_id}' not found")))?;
@@ -346,7 +348,10 @@ impl SalesReturnService {
     }
 
     pub async fn get_sales_return(&self, id: &str) -> AppResult<Option<SalesReturnDetailDto>> {
-        self.repo.get_by_id(id).await
+        match &self.repo {
+            SalesReturnRepository::SQLite(r) => r.get_by_id(id).await,
+            SalesReturnRepository::Postgres(_) => Err(AppError::Internal("Postgres get_by_id not implemented".into())),
+        }
     }
 
     pub async fn list_sales_returns(
@@ -354,11 +359,17 @@ impl SalesReturnService {
         branch_id: Option<&str>,
         limit: Option<i64>,
     ) -> AppResult<Vec<SalesReturnDetailDto>> {
-        self.repo.list_sales_returns(branch_id, limit).await
+        match &self.repo {
+            SalesReturnRepository::SQLite(r) => r.list_sales_returns(branch_id, limit).await,
+            SalesReturnRepository::Postgres(_) => Err(AppError::Internal("Postgres list_sales_returns not implemented".into())),
+        }
     }
 
     pub async fn get_sales_returns_by_sale(&self, sale_id: &str) -> AppResult<Vec<SalesReturnDetailDto>> {
-        self.repo.get_by_sale_id(sale_id).await
+        match &self.repo {
+            SalesReturnRepository::SQLite(r) => r.get_by_sale_id(sale_id).await,
+            SalesReturnRepository::Postgres(_) => Err(AppError::Internal("Postgres get_by_sale_id not implemented".into())),
+        }
     }
 }
 

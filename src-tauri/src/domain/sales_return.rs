@@ -142,3 +142,11 @@ pub struct SalesReturnDetailDto {
     pub customer_balance_after: Option<i64>,
     pub cash_refunded: Option<i64>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SalesReturnFilterDto {
+    pub sale_id: Option<String>,
+    pub branch_id: Option<String>,
+    pub customer_id: Option<String>,
+    pub limit: Option<u32>,
+}

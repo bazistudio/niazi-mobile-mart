@@ -60,13 +60,16 @@ impl ExpenseService {
         let cat = ExpenseCategory {
             id,
             name: name.to_string(),
-            description: dto.description.map(|d| d.trim().to_string()).filter(|d| !d.is_empty()),
+            description: dto.description.as_ref().map(|d| d.trim().to_string()).filter(|d| !d.is_empty()),
             is_active: true,
             created_at: now.clone(),
             updated_at: now,
         };
 
-        self.expense_repo.create_category(&cat).await
+        match &self.expense_repo {
+            ExpenseRepository::SQLite(r) => r.create_category(&cat).await,
+            ExpenseRepository::Postgres(r) => r.create_category(&dto).await,
+        }
     }
 
     pub async fn update_category(
@@ -75,18 +78,27 @@ impl ExpenseService {
         dto: UpdateExpenseCategoryDto,
     ) -> AppResult<ExpenseCategory> {
         let now = Utc::now().to_rfc3339();
-        self.expense_repo.update_category(id, &dto, &now).await
+        match &self.expense_repo {
+            ExpenseRepository::SQLite(r) => r.update_category(id, &dto, &now).await,
+            ExpenseRepository::Postgres(_) => Err(AppError::Internal("Postgres update_category not implemented".into())),
+        }
     }
 
     pub async fn get_category_by_id(&self, id: &str) -> AppResult<ExpenseCategory> {
-        self.expense_repo
-            .get_category_by_id(id)
-            .await?
-            .ok_or_else(|| AppError::NotFound(format!("Expense category '{id}' not found")))
+        match &self.expense_repo {
+            ExpenseRepository::SQLite(r) => r
+                .get_category_by_id(id)
+                .await?
+                .ok_or_else(|| AppError::NotFound(format!("Expense category '{id}' not found"))),
+            ExpenseRepository::Postgres(_) => Err(AppError::Internal("Postgres get_category_by_id not implemented".into())),
+        }
     }
 
     pub async fn list_categories(&self, active_only: bool) -> AppResult<Vec<ExpenseCategory>> {
-        self.expense_repo.list_categories(active_only).await
+        match &self.expense_repo {
+            ExpenseRepository::SQLite(r) => r.list_categories(active_only).await,
+            ExpenseRepository::Postgres(r) => r.list_categories().await,
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -136,7 +148,7 @@ impl ExpenseService {
             .map(str::to_string)
             .unwrap_or_else(|| Utc::now().to_rfc3339());
 
-        let notes = dto.notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+        let notes = dto.notes.as_ref().map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
         let uid = user_id.map(str::to_string);
         if let ExpenseRepository::Postgres(pg_repo) = &self.expense_repo {
             return pg_repo.create_expense(&dto, user_id).await;
@@ -221,7 +233,8 @@ impl ExpenseService {
         let eid = expense_id.trim().to_string();
         let uid = user_id.map(str::to_string);
 
-        let cancelled_expense = with_transaction(&self.db, move |tx| {
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let cancelled_expense = with_transaction(db, move |tx| {
             let now = Utc::now().to_rfc3339();
 
             let current = SQLiteExpenseRepository::get_expense_by_id_in_tx(tx, &eid)?

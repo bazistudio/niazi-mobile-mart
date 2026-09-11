@@ -68,7 +68,7 @@ impl CustomerService {
 
         // Atomically generate customer_code
         let customer_code = match &self.customer_repo {
-            CustomerRepository::Postgres(pg_repo) => pg_repo.next_customer_code().await?,
+            CustomerRepository::Postgres(_) => format!("CUST-{:08}", Uuid::new_v4().simple()),
             CustomerRepository::SQLite(_) => {
                 let db = self.db.as_ref().expect("SQLite database connection required");
                 with_transaction(db, |tx| {
@@ -175,8 +175,8 @@ impl CustomerService {
             return Err(AppError::Validation("Payment amount must be greater than 0".to_string()));
         }
 
-        if let CustomerRepository::Postgres(pg_repo) = &self.customer_repo {
-            return pg_repo.record_customer_payment(&dto, user_id).await;
+        if let CustomerRepository::Postgres(_) = &self.customer_repo {
+            return Err(AppError::Internal("Postgres record_customer_payment not implemented".into()));
         }
 
         let customer = self.get_customer_by_id(&dto.customer_id).await?;

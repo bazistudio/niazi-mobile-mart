@@ -60,6 +60,9 @@ pub use postgres_sales_return_repo::PostgresSalesReturnRepository;
 pub use postgres_supplier_repo::PostgresSupplierRepository;
 pub use postgres_user_repo::PostgresUserRepository;
 
+use crate::domain::cash::{
+    CashMovement, CashSession, CloseCashSessionDto, CreateCashAdjustmentDto, OpenCashSessionDto,
+};
 use crate::domain::catalog::{
     Brand, Category, CreateBrandDto, CreateCategoryDto, CreateUnitDto, Unit, UpdateBrandDto,
     UpdateCategoryDto, UpdateUnitDto,
@@ -555,45 +558,45 @@ pub enum SupplierRepository {
 impl SupplierRepository {
     pub async fn create_supplier(&self, supplier: &Supplier) -> AppResult<Supplier> {
         match self {
-            Self::SQLite(r) => r.create_supplier(supplier).await,
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite create_supplier handled via transaction".into())),
             Self::Postgres(r) => r.create_supplier(supplier).await,
         }
     }
 
-    pub async fn update_supplier(&self, id: &str, dto: &UpdateSupplierDto) -> AppResult<Supplier> {
+    pub async fn update(&self, id: &str, dto: &UpdateSupplierDto) -> AppResult<Supplier> {
         match self {
-            Self::SQLite(r) => r.update_supplier(id, dto).await,
+            Self::SQLite(r) => r.update(id, dto).await,
             Self::Postgres(r) => r.update_supplier(id, dto).await,
         }
     }
 
     pub async fn get_supplier_by_id(&self, id: &str) -> AppResult<Option<Supplier>> {
         match self {
-            Self::SQLite(r) => r.get_supplier_by_id(id).await,
+            Self::SQLite(r) => r.get_by_id(id).await,
             Self::Postgres(r) => r.get_supplier_by_id(id).await,
         }
     }
 
-    pub async fn get_supplier_detail(&self, id: &str) -> AppResult<SupplierDetailDto> {
+    pub async fn get_detail(&self, id: &str) -> AppResult<SupplierDetailDto> {
         match self {
-            Self::SQLite(r) => r.get_supplier_detail(id).await,
+            Self::SQLite(r) => r.get_detail(id).await,
             Self::Postgres(r) => r.get_supplier_detail(id).await,
         }
     }
 
-    pub async fn list_suppliers(
+    pub async fn list(
         &self,
-        filter: &SupplierFilter,
+        filter: Option<SupplierFilter>,
     ) -> AppResult<Vec<SupplierSummaryDto>> {
         match self {
-            Self::SQLite(r) => r.list_suppliers(filter).await,
-            Self::Postgres(r) => r.list_suppliers(filter).await,
+            Self::SQLite(r) => r.list(filter).await,
+            Self::Postgres(r) => r.list_suppliers(&filter.unwrap_or_default()).await,
         }
     }
 
-    pub async fn search_suppliers(&self, query: &str) -> AppResult<Vec<SupplierSummaryDto>> {
+    pub async fn search(&self, query: &str) -> AppResult<Vec<SupplierSummaryDto>> {
         match self {
-            Self::SQLite(r) => r.search_suppliers(query).await,
+            Self::SQLite(r) => r.search(query).await,
             Self::Postgres(r) => r.search_suppliers(query).await,
         }
     }
@@ -612,14 +615,21 @@ impl SupplierRepository {
         offset: Option<i64>,
     ) -> AppResult<Vec<SupplierLedgerEntry>> {
         match self {
-            Self::SQLite(r) => r.get_ledger(supplier_id, limit, offset).await,
+            Self::SQLite(r) => r.get_ledger_entries(supplier_id, limit, offset).await,
             Self::Postgres(r) => r.get_ledger(supplier_id, limit, offset).await,
         }
     }
 
-    pub async fn deactivate_supplier(&self, id: &str) -> AppResult<()> {
+    pub async fn get_statement(&self, supplier_id: &str) -> AppResult<crate::domain::supplier::SupplierStatementDto> {
         match self {
-            Self::SQLite(r) => r.deactivate_supplier(id).await,
+            Self::SQLite(r) => r.get_statement(supplier_id).await,
+            Self::Postgres(_) => Err(crate::errors::AppError::Internal("Postgres supplier statement not implemented".into())),
+        }
+    }
+
+    pub async fn deactivate(&self, id: &str) -> AppResult<()> {
+        match self {
+            Self::SQLite(r) => r.deactivate(id).await,
             Self::Postgres(r) => r.deactivate_supplier(id).await,
         }
     }
@@ -697,31 +707,31 @@ impl PurchaseRepository {
         }
     }
 
-    pub async fn get_purchase_by_id(&self, id: &str) -> AppResult<Option<Purchase>> {
+    pub async fn get_by_id(&self, id: &str) -> AppResult<Option<Purchase>> {
         match self {
-            Self::SQLite(r) => r.get_purchase_by_id(id).await,
+            Self::SQLite(r) => r.get_by_id(id).await,
             Self::Postgres(r) => r.get_purchase_by_id(id).await,
         }
     }
 
-    pub async fn get_purchase_by_number(&self, number: &str) -> AppResult<Option<Purchase>> {
+    pub async fn get_by_number(&self, number: &str) -> AppResult<Option<Purchase>> {
         match self {
-            Self::SQLite(r) => r.get_purchase_by_number(number).await,
+            Self::SQLite(r) => r.get_by_number(number).await,
             Self::Postgres(r) => r.get_purchase_by_number(number).await,
         }
     }
 
-    pub async fn get_purchase_lines(&self, purchase_id: &str) -> AppResult<Vec<PurchaseLine>> {
+    pub async fn get_lines(&self, purchase_id: &str) -> AppResult<Vec<PurchaseLine>> {
         match self {
-            Self::SQLite(r) => r.get_purchase_lines(purchase_id).await,
+            Self::SQLite(r) => r.get_lines(purchase_id).await,
             Self::Postgres(r) => r.get_purchase_lines(purchase_id).await,
         }
     }
 
-    pub async fn list_purchases(&self, filter: &PurchaseFilterDto) -> AppResult<Vec<Purchase>> {
+    pub async fn list(&self, filter: Option<PurchaseFilterDto>) -> AppResult<Vec<Purchase>> {
         match self {
-            Self::SQLite(r) => r.list_purchases(filter).await,
-            Self::Postgres(r) => r.list_purchases(&Some(filter.clone())).await,
+            Self::SQLite(r) => r.list(filter).await,
+            Self::Postgres(r) => r.list_purchases(&filter).await,
         }
     }
 }
@@ -739,7 +749,7 @@ impl CashRepository {
         user_id: Option<&str>,
     ) -> AppResult<crate::domain::cash::CashSession> {
         match self {
-            Self::SQLite(r) => r.open_session(dto, user_id).await,
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite open_session handled in CashService transaction".into())),
             Self::Postgres(r) => r.open_session(dto, user_id).await,
         }
     }
@@ -750,7 +760,7 @@ impl CashRepository {
         user_id: Option<&str>,
     ) -> AppResult<crate::domain::cash::CashSession> {
         match self {
-            Self::SQLite(r) => r.close_session(dto, user_id).await,
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite close_session handled in CashService transaction".into())),
             Self::Postgres(r) => r.close_session(dto, user_id).await,
         }
     }
@@ -775,7 +785,7 @@ impl CashRepository {
         user_id: Option<&str>,
     ) -> AppResult<crate::domain::cash::CashMovement> {
         match self {
-            Self::SQLite(r) => r.record_movement(dto, user_id).await,
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite record_movement handled in CashService transaction".into())),
             Self::Postgres(r) => r.record_movement(dto, user_id).await,
         }
     }
@@ -787,14 +797,14 @@ impl CashRepository {
         limit: Option<i64>,
     ) -> AppResult<Vec<crate::domain::cash::CashMovement>> {
         match self {
-            Self::SQLite(r) => r.get_movements(branch_id, session_id, limit).await,
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite get_movements handled via list_movements".into())),
             Self::Postgres(r) => r.get_movements(branch_id, session_id, limit).await,
         }
     }
 
     pub async fn calculate_branch_balance(&self, branch_id: &str) -> AppResult<i64> {
         match self {
-            Self::SQLite(r) => r.calculate_branch_balance(branch_id).await,
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite calculate_branch_balance not applicable".into())),
             Self::Postgres(r) => r.calculate_branch_balance(branch_id).await,
         }
     }
@@ -812,14 +822,14 @@ impl ExpenseRepository {
         dto: &CreateExpenseCategoryDto,
     ) -> AppResult<ExpenseCategory> {
         match self {
-            Self::SQLite(r) => r.create_category(dto).await,
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite create_category requires ExpenseCategory entity".into())),
             Self::Postgres(r) => r.create_category(dto).await,
         }
     }
 
     pub async fn list_categories(&self) -> AppResult<Vec<ExpenseCategory>> {
         match self {
-            Self::SQLite(r) => r.list_categories().await,
+            Self::SQLite(r) => r.list_categories(false).await,
             Self::Postgres(r) => r.list_categories().await,
         }
     }
@@ -868,17 +878,21 @@ impl SalesReturnRepository {
         }
     }
 
-    pub async fn get_return_by_id(&self, id: &str) -> AppResult<Option<SalesReturn>> {
+    pub async fn get_by_id(&self, id: &str) -> AppResult<Option<SalesReturnDetailDto>> {
         match self {
-            Self::SQLite(r) => r.get_return_by_id(id).await,
-            Self::Postgres(r) => r.get_return_by_id(id).await,
+            Self::SQLite(r) => r.get_by_id(id).await,
+            Self::Postgres(_) => Err(crate::errors::AppError::Internal("Postgres get_by_id not implemented".into())),
         }
     }
 
-    pub async fn list_returns(&self, filter: &SalesReturnFilterDto) -> AppResult<Vec<SalesReturn>> {
+    pub async fn list_sales_returns(
+        &self,
+        branch_id: Option<&str>,
+        limit: Option<i64>,
+    ) -> AppResult<Vec<SalesReturnDetailDto>> {
         match self {
-            Self::SQLite(r) => r.list_returns(filter).await,
-            Self::Postgres(r) => r.list_returns(&Some(filter.clone())).await,
+            Self::SQLite(r) => r.list_sales_returns(branch_id, limit).await,
+            Self::Postgres(_) => Err(crate::errors::AppError::Internal("Postgres list_sales_returns not implemented".into())),
         }
     }
 }
@@ -901,17 +915,21 @@ impl PurchaseReturnRepository {
         }
     }
 
-    pub async fn get_return_by_id(&self, id: &str) -> AppResult<Option<PurchaseReturn>> {
+    pub async fn get_by_id(&self, id: &str) -> AppResult<Option<PurchaseReturnDetailDto>> {
         match self {
-            Self::SQLite(r) => r.get_return_by_id(id).await,
-            Self::Postgres(r) => r.get_return_by_id(id).await,
+            Self::SQLite(r) => r.get_by_id(id).await,
+            Self::Postgres(_) => Err(crate::errors::AppError::Internal("Postgres get_by_id not implemented".into())),
         }
     }
 
-    pub async fn list_returns(&self, filter: &PurchaseReturnFilterDto) -> AppResult<Vec<PurchaseReturn>> {
+    pub async fn list_purchase_returns(
+        &self,
+        branch_id: Option<&str>,
+        limit: Option<i64>,
+    ) -> AppResult<Vec<PurchaseReturnDetailDto>> {
         match self {
-            Self::SQLite(r) => r.list_returns(filter).await,
-            Self::Postgres(r) => r.list_returns(&Some(filter.clone())).await,
+            Self::SQLite(r) => r.list_purchase_returns(branch_id, limit).await,
+            Self::Postgres(_) => Err(crate::errors::AppError::Internal("Postgres list_purchase_returns not implemented".into())),
         }
     }
 }
@@ -930,7 +948,7 @@ impl ProfitRepository {
         end_date: Option<&str>,
     ) -> AppResult<DashboardProfitSummaryDto> {
         match self {
-            Self::SQLite(r) => r.get_profit_summary(branch_id, start_date, end_date).await,
+            Self::SQLite(r) => r.get_dashboard_profit_summary(branch_id).await,
             Self::Postgres(r) => r.get_profit_summary(branch_id, start_date, end_date).await,
         }
     }
