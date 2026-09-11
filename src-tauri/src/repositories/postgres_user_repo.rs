@@ -125,9 +125,9 @@ impl PostgresUserRepository {
         .bind(&user.pin_hash)
         .bind(&role_str)
         .bind(is_active_int)
-        .bind(user.failed_pin_attempts)
+        .bind(user.failed_pin_attempts as i32)
         .bind(user.pin_locked_until_ms.map(|v| v as i64))
-        .bind(user.failed_login_attempts)
+        .bind(user.failed_login_attempts as i32)
         .bind(user.login_locked_until_ms.map(|v| v as i64))
         .bind(&user.created_at)
         .bind(&user.updated_at)
@@ -327,9 +327,9 @@ impl PostgresUserRepository {
             recovery_key_hash,
             must_change_password,
             access_profile,
-            failed_pin_attempts: row.try_get(7).unwrap_or(0),
+            failed_pin_attempts: row.try_get::<i32, _>(7).unwrap_or(0) as u32,
             pin_locked_until_ms: pin_locked_ms.map(|v| v as u128),
-            failed_login_attempts: row.try_get(9).unwrap_or(0),
+            failed_login_attempts: row.try_get::<i32, _>(9).unwrap_or(0) as u32,
             login_locked_until_ms: login_locked_ms.map(|v| v as u128),
             created_at: row.try_get(11).map_err(|e| AppError::Database(e.to_string()))?,
             updated_at: row.try_get(12).map_err(|e| AppError::Database(e.to_string()))?,

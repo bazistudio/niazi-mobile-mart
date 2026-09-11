@@ -283,19 +283,26 @@ impl PostgresCashRepository {
     }
 
     fn map_session_row(row: &sqlx::postgres::PgRow) -> AppResult<CashSession> {
+        let status_str: String = row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?;
+        let status = CashSessionStatus::from_str(&status_str)
+            .unwrap_or(CashSessionStatus::Open);
+
         Ok(CashSession {
             id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
             branch_id: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+            branch_name: None,
             business_date: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
             opening_cash: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
             expected_closing_cash: row.try_get(4).unwrap_or(None),
             actual_closing_cash: row.try_get(5).unwrap_or(None),
             cash_variance: row.try_get(6).unwrap_or(None),
-            status: row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?,
+            status,
             opened_at: row.try_get(8).map_err(|e| AppError::Database(e.to_string()))?,
             closed_at: row.try_get(9).unwrap_or(None),
             opened_by: row.try_get(10).unwrap_or(None),
+            opened_by_name: None,
             closed_by: row.try_get(11).unwrap_or(None),
+            closed_by_name: None,
             notes: row.try_get(12).unwrap_or(None),
         })
     }
@@ -319,8 +326,9 @@ impl PostgresCashRepository {
             reference_id: row.try_get(6).unwrap_or(None),
             reference_number: row.try_get(7).unwrap_or(None),
             payment_method: row.try_get(8).unwrap_or_else(|_| "CASH".to_string()),
-            description: row.try_get(9).map_err(|e| AppError::Database(e.to_string()))?,
+            description: row.try_get(9).unwrap_or_default(),
             performed_by: row.try_get(10).unwrap_or(None),
+            performed_by_name: None,
             created_at: row.try_get(11).map_err(|e| AppError::Database(e.to_string()))?,
         })
     }

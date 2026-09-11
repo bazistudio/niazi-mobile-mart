@@ -172,7 +172,7 @@ impl PostgresPurchaseRepository {
         .bind(purchase.paid_amount)
         .bind(purchase.credit_amount)
         .bind(purchase.payment_status.as_str())
-        .bind(&purchase.status)
+        .bind(purchase.status.as_str())
         .bind(purchase.notes.as_deref())
         .bind(purchase.performed_by.as_deref())
         .bind(&purchase.created_at)
@@ -458,7 +458,9 @@ impl PostgresPurchaseRepository {
 
     fn map_purchase_row(row: &sqlx::postgres::PgRow) -> AppResult<Purchase> {
         let p_status_str: String = row.try_get(9).map_err(|e| AppError::Database(e.to_string()))?;
-        let payment_status = PaymentStatus::from_str(&p_status_str).unwrap_or(PaymentStatus::Paid);
+        let payment_status = PurchasePaymentStatus::from_str(&p_status_str);
+        let status_str: String = row.try_get(10).map_err(|e| AppError::Database(e.to_string()))?;
+        let status = PurchaseStatus::from_str(&status_str).unwrap_or(PurchaseStatus::Completed);
 
         Ok(Purchase {
             id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
@@ -471,7 +473,7 @@ impl PostgresPurchaseRepository {
             paid_amount: row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?,
             credit_amount: row.try_get(8).map_err(|e| AppError::Database(e.to_string()))?,
             payment_status,
-            status: row.try_get(10).map_err(|e| AppError::Database(e.to_string()))?,
+            status,
             notes: row.try_get(11).unwrap_or(None),
             performed_by: row.try_get(12).unwrap_or(None),
             created_at: row.try_get(13).map_err(|e| AppError::Database(e.to_string()))?,

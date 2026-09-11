@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::domain::expense::{
     CreateExpenseCategoryDto, CreateExpenseDto, Expense, ExpenseCategory, ExpenseFilterDto,
+    ExpenseStatus, ExpenseSummaryDto, UpdateExpenseDto,
 };
 use crate::errors::{AppError, AppResult};
 
@@ -130,7 +131,7 @@ impl PostgresExpenseRepository {
         .bind(&expense.description)
         .bind(expense.notes.as_deref())
         .bind(&expense.expense_date)
-        .bind(&expense.status)
+        .bind(expense.status.as_str())
         .bind(expense.performed_by.as_deref())
         .bind(&expense.created_at)
         .bind(&expense.updated_at)
@@ -250,18 +251,24 @@ impl PostgresExpenseRepository {
     }
 
     fn map_expense_row(row: &sqlx::postgres::PgRow) -> AppResult<Expense> {
+        let status_str: String = row.try_get(9).map_err(|e| AppError::Database(e.to_string()))?;
+        let status = ExpenseStatus::from_str(&status_str)
+            .ok_or_else(|| AppError::Database(format!("Invalid expense status: '{status_str}'")))?;
+
         Ok(Expense {
             id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
             expense_number: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
             category_id: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+            category_name: None,
             branch_id: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
             amount: row.try_get(4).map_err(|e| AppError::Database(e.to_string()))?,
             payment_method: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
             description: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
             notes: row.try_get(7).unwrap_or(None),
             expense_date: row.try_get(8).map_err(|e| AppError::Database(e.to_string()))?,
-            status: row.try_get(9).map_err(|e| AppError::Database(e.to_string()))?,
+            status,
             performed_by: row.try_get(10).unwrap_or(None),
+            performed_by_name: None,
             created_at: row.try_get(11).map_err(|e| AppError::Database(e.to_string()))?,
             updated_at: row.try_get(12).map_err(|e| AppError::Database(e.to_string()))?,
         })

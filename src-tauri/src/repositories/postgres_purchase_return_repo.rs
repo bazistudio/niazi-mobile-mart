@@ -3,8 +3,8 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::domain::purchase_return::{
-    CreatePurchaseReturnDto, PurchaseReturn, PurchaseReturnFilterDto, PurchaseReturnLine,
-    PurchaseReturnDetailDto,
+    CreatePurchaseReturnDto, PurchaseReturn, PurchaseReturnLine,
+    PurchaseReturnDetailDto, PurchaseReturnStatus, PurchaseSettlementMethod,
 };
 use crate::errors::{AppError, AppResult};
 
@@ -405,16 +405,21 @@ impl PostgresPurchaseReturnRepository {
     }
 
     fn map_return_row(row: &sqlx::postgres::PgRow) -> AppResult<PurchaseReturn> {
+        let settlement_method_str: String = row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?;
+        let status_str: String = row.try_get(8).map_err(|e| AppError::Database(e.to_string()))?;
+
         Ok(PurchaseReturn {
             id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
             return_number: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
             purchase_id: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
             branch_id: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
-            supplier_id: row.try_get(4).unwrap_or(None),
+            supplier_id: row.try_get(4).unwrap_or_default(),
             supplier_name_snapshot: row.try_get(5).unwrap_or(None),
             total_amount: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
-            settlement_method: row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?,
-            status: row.try_get(8).map_err(|e| AppError::Database(e.to_string()))?,
+            settlement_method: PurchaseSettlementMethod::from_str(&settlement_method_str)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            status: PurchaseReturnStatus::from_str(&status_str)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             reason: row.try_get(9).unwrap_or(None),
             notes: row.try_get(10).unwrap_or(None),
             performed_by: row.try_get(11).unwrap_or(None),
