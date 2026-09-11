@@ -187,7 +187,7 @@ impl PostgresInventoryRepository {
         .map(|r: (i64,)| r.0)
         .unwrap_or(0);
 
-        let diff = (dto.new_quantity - current).abs();
+        let diff = (dto.target_quantity - current).abs();
 
         sqlx::query(
             "INSERT INTO stock (product_id, branch_id, quantity, updated_at)
@@ -196,7 +196,7 @@ impl PostgresInventoryRepository {
         )
         .bind(&dto.product_id)
         .bind(&dto.branch_id)
-        .bind(dto.new_quantity)
+        .bind(dto.target_quantity)
         .bind(&now)
         .execute(&mut *tx)
         .await
@@ -213,7 +213,7 @@ impl PostgresInventoryRepository {
             .bind(&dto.branch_id)
             .bind(diff)
             .bind(current)
-            .bind(dto.new_quantity)
+            .bind(dto.target_quantity)
             .bind(&dto.reason)
             .bind(user_id)
             .bind(&now)
@@ -223,7 +223,7 @@ impl PostgresInventoryRepository {
         }
 
         tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
-        Ok(dto.new_quantity)
+        Ok(dto.target_quantity)
     }
 
     pub async fn transfer_stock(
@@ -238,7 +238,7 @@ impl PostgresInventoryRepository {
             "SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2 FOR UPDATE",
         )
         .bind(&dto.product_id)
-        .bind(&dto.source_branch_id)
+        .bind(&dto.from_branch_id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| AppError::Database(e.to_string()))?
@@ -256,7 +256,7 @@ impl PostgresInventoryRepository {
             "SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2 FOR UPDATE",
         )
         .bind(&dto.product_id)
-        .bind(&dto.target_branch_id)
+        .bind(&dto.to_branch_id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| AppError::Database(e.to_string()))?
@@ -272,7 +272,7 @@ impl PostgresInventoryRepository {
         .bind(src_new)
         .bind(&now)
         .bind(&dto.product_id)
-        .bind(&dto.source_branch_id)
+        .bind(&dto.from_branch_id)
         .execute(&mut *tx)
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
@@ -283,7 +283,7 @@ impl PostgresInventoryRepository {
              ON CONFLICT (product_id, branch_id) DO UPDATE SET quantity = EXCLUDED.quantity, updated_at = EXCLUDED.updated_at",
         )
         .bind(&dto.product_id)
-        .bind(&dto.target_branch_id)
+        .bind(&dto.to_branch_id)
         .bind(dest_new)
         .bind(&now)
         .execute(&mut *tx)
@@ -300,7 +300,7 @@ impl PostgresInventoryRepository {
         )
         .bind(m1)
         .bind(&dto.product_id)
-        .bind(&dto.source_branch_id)
+        .bind(&dto.from_branch_id)
         .bind(dto.quantity)
         .bind(src_curr)
         .bind(src_new)
@@ -320,7 +320,7 @@ impl PostgresInventoryRepository {
         )
         .bind(m2)
         .bind(&dto.product_id)
-        .bind(&dto.target_branch_id)
+        .bind(&dto.to_branch_id)
         .bind(dto.quantity)
         .bind(dest_curr)
         .bind(dest_new)

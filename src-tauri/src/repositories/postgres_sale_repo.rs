@@ -387,7 +387,7 @@ impl PostgresSaleRepository {
             sale_id: sale_id.clone(),
             amount: recorded_paid,
             payment_method: p_method.clone(),
-            reference_number: dto.payment_reference.clone(),
+            reference_number: None,
             notes: dto.notes.clone(),
             created_at: now.clone(),
         };
