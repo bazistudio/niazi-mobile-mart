@@ -19,64 +19,36 @@ use crate::domain::supplier::{
 use crate::errors::{AppError, AppResult};
 use crate::repositories::inventory_repository::SQLiteInventoryRepository;
 use crate::repositories::{
-    SQLiteCashRepository, SQLiteProductRepository, SQLitePurchaseRepository, SQLiteSupplierRepository,
+    PostgresPurchaseRepository, PurchaseRepository, SQLiteCashRepository, SQLiteProductRepository,
+    SQLitePurchaseRepository, SQLiteSupplierRepository,
 };
-
-/// Calculates the deterministic weighted-average cost in whole PKR integers.
-///
-/// Formula:
-/// If existing_stock <= 0:
-///     new_average_cost = incoming_unit_cost
-/// Else:
-///     total_cost = (existing_stock * existing_avg_cost) + (incoming_qty * incoming_unit_cost)
-///     total_qty = existing_stock + incoming_qty
-///     quotient = total_cost / total_qty
-///     remainder = total_cost % total_qty
-///     if remainder * 2 >= total_qty { quotient + 1 } else { quotient }
-pub fn calculate_weighted_average_cost(
-    existing_stock: i64,
-    existing_avg_cost: i64,
-    incoming_qty: i64,
-    incoming_unit_cost: i64,
-) -> i64 {
-    if incoming_qty <= 0 {
-        return existing_avg_cost;
-    }
-    if existing_stock <= 0 {
-        return incoming_unit_cost;
-    }
-
-    let new_total_stock = existing_stock + incoming_qty;
-    if new_total_stock <= 0 {
-        return incoming_unit_cost;
-    }
-
-    let total_cost = (existing_stock * existing_avg_cost) + (incoming_qty * incoming_unit_cost);
-    let quotient = total_cost / new_total_stock;
-    let remainder = total_cost % new_total_stock;
-
-    if remainder * 2 >= new_total_stock {
-        quotient + 1
-    } else {
-        quotient
-    }
-}
 
 #[derive(Clone)]
 pub struct PurchaseService {
-    db: DatabaseConnection,
-    purchase_repo: SQLitePurchaseRepository,
+    db: Option<DatabaseConnection>,
+    purchase_repo: PurchaseRepository,
 }
 
 impl PurchaseService {
     pub fn new(db: DatabaseConnection) -> Self {
+        Self::new_sqlite(db)
+    }
+
+    pub fn new_sqlite(db: DatabaseConnection) -> Self {
         Self {
-            purchase_repo: SQLitePurchaseRepository::new(db.clone()),
-            db,
+            purchase_repo: PurchaseRepository::SQLite(SQLitePurchaseRepository::new(db.clone())),
+            db: Some(db),
         }
     }
 
-    /// Atomically completes a supplier purchase inside a single SQLite transaction
+    pub fn new_postgres(pool: sqlx::PgPool) -> Self {
+        Self {
+            purchase_repo: PurchaseRepository::Postgres(PostgresPurchaseRepository::new(pool)),
+            db: None,
+        }
+    }
+
+    /// Atomically completes a supplier purchase
     pub async fn complete_purchase(
         &self,
         user_id: Option<&str>,
@@ -86,6 +58,10 @@ impl PurchaseService {
             return Err(AppError::Validation(
                 "Cannot complete purchase with no items".to_string(),
             ));
+        }
+
+        if let PurchaseRepository::Postgres(pg_repo) = &self.purchase_repo {
+            return pg_repo.complete_purchase(&dto, user_id).await;
         }
 
         let branch_id = dto
@@ -105,7 +81,8 @@ impl PurchaseService {
 
         let user_id_owned = user_id.map(str::to_string);
 
-        let result = with_transaction(&self.db, move |tx| {
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let result = with_transaction(db, move |tx| {
             let now = Utc::now().to_rfc3339();
 
             // 1. Validate Supplier

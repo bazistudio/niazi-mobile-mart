@@ -56,34 +56,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let bind_addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-    // 3. Initialize AppState with SQLite (shared services — all business logic lives here)
-    //    NOTE: In server mode we still initialize SQLite AppState to hold the shared service
-    //    layer. In Phase 3, the services will be wired to PostgreSQL-backed repositories.
-    //    In Phase 2, the pg_pool field is attached for infrastructure validation only.
-    let base_app_state = {
-        // Try persistent path first; fall back to in-memory for diagnostic mode
-        let db_path = niazi_mobile_mart_lib::db::connection::DatabaseConnection::default_db_path();
-        match niazi_mobile_mart_lib::db::connection::DatabaseConnection::open_file(db_path) {
-            Ok(db) => AppState::new("1.0.1", db),
-            Err(e) => {
-                warn!(
-                    "Persistent SQLite path unavailable ({e}) — using in-memory SQLite. \
-                     PostgreSQL will be the primary data store in Cloud Run mode."
-                );
-                AppState::in_memory("1.0.1")
-            }
-        }
-    };
-
-    // 4. Attempt PostgreSQL pool initialization from DATABASE_URL
-    //    In Cloud Run mode: DATABASE_URL must be set to enable PostgreSQL mode.
-    //    In local dev / Phase 2 validation: DATABASE_URL is optional; server starts in SQLite mode.
+    // 3. Initialize AppState based on DATABASE_URL environment variable
+    //    Cloud mode: DATABASE_URL is set -> PostgreSQL repositories (no SQLite initialization!)
+    //    Local dev: DATABASE_URL unset -> SQLite repositories
     let app_state = if let Ok(database_url) = std::env::var("DATABASE_URL") {
         match PostgresAdapter::from_url(&database_url).await {
             Ok(pg_adapter) => {
                 info!("PostgreSQL connection pool ready — pg_mode: active");
                 let pool = pg_adapter.pool().clone();
-                Arc::new(base_app_state.with_pg_pool(pool))
+                Arc::new(AppState::new_postgres("1.0.1", pool))
             }
             Err(e) => {
                 error!("PostgreSQL initialization failed: {e}");
@@ -92,8 +73,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     } else {
-        info!("DATABASE_URL not set — running in SQLite-only mode (local / Phase 2 validation)");
-        Arc::new(base_app_state)
+        info!("DATABASE_URL not set — running in SQLite-only mode (local desktop / dev mode)");
+        let db_path = niazi_mobile_mart_lib::db::connection::DatabaseConnection::default_db_path();
+        let base_state = match niazi_mobile_mart_lib::db::connection::DatabaseConnection::open_file(db_path) {
+            Ok(db) => AppState::new_sqlite("1.0.1", db),
+            Err(e) => {
+                warn!("Persistent SQLite path unavailable ({e}) — using in-memory SQLite.");
+                AppState::in_memory("1.0.1")
+            }
+        };
+        Arc::new(base_state)
     };
 
     let server_state = ServerState { app_state };

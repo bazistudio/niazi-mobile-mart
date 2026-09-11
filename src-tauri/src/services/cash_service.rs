@@ -11,22 +11,36 @@ use crate::domain::cash::{
 };
 use crate::domain::organization::DEFAULT_MAIN_BRANCH_ID;
 use crate::errors::{AppError, AppResult};
-use crate::repositories::branch_repository::BranchRepository;
-use crate::repositories::cash_repository::SQLiteCashRepository;
+use crate::repositories::{
+    BranchRepository, CashRepository, PostgresBranchRepository, PostgresCashRepository,
+    SQLiteCashRepository,
+};
 
 #[derive(Clone)]
 pub struct CashService {
-    db: DatabaseConnection,
-    cash_repo: SQLiteCashRepository,
+    db: Option<DatabaseConnection>,
+    cash_repo: CashRepository,
     branch_repo: BranchRepository,
 }
 
 impl CashService {
     pub fn new(db: DatabaseConnection) -> Self {
+        Self::new_sqlite(db)
+    }
+
+    pub fn new_sqlite(db: DatabaseConnection) -> Self {
         Self {
-            cash_repo: SQLiteCashRepository::new(db.clone()),
-            branch_repo: BranchRepository::new(db.clone()),
-            db,
+            cash_repo: CashRepository::SQLite(SQLiteCashRepository::new(db.clone())),
+            branch_repo: BranchRepository::SQLite(crate::repositories::SQLiteBranchRepository::new(db.clone())),
+            db: Some(db),
+        }
+    }
+
+    pub fn new_postgres(pool: sqlx::PgPool) -> Self {
+        Self {
+            cash_repo: CashRepository::Postgres(PostgresCashRepository::new(pool.clone())),
+            branch_repo: BranchRepository::Postgres(PostgresBranchRepository::new(pool)),
+            db: None,
         }
     }
 

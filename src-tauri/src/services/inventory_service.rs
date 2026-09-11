@@ -9,21 +9,36 @@ use crate::domain::inventory::{
     StockMovementType, TransferStockDto,
 };
 use crate::errors::{AppError, AppResult};
-use crate::repositories::{SQLiteInventoryRepository, SQLiteProductRepository};
+use crate::repositories::{
+    InventoryRepository, PostgresInventoryRepository, PostgresProductRepository, ProductRepository,
+    SQLiteInventoryRepository, SQLiteProductRepository,
+};
 
 #[derive(Clone)]
 pub struct InventoryService {
-    db: DatabaseConnection,
-    repo: SQLiteInventoryRepository,
-    product_repo: SQLiteProductRepository,
+    db: Option<DatabaseConnection>,
+    repo: InventoryRepository,
+    product_repo: ProductRepository,
 }
 
 impl InventoryService {
     pub fn new(db: DatabaseConnection) -> Self {
+        Self::new_sqlite(db)
+    }
+
+    pub fn new_sqlite(db: DatabaseConnection) -> Self {
         Self {
-            repo: SQLiteInventoryRepository::new(db.clone()),
-            product_repo: SQLiteProductRepository::new(db.clone()),
-            db,
+            repo: InventoryRepository::SQLite(SQLiteInventoryRepository::new(db.clone())),
+            product_repo: ProductRepository::SQLite(SQLiteProductRepository::new(db.clone())),
+            db: Some(db),
+        }
+    }
+
+    pub fn new_postgres(pool: sqlx::PgPool) -> Self {
+        Self {
+            repo: InventoryRepository::Postgres(PostgresInventoryRepository::new(pool.clone())),
+            product_repo: ProductRepository::Postgres(PostgresProductRepository::new(pool)),
+            db: None,
         }
     }
 
@@ -31,6 +46,10 @@ impl InventoryService {
     pub async fn increase_stock(&self, dto: IncreaseStockDto, user_id: Option<&str>) -> AppResult<i64> {
         if dto.quantity <= 0 {
             return Err(AppError::Validation("Quantity must be greater than 0".to_string()));
+        }
+
+        if let InventoryRepository::Postgres(pg_repo) = &self.repo {
+            return pg_repo.increase_stock(&dto, user_id).await;
         }
 
         // Verify product exists
@@ -44,7 +63,8 @@ impl InventoryService {
         let bid = dto.branch_id.clone();
         let uid = user_id.map(|s| s.to_string());
 
-        let resulting = with_transaction(&self.db, move |tx| {
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let resulting = with_transaction(db, move |tx| {
             let prev = SQLiteInventoryRepository::get_stock_in_tx(tx, &pid, &bid)?;
             let new_qty = prev.saturating_add(dto.quantity);
 
@@ -79,6 +99,10 @@ impl InventoryService {
             return Err(AppError::Validation("Quantity must be greater than 0".to_string()));
         }
 
+        if let InventoryRepository::Postgres(pg_repo) = &self.repo {
+            return pg_repo.decrease_stock(&dto, user_id).await;
+        }
+
         // Verify product exists
         let product = self.product_repo.get_product_by_id(&dto.product_id).await?;
 
@@ -87,7 +111,8 @@ impl InventoryService {
         let bid = dto.branch_id.clone();
         let uid = user_id.map(|s| s.to_string());
 
-        let resulting = with_transaction(&self.db, move |tx| {
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let resulting = with_transaction(db, move |tx| {
             let prev = SQLiteInventoryRepository::get_stock_in_tx(tx, &pid, &bid)?;
             if prev < dto.quantity {
                 return Err(DbError::ValidationError(format!(
@@ -131,6 +156,10 @@ impl InventoryService {
             return Err(AppError::Validation("Reason is required for stock adjustment".to_string()));
         }
 
+        if let InventoryRepository::Postgres(pg_repo) = &self.repo {
+            return pg_repo.adjust_stock(&dto, user_id).await;
+        }
+
         let _product = self.product_repo.get_product_by_id(&dto.product_id).await?;
 
         let now = Utc::now().to_rfc3339();
@@ -138,7 +167,8 @@ impl InventoryService {
         let bid = dto.branch_id.clone();
         let uid = user_id.map(|s| s.to_string());
 
-        let resulting = with_transaction(&self.db, move |tx| {
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let resulting = with_transaction(db, move |tx| {
             let prev = SQLiteInventoryRepository::get_stock_in_tx(tx, &pid, &bid)?;
 
             // Rejection rule for no-op adjustments
@@ -175,18 +205,16 @@ impl InventoryService {
     }
 
     /// Atomically transfers stock from one controlled branch to another.
-    /// Enforces:
-    /// - from_branch != to_branch
-    /// - quantity > 0
-    /// - source has sufficient stock
-    /// - both branches updated atomically
-    /// - TRANSFER_OUT and TRANSFER_IN movements created inside the single transaction
     pub async fn transfer_stock(&self, dto: TransferStockDto, user_id: Option<&str>) -> AppResult<()> {
         if dto.from_branch_id == dto.to_branch_id {
             return Err(AppError::Validation("Source and destination branch cannot be the same".to_string()));
         }
         if dto.quantity <= 0 {
             return Err(AppError::Validation("Transfer quantity must be greater than 0".to_string()));
+        }
+
+        if let InventoryRepository::Postgres(pg_repo) = &self.repo {
+            return pg_repo.transfer_stock(&dto, user_id).await;
         }
 
         let product = self.product_repo.get_product_by_id(&dto.product_id).await?;
@@ -198,7 +226,8 @@ impl InventoryService {
         let uid = user_id.map(|s| s.to_string());
         let transfer_ref = dto.reference_id.unwrap_or_else(|| format!("TRF-{}", Uuid::new_v4()));
 
-        with_transaction(&self.db, move |tx| {
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        with_transaction(db, move |tx| {
             // 1. Check source stock
             let source_prev = SQLiteInventoryRepository::get_stock_in_tx(tx, &pid, &from_bid)?;
             if source_prev < dto.quantity {

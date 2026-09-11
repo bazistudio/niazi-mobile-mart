@@ -16,20 +16,34 @@ use crate::domain::sales_return::{
 };
 use crate::errors::{AppError, AppResult};
 use crate::repositories::{
-    SQLiteCashRepository, SQLiteCustomerRepository, SQLiteInventoryRepository,
-    SQLiteSaleRepository, SQLiteSalesReturnRepository,
+    PostgresSalesReturnRepository, SQLiteCashRepository, SQLiteCustomerRepository,
+    SQLiteInventoryRepository, SQLiteSaleRepository, SQLiteSalesReturnRepository,
+    SalesReturnRepository,
 };
 
 #[derive(Clone)]
 pub struct SalesReturnService {
-    db: DatabaseConnection,
-    repo: SQLiteSalesReturnRepository,
+    db: Option<DatabaseConnection>,
+    repo: SalesReturnRepository,
 }
 
 impl SalesReturnService {
     pub fn new(db: DatabaseConnection) -> Self {
-        let repo = SQLiteSalesReturnRepository::new(db.clone());
-        Self { db, repo }
+        Self::new_sqlite(db)
+    }
+
+    pub fn new_sqlite(db: DatabaseConnection) -> Self {
+        Self {
+            repo: SalesReturnRepository::SQLite(SQLiteSalesReturnRepository::new(db.clone())),
+            db: Some(db),
+        }
+    }
+
+    pub fn new_postgres(pool: sqlx::PgPool) -> Self {
+        Self {
+            repo: SalesReturnRepository::Postgres(PostgresSalesReturnRepository::new(pool)),
+            db: None,
+        }
     }
 
     /// Queries line-by-line returnable status for a sale

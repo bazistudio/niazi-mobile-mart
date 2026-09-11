@@ -11,22 +11,36 @@ use crate::domain::expense::{
 };
 use crate::domain::organization::DEFAULT_MAIN_BRANCH_ID;
 use crate::errors::{AppError, AppResult};
-use crate::repositories::branch_repository::BranchRepository;
-use crate::repositories::{SQLiteCashRepository, SQLiteExpenseRepository};
+use crate::repositories::{
+    BranchRepository, ExpenseRepository, PostgresBranchRepository, PostgresExpenseRepository,
+    SQLiteCashRepository, SQLiteExpenseRepository,
+};
 
 #[derive(Clone)]
 pub struct ExpenseService {
-    db: DatabaseConnection,
-    expense_repo: SQLiteExpenseRepository,
+    db: Option<DatabaseConnection>,
+    expense_repo: ExpenseRepository,
     branch_repo: BranchRepository,
 }
 
 impl ExpenseService {
     pub fn new(db: DatabaseConnection) -> Self {
+        Self::new_sqlite(db)
+    }
+
+    pub fn new_sqlite(db: DatabaseConnection) -> Self {
         Self {
-            expense_repo: SQLiteExpenseRepository::new(db.clone()),
-            branch_repo: BranchRepository::new(db.clone()),
-            db,
+            expense_repo: ExpenseRepository::SQLite(SQLiteExpenseRepository::new(db.clone())),
+            branch_repo: BranchRepository::SQLite(crate::repositories::SQLiteBranchRepository::new(db.clone())),
+            db: Some(db),
+        }
+    }
+
+    pub fn new_postgres(pool: sqlx::PgPool) -> Self {
+        Self {
+            expense_repo: ExpenseRepository::Postgres(PostgresExpenseRepository::new(pool.clone())),
+            branch_repo: BranchRepository::Postgres(PostgresBranchRepository::new(pool)),
+            db: None,
         }
     }
 
@@ -124,9 +138,14 @@ impl ExpenseService {
 
         let notes = dto.notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
         let uid = user_id.map(str::to_string);
+        if let ExpenseRepository::Postgres(pg_repo) = &self.expense_repo {
+            return pg_repo.create_expense(&dto, user_id).await;
+        }
+
         let amount = dto.amount;
 
-        let result = with_transaction(&self.db, move |tx| {
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let result = with_transaction(db, move |tx| {
             let now = Utc::now().to_rfc3339();
 
             // 1. Verify Category exists and is active

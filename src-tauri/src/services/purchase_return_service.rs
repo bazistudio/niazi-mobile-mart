@@ -17,20 +17,34 @@ use crate::domain::purchases::PurchaseStatus;
 use crate::domain::supplier::{SupplierLedgerEntry, SupplierLedgerEntryType};
 use crate::errors::{AppError, AppResult};
 use crate::repositories::{
-    SQLiteCashRepository, SQLiteInventoryRepository, SQLitePurchaseRepository,
-    SQLitePurchaseReturnRepository, SQLiteSupplierRepository,
+    PostgresPurchaseReturnRepository, PurchaseReturnRepository, SQLiteCashRepository,
+    SQLiteInventoryRepository, SQLitePurchaseRepository, SQLitePurchaseReturnRepository,
+    SQLiteSupplierRepository,
 };
 
 #[derive(Clone)]
 pub struct PurchaseReturnService {
-    db: DatabaseConnection,
-    repo: SQLitePurchaseReturnRepository,
+    db: Option<DatabaseConnection>,
+    repo: PurchaseReturnRepository,
 }
 
 impl PurchaseReturnService {
     pub fn new(db: DatabaseConnection) -> Self {
-        let repo = SQLitePurchaseReturnRepository::new(db.clone());
-        Self { db, repo }
+        Self::new_sqlite(db)
+    }
+
+    pub fn new_sqlite(db: DatabaseConnection) -> Self {
+        Self {
+            repo: PurchaseReturnRepository::SQLite(SQLitePurchaseReturnRepository::new(db.clone())),
+            db: Some(db),
+        }
+    }
+
+    pub fn new_postgres(pool: sqlx::PgPool) -> Self {
+        Self {
+            repo: PurchaseReturnRepository::Postgres(PostgresPurchaseReturnRepository::new(pool)),
+            db: None,
+        }
     }
 
     /// Queries line-by-line returnable status for a purchase order

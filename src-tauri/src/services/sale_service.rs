@@ -14,31 +14,47 @@ use crate::domain::sales::{
 };
 use crate::errors::{AppError, AppResult};
 use crate::repositories::{
-    BranchRepository, SQLiteCashRepository, SQLiteCustomerRepository, SQLiteInventoryRepository,
-    SQLiteProductRepository, SQLiteSaleRepository,
+    BranchRepository, CustomerRepository, PostgresBranchRepository, PostgresCustomerRepository,
+    PostgresProductRepository, PostgresSaleRepository, ProductRepository, SQLiteCashRepository,
+    SQLiteCustomerRepository, SQLiteInventoryRepository, SQLiteProductRepository,
+    SQLiteSaleRepository, SaleRepository,
 };
 
 #[derive(Clone)]
 pub struct SaleService {
-    db: DatabaseConnection,
-    sale_repo: SQLiteSaleRepository,
-    customer_repo: SQLiteCustomerRepository,
-    product_repo: SQLiteProductRepository,
+    db: Option<DatabaseConnection>,
+    sale_repo: SaleRepository,
+    customer_repo: CustomerRepository,
+    product_repo: ProductRepository,
     branch_repo: BranchRepository,
 }
 
 impl SaleService {
     pub fn new(db: DatabaseConnection) -> Self {
+        Self::new_sqlite(db)
+    }
+
+    pub fn new_sqlite(db: DatabaseConnection) -> Self {
         Self {
-            sale_repo: SQLiteSaleRepository::new(db.clone()),
-            customer_repo: SQLiteCustomerRepository::new(db.clone()),
-            product_repo: SQLiteProductRepository::new(db.clone()),
-            branch_repo: BranchRepository::new(db.clone()),
-            db,
+            sale_repo: SaleRepository::SQLite(SQLiteSaleRepository::new(db.clone())),
+            customer_repo: CustomerRepository::SQLite(SQLiteCustomerRepository::new(db.clone())),
+            product_repo: ProductRepository::SQLite(SQLiteProductRepository::new(db.clone())),
+            branch_repo: BranchRepository::SQLite(crate::repositories::SQLiteBranchRepository::new(db.clone())),
+            db: Some(db),
         }
     }
 
-    /// Completes a retail sale in a single atomic SQLite transaction
+    pub fn new_postgres(pool: sqlx::PgPool) -> Self {
+        Self {
+            sale_repo: SaleRepository::Postgres(PostgresSaleRepository::new(pool.clone())),
+            customer_repo: CustomerRepository::Postgres(PostgresCustomerRepository::new(pool.clone())),
+            product_repo: ProductRepository::Postgres(PostgresProductRepository::new(pool.clone())),
+            branch_repo: BranchRepository::Postgres(PostgresBranchRepository::new(pool)),
+            db: None,
+        }
+    }
+
+    /// Completes a retail sale
     pub async fn complete_sale(
         &self,
         user_id: Option<&str>,
@@ -46,6 +62,10 @@ impl SaleService {
     ) -> AppResult<SaleResultDto> {
         if dto.items.is_empty() {
             return Err(AppError::Validation("Cannot complete sale with empty cart".to_string()));
+        }
+
+        if let SaleRepository::Postgres(pg_repo) = &self.sale_repo {
+            return pg_repo.complete_sale(&dto, user_id).await;
         }
 
         // 1. Resolve Branch ID
@@ -161,7 +181,8 @@ impl SaleService {
         let notes_cloned = dto.notes.clone();
 
         // 6. Execute Atomic SQLite Checkout Transaction
-        let result = with_transaction(&self.db, move |tx| {
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let result = with_transaction(db, move |tx| {
             // A. Validate stock availability for all lines
             for line in &prepared_lines {
                 let current_stock = SQLiteInventoryRepository::get_stock_in_tx(tx, &line.product_id, &branch_id)?;

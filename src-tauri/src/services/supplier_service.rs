@@ -8,19 +8,32 @@ use crate::domain::supplier::{
     SupplierSummaryDto, UpdateSupplierDto,
 };
 use crate::errors::{AppError, AppResult};
-use crate::repositories::SQLiteSupplierRepository;
+use crate::repositories::{
+    PostgresSupplierRepository, SQLiteSupplierRepository, SupplierRepository,
+};
 
 #[derive(Clone)]
 pub struct SupplierService {
-    db: DatabaseConnection,
-    supplier_repo: SQLiteSupplierRepository,
+    db: Option<DatabaseConnection>,
+    supplier_repo: SupplierRepository,
 }
 
 impl SupplierService {
     pub fn new(db: DatabaseConnection) -> Self {
+        Self::new_sqlite(db)
+    }
+
+    pub fn new_sqlite(db: DatabaseConnection) -> Self {
         Self {
-            supplier_repo: SQLiteSupplierRepository::new(db.clone()),
-            db,
+            supplier_repo: SupplierRepository::SQLite(SQLiteSupplierRepository::new(db.clone())),
+            db: Some(db),
+        }
+    }
+
+    pub fn new_postgres(pool: sqlx::PgPool) -> Self {
+        Self {
+            supplier_repo: SupplierRepository::Postgres(PostgresSupplierRepository::new(pool)),
+            db: None,
         }
     }
 
@@ -44,11 +57,17 @@ impl SupplierService {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
 
-        // Atomically generate supplier_code inside a transaction
-        let supplier_code = with_transaction(&self.db, |tx| {
-            SQLiteSupplierRepository::next_supplier_code_in_tx(tx)
-        })
-        .await?;
+        // Atomically generate supplier_code
+        let supplier_code = match &self.supplier_repo {
+            SupplierRepository::Postgres(pg_repo) => pg_repo.next_supplier_code().await?,
+            SupplierRepository::SQLite(_) => {
+                let db = self.db.as_ref().expect("SQLite database connection required");
+                with_transaction(db, |tx| {
+                    SQLiteSupplierRepository::next_supplier_code_in_tx(tx)
+                })
+                .await?
+            }
+        };
 
         let supplier = Supplier {
             id,

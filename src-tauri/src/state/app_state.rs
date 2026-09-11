@@ -44,12 +44,12 @@ impl Default for SessionContext {
 pub struct AppState {
     pub app_version: String,
     pub session: Arc<RwLock<SessionContext>>,
-    pub db: DatabaseConnection,
+    pub db: Option<DatabaseConnection>,
     /// PostgreSQL connection pool for Cloud Run / HTTP server mode.
     /// Set to `Some(pool)` by `server.rs` when `DATABASE_URL` is present.
     /// Always `None` in desktop Tauri mode.
     pub pg_pool: Option<sqlx::PgPool>,
-    pub user_repo: SQLiteUserRepository,
+    pub user_repo: UserRepository,
     pub branch_repo: BranchRepository,
     pub catalog_service: CatalogService,
     pub product_service: ProductService,
@@ -68,28 +68,28 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Creates AppState with an existing DatabaseConnection
-    pub fn new(app_version: impl Into<String>, db: DatabaseConnection) -> Self {
-        let user_repo = SQLiteUserRepository::new(db.clone());
-        let branch_repo = BranchRepository::new(db.clone());
-        let catalog_service = CatalogService::new(db.clone());
-        let product_service = ProductService::new(db.clone());
-        let inventory_service = InventoryService::new(db.clone());
-        let customer_service = CustomerService::new(db.clone());
-        let sale_service = SaleService::new(db.clone());
-        let supplier_service = SupplierService::new(db.clone());
-        let purchase_service = PurchaseService::new(db.clone());
-        let expense_service = ExpenseService::new(db.clone());
-        let cash_service = CashService::new(db.clone());
-        let sales_return_service = SalesReturnService::new(db.clone());
-        let purchase_return_service = PurchaseReturnService::new(db.clone());
-        let profit_service = ProfitService::new(db.clone());
+    /// Creates AppState with SQLite persistence backend (Desktop / Local mode)
+    pub fn new_sqlite(app_version: impl Into<String>, db: DatabaseConnection) -> Self {
+        let user_repo = UserRepository::SQLite(SQLiteUserRepository::new(db.clone()));
+        let branch_repo = BranchRepository::SQLite(crate::repositories::SQLiteBranchRepository::new(db.clone()));
+        let catalog_service = CatalogService::new_sqlite(db.clone());
+        let product_service = ProductService::new_sqlite(db.clone());
+        let inventory_service = InventoryService::new_sqlite(db.clone());
+        let customer_service = CustomerService::new_sqlite(db.clone());
+        let sale_service = SaleService::new_sqlite(db.clone());
+        let supplier_service = SupplierService::new_sqlite(db.clone());
+        let purchase_service = PurchaseService::new_sqlite(db.clone());
+        let expense_service = ExpenseService::new_sqlite(db.clone());
+        let cash_service = CashService::new_sqlite(db.clone());
+        let sales_return_service = SalesReturnService::new_sqlite(db.clone());
+        let purchase_return_service = PurchaseReturnService::new_sqlite(db.clone());
+        let profit_service = ProfitService::new_sqlite(db.clone());
 
         Self {
             app_version: app_version.into(),
             session: Arc::new(RwLock::new(SessionContext::default())),
-            db,
-            pg_pool: None,  // PostgreSQL pool is None in desktop/SQLite mode
+            db: Some(db),
+            pg_pool: None,
             user_repo,
             branch_repo,
             catalog_service,
@@ -109,11 +109,59 @@ impl AppState {
         }
     }
 
+    /// Creates AppState with PostgreSQL persistence backend (Cloud Run / HTTP server mode).
+    /// CRITICAL ISOLATION: No SQLite database connection is opened or created in this mode.
+    pub fn new_postgres(app_version: impl Into<String>, pool: sqlx::PgPool) -> Self {
+        let user_repo = UserRepository::Postgres(crate::repositories::PostgresUserRepository::new(pool.clone()));
+        let branch_repo = BranchRepository::Postgres(crate::repositories::PostgresBranchRepository::new(pool.clone()));
+        let catalog_service = CatalogService::new_postgres(pool.clone());
+        let product_service = ProductService::new_postgres(pool.clone());
+        let inventory_service = InventoryService::new_postgres(pool.clone());
+        let customer_service = CustomerService::new_postgres(pool.clone());
+        let sale_service = SaleService::new_postgres(pool.clone());
+        let supplier_service = SupplierService::new_postgres(pool.clone());
+        let purchase_service = PurchaseService::new_postgres(pool.clone());
+        let expense_service = ExpenseService::new_postgres(pool.clone());
+        let cash_service = CashService::new_postgres(pool.clone());
+        let sales_return_service = SalesReturnService::new_postgres(pool.clone());
+        let purchase_return_service = PurchaseReturnService::new_postgres(pool.clone());
+        let profit_service = ProfitService::new_postgres(pool.clone());
+
+        Self {
+            app_version: app_version.into(),
+            session: Arc::new(RwLock::new(SessionContext::default())),
+            db: None,
+            pg_pool: Some(pool),
+            user_repo,
+            branch_repo,
+            catalog_service,
+            product_service,
+            inventory_service,
+            customer_service,
+            sale_service,
+            supplier_service,
+            purchase_service,
+            expense_service,
+            cash_service,
+            sales_return_service,
+            purchase_return_service,
+            profit_service,
+            token_manager: crate::services::TokenManager::new(),
+            is_initialized: Arc::new(RwLock::new(false)),
+        }
+    }
+
+    /// Backwards-compatible constructor for SQLite AppState
+    pub fn new(app_version: impl Into<String>, db: DatabaseConnection) -> Self {
+        Self::new_sqlite(app_version, db)
+    }
+
     /// Opens the persistent default local application database
     pub fn open_default(app_version: impl Into<String>) -> Self {
         let path = DatabaseConnection::default_db_path();
         let db = DatabaseConnection::open_file(path).expect("Failed to open persistent SQLite database");
-        Self::new(app_version, db)
+        Self::new_sqlite(app_version, db)
+    }
     }
 
     /// Opens an isolated in-memory database for testing and diagnostics
@@ -234,5 +282,21 @@ mod tests {
         let logged_out = state.get_session().await;
         assert!(!logged_out.is_authenticated);
         assert!(!logged_out.is_locked);
+    }
+
+    #[test]
+    fn test_cloud_composition_isolation_and_postgres_selection() {
+        let pool = sqlx::PgPool::connect_lazy("postgres://localhost/dummy_db").expect("connect_lazy should succeed");
+        let state = AppState::new_postgres("1.0.1", pool);
+
+        // 1. Verify SQLite database connection is NOT opened or created (db is None)
+        assert!(state.db.is_none(), "Cloud Run AppState must NOT initialize a SQLite connection");
+
+        // 2. Verify PostgreSQL pool is attached
+        assert!(state.pg_pool().is_some(), "PostgreSQL connection pool must be present in Cloud Run mode");
+
+        // 3. Verify repository enums are wired to Postgres variant
+        assert!(matches!(state.user_repo, crate::repositories::UserRepository::Postgres(_)));
+        assert!(matches!(state.branch_repo, crate::repositories::BranchRepository::Postgres(_)));
     }
 }

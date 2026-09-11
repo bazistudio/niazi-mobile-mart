@@ -6,19 +6,32 @@ use crate::db::transaction::with_transaction;
 use crate::domain::inventory::{StockMovement, StockMovementType};
 use crate::domain::product::{CreateProductDto, Product, ProductFilter, UpdateProductDto};
 use crate::errors::{AppError, AppResult};
-use crate::repositories::{SQLiteInventoryRepository, SQLiteProductRepository};
+use crate::repositories::{
+    PostgresProductRepository, ProductRepository, SQLiteInventoryRepository, SQLiteProductRepository,
+};
 
 #[derive(Clone)]
 pub struct ProductService {
-    db: DatabaseConnection,
-    repo: SQLiteProductRepository,
+    db: Option<DatabaseConnection>,
+    repo: ProductRepository,
 }
 
 impl ProductService {
     pub fn new(db: DatabaseConnection) -> Self {
+        Self::new_sqlite(db)
+    }
+
+    pub fn new_sqlite(db: DatabaseConnection) -> Self {
         Self {
-            repo: SQLiteProductRepository::new(db.clone()),
-            db,
+            repo: ProductRepository::SQLite(SQLiteProductRepository::new(db.clone())),
+            db: Some(db),
+        }
+    }
+
+    pub fn new_postgres(pool: sqlx::PgPool) -> Self {
+        Self {
+            repo: ProductRepository::Postgres(PostgresProductRepository::new(pool)),
+            db: None,
         }
     }
 
@@ -43,40 +56,49 @@ impl ProductService {
         }
 
         let product_id = Uuid::new_v4().to_string();
-        let product = self.repo.create_product(&product_id, &dto).await?;
 
-        // Optional opening stock initialization
-        if let (Some(qty), Some(branch_id)) = (dto.initial_quantity, dto.branch_id) {
-            if qty > 0 {
-                let now = Utc::now().to_rfc3339();
-                let pid = product_id.clone();
-                let bid = branch_id.clone();
-                let uid = user_id.map(|s| s.to_string());
+        match &self.repo {
+            ProductRepository::Postgres(pg_repo) => {
+                pg_repo.create_product_with_initial_stock(&product_id, &dto, user_id).await
+            }
+            ProductRepository::SQLite(sqlite_repo) => {
+                let product = sqlite_repo.create_product(&product_id, &dto).await?;
 
-                with_transaction(&self.db, move |tx| {
-                    SQLiteInventoryRepository::set_stock_in_tx(tx, &pid, &bid, qty, &now)?;
+                if let (Some(qty), Some(branch_id)) = (dto.initial_quantity, dto.branch_id) {
+                    if qty > 0 {
+                        let now = Utc::now().to_rfc3339();
+                        let pid = product_id.clone();
+                        let bid = branch_id.clone();
+                        let uid = user_id.map(|s| s.to_string());
 
-                    let movement = StockMovement {
-                        id: Uuid::new_v4().to_string(),
-                        product_id: pid,
-                        branch_id: bid,
-                        movement_type: StockMovementType::In,
-                        quantity: qty,
-                        previous_stock: 0,
-                        resulting_stock: qty,
-                        reason: Some("Opening Stock".to_string()),
-                        performed_by: uid,
-                        reference_id: Some("OPENING_BALANCE".to_string()),
-                        created_at: now,
-                    };
-                    SQLiteInventoryRepository::insert_movement_in_tx(tx, &movement)?;
-                    Ok(())
-                })
-                .await?;
+                        if let Some(ref db) = self.db {
+                            with_transaction(db, move |tx| {
+                                SQLiteInventoryRepository::set_stock_in_tx(tx, &pid, &bid, qty, &now)?;
+
+                                let movement = StockMovement {
+                                    id: Uuid::new_v4().to_string(),
+                                    product_id: pid,
+                                    branch_id: bid,
+                                    movement_type: StockMovementType::In,
+                                    quantity: qty,
+                                    previous_stock: 0,
+                                    resulting_stock: qty,
+                                    reason: Some("Opening Stock".to_string()),
+                                    performed_by: uid,
+                                    reference_id: Some("OPENING_BALANCE".to_string()),
+                                    created_at: now,
+                                };
+                                SQLiteInventoryRepository::insert_movement_in_tx(tx, &movement)?;
+                                Ok(())
+                            })
+                            .await?;
+                        }
+                    }
+                }
+
+                Ok(product)
             }
         }
-
-        Ok(product)
     }
 
     pub async fn update_product(&self, id: &str, dto: UpdateProductDto) -> AppResult<Product> {

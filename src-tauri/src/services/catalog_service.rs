@@ -3,17 +3,27 @@ use uuid::Uuid;
 use crate::db::connection::DatabaseConnection;
 use crate::domain::catalog::{Brand, Category, CreateBrandDto, CreateCategoryDto, CreateUnitDto, Unit, UpdateBrandDto, UpdateCategoryDto, UpdateUnitDto};
 use crate::errors::{AppError, AppResult};
-use crate::repositories::SQLiteCatalogRepository;
+use crate::repositories::{CatalogRepository, PostgresCatalogRepository, SQLiteCatalogRepository};
 
 #[derive(Clone)]
 pub struct CatalogService {
-    repo: SQLiteCatalogRepository,
+    repo: CatalogRepository,
 }
 
 impl CatalogService {
     pub fn new(db: DatabaseConnection) -> Self {
+        Self::new_sqlite(db)
+    }
+
+    pub fn new_sqlite(db: DatabaseConnection) -> Self {
         Self {
-            repo: SQLiteCatalogRepository::new(db),
+            repo: CatalogRepository::SQLite(SQLiteCatalogRepository::new(db)),
+        }
+    }
+
+    pub fn new_postgres(pool: sqlx::PgPool) -> Self {
+        Self {
+            repo: CatalogRepository::Postgres(PostgresCatalogRepository::new(pool)),
         }
     }
 

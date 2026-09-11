@@ -5,24 +5,32 @@ use crate::domain::profit::{
     SaleProfitabilityDto,
 };
 use crate::errors::{AppError, AppResult};
-use crate::repositories::profit_repository::SQLiteProfitRepository;
+use crate::repositories::{
+    PostgresProfitRepository, ProfitRepository, SQLiteProfitRepository,
+};
 
 use crate::db::connection::DatabaseConnection;
 
 #[derive(Clone)]
 pub struct ProfitService {
-    profit_repo: Arc<SQLiteProfitRepository>,
+    profit_repo: ProfitRepository,
 }
 
 impl ProfitService {
     pub fn new(db: DatabaseConnection) -> Self {
+        Self::new_sqlite(db)
+    }
+
+    pub fn new_sqlite(db: DatabaseConnection) -> Self {
         Self {
-            profit_repo: Arc::new(SQLiteProfitRepository::new(db)),
+            profit_repo: ProfitRepository::SQLite(SQLiteProfitRepository::new(db)),
         }
     }
 
-    pub fn with_repo(profit_repo: Arc<SQLiteProfitRepository>) -> Self {
-        Self { profit_repo }
+    pub fn new_postgres(pool: sqlx::PgPool) -> Self {
+        Self {
+            profit_repo: ProfitRepository::Postgres(PostgresProfitRepository::new(pool)),
+        }
     }
 
     /// Fetches aggregated profitability for an optional date range and branch

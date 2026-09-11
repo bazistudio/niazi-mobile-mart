@@ -2,7 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::domain::user::{SanitizedUser, UserStatus};
 use crate::errors::{AppError, AppResult};
-use crate::repositories::SQLiteUserRepository;
+use crate::repositories::{SQLiteUserRepository, UserRepository};
 use crate::services::hasher::verify_credential;
 use crate::state::{AppState, SessionContext};
 
@@ -18,7 +18,7 @@ pub struct AuthService;
 impl AuthService {
     /// Authenticates a staff member using username and login key
     pub async fn login(
-        repo: &SQLiteUserRepository,
+        repo: &UserRepository,
         app_state: &AppState,
         username: &str,
         login_key: &str,

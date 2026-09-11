@@ -14,22 +14,35 @@ use crate::domain::organization::DEFAULT_MAIN_BRANCH_ID;
 use crate::domain::sales::PaymentStatus;
 use crate::errors::{AppError, AppResult};
 use crate::repositories::{
-    BranchRepository, SQLiteCashRepository, SQLiteCustomerRepository, SQLiteSaleRepository,
+    BranchRepository, CustomerRepository, PostgresBranchRepository, PostgresCustomerRepository,
+    SQLiteCashRepository, SQLiteCustomerRepository, SQLiteSaleRepository,
 };
 
 #[derive(Clone)]
 pub struct CustomerService {
-    db: DatabaseConnection,
-    customer_repo: SQLiteCustomerRepository,
+    db: Option<DatabaseConnection>,
+    customer_repo: CustomerRepository,
     branch_repo: BranchRepository,
 }
 
 impl CustomerService {
     pub fn new(db: DatabaseConnection) -> Self {
+        Self::new_sqlite(db)
+    }
+
+    pub fn new_sqlite(db: DatabaseConnection) -> Self {
         Self {
-            customer_repo: SQLiteCustomerRepository::new(db.clone()),
-            branch_repo: BranchRepository::new(db.clone()),
-            db,
+            customer_repo: CustomerRepository::SQLite(SQLiteCustomerRepository::new(db.clone())),
+            branch_repo: BranchRepository::SQLite(crate::repositories::SQLiteBranchRepository::new(db.clone())),
+            db: Some(db),
+        }
+    }
+
+    pub fn new_postgres(pool: sqlx::PgPool) -> Self {
+        Self {
+            customer_repo: CustomerRepository::Postgres(PostgresCustomerRepository::new(pool.clone())),
+            branch_repo: BranchRepository::Postgres(PostgresBranchRepository::new(pool)),
+            db: None,
         }
     }
 
@@ -53,11 +66,17 @@ impl CustomerService {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
 
-        // Atomically generate customer_code inside a transaction
-        let customer_code = with_transaction(&self.db, |tx| {
-            SQLiteCustomerRepository::next_customer_code_in_tx(tx)
-        })
-        .await?;
+        // Atomically generate customer_code
+        let customer_code = match &self.customer_repo {
+            CustomerRepository::Postgres(pg_repo) => pg_repo.next_customer_code().await?,
+            CustomerRepository::SQLite(_) => {
+                let db = self.db.as_ref().expect("SQLite database connection required");
+                with_transaction(db, |tx| {
+                    SQLiteCustomerRepository::next_customer_code_in_tx(tx)
+                })
+                .await?
+            }
+        };
 
         let customer = Customer {
             id,
@@ -147,13 +166,17 @@ impl CustomerService {
     }
 
     /// Records customer payment atomically against receivables and allocates across open sales
-    pub async fn record_payment(
+    pub async fn record_customer_payment(
         &self,
         user_id: Option<&str>,
         dto: RecordCustomerPaymentDto,
     ) -> AppResult<CustomerPaymentResultDto> {
         if dto.amount <= 0 {
             return Err(AppError::Validation("Payment amount must be greater than 0".to_string()));
+        }
+
+        if let CustomerRepository::Postgres(pg_repo) = &self.customer_repo {
+            return pg_repo.record_customer_payment(&dto, user_id).await;
         }
 
         let customer = self.get_customer_by_id(&dto.customer_id).await?;
@@ -177,7 +200,8 @@ impl CustomerService {
             None => DEFAULT_MAIN_BRANCH_ID.to_string(),
         };
 
-        let result = with_transaction(&self.db, move |tx| {
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let result = with_transaction(db, move |tx| {
             // 1. Authoritative current outstanding balance
             let current_balance = SQLiteCustomerRepository::calculate_outstanding_balance_in_tx(tx, &cid)?;
 
