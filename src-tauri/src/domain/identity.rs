@@ -53,6 +53,56 @@ impl RequestIdentity {
         }
         self.access_profile.allowed_actions.iter().any(|a| a == action)
     }
+
+    /// Evaluates effective permissions and returns Ok(()) or AppError::Forbidden (403).
+    /// Enforces: Role Permissions + Individual Overrides = Effective Permissions.
+    pub fn authorize_permission(&self, page: Option<&str>, action: Option<&str>) -> Result<(), crate::errors::AppError> {
+        if self.is_admin() {
+            return Ok(());
+        }
+
+        if let Some(p) = page {
+            if !self.access_profile.has_page_access(p) {
+                return Err(crate::errors::AppError::Forbidden(format!(
+                    "Access denied: You do not have permission to access page '{p}'"
+                )));
+            }
+        }
+
+        if let Some(a) = action {
+            if !self.access_profile.has_action_access(a) {
+                return Err(crate::errors::AppError::Forbidden(format!(
+                    "Access denied: You do not have permission to execute action '{a}'"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validates organization and branch context integrity against trusted request identity.
+    /// Rejects client attempt to access another organization or unauthorized branch.
+    pub fn validate_context(&self, req_org_id: Option<&str>, req_branch_id: Option<&str>) -> Result<(), crate::errors::AppError> {
+        // Validate Organization Context
+        if let Some(org_id) = req_org_id {
+            if org_id != self.organization_id {
+                return Err(crate::errors::AppError::Forbidden(
+                    "Access denied: Cross-organization data access prohibited".to_string(),
+                ));
+            }
+        }
+
+        // Validate Branch Context if user is assigned to a specific branch
+        if let (Some(assigned_branch), Some(target_branch)) = (&self.branch_id, req_branch_id) {
+            if !self.is_admin() && assigned_branch != target_branch {
+                return Err(crate::errors::AppError::Forbidden(
+                    "Access denied: Unauthorized cross-branch access prohibited".to_string(),
+                ));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -81,5 +131,69 @@ mod tests {
         assert!(identity.is_admin());
         assert!(identity.can_access_page("dashboard"));
         assert!(identity.can_perform_action("sale:create"));
+    }
+
+    #[test]
+    fn test_phase4_authorization_and_individual_override_precedence() {
+        // Cashier role default profile: allowed_pages = ["dashboard", "pos", ...]
+        // Add individual override: grant "reports" page, deny "pos" page
+        let mut profile = StaffAccessProfile::cashier_default();
+        profile.allowed_pages.push("reports".to_string());
+        profile.allowed_pages.retain(|p| p != "pos");
+
+        let user = SanitizedUser {
+            id: "usr_cashier_override".to_string(),
+            name: "Cashier Override".to_string(),
+            username: "cashier_ovr".to_string(),
+            role: UserRole::Cashier,
+            status: UserStatus::Active,
+            is_active: true,
+            must_change_password: false,
+            has_pin: false,
+            access_profile: profile,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let identity = RequestIdentity::from_user(&user, 1000);
+
+        // Individual override grant: "reports" -> Ok(())
+        assert!(identity.authorize_permission(Some("reports"), None).is_ok());
+
+        // Individual override deny: "pos" -> Err(AppError::Forbidden)
+        let pos_err = identity.authorize_permission(Some("pos"), None);
+        assert!(pos_err.is_err());
+        assert!(pos_err.unwrap_err().to_string().contains("Access denied"));
+    }
+
+    #[test]
+    fn test_phase4_organization_and_branch_isolation() {
+        let user = SanitizedUser {
+            id: "usr_branch_user".to_string(),
+            name: "Branch Cashier".to_string(),
+            username: "branch_cashier".to_string(),
+            role: UserRole::Cashier,
+            status: UserStatus::Active,
+            is_active: true,
+            must_change_password: false,
+            has_pin: false,
+            access_profile: StaffAccessProfile::cashier_default(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let mut identity = RequestIdentity::from_user(&user, 1000);
+        identity.branch_id = Some("branch_branch1".to_string());
+
+        // Matching org and matching branch -> OK
+        assert!(identity.validate_context(Some("00000000-0000-0000-0000-000000000001"), Some("branch_branch1")).is_ok());
+
+        // Cross-organization tampering -> Err(Forbidden)
+        let org_err = identity.validate_context(Some("other_org_id"), None);
+        assert!(org_err.is_err());
+        assert!(org_err.unwrap_err().to_string().contains("Cross-organization data access prohibited"));
+
+        // Cross-branch tampering -> Err(Forbidden)
+        let branch_err = identity.validate_context(None, Some("unauthorized_branch_2"));
+        assert!(branch_err.is_err());
+        assert!(branch_err.unwrap_err().to_string().contains("Unauthorized cross-branch access prohibited"));
     }
 }
