@@ -1,0 +1,13 @@
+# Docker build ignore patterns
+.git
+.gitignore
+.env
+.env.*
+node_modules
+dist
+build
+scratch
+docs
+frontend
+src-tauri/target
+src-tauri/gen
