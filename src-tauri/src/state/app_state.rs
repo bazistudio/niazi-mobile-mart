@@ -228,6 +228,12 @@ impl AppState {
         self.pg_pool = Some(pool);
         self
     }
+
+    /// Configures explicit JWT_SECRET for stateless TokenManager.
+    pub fn with_jwt_secret(mut self, secret: impl Into<String>) -> Self {
+        self.token_manager = crate::services::TokenManager::with_secret(secret);
+        self
+    }
 }
 
 #[cfg(test)]

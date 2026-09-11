@@ -56,6 +56,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let bind_addr = SocketAddr::from(([0, 0, 0, 0], port));
 
+    // 2b. Require JWT_SECRET environment variable in server mode
+    let jwt_secret = match std::env::var("JWT_SECRET") {
+        Ok(secret) if !secret.trim().is_empty() => secret,
+        _ => {
+            error!("FATAL: JWT_SECRET environment variable is missing or empty.");
+            error!("Stateless JWT authentication requires JWT_SECRET to be configured in server mode.");
+            return Err("JWT_SECRET environment variable is required for server mode".into());
+        }
+    };
+
     // 3. Initialize AppState based on DATABASE_URL environment variable
     //    Cloud mode: DATABASE_URL is set -> PostgreSQL repositories (no SQLite initialization!)
     //    Local dev: DATABASE_URL unset -> SQLite repositories
@@ -64,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(pg_adapter) => {
                 info!("PostgreSQL connection pool ready — pg_mode: active");
                 let pool = pg_adapter.pool().clone();
-                Arc::new(AppState::new_postgres("1.0.1", pool))
+                Arc::new(AppState::new_postgres("1.0.1", pool).with_jwt_secret(&jwt_secret))
             }
             Err(e) => {
                 error!("PostgreSQL initialization failed: {e}");
@@ -76,10 +86,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("DATABASE_URL not set — running in SQLite-only mode (local desktop / dev mode)");
         let db_path = niazi_mobile_mart_lib::db::connection::DatabaseConnection::default_db_path();
         let base_state = match niazi_mobile_mart_lib::db::connection::DatabaseConnection::open_file(db_path) {
-            Ok(db) => AppState::new_sqlite("1.0.1", db),
+            Ok(db) => AppState::new_sqlite("1.0.1", db).with_jwt_secret(&jwt_secret),
             Err(e) => {
                 warn!("Persistent SQLite path unavailable ({e}) — using in-memory SQLite.");
-                AppState::in_memory("1.0.1")
+                AppState::in_memory("1.0.1").with_jwt_secret(&jwt_secret)
             }
         };
         Arc::new(base_state)
