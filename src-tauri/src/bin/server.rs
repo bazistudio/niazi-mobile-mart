@@ -112,6 +112,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/auth/login", axum::routing::post(login_handler))
         .route("/api/auth/logout", axum::routing::post(logout_handler))
         .route("/api/auth/me", get(me_handler))
+        .route("/api/products", get(list_products_handler).post(create_product_handler))
+        .route("/api/products/:id", get(get_product_handler))
+        .route("/api/inventory", get(list_inventory_handler))
+        .route("/api/sales", axum::routing::post(complete_sale_handler))
         .layer(cors)
         .with_state(server_state);
 
@@ -122,6 +126,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("  POST /api/auth/login → {bind_addr}/api/auth/login");
     info!("  POST /api/auth/logout → {bind_addr}/api/auth/logout");
     info!("  GET  /api/auth/me → {bind_addr}/api/auth/me");
+    info!("  GET  /api/products → {bind_addr}/api/products");
+    info!("  POST /api/products → {bind_addr}/api/products");
+    info!("  GET  /api/inventory → {bind_addr}/api/inventory");
+    info!("  POST /api/sales → {bind_addr}/api/sales");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -280,6 +288,100 @@ async fn health_handler(State(state): State<ServerState>) -> impl IntoResponse {
             "version": state.app_state.app_version,
         })),
     )
+}
+
+// ---------------------------------------------------------------------------
+// Domain API Handlers — TRANSPORT ONLY
+// Direct SQL is strictly prohibited. All handlers delegate to AppState services.
+// ---------------------------------------------------------------------------
+
+/// GET /api/products — List products with search filter
+async fn list_products_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Query(filter): axum::extract::Query<niazi_mobile_mart_lib::domain::product::ProductFilter>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("products"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.product_service.list_products(filter).await {
+        Ok(products) => (StatusCode::OK, Json(json!(products))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/products/:id — Get product details
+async fn get_product_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("products"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.product_service.get_product(&id).await {
+        Ok(product) => (StatusCode::OK, Json(json!(product))),
+        Err(e) => (StatusCode::NOT_FOUND, Json(json!({"error": "NOT_FOUND", "message": e.to_string()}))),
+    }
+}
+
+/// POST /api/products — Create new product
+async fn create_product_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::product::CreateProductDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("products"), Some("product:create")) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.product_service.create_product(payload, Some(&auth.0.user_id)).await {
+        Ok(product) => (StatusCode::CREATED, Json(json!(product))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/inventory — List inventory stock map per branch
+async fn list_inventory_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("inventory"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    let branch_id = params.get("branch_id").cloned().unwrap_or_else(|| niazi_mobile_mart_lib::domain::organization::DEFAULT_MAIN_BRANCH_ID.to_string());
+    if let Err(e) = auth.0.validate_context(None, Some(&branch_id)) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.inventory_service.get_stock_map(&branch_id).await {
+        Ok(stock) => (StatusCode::OK, Json(json!(stock))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// POST /api/sales — Complete retail sale checkout
+async fn complete_sale_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::sales::CompleteSaleDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("pos"), Some("pos:sale")) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    if let Err(e) = auth.0.validate_context(None, payload.branch_id.as_deref()) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.sale_service.complete_sale(Some(&auth.0.user_id), payload).await {
+        Ok(result) => (StatusCode::CREATED, Json(json!(result))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "SALE_FAILED", "message": e.to_string()}))),
+    }
 }
 
 // ---------------------------------------------------------------------------
