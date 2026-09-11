@@ -108,6 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    Direct SQL in handlers is PROHIBITED.
     let app = Router::new()
         .route("/api/health", get(health_handler))
+        .route("/api/v1/health", get(health_handler))
         .route("/api/auth/login", axum::routing::post(login_handler))
         .route("/api/auth/logout", axum::routing::post(logout_handler))
         .route("/api/auth/me", get(me_handler))
@@ -120,6 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/purchases", axum::routing::post(complete_purchase_handler))
         .route("/api/expenses", get(list_expenses_handler).post(create_expense_handler))
         .route("/api/reports/profit", get(profit_report_handler))
+        .fallback(spa_fallback_handler)
         .layer(cors)
         .with_state(server_state);
 
@@ -127,6 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(bind_addr).await?;
     info!("Niazi Cloud Run HTTP Server listening on http://{bind_addr}");
     info!("  GET  /api/health → {bind_addr}/api/health");
+    info!("  GET  /api/v1/health → {bind_addr}/api/v1/health");
     info!("  POST /api/auth/login → {bind_addr}/api/auth/login");
     info!("  POST /api/auth/logout → {bind_addr}/api/auth/logout");
     info!("  GET  /api/auth/me → {bind_addr}/api/auth/me");
@@ -142,6 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("  GET  /api/expenses → {bind_addr}/api/expenses");
     info!("  POST /api/expenses → {bind_addr}/api/expenses");
     info!("  GET  /api/reports/profit → {bind_addr}/api/reports/profit");
+    info!("  FALLBACK SPA serving → React dist directory (index.html)");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -588,3 +592,77 @@ async fn shutdown_signal() {
         _ = terminate => { info!("SIGTERM received — shutting down."); },
     }
 }
+
+// ---------------------------------------------------------------------------
+// SPA Static Asset Serving & Fallback Handler
+// Serves built React SPA assets from STATIC_DIR ("frontend/dist" by default).
+// SPA fallback returns index.html for client-side React Router routes.
+// Explicitly rejects unknown /api/* requests with JSON 404.
+// ---------------------------------------------------------------------------
+
+async fn spa_fallback_handler(req: axum::extract::Request) -> impl IntoResponse {
+    let path = req.uri().path().trim_start_matches('/');
+
+    // Safety check: Never let SPA fallback swallow API routes (return 404 JSON for /api/*)
+    if path.starts_with("api/") || path == "api" {
+        return (
+            StatusCode::NOT_FOUND,
+            [("content-type", "application/json")],
+            json!({"error": "NOT_FOUND", "message": "API endpoint not found"}).to_string(),
+        )
+            .into_response();
+    }
+
+    // Resolve file path in frontend/dist
+    let dist_dir = std::env::var("STATIC_DIR").unwrap_or_else(|_| "frontend/dist".to_string());
+    let requested_file = std::path::Path::new(&dist_dir).join(path);
+
+    if requested_file.is_file() {
+        if let Ok(contents) = std::fs::read(&requested_file) {
+            let mime = get_mime_type(&requested_file);
+            return (
+                StatusCode::OK,
+                [("content-type", mime)],
+                contents,
+            )
+                .into_response();
+        }
+    }
+
+    // SPA fallback: Return index.html for frontend client-side routes
+    let index_file = std::path::Path::new(&dist_dir).join("index.html");
+    if let Ok(contents) = std::fs::read(&index_file) {
+        return (
+            StatusCode::OK,
+            [("content-type", "text/html; charset=utf-8")],
+            contents,
+        )
+            .into_response();
+    }
+
+    (
+        StatusCode::NOT_FOUND,
+        [("content-type", "text/plain")],
+        "Static files not built. Please build frontend.".as_bytes().to_vec(),
+    )
+        .into_response()
+}
+
+fn get_mime_type(path: &std::path::Path) -> &'static str {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("html") | Some("htm") => "text/html; charset=utf-8",
+        Some("js") | Some("mjs") => "application/javascript; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("json") => "application/json",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("svg") => "image/svg+xml",
+        Some("ico") => "image/x-icon",
+        Some("woff") => "font/woff",
+        Some("woff2") => "font/woff2",
+        Some("ttf") => "font/ttf",
+        _ => "application/octet-stream",
+    }
+}
+

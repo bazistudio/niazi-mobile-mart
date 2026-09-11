@@ -4,14 +4,18 @@ import { AuthSession } from "@/types/auth/session";
 
 const SESSION_KEY = "niazi_session";
 const LEGACY_SESSION_KEY = "tijarat_session";
+const TOKEN_KEY = "niazi_token";
 
 /**
  * Save session securely in browser storage
  */
-export function setSession(session: AuthSession) {
+export function setSession(session: AuthSession & { token?: string }) {
   if (typeof window === "undefined") return;
 
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  if (session.token) {
+    localStorage.setItem(TOKEN_KEY, session.token);
+  }
 }
 
 /**
@@ -31,6 +35,23 @@ export function getSession(): AuthSession | null {
 }
 
 /**
+ * Get stored Bearer JWT auth token
+ */
+export function getAuthToken(): string | null {
+  if (typeof window === "undefined") return null;
+
+  const directToken = localStorage.getItem(TOKEN_KEY);
+  if (directToken) return directToken;
+
+  const session = getSession();
+  if (session && (session as any).token) {
+    return (session as any).token;
+  }
+
+  return null;
+}
+
+/**
  * Clear session (logout)
  */
 export function clearSession() {
@@ -38,6 +59,7 @@ export function clearSession() {
 
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem(LEGACY_SESSION_KEY);
+  localStorage.removeItem(TOKEN_KEY);
 }
 
 /**
@@ -48,8 +70,6 @@ export function isSessionValid(session: AuthSession | null): boolean {
 
   return session.expiresAt > Date.now();
 }
-
-// Removed getAccessToken and getRefreshToken to prevent mixed sources of truth
 
 /**
  * Get device ID (Browser safe)

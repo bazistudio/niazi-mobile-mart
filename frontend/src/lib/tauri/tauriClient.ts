@@ -85,9 +85,55 @@ export interface AuthResponse {
   session: SessionContext;
 }
 
+import { getAuthToken } from '../auth/core/auth.session';
+
 export const isTauriEnvironment = (): boolean => {
   return typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
 };
+
+const getApiBaseUrl = (): string => {
+  if (typeof window !== 'undefined' && (window as any).__API_BASE_URL__) {
+    return (window as any).__API_BASE_URL__;
+  }
+  return (import.meta as any).env?.VITE_API_BASE_URL || '';
+};
+
+async function httpFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string>),
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const url = `${getApiBaseUrl()}${path}`;
+  const res = await fetch(url, {
+    ...options,
+    headers,
+  });
+
+  if (!res.ok) {
+    let errorMsg = `HTTP Error ${res.status}`;
+    try {
+      const errData = await res.json();
+      if (errData && errData.message) {
+        errorMsg = errData.message;
+      }
+    } catch {
+      // Ignore JSON error
+    }
+    throw new Error(errorMsg);
+  }
+
+  const text = await res.text();
+  if (!text) {
+    return {} as T;
+  }
+  return JSON.parse(text) as T;
+}
 
 export const tauriClient = {
   isTauri: isTauriEnvironment,
@@ -98,13 +144,18 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<HealthResponse>('health_check');
     }
-    return {
-      status: 'ok',
-      app_name: 'Niazi Mobile Mart (Web Fallback)',
-      version: '1.0.1',
-      engine: 'Browser Runtime (Development)',
-      timestamp_ms: Date.now(),
-    };
+    try {
+      const health = await httpFetch<HealthResponse>('/api/health');
+      return health;
+    } catch {
+      return {
+        status: 'ok',
+        app_name: 'Niazi Mobile Mart (Web Fallback)',
+        version: '1.0.1',
+        engine: 'Browser Runtime',
+        timestamp_ms: Date.now(),
+      };
+    }
   },
 
   async ping(message?: string): Promise<string> {
@@ -124,13 +175,39 @@ export const tauriClient = {
         loginKey,
       });
     }
-    throw new Error('Native Tauri environment required for desktop auth');
+    const data = await httpFetch<{ token: string; user: SanitizedUser }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password: loginKey }),
+    });
+
+    if (data.token && typeof window !== 'undefined') {
+      localStorage.setItem('niazi_token', data.token);
+    }
+
+    return {
+      user: data.user,
+      session: {
+        is_authenticated: true,
+        is_locked: false,
+        user_id: data.user.id,
+        username: data.user.username,
+        role: data.user.role,
+        login_time_ms: Date.now(),
+        access_profile: data.user.access_profile,
+      },
+    };
   },
 
   async authLogout(): Promise<void> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('auth_logout');
+      return;
+    }
+    try {
+      await httpFetch('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // Ignore
     }
   },
 
