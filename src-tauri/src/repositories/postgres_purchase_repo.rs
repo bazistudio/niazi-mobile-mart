@@ -3,7 +3,7 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::domain::organization::DEFAULT_MAIN_BRANCH_ID;
-use crate::domain::purchase::{
+use crate::domain::purchases::{
     CompletePurchaseDto, Purchase, PurchaseFilterDto, PurchaseLine, PurchaseResultDto,
 };
 use crate::domain::sales::PaymentStatus;

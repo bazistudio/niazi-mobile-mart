@@ -162,7 +162,6 @@ impl AppState {
         let db = DatabaseConnection::open_file(path).expect("Failed to open persistent SQLite database");
         Self::new_sqlite(app_version, db)
     }
-    }
 
     /// Opens an isolated in-memory database for testing and diagnostics
     pub fn in_memory(app_version: impl Into<String>) -> Self {

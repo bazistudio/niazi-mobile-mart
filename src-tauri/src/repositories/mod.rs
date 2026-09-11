@@ -78,7 +78,7 @@ use crate::domain::inventory::{
 use crate::domain::organization::Branch;
 use crate::domain::product::{CreateProductDto, Product, ProductFilter, UpdateProductDto};
 use crate::domain::profit::ProfitSummaryDto;
-use crate::domain::purchase::{
+use crate::domain::purchases::{
     CompletePurchaseDto, Purchase, PurchaseFilterDto, PurchaseLine, PurchaseResultDto,
 };
 use crate::domain::purchase_return::{
