@@ -144,7 +144,7 @@ impl PostgresPurchaseReturnRepository {
             purchase_id: purchase_id.clone(),
             branch_id: branch_id.clone(),
             supplier_id: Some(supplier_id.clone()),
-            supplier_name_snapshot,
+            supplier_name_snapshot: supplier_name,
             total_amount: total_return_amount,
             settlement_method: settlement_method.clone(),
             status: "COMPLETED".to_string(),

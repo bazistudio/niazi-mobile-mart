@@ -6,7 +6,7 @@ use tokio::sync::RwLock;
 use crate::db::connection::DatabaseConnection;
 use crate::domain::access_control::StaffAccessProfile;
 use crate::domain::user::{User, UserRole};
-use crate::repositories::{BranchRepository, SQLiteUserRepository};
+use crate::repositories::{BranchRepository, SQLiteUserRepository, UserRepository};
 use crate::services::{
     CashService, CatalogService, CustomerService, ExpenseService, InventoryService, ProductService,
     ProfitService, PurchaseReturnService, PurchaseService, SaleService, SalesReturnService, SupplierService,
