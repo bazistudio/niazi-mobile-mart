@@ -77,18 +77,18 @@ use crate::domain::inventory::{
 };
 use crate::domain::organization::Branch;
 use crate::domain::product::{CreateProductDto, Product, ProductFilter, UpdateProductDto};
-use crate::domain::profit::ProfitSummaryDto;
+use crate::domain::profit::DashboardProfitSummaryDto;
 use crate::domain::purchases::{
     CompletePurchaseDto, Purchase, PurchaseFilterDto, PurchaseLine, PurchaseResultDto,
 };
 use crate::domain::purchase_return::{
-    ProcessPurchaseReturnDto, PurchaseReturn, PurchaseReturnFilterDto, PurchaseReturnResultDto,
+    CreatePurchaseReturnDto, PurchaseReturn, PurchaseReturnFilterDto, PurchaseReturnDetailDto,
 };
 use crate::domain::sales::{
     CompleteSaleDto, Sale, SaleFilterDto, SaleLine, SalePayment, SaleResultDto,
 };
 use crate::domain::sales_return::{
-    ProcessSalesReturnDto, SalesReturn, SalesReturnFilterDto, SalesReturnResultDto,
+    CreateSalesReturnDto, SalesReturn, SalesReturnFilterDto, SalesReturnDetailDto,
 };
 use crate::domain::supplier::{
     Supplier, SupplierDetailDto, SupplierFilter, SupplierLedgerEntry, SupplierSummaryDto,
@@ -735,7 +735,7 @@ pub enum CashRepository {
 impl CashRepository {
     pub async fn open_session(
         &self,
-        dto: &OpenSessionDto,
+        dto: &OpenCashSessionDto,
         user_id: Option<&str>,
     ) -> AppResult<crate::domain::cash::CashSession> {
         match self {
@@ -746,7 +746,7 @@ impl CashRepository {
 
     pub async fn close_session(
         &self,
-        dto: &CloseSessionDto,
+        dto: &CloseCashSessionDto,
         user_id: Option<&str>,
     ) -> AppResult<crate::domain::cash::CashSession> {
         match self {
@@ -771,7 +771,7 @@ impl CashRepository {
 
     pub async fn record_movement(
         &self,
-        dto: &RecordCashMovementDto,
+        dto: &CreateCashAdjustmentDto,
         user_id: Option<&str>,
     ) -> AppResult<crate::domain::cash::CashMovement> {
         match self {
@@ -859,9 +859,9 @@ pub enum SalesReturnRepository {
 impl SalesReturnRepository {
     pub async fn process_return(
         &self,
-        dto: &ProcessSalesReturnDto,
+        dto: &CreateSalesReturnDto,
         user_id: Option<&str>,
-    ) -> AppResult<SalesReturnResultDto> {
+    ) -> AppResult<SalesReturnDetailDto> {
         match self {
             Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite uses db transaction in service".into())),
             Self::Postgres(r) => r.process_return(dto, user_id).await,
@@ -892,9 +892,9 @@ pub enum PurchaseReturnRepository {
 impl PurchaseReturnRepository {
     pub async fn process_return(
         &self,
-        dto: &ProcessPurchaseReturnDto,
+        dto: &CreatePurchaseReturnDto,
         user_id: Option<&str>,
-    ) -> AppResult<PurchaseReturnResultDto> {
+    ) -> AppResult<PurchaseReturnDetailDto> {
         match self {
             Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite uses db transaction in service".into())),
             Self::Postgres(r) => r.process_return(dto, user_id).await,
@@ -928,7 +928,7 @@ impl ProfitRepository {
         branch_id: Option<&str>,
         start_date: Option<&str>,
         end_date: Option<&str>,
-    ) -> AppResult<ProfitSummaryDto> {
+    ) -> AppResult<DashboardProfitSummaryDto> {
         match self {
             Self::SQLite(r) => r.get_profit_summary(branch_id, start_date, end_date).await,
             Self::Postgres(r) => r.get_profit_summary(branch_id, start_date, end_date).await,

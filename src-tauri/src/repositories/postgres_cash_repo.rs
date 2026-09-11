@@ -3,8 +3,8 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::domain::cash::{
-    CashMovement, CashMovementDirection, CashMovementType, CashSession, CloseSessionDto,
-    OpenSessionDto, RecordCashMovementDto,
+    CashMovement, CashMovementDirection, CashMovementType, CashSession, CloseCashSessionDto,
+    OpenCashSessionDto, CreateCashAdjustmentDto,
 };
 use crate::errors::{AppError, AppResult};
 
@@ -20,7 +20,7 @@ impl PostgresCashRepository {
 
     pub async fn open_session(
         &self,
-        dto: &OpenSessionDto,
+        dto: &OpenCashSessionDto,
         user_id: Option<&str>,
     ) -> AppResult<CashSession> {
         let existing = self.get_open_session(&dto.branch_id).await?;
@@ -72,7 +72,7 @@ impl PostgresCashRepository {
 
     pub async fn close_session(
         &self,
-        dto: &CloseSessionDto,
+        dto: &CloseCashSessionDto,
         user_id: Option<&str>,
     ) -> AppResult<CashSession> {
         let open_session = self
@@ -173,7 +173,7 @@ impl PostgresCashRepository {
 
     pub async fn record_movement(
         &self,
-        dto: &RecordCashMovementDto,
+        dto: &CreateCashAdjustmentDto,
         user_id: Option<&str>,
     ) -> AppResult<CashMovement> {
         let open_session_id = self

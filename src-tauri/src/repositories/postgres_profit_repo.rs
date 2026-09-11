@@ -1,6 +1,6 @@
 use sqlx::{PgPool, Row};
 
-use crate::domain::profit::ProfitSummaryDto;
+use crate::domain::profit::DashboardProfitSummaryDto;
 use crate::errors::{AppError, AppResult};
 
 #[derive(Clone)]
@@ -18,7 +18,7 @@ impl PostgresProfitRepository {
         branch_id: Option<&str>,
         start_date: Option<&str>,
         end_date: Option<&str>,
-    ) -> AppResult<ProfitSummaryDto> {
+    ) -> AppResult<DashboardProfitSummaryDto> {
         let mut sale_where = String::from("WHERE sale_status = 'COMPLETED'");
         let mut exp_where = String::from("WHERE status = 'COMPLETED'");
         let mut pur_where = String::from("WHERE status = 'COMPLETED'");
@@ -102,17 +102,18 @@ impl PostgresProfitRepository {
             .await
             .unwrap_or((0,));
 
-        Ok(ProfitSummaryDto {
-            gross_revenue,
-            total_sales_count: sales_count.0,
-            returns_amount,
-            net_revenue,
-            cost_of_goods_sold: cogs,
-            gross_profit,
-            total_expenses,
-            net_profit,
-            profit_margin_percent,
-            total_purchases_amount: total_purchases,
+        Ok(DashboardProfitSummaryDto {
+            today: crate::domain::profit::ProfitMetricsDto {
+                gross_revenue,
+                discounts: returns_amount,
+                net_revenue,
+                cogs,
+                gross_profit,
+                gross_margin: profit_margin_percent as i64,
+                orders_count: sales_count.0,
+            },
+            this_month: crate::domain::profit::ProfitMetricsDto::default(),
+            total: crate::domain::profit::ProfitMetricsDto::default(),
         })
     }
 }

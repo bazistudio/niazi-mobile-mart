@@ -3,8 +3,8 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::domain::sales_return::{
-    ProcessSalesReturnDto, SalesReturn, SalesReturnFilterDto, SalesReturnLine,
-    SalesReturnResultDto,
+    CreateSalesReturnDto, SalesReturn, SalesReturnFilterDto, SalesReturnLine,
+    SalesReturnDetailDto,
 };
 use crate::errors::{AppError, AppResult};
 
@@ -20,9 +20,9 @@ impl PostgresSalesReturnRepository {
 
     pub async fn process_return(
         &self,
-        dto: &ProcessSalesReturnDto,
+        dto: &CreateSalesReturnDto,
         user_id: Option<&str>,
-    ) -> AppResult<SalesReturnResultDto> {
+    ) -> AppResult<SalesReturnDetailDto> {
         if dto.items.is_empty() {
             return Err(AppError::Validation("Return cart cannot be empty".to_string()));
         }
@@ -324,7 +324,7 @@ impl PostgresSalesReturnRepository {
 
         tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
 
-        Ok(SalesReturnResultDto {
+        Ok(SalesReturnDetailDto {
             sales_return,
             lines: inserted_lines,
             customer_outstanding_balance: customer_balance_after,

@@ -3,8 +3,8 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::domain::purchase_return::{
-    ProcessPurchaseReturnDto, PurchaseReturn, PurchaseReturnFilterDto, PurchaseReturnLine,
-    PurchaseReturnResultDto,
+    CreatePurchaseReturnDto, PurchaseReturn, PurchaseReturnFilterDto, PurchaseReturnLine,
+    PurchaseReturnDetailDto,
 };
 use crate::errors::{AppError, AppResult};
 
@@ -20,9 +20,9 @@ impl PostgresPurchaseReturnRepository {
 
     pub async fn process_return(
         &self,
-        dto: &ProcessPurchaseReturnDto,
+        dto: &CreatePurchaseReturnDto,
         user_id: Option<&str>,
-    ) -> AppResult<PurchaseReturnResultDto> {
+    ) -> AppResult<PurchaseReturnDetailDto> {
         if dto.items.is_empty() {
             return Err(AppError::Validation("Return items cannot be empty".to_string()));
         }
@@ -329,7 +329,7 @@ impl PostgresPurchaseReturnRepository {
 
         tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
 
-        Ok(PurchaseReturnResultDto {
+        Ok(PurchaseReturnDetailDto {
             purchase_return,
             lines: inserted_lines,
             supplier_outstanding_balance: supplier_balance_after,
