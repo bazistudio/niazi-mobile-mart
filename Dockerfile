@@ -16,7 +16,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy manifest files first to enable layer caching
-COPY src-tauri/Cargo.toml src-tauri/Cargo.lock ./src-tauri/
+COPY src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json src-tauri/build.rs ./src-tauri/
+COPY src-tauri/capabilities ./src-tauri/capabilities
+COPY src-tauri/icons ./src-tauri/icons
+COPY src-tauri/migrations ./src-tauri/migrations
 COPY src-tauri/src ./src-tauri/src
 
 WORKDIR /usr/src/niazi-mobile-mart/src-tauri
