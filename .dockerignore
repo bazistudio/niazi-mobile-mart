@@ -4,10 +4,12 @@
 .env
 .env.*
 node_modules
+frontend/node_modules
+src-tauri/target
+src-tauri/gen
 dist
 build
 scratch
 docs
-frontend
-src-tauri/target
-src-tauri/gen
+
+

@@ -46,7 +46,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .try_init();
 
-    info!("Starting Niazi Mobile Mart Cloud Run HTTP Server (Phase 2)...");
+    info!("Starting Niazi Mobile Mart Cloud Run HTTP Server binary...");
+
+    // 1b. Controlled Migration CLI Command (Option A Production Architecture)
+    // Invoked via `niazi-server migrate` or `niazi-server --migrate`
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 && (args[1] == "migrate" || args[1] == "--migrate") {
+        info!("Running in deliberate PostgreSQL migration mode (Option A)...");
+        let database_url = match std::env::var("DATABASE_URL") {
+            Ok(url) if !url.trim().is_empty() => url,
+            _ => {
+                error!("FATAL: DATABASE_URL environment variable is required to execute migrations.");
+                return Err("DATABASE_URL environment variable is required for migration mode".into());
+            }
+        };
+
+        info!("Connecting to PostgreSQL database for migration...");
+        let pg_adapter = PostgresAdapter::from_url(&database_url).await?;
+        pg_adapter.run_migrations().await?;
+        info!("PostgreSQL database migration completed successfully. Exiting.");
+        return Ok(());
+    }
 
     // 2. Resolve port from $PORT env var (Cloud Run sets this automatically)
     let port: u16 = std::env::var("PORT")
