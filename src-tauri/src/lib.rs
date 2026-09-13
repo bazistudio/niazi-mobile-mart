@@ -18,7 +18,7 @@ pub fn run() {
         )
         .try_init();
 
-    let app_state = AppState::open_default("1.0.1");
+    let app_state = AppState::open_default("1.0.9");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
