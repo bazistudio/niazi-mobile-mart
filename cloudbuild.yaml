@@ -13,7 +13,22 @@ steps:
       - '.'
 
   # ---------------------------------------------------------------------------
-  # Step 2: Deploy Service to Google Cloud Run (Using Immutable Commit SHA)
+  # Step 2: Push Release Tag & Commit SHA Images to Artifact Registry
+  # ---------------------------------------------------------------------------
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Push Release Tag Image'
+    args:
+      - 'push'
+      - 'asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:$TAG_NAME'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Push Commit SHA Image'
+    args:
+      - 'push'
+      - 'asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:$COMMIT_SHA'
+
+  # ---------------------------------------------------------------------------
+  # Step 3: Deploy Service to Google Cloud Run (Using Immutable Commit SHA)
   # ---------------------------------------------------------------------------
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     id: 'Deploy Cloud Run Service'
