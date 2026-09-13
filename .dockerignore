@@ -7,10 +7,8 @@ node_modules
 frontend/node_modules
 src-tauri/target
 src-tauri/gen
-dist
-!frontend/dist
 build
 scratch
 docs
-
-
+!frontend/dist
+!frontend/dist/**

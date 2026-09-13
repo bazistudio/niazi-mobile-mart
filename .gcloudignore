@@ -1,0 +1,13 @@
+# gcloud upload ignore rules
+.git
+.gitignore
+.dockerignore
+.env
+.env.*
+node_modules/
+**/node_modules/
+src-tauri/target/
+src-tauri/gen/
+build/
+scratch/
+docs/
