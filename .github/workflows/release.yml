@@ -1,0 +1,52 @@
+name: Release Windows Application
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+\.[0-9]+\.[0-9]+*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Windows Installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+
+      - name: Install Sub-package Dependencies
+        run: npm --prefix frontend ci
+
+      - name: Build Tauri Desktop Installer
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Niazi Mobile Mart ${{ github.ref_name }}'
+          releaseBody: 'Production release for Niazi Mobile Mart Windows Desktop Application.'
+          releaseDraft: false
+          prerelease: false
+          args: --target x86_64-pc-windows-msvc
