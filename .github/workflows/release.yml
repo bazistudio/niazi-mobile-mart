@@ -35,9 +35,6 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Install Frontend Dependencies
-        run: npm ci
-
-      - name: Install Sub-package Dependencies
         run: npm --prefix frontend ci
 
       - name: Build Tauri Desktop Installer
