@@ -47,11 +47,14 @@ RUN cargo build --release --bin niazi-server
 # ─────────────────────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
 
-# Install CA certificates & OpenSSL runtime
+# Install CA certificates, OpenSSL runtime, and GTK/GLib/WebKit shared libraries required by niazi-server binary
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3 \
     curl \
+    libgtk-3-0 \
+    libglib2.0-0 \
+    libwebkit2gtk-4.1-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create unprivileged non-root app user (UID 10001)
