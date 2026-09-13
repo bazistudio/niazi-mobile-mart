@@ -1,6 +1,21 @@
 # Multi-stage Dockerfile for Niazi Mobile Mart Cloud Run HTTP Server (niazi-server)
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 1: Cargo Rust Backend Builder
+# STAGE 1: Frontend SPA Builder
+# ─────────────────────────────────────────────────────────────────────────────
+FROM node:20-slim AS frontend-builder
+
+WORKDIR /app/frontend
+
+# Copy package manifests first to enable layer caching
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+# Copy frontend source files and build production bundle
+COPY frontend/ ./
+RUN npm run build
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 2: Cargo Rust Backend Builder
 # ─────────────────────────────────────────────────────────────────────────────
 FROM rust:1.88-slim AS builder
 
@@ -28,7 +43,7 @@ WORKDIR /usr/src/niazi-mobile-mart/src-tauri
 RUN cargo build --release --bin niazi-server
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 2: Minimal Production Runtime Container
+# STAGE 3: Minimal Production Runtime Container
 # ─────────────────────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
 
@@ -47,8 +62,8 @@ WORKDIR /app
 # Copy compiled binary from Rust builder stage
 COPY --from=builder /usr/src/niazi-mobile-mart/src-tauri/target/release/niazi-server /app/niazi-server
 
-# Copy compiled frontend production static assets from build context
-COPY frontend/dist /app/frontend/dist
+# Copy compiled frontend production static assets from frontend-builder stage
+COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
 # Set file permissions for appuser
 RUN chown -R appuser:appuser /app
@@ -66,5 +81,3 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:${PORT}/api/health || exit 1
 
 ENTRYPOINT ["/app/niazi-server"]
-
-
