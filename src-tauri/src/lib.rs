@@ -8,7 +8,7 @@ pub mod services;
 pub mod state;
 
 use state::AppState;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 
 pub fn run() {
     // Initialize tracing subscriber for structured native logging
@@ -27,13 +27,10 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let handle = app.handle();
-            let file_menu = Submenu::with_id(
-                handle,
-                "file_menu",
-                "File",
-                true,
-                &[&PredefinedMenuItem::quit(handle, Some("Exit"))?],
-            )?;
+            let file_menu = SubmenuBuilder::new(handle, "File")
+                .id("file_menu")
+                .item(&PredefinedMenuItem::quit(handle, Some("Exit"))?)
+                .build()?;
 
             let check_updates_item = MenuItem::with_id(
                 handle,
@@ -51,17 +48,12 @@ pub fn run() {
                 None::<&str>,
             )?;
 
-            let help_menu = Submenu::with_id(
-                handle,
-                "help_menu",
-                "Help",
-                true,
-                &[
-                    &check_updates_item,
-                    &PredefinedMenuItem::separator(handle)?,
-                    &about_item,
-                ],
-            )?;
+            let help_menu = SubmenuBuilder::new(handle, "Help")
+                .id("help_menu")
+                .item(&check_updates_item)
+                .separator()
+                .item(&about_item)
+                .build()?;
 
             let menu = Menu::with_items(handle, &[&file_menu, &help_menu])?;
             app.set_menu(menu)?;
