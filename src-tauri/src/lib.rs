@@ -8,6 +8,7 @@ pub mod services;
 pub mod state;
 
 use state::AppState;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 
 pub fn run() {
     // Initialize tracing subscriber for structured native logging
@@ -22,6 +23,130 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|app| {
+            let handle = app.handle();
+            let file_menu = Submenu::with_id(
+                handle,
+                "file_menu",
+                "File",
+                true,
+                &[&PredefinedMenuItem::quit(handle, Some("Exit"))?],
+            )?;
+
+            let check_updates_item = MenuItem::with_id(
+                handle,
+                "help_check_updates",
+                "Check for Updates...",
+                true,
+                None::<&str>,
+            )?;
+
+            let about_item = MenuItem::with_id(
+                handle,
+                "help_about",
+                "About Niazi Mobile Mart",
+                true,
+                None::<&str>,
+            )?;
+
+            let help_menu = Submenu::with_id(
+                handle,
+                "help_menu",
+                "Help",
+                true,
+                &[
+                    &check_updates_item,
+                    &PredefinedMenuItem::separator(handle)?,
+                    &about_item,
+                ],
+            )?;
+
+            let menu = Menu::with_items(handle, &[&file_menu, &help_menu])?;
+            app.set_menu(menu)?;
+
+            Ok(())
+        })
+        .on_menu_event(|app_handle, event| match event.id().as_ref() {
+            "help_about" => {
+                let version = app_handle.package_info().version.to_string();
+                let app_name = app_handle.package_info().name.clone();
+                let message = format!(
+                    "{}\nVersion: {}\n\n© 2026 Niazi Mobile Mart\nDesktop ERP & POS System",
+                    app_name, version
+                );
+                let handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                    handle
+                        .dialog()
+                        .message(message)
+                        .title("About Niazi Mobile Mart")
+                        .kind(MessageDialogKind::Info)
+                        .show(|_| {});
+                });
+            }
+            "help_check_updates" => {
+                let handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                    use tauri_plugin_updater::UpdaterExt;
+
+                    match handle.updater() {
+                        Ok(updater_builder) => match updater_builder.check().await {
+                            Ok(Some(update)) => {
+                                let version = update.version.clone();
+                                let body = update
+                                    .body
+                                    .clone()
+                                    .unwrap_or_else(|| "A new release is available.".into());
+                                let msg = format!(
+                                    "A new version ({}) is available!\n\nRelease Notes:\n{}",
+                                    version, body
+                                );
+                                handle
+                                    .dialog()
+                                    .message(msg)
+                                    .title("Update Available")
+                                    .kind(MessageDialogKind::Info)
+                                    .show(|_| {});
+                            }
+                            Ok(None) => {
+                                handle
+                                    .dialog()
+                                    .message(
+                                        "You are running the latest version of Niazi Mobile Mart.",
+                                    )
+                                    .title("Check for Updates")
+                                    .kind(MessageDialogKind::Info)
+                                    .show(|_| {});
+                            }
+                            Err(e) => {
+                                handle
+                                    .dialog()
+                                    .message(format!(
+                                        "Checked configured release endpoint.\nStatus: Up to date or check failed:\n{}",
+                                        e
+                                    ))
+                                    .title("Check for Updates")
+                                    .kind(MessageDialogKind::Info)
+                                    .show(|_| {});
+                            }
+                        },
+                        Err(e) => {
+                            handle
+                                .dialog()
+                                .message(format!("Updater plugin initialization notice:\n{}", e))
+                                .title("Update Check")
+                                .kind(MessageDialogKind::Info)
+                                .show(|_| {});
+                        }
+                    }
+                });
+            }
+            _ => {}
+        })
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::health_check::health_check,
