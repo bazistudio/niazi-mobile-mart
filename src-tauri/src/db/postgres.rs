@@ -63,11 +63,18 @@ impl PostgresAdapter {
         info!("Running PostgreSQL schema migrations...");
         let schema_sql = include_str!("../../migrations/postgres/001_initial_schema.sql");
 
-        // Execute batch SQL statements
-        sqlx::query(schema_sql)
-            .execute(&self.pool)
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            DbError::MigrationError(format!("Failed to begin migration transaction: {e}"))
+        })?;
+
+        sqlx::raw_sql(schema_sql)
+            .execute(&mut *tx)
             .await
             .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migrations: {e}")))?;
+
+        tx.commit().await.map_err(|e| {
+            DbError::MigrationError(format!("Failed to commit migration transaction: {e}"))
+        })?;
 
         info!("PostgreSQL schema migrations applied successfully.");
         Ok(())
