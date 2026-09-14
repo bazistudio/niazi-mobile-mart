@@ -4,4 +4,5 @@ export interface AuthSession {
   expiresAt: number;
   deviceId: string;
   user: AuthUser;
+  token?: string;
 }
