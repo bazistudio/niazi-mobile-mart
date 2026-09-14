@@ -1,0 +1,14 @@
+# GCP Cloud Build ignore rules
+.git
+.gitignore
+.env
+.env.*
+node_modules/
+**/node_modules/
+src-tauri/target/
+src-tauri/gen/
+build/
+scratch/
+docs/
+!frontend/dist
+!frontend/dist/**

@@ -1,0 +1,9 @@
+steps:
+- name: 'ubuntu'
+  script: |
+    echo "=== ROOT FILES ==="
+    ls -la
+    echo "=== FRONTEND FILES ==="
+    ls -la frontend || true
+    echo "=== FRONTEND DIST FILES ==="
+    ls -la frontend/dist || true
