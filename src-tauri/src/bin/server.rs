@@ -94,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(pg_adapter) => {
                 info!("PostgreSQL connection pool ready — pg_mode: active");
                 let pool = pg_adapter.pool().clone();
-                Arc::new(AppState::new_postgres("1.0.9", pool).with_jwt_secret(&jwt_secret))
+                Arc::new(AppState::new_postgres("1.1.0", pool).with_jwt_secret(&jwt_secret))
             }
             Err(e) => {
                 error!("PostgreSQL initialization failed: {e}");
@@ -106,10 +106,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("DATABASE_URL not set — running in SQLite-only mode (local desktop / dev mode)");
         let db_path = niazi_mobile_mart_lib::db::connection::DatabaseConnection::default_db_path();
         let base_state = match niazi_mobile_mart_lib::db::connection::DatabaseConnection::open_file(db_path) {
-            Ok(db) => AppState::new_sqlite("1.0.9", db).with_jwt_secret(&jwt_secret),
+            Ok(db) => AppState::new_sqlite("1.1.0", db).with_jwt_secret(&jwt_secret),
             Err(e) => {
                 warn!("Persistent SQLite path unavailable ({e}) — using in-memory SQLite.");
-                AppState::in_memory("1.0.9").with_jwt_secret(&jwt_secret)
+                AppState::in_memory("1.1.0").with_jwt_secret(&jwt_secret)
             }
         };
         Arc::new(base_state)
