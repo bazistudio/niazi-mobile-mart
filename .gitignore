@@ -37,3 +37,9 @@ tmp/
 
 # Documentation & Local Archives
 docs/
+
+# Keys
+~
+*.key
+*.key.pub
+

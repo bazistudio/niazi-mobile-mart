@@ -40,7 +40,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXkNCnJ3UlZ2OGJ5R3hhaFlZTUJHbVdGdkdvdU8vbERaRFNUWWpSUElBdzN4VG4yMVdrcC9tS3FpNmNVCg==",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZGRUREODE0OEVBQUM2NTIKUldSU3hxcU9GTmp0LzNDN095MnhndU1jQXhKK2V1K2hMeTZlTjhIdW5MVXhVcEJ1THlQYUYwdDcK",
       "endpoints": [
         "https://github.com/bazistudio/niazi-mobile-mart/releases/latest/download/latest.json"
       ]
