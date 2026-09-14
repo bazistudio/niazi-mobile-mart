@@ -76,6 +76,126 @@ impl SQLiteUserRepository {
         Ok(())
     }
 
+    /// Atomically creates the initial administrator user and sets organization initialized = 1 within a single SQLite transaction.
+    pub async fn bootstrap_first_admin(&self, admin_user: User) -> AppResult<()> {
+        let conn_arc = self.db.inner();
+        let mut guard = conn_arc.lock().await;
+
+        let tx = guard
+            .transaction()
+            .map_err(|e| AppError::Database(format!("Failed to begin SQLite bootstrap transaction: {e}")))?;
+
+        // 1. Check initialization state inside transaction
+        let init: i64 = tx
+            .query_row(
+                "SELECT is_initialized FROM organizations WHERE id = '00000000-0000-0000-0000-000000000001'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+
+        if init == 1 {
+            return Err(AppError::Forbidden(
+                "Organization already initialized. Please login.".to_string(),
+            ));
+        }
+
+        // 2. Check username collision inside transaction
+        let existing_count: i64 = tx
+            .query_row(
+                "SELECT count(*) FROM users WHERE LOWER(username) = LOWER(?1)",
+                [&admin_user.username],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+
+        if existing_count > 0 {
+            return Err(AppError::Conflict(format!(
+                "Account with username '{}' already exists",
+                admin_user.username
+            )));
+        }
+
+        // 3. Save admin user
+        let role_str = admin_user.role.to_string();
+        let is_active_int = admin_user.status.to_i32();
+        let must_change_pwd_int = if admin_user.must_change_password { 1 } else { 0 };
+
+        tx.execute(
+            "INSERT INTO users (
+                id, name, username, login_key_hash, pin_hash, role, is_active,
+                failed_pin_attempts, pin_locked_until_ms, failed_login_attempts, login_locked_until_ms,
+                created_at, updated_at, recovery_key_hash, must_change_password
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            rusqlite::params![
+                &admin_user.id,
+                &admin_user.name,
+                &admin_user.username,
+                &admin_user.login_key_hash,
+                &admin_user.pin_hash,
+                &role_str,
+                is_active_int,
+                admin_user.failed_pin_attempts as i32,
+                admin_user.pin_locked_until_ms.map(|v| v as i64),
+                admin_user.failed_login_attempts as i32,
+                admin_user.login_locked_until_ms.map(|v| v as i64),
+                &admin_user.created_at,
+                &admin_user.updated_at,
+                &admin_user.recovery_key_hash,
+                must_change_pwd_int,
+            ],
+        )
+        .map_err(|e| AppError::Database(format!("Failed to save initial admin user: {e}")))?;
+
+        // 4. Save access profile
+        let pages_json = serde_json::to_string(&admin_user.access_profile.allowed_pages)
+            .map_err(|e| AppError::Internal(format!("Failed to serialize allowed_pages: {e}")))?;
+        let actions_json = serde_json::to_string(&admin_user.access_profile.allowed_actions)
+            .map_err(|e| AppError::Internal(format!("Failed to serialize allowed_actions: {e}")))?;
+        let limits = &admin_user.access_profile.limits;
+
+        tx.execute(
+            "INSERT INTO user_access_profiles (
+                user_id, allowed_pages, allowed_actions, max_discount_percent,
+                can_price_override, can_refund, can_void_sale, can_view_profit,
+                created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            rusqlite::params![
+                &admin_user.id,
+                &pages_json,
+                &actions_json,
+                limits.max_discount_percent,
+                if limits.can_price_override { 1 } else { 0 },
+                if limits.can_refund { 1 } else { 0 },
+                if limits.can_void_sale { 1 } else { 0 },
+                if limits.can_view_profit { 1 } else { 0 },
+                &admin_user.created_at,
+                &admin_user.updated_at,
+            ],
+        )
+        .map_err(|e| AppError::Database(format!("Failed to save admin access profile: {e}")))?;
+
+        // 5. Update organizations.is_initialized = 1
+        let rows_affected = tx
+            .execute(
+                "UPDATE organizations SET is_initialized = 1 WHERE id = '00000000-0000-0000-0000-000000000001' AND is_initialized = 0",
+                [],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to mark organization initialized: {e}")))?;
+
+        if rows_affected == 0 {
+            return Err(AppError::Forbidden(
+                "Organization already initialized. Please login.".to_string(),
+            ));
+        }
+
+        // 6. Commit transaction
+        tx.commit()
+            .map_err(|e| AppError::Database(format!("SQLite bootstrap transaction commit failed: {e}")))?;
+
+        Ok(())
+    }
+
     /// Finds a user by their canonical UUID v4
     pub async fn find_by_id(&self, id: &str) -> AppResult<Option<User>> {
         let conn_arc = self.db.inner();

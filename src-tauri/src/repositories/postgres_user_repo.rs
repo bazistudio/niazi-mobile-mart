@@ -57,6 +57,127 @@ impl PostgresUserRepository {
         Ok(())
     }
 
+    /// Atomically creates the initial administrator user and sets organization initialized = 1 within a single transaction.
+    /// Uses row-level locking (FOR UPDATE) to guarantee race safety across concurrent requests.
+    pub async fn bootstrap_first_admin(&self, admin_user: User) -> AppResult<()> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Database(format!("Transaction begin failed: {e}")))?;
+
+        // 1. Lock organizations row FOR UPDATE to serialize concurrent bootstrap requests
+        let row_opt: Option<(i32,)> = sqlx::query_as(
+            "SELECT is_initialized FROM organizations WHERE id = '00000000-0000-0000-0000-000000000001' FOR UPDATE",
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to query organization initialization state: {e}")))?;
+
+        let is_init = row_opt.map_or(false, |r| r.0 == 1);
+        if is_init {
+            return Err(AppError::Forbidden(
+                "Organization already initialized. Please login.".to_string(),
+            ));
+        }
+
+        // 2. Check for username collision inside transaction
+        let existing: Option<(String,)> = sqlx::query_as(
+            "SELECT id FROM users WHERE LOWER(username) = LOWER($1)",
+        )
+        .bind(&admin_user.username)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| AppError::Database(format!("Username check failed: {e}")))?;
+
+        if existing.is_some() {
+            return Err(AppError::Conflict(format!(
+                "Account with username '{}' already exists",
+                admin_user.username
+            )));
+        }
+
+        // 3. Insert user
+        let role_str = admin_user.role.to_string();
+        let is_active_int = admin_user.status.to_i32();
+        let must_change_pwd_int = if admin_user.must_change_password { 1 } else { 0 };
+
+        sqlx::query(
+            "INSERT INTO users (
+                id, name, username, login_key_hash, pin_hash, role, is_active,
+                failed_pin_attempts, pin_locked_until_ms, failed_login_attempts, login_locked_until_ms,
+                created_at, updated_at, recovery_key_hash, must_change_password
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15);",
+        )
+        .bind(&admin_user.id)
+        .bind(&admin_user.name)
+        .bind(&admin_user.username)
+        .bind(&admin_user.login_key_hash)
+        .bind(&admin_user.pin_hash)
+        .bind(&role_str)
+        .bind(is_active_int)
+        .bind(admin_user.failed_pin_attempts as i32)
+        .bind(admin_user.pin_locked_until_ms.map(|v| v as i64))
+        .bind(admin_user.failed_login_attempts as i32)
+        .bind(admin_user.login_locked_until_ms.map(|v| v as i64))
+        .bind(&admin_user.created_at)
+        .bind(&admin_user.updated_at)
+        .bind(&admin_user.recovery_key_hash)
+        .bind(must_change_pwd_int)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to save initial admin user: {e}")))?;
+
+        // 4. Insert access profile
+        let pages_json = serde_json::to_string(&admin_user.access_profile.allowed_pages)
+            .map_err(|e| AppError::Internal(format!("Failed to serialize allowed_pages: {e}")))?;
+        let actions_json = serde_json::to_string(&admin_user.access_profile.allowed_actions)
+            .map_err(|e| AppError::Internal(format!("Failed to serialize allowed_actions: {e}")))?;
+        let limits = &admin_user.access_profile.limits;
+
+        sqlx::query(
+            "INSERT INTO user_access_profiles (
+                user_id, allowed_pages, allowed_actions, max_discount_percent,
+                can_price_override, can_refund, can_void_sale, can_view_profit,
+                created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);",
+        )
+        .bind(&admin_user.id)
+        .bind(&pages_json)
+        .bind(&actions_json)
+        .bind(limits.max_discount_percent)
+        .bind(if limits.can_price_override { 1 } else { 0 })
+        .bind(if limits.can_refund { 1 } else { 0 })
+        .bind(if limits.can_void_sale { 1 } else { 0 })
+        .bind(if limits.can_view_profit { 1 } else { 0 })
+        .bind(&admin_user.created_at)
+        .bind(&admin_user.updated_at)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to save admin access profile: {e}")))?;
+
+        // 5. Update organization initialization state
+        let update_res = sqlx::query(
+            "UPDATE organizations SET is_initialized = 1 WHERE id = '00000000-0000-0000-0000-000000000001' AND is_initialized = 0",
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to mark organization initialized: {e}")))?;
+
+        if update_res.rows_affected() == 0 {
+            return Err(AppError::Forbidden(
+                "Organization already initialized. Please login.".to_string(),
+            ));
+        }
+
+        // 6. Commit single atomic transaction
+        tx.commit()
+            .await
+            .map_err(|e| AppError::Database(format!("Bootstrap transaction commit failed: {e}")))?;
+
+        Ok(())
+    }
+
     pub async fn find_by_id(&self, id: &str) -> AppResult<Option<User>> {
         let sql = "
             SELECT 

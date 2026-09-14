@@ -137,6 +137,13 @@ impl UserRepository {
         }
     }
 
+    pub async fn bootstrap_first_admin(&self, admin_user: User) -> AppResult<()> {
+        match self {
+            Self::SQLite(r) => r.bootstrap_first_admin(admin_user).await,
+            Self::Postgres(r) => r.bootstrap_first_admin(admin_user).await,
+        }
+    }
+
     pub async fn find_by_id(&self, id: &str) -> AppResult<Option<User>> {
         match self {
             Self::SQLite(r) => r.find_by_id(id).await,

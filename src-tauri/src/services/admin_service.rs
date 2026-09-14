@@ -190,8 +190,7 @@ impl AdminService {
         };
 
         let sanitized = admin_user.sanitize();
-        repo.save(admin_user).await?;
-        repo.mark_organization_initialized().await?;
+        repo.bootstrap_first_admin(admin_user).await?;
 
         Ok(BootstrapAdminResponse {
             user: sanitized,
