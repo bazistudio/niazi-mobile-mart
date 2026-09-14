@@ -45,6 +45,37 @@ impl SQLiteUserRepository {
         Ok(count)
     }
 
+    /// Checks whether the Niazi organization has completed its one-time initial setup
+    pub async fn is_organization_initialized(&self) -> AppResult<bool> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        let init: i64 = guard
+            .query_row(
+                "SELECT is_initialized FROM organizations WHERE id = '00000000-0000-0000-0000-000000000001'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+
+        Ok(init == 1)
+    }
+
+    /// Marks the Niazi organization initial setup permanently complete
+    pub async fn mark_organization_initialized(&self) -> AppResult<()> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        guard
+            .execute(
+                "UPDATE organizations SET is_initialized = 1 WHERE id = '00000000-0000-0000-0000-000000000001'",
+                [],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to mark organization initialized: {e}")))?;
+
+        Ok(())
+    }
+
     /// Finds a user by their canonical UUID v4
     pub async fn find_by_id(&self, id: &str) -> AppResult<Option<User>> {
         let conn_arc = self.db.inner();

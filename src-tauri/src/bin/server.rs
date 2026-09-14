@@ -129,9 +129,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/api/health", get(health_handler))
         .route("/api/v1/health", get(health_handler))
+        .route("/api/auth/bootstrap-status", get(bootstrap_status_handler))
+        .route("/api/v1/auth/bootstrap-status", get(bootstrap_status_handler))
+        .route("/api/auth/bootstrap-first-admin", axum::routing::post(bootstrap_first_admin_handler))
+        .route("/api/v1/auth/bootstrap-first-admin", axum::routing::post(bootstrap_first_admin_handler))
         .route("/api/auth/login", axum::routing::post(login_handler))
+        .route("/api/v1/auth/login", axum::routing::post(login_handler))
         .route("/api/auth/logout", axum::routing::post(logout_handler))
+        .route("/api/v1/auth/logout", axum::routing::post(logout_handler))
         .route("/api/auth/me", get(me_handler))
+        .route("/api/v1/auth/me", get(me_handler))
+        .route("/api/users", get(list_users_handler).post(create_user_handler))
+        .route("/api/v1/users", get(list_users_handler).post(create_user_handler))
         .route("/api/products", get(list_products_handler).post(create_product_handler))
         .route("/api/products/:id", get(get_product_handler))
         .route("/api/inventory", get(list_inventory_handler))
@@ -303,6 +312,81 @@ async fn me_handler(
             "identity": auth.0,
         })),
     )
+}
+
+/// GET /api/v1/auth/bootstrap-status
+async fn bootstrap_status_handler(State(state): State<ServerState>) -> impl IntoResponse {
+    use niazi_mobile_mart_lib::services::AdminService;
+    match AdminService::check_bootstrap_status(&state.app_state.user_repo).await {
+        Ok(needs_bootstrap) => (
+            StatusCode::OK,
+            Json(json!({
+                "initialized": !needs_bootstrap,
+                "is_bootstrap_required": needs_bootstrap
+            })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "CHECK_FAILED", "message": e.to_string()})),
+        ),
+    }
+}
+
+/// POST /api/v1/auth/bootstrap-first-admin
+async fn bootstrap_first_admin_handler(
+    State(state): State<ServerState>,
+    Json(payload): Json<niazi_mobile_mart_lib::services::admin_service::BootstrapAdminPayload>,
+) -> impl IntoResponse {
+    use niazi_mobile_mart_lib::services::AdminService;
+    match AdminService::bootstrap_first_admin(&state.app_state.user_repo, payload).await {
+        Ok(res) => (StatusCode::CREATED, Json(json!(res))),
+        Err(e) => {
+            let status = match e {
+                niazi_mobile_mart_lib::errors::AppError::Forbidden(_) => StatusCode::FORBIDDEN,
+                niazi_mobile_mart_lib::errors::AppError::Conflict(_) => StatusCode::CONFLICT,
+                _ => StatusCode::BAD_REQUEST,
+            };
+            (
+                status,
+                Json(json!({"error": "BOOTSTRAP_FAILED", "message": e.to_string()})),
+            )
+        }
+    }
+}
+
+/// POST /api/v1/users — Create staff user (Admin only)
+async fn create_user_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::services::admin_service::CreateUserPayload>,
+) -> impl IntoResponse {
+    use niazi_mobile_mart_lib::services::AdminService;
+    if let Err(e) = AdminService::ensure_admin(&state.app_state).await {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match AdminService::create_user(&state.app_state.user_repo, &state.app_state, payload).await {
+        Ok(user) => (StatusCode::CREATED, Json(json!(user))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_USER_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/v1/users — List all users (Admin/Manager)
+async fn list_users_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("users"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.user_repo.list_all().await {
+        Ok(users) => {
+            let sanitized: Vec<_> = users.into_iter().map(|u| u.sanitize()).collect();
+            (StatusCode::OK, Json(json!(sanitized)))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
 }
 
 /// GET /api/health

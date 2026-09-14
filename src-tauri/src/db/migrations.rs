@@ -659,6 +659,18 @@ pub const MIGRATIONS: &[Migration] = &[
         WHERE cost_price_snapshot = 0;
         "#,
     },
+    Migration {
+        version: 11,
+        name: "011_add_organization_is_initialized",
+        up: r#"
+        ALTER TABLE organizations ADD COLUMN is_initialized INTEGER NOT NULL DEFAULT 0;
+
+        -- Mark initialized if active admins already exist
+        UPDATE organizations
+        SET is_initialized = 1
+        WHERE (SELECT COUNT(*) FROM users WHERE role = 'ADMIN' AND is_active = 1) > 0;
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction
@@ -738,7 +750,7 @@ mod tests {
 
         // 1. First run applies migrations (10 total: Core, Product/Inventory, Auth Security, Sales/Invoices, Customers/Ledger, Suppliers/Purchasing, Cash Management/Closing, Returns/Stock Reversal, Product Average Cost, Profitability and COGS)
         let count = MigrationRunner::run(&mut conn).unwrap();
-        assert_eq!(count, 10);
+        assert_eq!(count, 11);
 
         // Verify permanent tables exist (5 from Phase 6 + 6 from Phase 7 + 4 from Phase 14 + 2 from Phase 15 + 4 from Phase 16 + 4 from Phase 17 + 4 from Phase 18 = 29 tables)
         let tables_count: i64 = conn

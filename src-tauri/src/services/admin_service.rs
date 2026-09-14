@@ -110,22 +110,22 @@ impl AdminService {
         Ok(())
     }
 
-    /// Checks whether first-admin bootstrap is required (count active admins == 0)
+    /// Checks whether first-admin bootstrap is required (organization is NOT yet initialized)
     pub async fn check_bootstrap_status(repo: &UserRepository) -> AppResult<bool> {
-        let count = repo.count_active_admins().await?;
-        Ok(count == 0)
+        let is_initialized = repo.is_organization_initialized().await?;
+        Ok(!is_initialized)
     }
 
     /// Creates the very first system administrator with one-time recovery key.
-    /// Strictly locked if an active administrator already exists.
+    /// Permanently locked once organization initial setup has been marked complete.
     pub async fn bootstrap_first_admin(
         repo: &UserRepository,
         payload: BootstrapAdminPayload,
     ) -> AppResult<BootstrapAdminResponse> {
-        let active_admins = repo.count_active_admins().await?;
-        if active_admins > 0 {
+        let is_initialized = repo.is_organization_initialized().await?;
+        if is_initialized {
             return Err(AppError::Forbidden(
-                "Bootstrap is permanently locked: An active administrator already exists."
+                "Bootstrap is permanently locked: Organization initial setup has already been completed."
                     .to_string(),
             ));
         }
@@ -191,6 +191,7 @@ impl AdminService {
 
         let sanitized = admin_user.sanitize();
         repo.save(admin_user).await?;
+        repo.mark_organization_initialized().await?;
 
         Ok(BootstrapAdminResponse {
             user: sanitized,

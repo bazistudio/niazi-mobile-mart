@@ -27,6 +27,68 @@ const getApiBaseUrl = (): string => {
  * In Browser HTTP mode: routes to Axum /api/auth/login and stores JWT.
  */
 export async function loginUser(identifier: string, password: string) {
+  const apiBaseUrl = getApiBaseUrl();
+
+  // 1. If Central API base URL is configured, use Central HTTP API regardless of environment
+  if (apiBaseUrl) {
+    const url = `${apiBaseUrl}/api/v1/auth/login`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        username: identifier,
+        password: password,
+      }),
+    });
+
+    if (!response.ok) {
+      let errMessage = "Invalid credentials or central authentication failure";
+      try {
+        const errData = await response.json();
+        if (errData && errData.message) {
+          errMessage = errData.message;
+        }
+      } catch {
+        // Ignore JSON parse error
+      }
+      throw new Error(errMessage);
+    }
+
+    const data = await response.json();
+    const rawUser = data.user;
+    const token = data.token;
+
+    const user: AuthUser = {
+      id: rawUser.id,
+      name: rawUser.name,
+      username: rawUser.username,
+      email: `${rawUser.username}@local`,
+      role: (rawUser.role ? rawUser.role.toUpperCase() : "STAFF") as any,
+      status: (rawUser.status ? rawUser.status.toLowerCase() : (rawUser.is_active ? "active" : "suspended")) as any,
+      mustChangePassword: rawUser.must_change_password,
+      permissions: rawUser.access_profile ? rawUser.access_profile.allowed_actions : [],
+      createdAt: rawUser.created_at,
+    };
+
+    const session: AuthSession = {
+      expiresAt: Date.now() + 7 * 24 * 3600 * 1000,
+      deviceId: getDeviceId(),
+      user,
+      token: token,
+    };
+
+    setSession(session);
+
+    return {
+      user,
+      token,
+      session,
+    };
+  }
+
+  // 2. Fallback to native Tauri IPC only when API base URL is unset (local SQLite dev mode)
   if (isTauriEnvironment()) {
     const res = await tauriClient.authLogin(identifier, password);
 
@@ -58,8 +120,8 @@ export async function loginUser(identifier: string, password: string) {
     };
   }
 
-  // Web Browser HTTP Mode against Axum API
-  const url = `${getApiBaseUrl()}/api/auth/login`;
+  // Fallback Web Mode
+  const url = `/api/v1/auth/login`;
   const response = await fetch(url, {
     method: "POST",
     headers: {

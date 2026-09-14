@@ -123,6 +123,20 @@ impl UserRepository {
         }
     }
 
+    pub async fn is_organization_initialized(&self) -> AppResult<bool> {
+        match self {
+            Self::SQLite(r) => r.is_organization_initialized().await,
+            Self::Postgres(r) => r.is_organization_initialized().await,
+        }
+    }
+
+    pub async fn mark_organization_initialized(&self) -> AppResult<()> {
+        match self {
+            Self::SQLite(r) => r.mark_organization_initialized().await,
+            Self::Postgres(r) => r.mark_organization_initialized().await,
+        }
+    }
+
     pub async fn find_by_id(&self, id: &str) -> AppResult<Option<User>> {
         match self {
             Self::SQLite(r) => r.find_by_id(id).await,

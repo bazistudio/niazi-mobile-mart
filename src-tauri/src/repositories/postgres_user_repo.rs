@@ -35,6 +35,28 @@ impl PostgresUserRepository {
         Ok(row.0)
     }
 
+    pub async fn is_organization_initialized(&self) -> AppResult<bool> {
+        let row_opt: Option<(i32,)> = sqlx::query_as(
+            "SELECT is_initialized FROM organizations WHERE id = '00000000-0000-0000-0000-000000000001'",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to query organization initialization: {e}")))?;
+
+        Ok(row_opt.map_or(false, |r| r.0 == 1))
+    }
+
+    pub async fn mark_organization_initialized(&self) -> AppResult<()> {
+        sqlx::query(
+            "UPDATE organizations SET is_initialized = 1 WHERE id = '00000000-0000-0000-0000-000000000001'",
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to mark organization initialized: {e}")))?;
+
+        Ok(())
+    }
+
     pub async fn find_by_id(&self, id: &str) -> AppResult<Option<User>> {
         let sql = "
             SELECT 

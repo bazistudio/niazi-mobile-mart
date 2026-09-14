@@ -14,12 +14,13 @@ CREATE TABLE IF NOT EXISTS organizations (
     name TEXT NOT NULL,
     currency TEXT NOT NULL DEFAULT 'PKR',
     currency_symbol TEXT NOT NULL DEFAULT 'Rs',
+    is_initialized INT NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 
-INSERT INTO organizations (id, name, currency, currency_symbol, created_at, updated_at)
-VALUES ('00000000-0000-0000-0000-000000000001', 'Niazi Mobile Mart', 'PKR', 'Rs', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+INSERT INTO organizations (id, name, currency, currency_symbol, is_initialized, created_at, updated_at)
+VALUES ('00000000-0000-0000-0000-000000000001', 'Niazi Mobile Mart', 'PKR', 'Rs', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
 ON CONFLICT (id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS branches (

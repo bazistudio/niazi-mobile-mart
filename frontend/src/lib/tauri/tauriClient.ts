@@ -285,6 +285,10 @@ export const tauriClient = {
 
   // ── First-Run Bootstrap & Password Security ───────────────────────────────
   async authCheckBootstrapStatus(): Promise<boolean> {
+    if (getApiBaseUrl()) {
+      const res = await httpFetch<{ initialized: boolean; is_bootstrap_required: boolean }>('/api/v1/auth/bootstrap-status');
+      return res.is_bootstrap_required;
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<boolean>('auth_check_bootstrap_status');
@@ -293,11 +297,17 @@ export const tauriClient = {
   },
 
   async authBootstrapFirstAdmin(payload: BootstrapAdminPayload): Promise<BootstrapAdminResponse> {
+    if (getApiBaseUrl()) {
+      return await httpFetch<BootstrapAdminResponse>('/api/v1/auth/bootstrap-first-admin', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<BootstrapAdminResponse>('auth_bootstrap_first_admin', { payload });
     }
-    throw new Error('Native Tauri environment required for administrator bootstrap');
+    throw new Error('API Base URL or Native Tauri environment required for administrator bootstrap');
   },
 
   async authChangePassword(currentPassword: string, newPassword: string): Promise<void> {
@@ -326,6 +336,9 @@ export const tauriClient = {
 
   // ── Staff Access Management (Admin) ───────────────────────────────────────
   async adminListUsers(): Promise<SanitizedUser[]> {
+    if (getApiBaseUrl()) {
+      return await httpFetch<SanitizedUser[]>('/api/v1/users');
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<SanitizedUser[]>('admin_list_users');
@@ -374,11 +387,17 @@ export const tauriClient = {
     role: StaffRole;
     access_profile?: StaffAccessProfile;
   }): Promise<SanitizedUser> {
+    if (getApiBaseUrl()) {
+      return await httpFetch<SanitizedUser>('/api/v1/users', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<SanitizedUser>('admin_create_user', { payload });
     }
-    throw new Error('Tauri environment required');
+    throw new Error('API Base URL or Tauri environment required');
   },
 
   async adminUpdateUser(payload: {
