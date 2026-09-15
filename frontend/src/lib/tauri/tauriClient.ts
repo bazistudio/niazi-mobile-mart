@@ -102,8 +102,6 @@ export interface AuthResponse {
 
 import { getAuthToken } from '../auth/core/auth.session';
 
-export const DEFAULT_CENTRAL_API_URL = 'https://niazi-server-450917208226.asia-south1.run.app';
-
 export const isTauriEnvironment = (): boolean => {
   return typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
 };
@@ -116,7 +114,7 @@ export const getApiBaseUrl = (): string => {
   if (viteUrl && viteUrl.trim().length > 0) {
     return viteUrl.trim();
   }
-  return DEFAULT_CENTRAL_API_URL;
+  return '';
 };
 
 async function httpFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
