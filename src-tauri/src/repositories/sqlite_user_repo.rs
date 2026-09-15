@@ -58,7 +58,24 @@ impl SQLiteUserRepository {
             )
             .unwrap_or(0);
 
-        Ok(init == 1)
+        if init == 1 {
+            return Ok(true);
+        }
+
+        // HEURISTIC GUARANTEE: If users table already has user accounts, org IS initialized!
+        let user_count: i64 = guard
+            .query_row("SELECT count(*) FROM users", [], |r| r.get(0))
+            .unwrap_or(0);
+
+        if user_count > 0 {
+            let _ = guard.execute(
+                "UPDATE organizations SET is_initialized = 1 WHERE id = '00000000-0000-0000-0000-000000000001'",
+                [],
+            );
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 
     /// Marks the Niazi organization initial setup permanently complete

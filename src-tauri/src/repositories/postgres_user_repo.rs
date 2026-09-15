@@ -43,7 +43,25 @@ impl PostgresUserRepository {
         .await
         .map_err(|e| AppError::Database(format!("Failed to query organization initialization: {e}")))?;
 
-        Ok(row_opt.map_or(false, |r| r.0 == 1))
+        if row_opt.map_or(false, |r| r.0 == 1) {
+            return Ok(true);
+        }
+
+        let user_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or((0,));
+
+        if user_count.0 > 0 {
+            let _ = sqlx::query(
+                "UPDATE organizations SET is_initialized = 1 WHERE id = '00000000-0000-0000-0000-000000000001'",
+            )
+            .execute(&self.pool)
+            .await;
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 
     pub async fn mark_organization_initialized(&self) -> AppResult<()> {

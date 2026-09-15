@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   Download,
   RefreshCw,
@@ -9,77 +9,18 @@ import {
   Sparkles,
   ShieldCheck,
 } from 'lucide-react';
-import {
-  tauriClient,
-  UpdateCheckResponse,
-  UpdateProgressPayload,
-} from '@/lib/tauri/tauriClient';
-
-type ModalState =
-  | 'IDLE'
-  | 'CHECKING'
-  | 'NO_UPDATE'
-  | 'UPDATE_AVAILABLE'
-  | 'DOWNLOADING'
-  | 'INSTALLING'
-  | 'READY'
-  | 'ERROR';
+import { useUpdater } from '@/context/UpdaterContext';
+import { tauriClient } from '@/lib/tauri/tauriClient';
 
 const FALLBACK_URL = 'https://github.com/bazistudio/niazi-mobile-mart/releases/latest';
 
 export const UpdateModal: React.FC = () => {
-  const [isOpen, setIsOpen] = useState<boolean>(false);
-  const [modalState, setModalState] = useState<ModalState>('IDLE');
-  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResponse | null>(null);
-  const [progress, setProgress] = useState<UpdateProgressPayload | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string>('');
+  const { state, checkUpdate, startDownload, restartAndInstall, closeModal } = useUpdater();
 
-  // Format byte values nicely into MB
+  if (!state.isModalOpen) return null;
+
   const formatMB = (bytes: number): string => {
     return (bytes / (1024 * 1024)).toFixed(1);
-  };
-
-  const handleCheckUpdate = async () => {
-    setIsOpen(true);
-    setModalState('CHECKING');
-    setErrorMessage('');
-    setProgress(null);
-
-    try {
-      const res = await tauriClient.checkAppUpdate();
-      setUpdateInfo(res);
-      if (res.available) {
-        setModalState('UPDATE_AVAILABLE');
-      } else {
-        setModalState('NO_UPDATE');
-      }
-    } catch (err: any) {
-      setErrorMessage(err?.message || 'Failed to connect to update server.');
-      setModalState('ERROR');
-    }
-  };
-
-  const handleStartDownload = async () => {
-    setModalState('DOWNLOADING');
-    setErrorMessage('');
-    try {
-      await tauriClient.downloadAndInstallUpdate();
-      setModalState('READY');
-    } catch (err: any) {
-      setErrorMessage(
-        err?.message || 'Automatic download/installation failed. Please try downloading manually.'
-      );
-      setModalState('ERROR');
-    }
-  };
-
-  const handleRestart = async () => {
-    try {
-      await tauriClient.relaunchApp();
-    } catch (err: any) {
-      setErrorMessage('Failed to restart automatically: ' + (err?.message || 'Unknown error'));
-      setModalState('ERROR');
-    }
   };
 
   const handleOpenManualDownload = async () => {
@@ -89,52 +30,6 @@ export const UpdateModal: React.FC = () => {
       window.open(FALLBACK_URL, '_blank');
     }
   };
-
-  useEffect(() => {
-    let unlistenTrigger: (() => void) | undefined;
-    let unlistenProgress: (() => void) | undefined;
-
-    const setupListeners = async () => {
-      if (!tauriClient.isTauri()) return;
-
-      try {
-        const { listen } = await import('@tauri-apps/api/event');
-
-        // Listen for native menu "Help -> Check for Updates..." trigger
-        unlistenTrigger = await listen('trigger-update-check', () => {
-          handleCheckUpdate();
-        });
-
-        // Listen for download/install progress payload from Rust backend
-        unlistenProgress = await listen<UpdateProgressPayload>('update-progress', (event) => {
-          const payload = event.payload;
-          setProgress(payload);
-
-          if (payload.status === 'downloading') {
-            setModalState('DOWNLOADING');
-          } else if (payload.status === 'installing') {
-            setModalState('INSTALLING');
-          } else if (payload.status === 'completed') {
-            setModalState('READY');
-          } else if (payload.status === 'error') {
-            setErrorMessage(payload.error || 'Update failed during installation.');
-            setModalState('ERROR');
-          }
-        });
-      } catch (e) {
-        console.warn('Failed to attach Tauri event listeners for updater:', e);
-      }
-    };
-
-    setupListeners();
-
-    return () => {
-      if (unlistenTrigger) unlistenTrigger();
-      if (unlistenProgress) unlistenProgress();
-    };
-  }, []);
-
-  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -154,9 +49,9 @@ export const UpdateModal: React.FC = () => {
               </p>
             </div>
           </div>
-          {modalState !== 'DOWNLOADING' && modalState !== 'INSTALLING' && (
+          {state.status !== 'DOWNLOADING' && state.status !== 'INSTALLING' && (
             <button
-              onClick={() => setIsOpen(false)}
+              onClick={closeModal}
               className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200 transition"
             >
               <X className="h-5 w-5" />
@@ -167,7 +62,7 @@ export const UpdateModal: React.FC = () => {
         {/* Content Body */}
         <div className="p-6">
           {/* STATE A: CHECKING */}
-          {modalState === 'CHECKING' && (
+          {state.status === 'CHECKING' && (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <RefreshCw className="h-10 w-10 animate-spin text-teal-600 dark:text-teal-400 mb-4" />
               <h4 className="text-lg font-medium text-gray-900 dark:text-white">
@@ -179,8 +74,8 @@ export const UpdateModal: React.FC = () => {
             </div>
           )}
 
-          {/* STATE B: NO UPDATE */}
-          {modalState === 'NO_UPDATE' && (
+          {/* STATE B: IDLE / NO UPDATE */}
+          {state.status === 'IDLE' && (
             <div className="flex flex-col items-center justify-center py-6 text-center">
               <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 mb-4">
                 <CheckCircle2 className="h-8 w-8" />
@@ -189,12 +84,18 @@ export const UpdateModal: React.FC = () => {
                 You're up to date!
               </h4>
               <p className="mt-1.5 text-sm text-gray-500 dark:text-gray-400">
-                Niazi Mobile Mart v{updateInfo?.current_version || '1.1.3'} is currently the latest version.
+                Niazi Mobile Mart v{state.currentVersion || '1.1.5'} is currently the latest version.
               </p>
-              <div className="mt-6">
+              <div className="mt-6 flex gap-3">
                 <button
-                  onClick={() => setIsOpen(false)}
-                  className="w-32 rounded-xl bg-gray-900 dark:bg-gray-100 py-2.5 text-sm font-medium text-white dark:text-gray-900 shadow hover:bg-gray-800 dark:hover:bg-white transition"
+                  onClick={() => checkUpdate(true)}
+                  className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 py-2.5 px-4 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition"
+                >
+                  Check Again
+                </button>
+                <button
+                  onClick={closeModal}
+                  className="rounded-xl bg-gray-900 dark:bg-gray-100 py-2.5 px-6 text-sm font-medium text-white dark:text-gray-900 shadow hover:bg-gray-800 dark:hover:bg-white transition"
                 >
                   Close
                 </button>
@@ -202,8 +103,8 @@ export const UpdateModal: React.FC = () => {
             </div>
           )}
 
-          {/* STATE C: UPDATE AVAILABLE */}
-          {modalState === 'UPDATE_AVAILABLE' && (
+          {/* STATE C: AVAILABLE */}
+          {state.status === 'AVAILABLE' && (
             <div>
               <div className="flex items-start gap-4">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-teal-500/10 text-teal-600 dark:text-teal-400">
@@ -215,14 +116,14 @@ export const UpdateModal: React.FC = () => {
                       New Release
                     </span>
                     <span className="rounded-full bg-teal-50 dark:bg-teal-950/50 px-2.5 py-0.5 text-xs font-medium text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
-                      v{updateInfo?.version}
+                      v{state.availableVersion}
                     </span>
                   </div>
                   <h4 className="mt-1 text-xl font-bold text-gray-900 dark:text-white">
-                    Version {updateInfo?.version} is available
+                    Version {state.availableVersion} is available
                   </h4>
                   <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    Current installed version: v{updateInfo?.current_version}
+                    Current installed version: v{state.currentVersion}
                   </p>
                 </div>
               </div>
@@ -233,14 +134,14 @@ export const UpdateModal: React.FC = () => {
                   Release Notes
                 </h5>
                 <p className="text-sm text-gray-600 dark:text-gray-300 whitespace-pre-line leading-relaxed max-h-40 overflow-y-auto">
-                  {updateInfo?.body || 'Includes performance optimizations, security enhancements, and multi-terminal capabilities.'}
+                  {state.releaseNotes || 'Includes performance optimizations, security enhancements, and multi-terminal capabilities.'}
                 </p>
               </div>
 
               {/* Action Buttons */}
               <div className="mt-6 flex flex-col sm:flex-row gap-3">
                 <button
-                  onClick={handleStartDownload}
+                  onClick={startDownload}
                   className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-medium py-3 px-4 shadow-lg shadow-teal-600/20 transition active:scale-[0.98]"
                 >
                   <Download className="h-4 w-4" />
@@ -258,17 +159,17 @@ export const UpdateModal: React.FC = () => {
           )}
 
           {/* STATE D: DOWNLOADING */}
-          {modalState === 'DOWNLOADING' && (
+          {state.status === 'DOWNLOADING' && (
             <div className="py-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                   <RefreshCw className="h-4 w-4 animate-spin text-teal-600 dark:text-teal-400" />
-                  Downloading Update...
+                  Downloading Update v{state.availableVersion}...
                 </span>
                 <span className="text-sm font-bold text-teal-600 dark:text-teal-400">
-                  {progress?.percentage != null
-                    ? `${Math.round(progress.percentage)}%`
-                    : formatMB(progress?.downloaded || 0) + ' MB'}
+                  {state.progressPercent != null
+                    ? `${Math.round(state.progressPercent)}%`
+                    : formatMB(state.downloadedBytes) + ' MB'}
                 </span>
               </div>
 
@@ -278,8 +179,8 @@ export const UpdateModal: React.FC = () => {
                   className="h-full bg-gradient-to-r from-teal-500 to-emerald-500 rounded-full transition-all duration-300 ease-out"
                   style={{
                     width: `${
-                      progress?.percentage != null
-                        ? Math.max(5, Math.min(100, progress.percentage))
+                      state.progressPercent != null
+                        ? Math.max(5, Math.min(100, state.progressPercent))
                         : 50
                     }%`,
                   }}
@@ -288,9 +189,9 @@ export const UpdateModal: React.FC = () => {
 
               <div className="flex items-center justify-between mt-3 text-xs text-gray-500 dark:text-gray-400">
                 <span>
-                  {progress?.total
-                    ? `Downloaded ${formatMB(progress.downloaded)} MB of ${formatMB(progress.total)} MB`
-                    : `Downloaded ${formatMB(progress?.downloaded || 0)} MB`}
+                  {state.totalBytes
+                    ? `Downloaded ${formatMB(state.downloadedBytes)} MB of ${formatMB(state.totalBytes)} MB`
+                    : `Downloaded ${formatMB(state.downloadedBytes)} MB`}
                 </span>
                 <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
                   <ShieldCheck className="h-3.5 w-3.5" /> Verifying Minisign signature
@@ -300,7 +201,7 @@ export const UpdateModal: React.FC = () => {
           )}
 
           {/* STATE E: INSTALLING */}
-          {modalState === 'INSTALLING' && (
+          {state.status === 'INSTALLING' && (
             <div className="flex flex-col items-center justify-center py-6 text-center">
               <RefreshCw className="h-10 w-10 animate-spin text-teal-600 dark:text-teal-400 mb-4" />
               <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -313,7 +214,7 @@ export const UpdateModal: React.FC = () => {
           )}
 
           {/* STATE F: READY */}
-          {modalState === 'READY' && (
+          {state.status === 'READY' && (
             <div className="text-center py-4">
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 mb-4">
                 <CheckCircle2 className="h-8 w-8" />
@@ -322,19 +223,19 @@ export const UpdateModal: React.FC = () => {
                 Update Ready to Install!
               </h4>
               <p className="mt-1.5 text-sm text-gray-600 dark:text-gray-300">
-                Version {updateInfo?.version || '1.1.3'} has been downloaded and verified. Restart Niazi Mobile Mart now to apply the update.
+                Version {state.availableVersion} has been downloaded and verified. Restart Niazi Mobile Mart now to apply the update.
               </p>
 
               <div className="mt-6 flex flex-col sm:flex-row gap-3">
                 <button
-                  onClick={handleRestart}
+                  onClick={restartAndInstall}
                   className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold py-3 px-4 shadow-lg shadow-teal-600/20 transition"
                 >
                   <RefreshCw className="h-4 w-4" />
                   Restart & Install Now
                 </button>
                 <button
-                  onClick={() => setIsOpen(false)}
+                  onClick={closeModal}
                   className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-medium py-3 px-4 transition"
                 >
                   Restart Later
@@ -344,7 +245,7 @@ export const UpdateModal: React.FC = () => {
           )}
 
           {/* STATE G: ERROR */}
-          {modalState === 'ERROR' && (
+          {state.status === 'ERROR' && (
             <div>
               <div className="flex items-start gap-3.5">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
@@ -355,14 +256,14 @@ export const UpdateModal: React.FC = () => {
                     Update could not be installed automatically
                   </h4>
                   <p className="mt-1 text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
-                    {errorMessage}
+                    {state.errorMessage || 'An error occurred during update download.'}
                   </p>
                 </div>
               </div>
 
               <div className="mt-6 flex flex-col sm:flex-row gap-3">
                 <button
-                  onClick={handleCheckUpdate}
+                  onClick={() => checkUpdate(true)}
                   className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 dark:bg-gray-100 hover:bg-gray-800 dark:hover:bg-white text-white dark:text-gray-900 font-medium py-2.5 px-4 transition"
                 >
                   <RefreshCw className="h-4 w-4" />
