@@ -1,6 +1,5 @@
 use rusqlite::params;
 use sqlx::PgPool;
-use std::sync::Arc;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -87,8 +86,8 @@ impl SQLiteTerminalRepository {
         let new_id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
 
-        let device_name = hostname::get()
-            .map(|h| h.to_string_lossy().to_string())
+        let device_name = std::env::var("COMPUTERNAME")
+            .or_else(|_| std::env::var("HOSTNAME"))
             .unwrap_or_else(|_| "Niazi Terminal".to_string());
 
         let new_terminal = Terminal {
