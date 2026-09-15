@@ -36,19 +36,34 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Check if system requires initial administrator bootstrap
-  useEffect(() => {
-    async function checkBootstrap() {
-      try {
-        const needsBootstrap = await tauriClient.authCheckBootstrapStatus();
-        if (needsBootstrap) {
-          navigate("/auth/bootstrap", { replace: true });
-        }
-      } catch (err) {
-        console.error("Bootstrap check error:", err);
+  const [isServerUnreachable, setIsServerUnreachable] = useState(false);
+  const [isRetryingServer, setIsRetryingServer] = useState(false);
+
+  // Check if system requires initial administrator bootstrap using Three-State Model
+  const checkCentralBootstrap = async () => {
+    setIsRetryingServer(true);
+    setIsServerUnreachable(false);
+    try {
+      const statusState = await tauriClient.getBootstrapStatusState();
+      if (statusState === "CENTRAL_NOT_INITIALIZED") {
+        navigate("/auth/bootstrap", { replace: true });
+        return;
       }
+      if (statusState === "CENTRAL_UNREACHABLE") {
+        setIsServerUnreachable(true);
+        return;
+      }
+      setIsServerUnreachable(false);
+    } catch (err) {
+      console.error("Bootstrap check error:", err);
+      setIsServerUnreachable(true);
+    } finally {
+      setIsRetryingServer(false);
     }
-    checkBootstrap();
+  };
+
+  useEffect(() => {
+    checkCentralBootstrap();
   }, [navigate]);
 
   const onSubmitLogin = async (e: React.FormEvent) => {
@@ -105,6 +120,27 @@ export function LoginForm() {
               Enter your credentials to access your workspace
             </p>
           </div>
+
+          {/* Central Server Unreachable Alert Banner */}
+          {isServerUnreachable && (
+            <div className="mb-5 p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex flex-col gap-2 shadow-sm">
+              <div className="flex items-center gap-2 font-semibold text-amber-900">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Unable to reach Central Server</span>
+              </div>
+              <p className="text-amber-700">
+                Could not connect to the Niazi Mobile Mart central server. Please verify your internet connection.
+              </p>
+              <button
+                type="button"
+                onClick={checkCentralBootstrap}
+                disabled={isRetryingServer}
+                className="mt-1 self-start px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium shadow-xs transition-colors disabled:opacity-50"
+              >
+                {isRetryingServer ? "Reconnecting..." : "Retry Connection"}
+              </button>
+            </div>
+          )}
 
           <form onSubmit={onSubmitLogin} className="flex flex-col gap-4">
             {/* Identifier field */}

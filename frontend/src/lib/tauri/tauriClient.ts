@@ -102,15 +102,21 @@ export interface AuthResponse {
 
 import { getAuthToken } from '../auth/core/auth.session';
 
+export const DEFAULT_CENTRAL_API_URL = 'https://niazi-server-450917208226.asia-south1.run.app';
+
 export const isTauriEnvironment = (): boolean => {
   return typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
 };
 
-const getApiBaseUrl = (): string => {
+export const getApiBaseUrl = (): string => {
   if (typeof window !== 'undefined' && (window as any).__API_BASE_URL__) {
     return (window as any).__API_BASE_URL__;
   }
-  return (import.meta as any).env?.VITE_API_BASE_URL || '';
+  const viteUrl = (import.meta as any).env?.VITE_API_BASE_URL;
+  if (viteUrl && viteUrl.trim().length > 0) {
+    return viteUrl.trim();
+  }
+  return DEFAULT_CENTRAL_API_URL;
 };
 
 async function httpFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -343,49 +349,47 @@ export const tauriClient = {
   },
 
   // ── First-Run Bootstrap & Password Security ───────────────────────────────
-  async authCheckBootstrapStatus(): Promise<boolean> {
+  /**
+   * Three-State Central Bootstrap Authority Resolution:
+   * - CENTRAL_INITIALIZED: Central org is initialized. Proceed to Login screen.
+   * - CENTRAL_NOT_INITIALIZED: Central org is genuinely uninitialized. Proceed to Initial Admin Setup.
+   * - CENTRAL_UNREACHABLE: Central API is unreachable (network error/offline). Display connection alert banner, NEVER redirect to Setup.
+   */
+  async getBootstrapStatusState(): Promise<'CENTRAL_INITIALIZED' | 'CENTRAL_NOT_INITIALIZED' | 'CENTRAL_UNREACHABLE'> {
     const apiBaseUrl = getApiBaseUrl();
 
     // 1. PRIMARY BOOTSTRAP AUTHORITY: Central API / PostgreSQL
     if (apiBaseUrl) {
       try {
         const res = await httpFetch<{ initialized: boolean; is_bootstrap_required: boolean }>('/api/v1/auth/bootstrap-status');
-        return Boolean(res.is_bootstrap_required);
+        if (res.is_bootstrap_required || !res.initialized) {
+          return 'CENTRAL_NOT_INITIALIZED';
+        }
+        return 'CENTRAL_INITIALIZED';
       } catch (err) {
         console.warn('[AUTH_BOOTSTRAP] Central API unreachable during bootstrap check:', err);
-        // Central API is configured but unreachable.
-        // DO NOT interpret central API network outage as needing bootstrap!
-        // Check if local desktop has existing initialized state.
-        if (isTauriEnvironment()) {
-          try {
-            const { invoke } = await import('@tauri-apps/api/core');
-            const localNeedsBootstrap = await invoke<boolean>('auth_check_bootstrap_status');
-            // If local SQLite is also uninitialized, FAIL CLOSED (do not show Initial Setup when offline)
-            if (localNeedsBootstrap) {
-              console.warn('[AUTH_BOOTSTRAP] Central API offline & fresh local DB. Suppressing setup redirect.');
-              return false;
-            }
-            return false;
-          } catch {
-            return false;
-          }
-        }
-        return false; // Safe fallback: stay on login
+        return 'CENTRAL_UNREACHABLE';
       }
     }
 
-    // 2. NATIVE DESKTOP / LOCAL STANDALONE MODE: Query local IPC
+    // 2. NATIVE DESKTOP / LOCAL STANDALONE FALLBACK: Only when no API URL configured
     if (isTauriEnvironment()) {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
-        return await invoke<boolean>('auth_check_bootstrap_status');
+        const localNeedsBootstrap = await invoke<boolean>('auth_check_bootstrap_status');
+        return localNeedsBootstrap ? 'CENTRAL_NOT_INITIALIZED' : 'CENTRAL_INITIALIZED';
       } catch (err) {
         console.error('[AUTH_BOOTSTRAP] Native IPC bootstrap status check failed:', err);
-        return false;
+        return 'CENTRAL_UNREACHABLE';
       }
     }
 
-    return false;
+    return 'CENTRAL_UNREACHABLE';
+  },
+
+  async authCheckBootstrapStatus(): Promise<boolean> {
+    const state = await this.getBootstrapStatusState();
+    return state === 'CENTRAL_NOT_INITIALIZED';
   },
 
   async authBootstrapFirstAdmin(payload: BootstrapAdminPayload): Promise<BootstrapAdminResponse> {

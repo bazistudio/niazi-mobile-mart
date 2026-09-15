@@ -3,21 +3,7 @@
 import { AuthUser } from "@/types/auth/auth";
 import { AuthSession } from "@/types/auth/session";
 import { setSession, clearSession, getAuthToken, getDeviceId } from "./auth.session";
-import { isTauriEnvironment, tauriClient } from "@/lib/tauri/tauriClient";
-
-export interface LoginResponse {
-  user: AuthUser;
-  token: string;
-  refreshToken?: string;
-  expiresIn?: number; // seconds
-}
-
-const getApiBaseUrl = (): string => {
-  if (typeof window !== "undefined" && (window as any).__API_BASE_URL__) {
-    return (window as any).__API_BASE_URL__;
-  }
-  return (import.meta as any).env?.VITE_API_BASE_URL || "";
-};
+import { isTauriEnvironment, tauriClient, getApiBaseUrl } from "@/lib/tauri/tauriClient";
 
 // ─── Main login ─────────────────────────────────────────────────────────────
 
