@@ -285,14 +285,47 @@ export const tauriClient = {
 
   // ── First-Run Bootstrap & Password Security ───────────────────────────────
   async authCheckBootstrapStatus(): Promise<boolean> {
-    if (getApiBaseUrl()) {
-      const res = await httpFetch<{ initialized: boolean; is_bootstrap_required: boolean }>('/api/v1/auth/bootstrap-status');
-      return res.is_bootstrap_required;
+    const apiBaseUrl = getApiBaseUrl();
+
+    // 1. PRIMARY BOOTSTRAP AUTHORITY: Central API / PostgreSQL
+    if (apiBaseUrl) {
+      try {
+        const res = await httpFetch<{ initialized: boolean; is_bootstrap_required: boolean }>('/api/v1/auth/bootstrap-status');
+        return Boolean(res.is_bootstrap_required);
+      } catch (err) {
+        console.warn('[AUTH_BOOTSTRAP] Central API unreachable during bootstrap check:', err);
+        // Central API is configured but unreachable.
+        // DO NOT interpret central API network outage as needing bootstrap!
+        // Check if local desktop has existing initialized state.
+        if (isTauriEnvironment()) {
+          try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const localNeedsBootstrap = await invoke<boolean>('auth_check_bootstrap_status');
+            // If local SQLite is also uninitialized, FAIL CLOSED (do not show Initial Setup when offline)
+            if (localNeedsBootstrap) {
+              console.warn('[AUTH_BOOTSTRAP] Central API offline & fresh local DB. Suppressing setup redirect.');
+              return false;
+            }
+            return false;
+          } catch {
+            return false;
+          }
+        }
+        return false; // Safe fallback: stay on login
+      }
     }
+
+    // 2. NATIVE DESKTOP / LOCAL STANDALONE MODE: Query local IPC
     if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<boolean>('auth_check_bootstrap_status');
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<boolean>('auth_check_bootstrap_status');
+      } catch (err) {
+        console.error('[AUTH_BOOTSTRAP] Native IPC bootstrap status check failed:', err);
+        return false;
+      }
     }
+
     return false;
   },
 

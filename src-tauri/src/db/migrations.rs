@@ -671,6 +671,44 @@ pub const MIGRATIONS: &[Migration] = &[
         WHERE (SELECT COUNT(*) FROM users WHERE role = 'ADMIN' AND is_active = 1) > 0;
         "#,
     },
+    Migration {
+        version: 12,
+        name: "012_add_terminals_and_offline_sync_queue",
+        up: r#"
+        CREATE TABLE IF NOT EXISTS terminals (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+            branch_id TEXT REFERENCES branches(id) ON DELETE SET NULL,
+            device_name TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            is_offline_terminal INTEGER NOT NULL DEFAULT 0,
+            registered_centrally INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_seen_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS offline_sync_queue (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            client_event_id TEXT NOT NULL UNIQUE CHECK(length(client_event_id) = 36),
+            terminal_id TEXT NOT NULL REFERENCES terminals(id) ON DELETE CASCADE,
+            organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+            branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+            event_type TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            last_attempt_at TEXT,
+            server_event_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sync_queue_status ON offline_sync_queue(status);
+        CREATE INDEX IF NOT EXISTS idx_sync_queue_terminal ON offline_sync_queue(terminal_id);
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction

@@ -12,8 +12,13 @@ pub mod purchase_return;
 pub mod purchases;
 pub mod sales;
 pub mod sales_return;
+pub mod sync_queue;
 pub mod supplier;
+pub mod terminal;
 pub mod user;
+
+pub use sync_queue::{EnqueueOfflineEventDto, SyncQueueItem, SyncQueueStatus};
+pub use terminal::{RegisterTerminalDto, Terminal};
 
 pub use identity::RequestIdentity;
 

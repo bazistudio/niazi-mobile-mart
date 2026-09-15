@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::access_control::StaffAccessProfile;
 use crate::domain::identity::RequestIdentity;
+use crate::domain::organization::NIAZI_ORGANIZATION_ID;
 use crate::domain::user::{SanitizedUser, UserRole};
 use crate::errors::{AppError, AppResult};
 
@@ -59,6 +60,11 @@ impl TokenManager {
     /// Generates a signed JWT Bearer token for an authenticated user.
     /// Default token expiration is set to 24 hours (86,400 seconds).
     pub async fn create_token(&self, user: SanitizedUser) -> String {
+        self.create_token_with_branch(user, None).await
+    }
+
+    /// Generates a signed JWT Bearer token for an authenticated user with branch context.
+    pub async fn create_token_with_branch(&self, user: SanitizedUser, branch_id: Option<String>) -> String {
         let now = current_time_secs();
         let exp = now + 86400; // 24 hours validity
 
@@ -67,7 +73,7 @@ impl TokenManager {
             username: user.username.clone(),
             role: user.role,
             access_profile: user.access_profile.clone(),
-            branch_id: None,
+            branch_id,
             iat: now,
             exp,
         };
@@ -111,7 +117,7 @@ impl TokenManager {
             user_id: claims.sub,
             username: claims.username,
             role: claims.role,
-            organization_id: "00000000-0000-0000-0000-000000000001".to_string(),
+            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
             branch_id: claims.branch_id,
             access_profile: claims.access_profile,
             authenticated_at_ms: (claims.iat as u128) * 1000,

@@ -19,7 +19,7 @@ pub fn run() {
         )
         .try_init();
 
-    let app_state = AppState::open_default("1.1.0");
+    let app_state = AppState::open_default(env!("CARGO_PKG_VERSION"));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -83,6 +83,7 @@ pub fn run() {
                 let handle = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
                     use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                    use tauri_plugin_opener::OpenerExt;
                     use tauri_plugin_updater::UpdaterExt;
 
                     match handle.updater() {
@@ -93,45 +94,75 @@ pub fn run() {
                                     .body
                                     .clone()
                                     .unwrap_or_else(|| "A new release is available.".into());
-                                let msg = format!(
-                                    "A new version ({}) is available!\n\nRelease Notes:\n{}",
-                                    version, body
-                                );
-                                handle
-                                    .dialog()
-                                    .message(msg)
-                                    .title("Update Available")
-                                    .kind(MessageDialogKind::Info)
-                                    .show(|_| {});
+
+                                match update.download_and_install(|_, _| {}, || {}).await {
+                                    Ok(_) => {
+                                        handle
+                                            .dialog()
+                                            .message(format!(
+                                                "Version {} downloaded and installed successfully.\nPlease restart Niazi Mobile Mart to complete the update.\n\nRelease Notes:\n{}",
+                                                version, body
+                                            ))
+                                            .title("Update Installed - Restart Required")
+                                            .kind(MessageDialogKind::Info)
+                                            .show(|_| {});
+                                    }
+                                    Err(install_err) => {
+                                        tracing::warn!("Automatic update download/install failed: {}", install_err);
+                                        let msg = format!(
+                                            "A new version ({}) is available, but automatic installation could not complete:\n{}\n\nOpening the official download page in your browser so you can download the installer manually.",
+                                            version, install_err
+                                        );
+                                        handle
+                                            .dialog()
+                                            .message(msg)
+                                            .title("Update Download Failed - Manual Fallback")
+                                            .kind(MessageDialogKind::Warning)
+                                            .show(|_| {});
+
+                                        let _ = handle.opener().open_url(
+                                            "https://github.com/bazistudio/niazi-mobile-mart/releases/latest",
+                                            None::<&str>,
+                                        );
+                                    }
+                                }
                             }
                             Ok(None) => {
                                 handle
                                     .dialog()
-                                    .message(
-                                        "You are running the latest version of Niazi Mobile Mart.",
-                                    )
-                                    .title("Check for Updates")
-                                    .kind(MessageDialogKind::Info)
-                                    .show(|_| {});
-                            }
-                            Err(e) => {
-                                handle
-                                    .dialog()
                                     .message(format!(
-                                        "Checked configured release endpoint.\nStatus: Up to date or check failed:\n{}",
-                                        e
+                                        "You are running the latest version of Niazi Mobile Mart (v{}).",
+                                        env!("CARGO_PKG_VERSION")
                                     ))
                                     .title("Check for Updates")
                                     .kind(MessageDialogKind::Info)
                                     .show(|_| {});
                             }
+                            Err(e) => {
+                                tracing::warn!("Update check failed: {}", e);
+                                handle
+                                    .dialog()
+                                    .message(format!(
+                                        "Unable to check for updates automatically:\n{}\n\nOpening official release page in your browser...",
+                                        e
+                                    ))
+                                    .title("Check for Updates Failed")
+                                    .kind(MessageDialogKind::Warning)
+                                    .show(|_| {});
+
+                                let _ = handle.opener().open_url(
+                                    "https://github.com/bazistudio/niazi-mobile-mart/releases/latest",
+                                    None::<&str>,
+                                );
+                            }
                         },
                         Err(e) => {
+                            tracing::warn!("Updater plugin error: {}", e);
                             handle
                                 .dialog()
                                 .message(format!("Updater plugin initialization notice:\n{}", e))
-                                .title("Update Check")
-                                .kind(MessageDialogKind::Info)
+                                .title("Update Check Notice")
+                                .kind(MessageDialogKind::Warning)
                                 .show(|_| {});
                         }
                     }
@@ -164,6 +195,9 @@ pub fn run() {
             commands::auth::admin_reject_staff,
             commands::auth::admin_reset_staff_password,
             commands::auth::admin_recover_access,
+            // Terminal Commands
+            commands::terminal::terminal_get_current,
+            commands::terminal::terminal_register,
             // Catalog Commands
             commands::catalog::category_create,
             commands::catalog::category_get,

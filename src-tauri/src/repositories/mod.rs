@@ -11,7 +11,9 @@ pub mod purchase_return_repository;
 pub mod sale_repository;
 pub mod sales_return_repository;
 pub mod sqlite_user_repo;
+pub mod sync_queue_repository;
 pub mod supplier_repository;
+pub mod terminal_repository;
 pub mod user_repository;
 
 pub mod postgres_branch_repo;
@@ -28,6 +30,9 @@ pub mod postgres_sale_repo;
 pub mod postgres_sales_return_repo;
 pub mod postgres_supplier_repo;
 pub mod postgres_user_repo;
+
+pub use sync_queue_repository::SQLiteSyncQueueRepository;
+pub use terminal_repository::{PostgresTerminalRepository, SQLiteTerminalRepository, TerminalRepository};
 
 pub use branch_repository::{BranchRepository as SQLiteBranchRepository, OrganizationDashboardStats};
 pub use cash_repository::SQLiteCashRepository;

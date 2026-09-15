@@ -6,7 +6,10 @@ use tokio::sync::RwLock;
 use crate::db::connection::DatabaseConnection;
 use crate::domain::access_control::StaffAccessProfile;
 use crate::domain::user::{User, UserRole};
-use crate::repositories::{BranchRepository, SQLiteUserRepository, UserRepository};
+use crate::repositories::{
+    BranchRepository, PostgresTerminalRepository, SQLiteSyncQueueRepository, SQLiteTerminalRepository,
+    SQLiteUserRepository, TerminalRepository, UserRepository,
+};
 use crate::services::{
     CashService, CatalogService, CustomerService, ExpenseService, InventoryService, ProductService,
     ProfitService, PurchaseReturnService, PurchaseService, SaleService, SalesReturnService, SupplierService,
@@ -51,6 +54,8 @@ pub struct AppState {
     pub pg_pool: Option<sqlx::PgPool>,
     pub user_repo: UserRepository,
     pub branch_repo: BranchRepository,
+    pub terminal_repo: TerminalRepository,
+    pub sync_queue_repo: Option<SQLiteSyncQueueRepository>,
     pub catalog_service: CatalogService,
     pub product_service: ProductService,
     pub inventory_service: InventoryService,
@@ -72,6 +77,8 @@ impl AppState {
     pub fn new_sqlite(app_version: impl Into<String>, db: DatabaseConnection) -> Self {
         let user_repo = UserRepository::SQLite(SQLiteUserRepository::new(db.clone()));
         let branch_repo = BranchRepository::SQLite(crate::repositories::SQLiteBranchRepository::new(db.clone()));
+        let terminal_repo = TerminalRepository::SQLite(SQLiteTerminalRepository::new(db.clone()));
+        let sync_queue_repo = Some(SQLiteSyncQueueRepository::new(db.clone()));
         let catalog_service = CatalogService::new_sqlite(db.clone());
         let product_service = ProductService::new_sqlite(db.clone());
         let inventory_service = InventoryService::new_sqlite(db.clone());
@@ -92,6 +99,8 @@ impl AppState {
             pg_pool: None,
             user_repo,
             branch_repo,
+            terminal_repo,
+            sync_queue_repo,
             catalog_service,
             product_service,
             inventory_service,
@@ -114,6 +123,7 @@ impl AppState {
     pub fn new_postgres(app_version: impl Into<String>, pool: sqlx::PgPool) -> Self {
         let user_repo = UserRepository::Postgres(crate::repositories::PostgresUserRepository::new(pool.clone()));
         let branch_repo = BranchRepository::Postgres(crate::repositories::PostgresBranchRepository::new(pool.clone()));
+        let terminal_repo = TerminalRepository::Postgres(PostgresTerminalRepository::new(pool.clone()));
         let catalog_service = CatalogService::new_postgres(pool.clone());
         let product_service = ProductService::new_postgres(pool.clone());
         let inventory_service = InventoryService::new_postgres(pool.clone());
@@ -134,6 +144,8 @@ impl AppState {
             pg_pool: Some(pool),
             user_repo,
             branch_repo,
+            terminal_repo,
+            sync_queue_repo: None,
             catalog_service,
             product_service,
             inventory_service,
