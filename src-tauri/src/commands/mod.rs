@@ -14,4 +14,5 @@ pub mod sales;
 pub mod sales_return;
 pub mod supplier;
 pub mod terminal;
+pub mod updater;
 

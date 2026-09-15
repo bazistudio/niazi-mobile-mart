@@ -59,6 +59,21 @@ export interface BootstrapAdminPayload {
   pin?: string;
 }
 
+export interface UpdateCheckResponse {
+  available: boolean;
+  version: string;
+  body?: string | null;
+  current_version: string;
+}
+
+export interface UpdateProgressPayload {
+  downloaded: number;
+  total?: number | null;
+  percentage?: number | null;
+  status: 'downloading' | 'installing' | 'completed' | 'error';
+  error?: string | null;
+}
+
 export interface BootstrapAdminResponse {
   user: SanitizedUser;
   recovery_key: string;
@@ -164,6 +179,50 @@ export const tauriClient = {
       return await invoke<string>('ping', { message });
     }
     return `pong (web fallback): ${message || 'hello'}`;
+  },
+
+  // ── Auto-Updater ─────────────────────────────────────────────────────────
+  async checkAppUpdate(): Promise<UpdateCheckResponse> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<UpdateCheckResponse>('check_app_update');
+    }
+    return {
+      available: false,
+      version: '1.1.3',
+      body: 'Web fallback — updater is active only in native desktop app.',
+      current_version: '1.1.3',
+    };
+  },
+
+  async downloadAndInstallUpdate(): Promise<void> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<void>('download_and_install_update');
+    }
+    throw new Error('Automatic updates are supported in desktop mode only.');
+  },
+
+  async relaunchApp(): Promise<void> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<void>('relaunch_app');
+    }
+    window.location.reload();
+  },
+
+  async openExternalUrl(url: string): Promise<void> {
+    if (isTauriEnvironment()) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke<void>('open_external_url', { url });
+        return;
+      } catch {
+        window.open(url, '_blank');
+        return;
+      }
+    }
+    window.open(url, '_blank');
   },
 
   // ── Native Staff Authentication ───────────────────────────────────────────

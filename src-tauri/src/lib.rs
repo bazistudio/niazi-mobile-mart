@@ -80,93 +80,8 @@ pub fn run() {
                 });
             }
             "help_check_updates" => {
-                let handle = app_handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-                    use tauri_plugin_opener::OpenerExt;
-                    use tauri_plugin_updater::UpdaterExt;
-
-                    match handle.updater() {
-                        Ok(updater_builder) => match updater_builder.check().await {
-                            Ok(Some(update)) => {
-                                let version = update.version.clone();
-                                let body = update
-                                    .body
-                                    .clone()
-                                    .unwrap_or_else(|| "A new release is available.".into());
-
-                                match update.download_and_install(|_, _| {}, || {}).await {
-                                    Ok(_) => {
-                                        handle
-                                            .dialog()
-                                            .message(format!(
-                                                "Version {} downloaded and installed successfully.\nPlease restart Niazi Mobile Mart to complete the update.\n\nRelease Notes:\n{}",
-                                                version, body
-                                            ))
-                                            .title("Update Installed - Restart Required")
-                                            .kind(MessageDialogKind::Info)
-                                            .show(|_| {});
-                                    }
-                                    Err(install_err) => {
-                                        tracing::warn!("Automatic update download/install failed: {}", install_err);
-                                        let msg = format!(
-                                            "A new version ({}) is available, but automatic installation could not complete:\n{}\n\nOpening the official download page in your browser so you can download the installer manually.",
-                                            version, install_err
-                                        );
-                                        handle
-                                            .dialog()
-                                            .message(msg)
-                                            .title("Update Download Failed - Manual Fallback")
-                                            .kind(MessageDialogKind::Warning)
-                                            .show(|_| {});
-
-                                        let _ = handle.opener().open_url(
-                                            "https://github.com/bazistudio/niazi-mobile-mart/releases/latest",
-                                            None::<&str>,
-                                        );
-                                    }
-                                }
-                            }
-                            Ok(None) => {
-                                handle
-                                    .dialog()
-                                    .message(format!(
-                                        "You are running the latest version of Niazi Mobile Mart (v{}).",
-                                        env!("CARGO_PKG_VERSION")
-                                    ))
-                                    .title("Check for Updates")
-                                    .kind(MessageDialogKind::Info)
-                                    .show(|_| {});
-                            }
-                            Err(e) => {
-                                tracing::warn!("Update check failed: {}", e);
-                                handle
-                                    .dialog()
-                                    .message(format!(
-                                        "Unable to check for updates automatically:\n{}\n\nOpening official release page in your browser...",
-                                        e
-                                    ))
-                                    .title("Check for Updates Failed")
-                                    .kind(MessageDialogKind::Warning)
-                                    .show(|_| {});
-
-                                let _ = handle.opener().open_url(
-                                    "https://github.com/bazistudio/niazi-mobile-mart/releases/latest",
-                                    None::<&str>,
-                                );
-                            }
-                        },
-                        Err(e) => {
-                            tracing::warn!("Updater plugin error: {}", e);
-                            handle
-                                .dialog()
-                                .message(format!("Updater plugin initialization notice:\n{}", e))
-                                .title("Update Check Notice")
-                                .kind(MessageDialogKind::Warning)
-                                .show(|_| {});
-                        }
-                    }
-                });
+                use tauri::Emitter;
+                let _ = app_handle.emit("trigger-update-check", ());
             }
             _ => {}
         })
@@ -198,6 +113,11 @@ pub fn run() {
             // Terminal Commands
             commands::terminal::terminal_get_current,
             commands::terminal::terminal_register,
+            // Updater Commands
+            commands::updater::check_app_update,
+            commands::updater::download_and_install_update,
+            commands::updater::relaunch_app,
+            commands::updater::open_external_url,
             // Catalog Commands
             commands::catalog::category_create,
             commands::catalog::category_get,

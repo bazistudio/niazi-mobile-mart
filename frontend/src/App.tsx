@@ -5,6 +5,7 @@ import ReactQueryProvider from '@/components/providers/ReactQueryProvider';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import AuthHydrator from '@/components/auth/AuthHydrator';
 import { GlobalPrintPreviewModal } from '@/lib/printer';
+import { UpdateModal } from '@/components/updater/UpdateModal';
 import { AppRoutes } from '@/routes/AppRoutes';
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
           <AppRoutes />
 
           {/* Global UI Feedback & Overlays */}
+          <UpdateModal />
           <GlobalPrintPreviewModal />
           <Toaster
             position="bottom-right"
