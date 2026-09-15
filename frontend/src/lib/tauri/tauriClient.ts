@@ -102,6 +102,8 @@ export interface AuthResponse {
 
 import { getAuthToken } from '../auth/core/auth.session';
 
+export const DEFAULT_CENTRAL_API_URL = 'https://niazi-server-450917208226.asia-south1.run.app';
+
 export const isTauriEnvironment = (): boolean => {
   return typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
 };
@@ -114,7 +116,7 @@ export const getApiBaseUrl = (): string => {
   if (viteUrl && viteUrl.trim().length > 0) {
     return viteUrl.trim();
   }
-  return '';
+  return DEFAULT_CENTRAL_API_URL;
 };
 
 async function httpFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -349,14 +351,14 @@ export const tauriClient = {
   // ── First-Run Bootstrap & Password Security ───────────────────────────────
   /**
    * Three-State Central Bootstrap Authority Resolution:
-   * - CENTRAL_INITIALIZED: Central org is initialized. Proceed to Login screen.
-   * - CENTRAL_NOT_INITIALIZED: Central org is genuinely uninitialized. Proceed to Initial Admin Setup.
+   * - CENTRAL_INITIALIZED: Central PostgreSQL org is initialized. Proceed to Sign In screen.
+   * - CENTRAL_NOT_INITIALIZED: Central PostgreSQL org is genuinely uninitialized. Proceed to Initial Admin Setup.
    * - CENTRAL_UNREACHABLE: Central API is unreachable (network error/offline). Display connection alert banner, NEVER redirect to Setup.
    */
   async getBootstrapStatusState(): Promise<'CENTRAL_INITIALIZED' | 'CENTRAL_NOT_INITIALIZED' | 'CENTRAL_UNREACHABLE'> {
     const apiBaseUrl = getApiBaseUrl();
 
-    // 1. PRIMARY BOOTSTRAP AUTHORITY: Central API / PostgreSQL
+    // CENTRAL API IS AUTHORITATIVE FOR PRODUCTION BOOTSTRAP & AUTH
     if (apiBaseUrl) {
       try {
         const res = await httpFetch<{ initialized: boolean; is_bootstrap_required: boolean }>('/api/v1/auth/bootstrap-status');
@@ -366,18 +368,6 @@ export const tauriClient = {
         return 'CENTRAL_INITIALIZED';
       } catch (err) {
         console.warn('[AUTH_BOOTSTRAP] Central API unreachable during bootstrap check:', err);
-        return 'CENTRAL_UNREACHABLE';
-      }
-    }
-
-    // 2. NATIVE DESKTOP / LOCAL STANDALONE FALLBACK: Only when no API URL configured
-    if (isTauriEnvironment()) {
-      try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        const localNeedsBootstrap = await invoke<boolean>('auth_check_bootstrap_status');
-        return localNeedsBootstrap ? 'CENTRAL_NOT_INITIALIZED' : 'CENTRAL_INITIALIZED';
-      } catch (err) {
-        console.error('[AUTH_BOOTSTRAP] Native IPC bootstrap status check failed:', err);
         return 'CENTRAL_UNREACHABLE';
       }
     }
