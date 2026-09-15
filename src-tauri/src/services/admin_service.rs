@@ -416,14 +416,12 @@ impl AdminService {
         Ok(users.into_iter().map(|u| u.sanitize()).collect())
     }
 
-    /// Creates a new staff member account (admin only)
-    pub async fn create_user(
+    /// Creates a new staff member account without checking container-local AppState session.
+    /// Caller MUST perform authorization checks (e.g. via RequestIdentity::authorize_permission).
+    pub async fn create_user_direct(
         repo: &UserRepository,
-        app_state: &AppState,
         payload: CreateUserPayload,
     ) -> AppResult<SanitizedUser> {
-        Self::ensure_admin(app_state).await?;
-
         let clean_username = payload.username.trim().to_lowercase();
         if clean_username.is_empty() {
             return Err(AppError::Validation("Username is required".to_string()));
@@ -494,6 +492,16 @@ impl AdminService {
         let sanitized = new_user.sanitize();
         repo.save(new_user).await?;
         Ok(sanitized)
+    }
+
+    /// Creates a new staff member account (admin only) via container session validation
+    pub async fn create_user(
+        repo: &UserRepository,
+        app_state: &AppState,
+        payload: CreateUserPayload,
+    ) -> AppResult<SanitizedUser> {
+        Self::ensure_admin(app_state).await?;
+        Self::create_user_direct(repo, payload).await
     }
 
     /// Updates staff member properties and access profile

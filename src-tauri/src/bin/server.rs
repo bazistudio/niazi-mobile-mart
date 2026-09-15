@@ -361,11 +361,11 @@ async fn create_user_handler(
     Json(payload): Json<niazi_mobile_mart_lib::services::admin_service::CreateUserPayload>,
 ) -> impl IntoResponse {
     use niazi_mobile_mart_lib::services::AdminService;
-    if let Err(e) = AdminService::ensure_admin(&state.app_state).await {
+    if let Err(e) = auth.0.authorize_permission(Some("users"), Some("users:create")) {
         return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
     }
 
-    match AdminService::create_user(&state.app_state.user_repo, &state.app_state, payload).await {
+    match AdminService::create_user_direct(&state.app_state.user_repo, payload).await {
         Ok(user) => (StatusCode::CREATED, Json(json!(user))),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_USER_FAILED", "message": e.to_string()}))),
     }
