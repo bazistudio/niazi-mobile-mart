@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "@/lib/auth/core/auth.store";
 import { loginUser } from "@/lib/auth/core/auth.client";
-import { tauriClient } from "@/lib/tauri/tauriClient";
+import { tauriClient, setCustomApiBaseUrl, getApiBaseUrl } from "@/lib/tauri/tauriClient";
 import type { LoginFormData } from "@/lib/auth/auth.schema";
 import {
   Mail,
@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   CheckCircle2,
   AlertCircle,
+  Settings,
 } from "lucide-react";
 
 export function LoginForm() {
@@ -38,6 +39,8 @@ export function LoginForm() {
 
   const [isServerUnreachable, setIsServerUnreachable] = useState(false);
   const [isRetryingServer, setIsRetryingServer] = useState(false);
+  const [showUrlConfig, setShowUrlConfig] = useState(false);
+  const [customServerUrl, setCustomServerUrl] = useState("");
 
   // Check if system requires initial administrator bootstrap using Three-State Model
   const checkCentralBootstrap = async () => {
@@ -131,14 +134,62 @@ export function LoginForm() {
               <p className="text-amber-700">
                 Could not connect to the Niazi Mobile Mart central server. Please verify your internet connection.
               </p>
-              <button
-                type="button"
-                onClick={checkCentralBootstrap}
-                disabled={isRetryingServer}
-                className="mt-1 self-start px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium shadow-xs transition-colors disabled:opacity-50"
-              >
-                {isRetryingServer ? "Reconnecting..." : "Retry Connection"}
-              </button>
+              {showUrlConfig ? (
+                <div className="mt-2 flex flex-col gap-1.5 p-2.5 rounded-lg bg-white/80 border border-amber-300">
+                  <label className="text-[11px] font-semibold text-amber-900 flex items-center gap-1">
+                    <Settings className="w-3 h-3" />
+                    Central API Endpoint URL:
+                  </label>
+                  <input
+                    type="url"
+                    value={customServerUrl}
+                    onChange={(e) => setCustomServerUrl(e.target.value)}
+                    placeholder="https://niazi-server-860232188829.asia-south1.run.app"
+                    className="w-full px-2.5 py-1.5 bg-slate-50 border border-amber-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                  />
+                  <div className="flex gap-2 mt-1">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setCustomApiBaseUrl(customServerUrl);
+                        await checkCentralBootstrap();
+                      }}
+                      disabled={isRetryingServer}
+                      className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs disabled:opacity-50"
+                    >
+                      Save & Reconnect
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowUrlConfig(false)}
+                      className="px-3 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-1 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={checkCentralBootstrap}
+                    disabled={isRetryingServer}
+                    className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium shadow-xs transition-colors disabled:opacity-50"
+                  >
+                    {isRetryingServer ? "Reconnecting..." : "Retry Connection"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomServerUrl(getApiBaseUrl());
+                      setShowUrlConfig(true);
+                    }}
+                    className="text-amber-700 hover:text-amber-900 underline font-medium text-[11px]"
+                  >
+                    Server Settings
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

@@ -102,15 +102,29 @@ export interface AuthResponse {
 
 import { getAuthToken } from '../auth/core/auth.session';
 
-export const DEFAULT_CENTRAL_API_URL = 'https://niazi-server-450917208226.asia-south1.run.app';
+export const DEFAULT_CENTRAL_API_URL = 'https://niazi-server-860232188829.asia-south1.run.app';
 
 export const isTauriEnvironment = (): boolean => {
   return typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
 };
 
+export const setCustomApiBaseUrl = (url: string): void => {
+  if (typeof window !== 'undefined') {
+    const cleanUrl = url.trim().replace(/\/+$/, '');
+    localStorage.setItem('niazi_api_url', cleanUrl);
+    (window as any).__API_BASE_URL__ = cleanUrl;
+  }
+};
+
 export const getApiBaseUrl = (): string => {
-  if (typeof window !== 'undefined' && (window as any).__API_BASE_URL__) {
-    return (window as any).__API_BASE_URL__;
+  if (typeof window !== 'undefined') {
+    if ((window as any).__API_BASE_URL__) {
+      return (window as any).__API_BASE_URL__;
+    }
+    const storedUrl = localStorage.getItem('niazi_api_url');
+    if (storedUrl && storedUrl.trim().length > 0) {
+      return storedUrl.trim();
+    }
   }
   const viteUrl = (import.meta as any).env?.VITE_API_BASE_URL;
   if (viteUrl && viteUrl.trim().length > 0) {
