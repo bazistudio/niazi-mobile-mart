@@ -220,6 +220,10 @@ export const productService = {
       purchasePrice: updated.purchase_price,
       status: currentStock > 0 ? StockStatus.HEALTHY : StockStatus.OUT_OF_STOCK,
     };
+  },
+
+  deleteProduct: async (id: string): Promise<void> => {
+    await tauriClient.productDeactivate(id);
   }
 };
 

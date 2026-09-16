@@ -25,6 +25,13 @@ export const useProducts = (params: PaginationParams, options?: { enabled?: bool
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => productService.deleteProduct(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+    },
+  });
+
   return {
     products: data?.products || [],
     total: data?.total || 0,
@@ -34,5 +41,7 @@ export const useProducts = (params: PaginationParams, options?: { enabled?: bool
     isCreating: createMutation.isPending,
     updateProduct: updateMutation.mutateAsync,
     isUpdating: updateMutation.isPending,
+    deleteProduct: deleteMutation.mutateAsync,
+    isDeleting: deleteMutation.isPending,
   };
 };

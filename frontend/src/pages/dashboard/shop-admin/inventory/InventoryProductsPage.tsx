@@ -5,11 +5,13 @@ import { useProducts } from '@/features/inventory/hooks/useProducts';
 import { InventoryProduct, StockStatus } from '@/features/inventory/types';
 import { useInventoryUIStore } from '@/features/inventory/store/inventory-ui.store';
 import { ProductEditModal } from '@/features/inventory/product/components/ProductEditModal';
-import { Loader2, Plus, Edit } from 'lucide-react';
+import { ProductDeleteDialog } from '@/features/inventory/product/components/ProductDeleteDialog';
+import { Loader2, Plus, Edit, Trash2 } from 'lucide-react';
 
 export function InventoryProductsPage() {
   const { filters } = useInventoryFilters();
   const [editingProduct, setEditingProduct] = useState<InventoryProduct | null>(null);
+  const [deletingProduct, setDeletingProduct] = useState<InventoryProduct | null>(null);
 
   const { products, isLoading, error } = useProducts({
     page: 1,
@@ -54,14 +56,24 @@ export function InventoryProductsPage() {
       key: 'actions', 
       label: 'Action', 
       render: (row) => (
-        <button
-          type="button"
-          onClick={() => setEditingProduct(row)}
-          className="inline-flex items-center gap-1 text-[#006970] dark:text-[#00B4BB] hover:underline font-semibold cursor-pointer"
-        >
-          <Edit className="w-3.5 h-3.5" />
-          Edit
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setEditingProduct(row)}
+            className="inline-flex items-center gap-1 text-[#006970] dark:text-[#00B4BB] hover:underline font-semibold cursor-pointer"
+          >
+            <Edit className="w-3.5 h-3.5" />
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={() => setDeletingProduct(row)}
+            className="inline-flex items-center gap-1 text-red-600 dark:text-red-400 hover:underline font-semibold cursor-pointer"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Delete
+          </button>
+        </div>
       )
     },
   ];
@@ -103,6 +115,14 @@ export function InventoryProductsPage() {
         <ProductEditModal
           product={editingProduct}
           onClose={() => setEditingProduct(null)}
+        />
+      )}
+
+      {/* Row Hard Delete Dialog with Admin Password Confirmation */}
+      {deletingProduct && (
+        <ProductDeleteDialog
+          product={deletingProduct}
+          onClose={() => setDeletingProduct(null)}
         />
       )}
     </div>
