@@ -213,6 +213,34 @@ function saveStoredWebStockMap(map: Record<string, number>): void {
   }
 }
 
+const WEB_SALES_STORAGE_KEY = 'niazi_web_sales';
+
+interface StoredWebSale {
+  sale: Sale;
+  lines: SaleLine[];
+  payments: SalePayment[];
+}
+
+function getStoredWebSales(): StoredWebSale[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(WEB_SALES_STORAGE_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredWebSales(sales: StoredWebSale[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(WEB_SALES_STORAGE_KEY, JSON.stringify(sales));
+  } catch (e) {
+    console.warn('Failed to save web sales to localStorage:', e);
+  }
+}
+
 export const tauriClient = {
   isTauri: isTauriEnvironment,
 
@@ -1143,7 +1171,106 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<SaleResultDto>('sale_complete', { dto });
     }
-    throw new Error('Tauri environment required');
+    const now = new Date().toISOString();
+    const invoiceNum = `INV-${Math.floor(100000 + Math.random() * 900000)}`;
+    const saleId = `sale_${Date.now()}`;
+
+    let subtotal = 0;
+    const lines: SaleLine[] = [];
+    const products = getStoredWebProducts();
+    const stockMap = getStoredWebStockMap();
+
+    (dto.items || []).forEach((item, idx) => {
+      const prod = products.find((p) => p.id === item.product_id);
+      const unitPrice = prod ? prod.sale_price : 1000;
+      const costPrice = prod ? (prod.purchase_price || prod.average_cost || 800) : 800;
+      const lineDisc = item.discount || 0;
+      const lineTotal = Math.max(0, unitPrice * item.quantity - lineDisc);
+      subtotal += lineTotal;
+
+      lines.push({
+        id: `line_${saleId}_${idx + 1}`,
+        sale_id: saleId,
+        product_id: item.product_id,
+        product_name_snapshot: prod ? prod.name : `Product ${item.product_id}`,
+        sku_snapshot: prod ? prod.sku : `SKU-${idx + 1}`,
+        unit_price: unitPrice,
+        cost_price_snapshot: costPrice,
+        quantity: item.quantity,
+        discount: lineDisc,
+        line_total: lineTotal,
+        created_at: now,
+      });
+
+      if (stockMap[item.product_id] !== undefined) {
+        stockMap[item.product_id] = Math.max(0, (stockMap[item.product_id] || 0) - item.quantity);
+      }
+    });
+
+    saveStoredWebStockMap(stockMap);
+
+    const extraDisc = dto.discount || 0;
+    const totalAmount = Math.max(0, subtotal - extraDisc);
+    const paidAmount = dto.paid_amount !== null && dto.paid_amount !== undefined ? dto.paid_amount : totalAmount;
+    const changeAmount = Math.max(0, paidAmount - totalAmount);
+
+    let paymentStatus: PaymentStatus = 'PAID';
+    if (paidAmount === 0 && totalAmount > 0) {
+      paymentStatus = 'UNPAID';
+    } else if (paidAmount < totalAmount) {
+      paymentStatus = 'PARTIALLY_PAID';
+    }
+
+    const saleRecord: Sale = {
+      id: saleId,
+      invoice_number: invoiceNum,
+      branch_id: dto.branch_id || '00000000-0000-0000-0000-000000000002',
+      customer_id: dto.customer_id || null,
+      customer_name_snapshot: dto.customer_id ? 'Customer' : 'Walk-in Customer',
+      subtotal,
+      discount: extraDisc,
+      tax_amount: 0,
+      total_amount: totalAmount,
+      paid_amount: paidAmount,
+      change_amount: changeAmount,
+      payment_status: paymentStatus,
+      sale_status: 'COMPLETED',
+      performed_by: 'Cashier',
+      notes: dto.notes || null,
+      created_at: now,
+      updated_at: now,
+    };
+
+    const payments: SalePayment[] = [
+      {
+        id: `pay_${saleId}_1`,
+        sale_id: saleId,
+        amount: paidAmount,
+        payment_method: dto.payment_method || 'cash',
+        reference_number: null,
+        notes: null,
+        created_at: now,
+      },
+    ];
+
+    const cogs = lines.reduce((acc, l) => acc + l.cost_price_snapshot * l.quantity, 0);
+    const grossProfit = totalAmount - cogs;
+    const grossMargin = totalAmount > 0 ? (grossProfit / totalAmount) * 100 : 0;
+
+    const storedSales = getStoredWebSales();
+    storedSales.unshift({ sale: saleRecord, lines, payments });
+    saveStoredWebSales(storedSales);
+
+    return {
+      sale: saleRecord,
+      lines,
+      payments,
+      credit_amount: paymentStatus === 'UNPAID' || paymentStatus === 'PARTIALLY_PAID' ? totalAmount - paidAmount : 0,
+      customer_balance_after: null,
+      cogs,
+      gross_profit: grossProfit,
+      gross_margin: grossMargin,
+    };
   },
 
   async saleGetById(id: string): Promise<Sale | null> {
@@ -1151,7 +1278,9 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Sale | null>('sale_get_by_id', { id });
     }
-    return null;
+    const stored = getStoredWebSales();
+    const found = stored.find((s) => s.sale.id === id);
+    return found ? found.sale : null;
   },
 
   async saleGetByInvoice(invoiceNumber: string): Promise<Sale | null> {
@@ -1159,7 +1288,9 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Sale | null>('sale_get_by_invoice', { invoiceNumber });
     }
-    return null;
+    const stored = getStoredWebSales();
+    const found = stored.find((s) => s.sale.invoice_number.toLowerCase() === invoiceNumber.toLowerCase());
+    return found ? found.sale : null;
   },
 
   async saleList(filter?: SaleFilterDto): Promise<Sale[]> {
@@ -1167,7 +1298,33 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Sale[]>('sale_list', { filter });
     }
-    return [];
+    let list = getStoredWebSales().map((s) => s.sale);
+    if (filter) {
+      if (filter.customer_id) {
+        list = list.filter((s) => s.customer_id === filter.customer_id);
+      }
+      if (filter.payment_status) {
+        list = list.filter((s) => s.payment_status === filter.payment_status);
+      }
+      if (filter.sale_status) {
+        list = list.filter((s) => s.sale_status === filter.sale_status);
+      }
+      if (filter.search) {
+        const q = filter.search.toLowerCase();
+        list = list.filter(
+          (s) =>
+            s.invoice_number.toLowerCase().includes(q) ||
+            (s.customer_name_snapshot && s.customer_name_snapshot.toLowerCase().includes(q))
+        );
+      }
+      if (filter.offset) {
+        list = list.slice(filter.offset);
+      }
+      if (filter.limit) {
+        list = list.slice(0, filter.limit);
+      }
+    }
+    return list;
   },
 
   async saleGetLines(saleId: string): Promise<SaleLine[]> {
@@ -1175,7 +1332,9 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<SaleLine[]>('sale_get_lines', { saleId });
     }
-    return [];
+    const stored = getStoredWebSales();
+    const found = stored.find((s) => s.sale.id === saleId);
+    return found ? found.lines : [];
   },
 
   async saleGetPayments(saleId: string): Promise<SalePayment[]> {
@@ -1183,7 +1342,9 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<SalePayment[]>('sale_get_payments', { saleId });
     }
-    return [];
+    const stored = getStoredWebSales();
+    const found = stored.find((s) => s.sale.id === saleId);
+    return found ? found.payments : [];
   },
 
   // ── Suppliers & Payables Domain (Phase 16) ──────────────────────────────────
