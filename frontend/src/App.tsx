@@ -8,7 +8,7 @@ import { GlobalPrintPreviewModal } from '@/lib/printer';
 import { UpdateModal } from '@/components/updater/UpdateModal';
 import { AutoUpdaterBanner } from '@/components/updater/AutoUpdaterBanner';
 import { UpdaterProvider } from '@/context/UpdaterContext';
-import { AppRoutes } from '@/routes/AppRoutes';
+import { AppRoutes } from '@/app/router/AppRoutes';
 
 export default function App() {
   return (
@@ -39,4 +39,3 @@ export default function App() {
     </ReactQueryProvider>
   );
 }
-

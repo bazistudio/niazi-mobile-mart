@@ -1,4 +1,4 @@
-export { ProtectedRoute } from '@/components/auth/ProtectedRoute';
-export { PublicOnlyRoute } from '@/components/auth/PublicOnlyRoute';
-export { RoleGuard } from '@/components/auth/RoleGuard';
-export { PermissionGuard } from '@/components/auth/PermissionGuard';
+export { ProtectedRoute } from '@/app/guards/ProtectedRoute';
+export { PublicOnlyRoute } from '@/app/guards/PublicOnlyRoute';
+export { RoleGuard } from '@/app/guards/RoleGuard';
+export { PermissionGuard } from '@/app/guards/PermissionGuard';
