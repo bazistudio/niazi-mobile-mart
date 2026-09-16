@@ -5,6 +5,7 @@ import { Topbar } from '@/components/layout/Topbar';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { LockScreenOverlay } from '@/components/layout/LockScreenOverlay';
 import { GlobalFooter } from '@/components/layout/GlobalFooter';
+import { GlobalAddProductDrawer } from '@/features/inventory/components/GlobalAddProductDrawer';
 import { useSyncEngine } from '@/features/realtime-sync/hooks/useSyncEngine';
 import { useDashboardShortcuts } from '@/hooks/useDashboardShortcuts';
 
@@ -44,6 +45,9 @@ export const ShopAdminDashboardLayout = ({ children }: ShopAdminDashboardLayoutP
 
         {/* Global Desktop Footer */}
         <GlobalFooter />
+
+        {/* Global Add Product Drawer Overlay */}
+        <GlobalAddProductDrawer />
       </div>
     </div>
   );

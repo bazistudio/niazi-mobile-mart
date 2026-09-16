@@ -2,14 +2,7 @@
 
 import React, { useEffect } from 'react';
 import { Package, RefreshCw, Plus } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { 
-  selectFetchProducts,
-  selectForceSync,
-  selectProducts, 
-  selectInventoryStatus, 
-  selectInventoryError 
-} from '@/features/inventory/core/inventory.selectors';
+import { selectFetchProducts, selectForceSync } from '@/features/inventory/core/inventory.selectors';
 import { useInventoryData } from '@/features/inventory/hooks/useInventoryData';
 import { InventorySearchBar } from '@/features/inventory/components/InventorySearchBar';
 import { InventoryFilters } from '@/features/inventory/components/InventoryFilters';
@@ -18,6 +11,7 @@ import { ErrorState } from '@/shared/components/error-state/ErrorState';
 import { LoadingState } from '@/shared/components/loading-state/LoadingState';
 import { usePermissions } from '@/lib/auth/usePermissions';
 import { PERMISSIONS } from '@/constants/permissions';
+import { useInventoryUIStore } from '@/features/inventory/store/inventory-ui.store';
 
 export const ProductListWidget = () => {
   const { hasPermission } = usePermissions();
@@ -25,28 +19,24 @@ export const ProductListWidget = () => {
 
   const fetchProducts = selectFetchProducts();
   const forceSync = selectForceSync();
-  const products = selectProducts();
-  const reqStatus = selectInventoryStatus();
-  const error = selectInventoryError();
-  
-  // Custom hook extracts memoized filtered data
-  const { filtered, stats } = useInventoryData();
+
+  const { filtered, stats, status: reqStatus, error } = useInventoryData();
 
   useEffect(() => {
     fetchProducts();
   }, [fetchProducts]);
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div className="space-y-4">
+      {/* Header Section */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 dark:border-gray-800 pb-4">
         <div>
-          <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-            <Package className="h-5 w-5 text-[#006970] dark:text-[#00B4BB]" />
-            Products
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+            <Package className="h-5 w-5 text-[#006970]" />
+            Products Directory
           </h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Manage product entities, pricing, and categories
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Manage catalog items, pricing, SKU mapping, and stock alert levels
           </p>
         </div>
         <div className="flex items-center gap-3 self-start">
@@ -60,13 +50,14 @@ export const ProductListWidget = () => {
           </button>
           
           {canManageProducts && (
-            <Link
-              to="/dashboard/shop-admin/products/new"
-              className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-white bg-[#006970] hover:bg-[#005a60] rounded-lg transition-colors"
+            <button
+              type="button"
+              onClick={() => useInventoryUIStore.getState().setAddProductOpen(true)}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-white bg-[#006970] hover:bg-[#005a60] rounded-lg transition-colors cursor-pointer"
             >
               <Plus className="h-3.5 w-3.5" />
               Add Product
-            </Link>
+            </button>
           )}
         </div>
       </div>
@@ -93,7 +84,7 @@ export const ProductListWidget = () => {
           </span>
         </div>
         
-        {reqStatus === 'loading' && products.length === 0 ? (
+        {reqStatus === 'loading' && filtered.length === 0 ? (
           <LoadingState rows={5} />
         ) : (
           <ProductTable products={filtered} isLoading={reqStatus === 'loading'} />
@@ -102,5 +93,3 @@ export const ProductListWidget = () => {
     </div>
   );
 };
-
-export default ProductListWidget;
