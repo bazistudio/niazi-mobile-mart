@@ -925,7 +925,7 @@ export const tauriClient = {
       return await invoke<number>('inventory_adjust', { dto });
     }
     const stockMap = getStoredWebStockMap();
-    const next = dto.new_quantity;
+    const next = dto.target_quantity ?? (dto as any).new_quantity ?? 0;
     stockMap[dto.product_id] = next;
     saveStoredWebStockMap(stockMap);
     return next;
