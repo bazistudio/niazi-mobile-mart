@@ -113,8 +113,8 @@ export function LoginForm() {
         <div>
           {/* 3D Header Emblem */}
           <div className="text-center mb-6">
-            <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#006970] to-[#00b4bb] p-[1px] shadow-[0_8px_16px_-2px_rgba(0,105,112,0.35),0_3px_6px_rgba(0,0,0,0.08)] mb-3">
-              <div className="w-full h-full rounded-2xl bg-gradient-to-b from-[#006970] to-[#004f54] flex items-center justify-center text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)]">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-tr from-primary to-secondary p-[1px] shadow-sm mb-3">
+              <div className="w-full h-full rounded-2xl bg-gradient-to-b from-primary to-primary-active flex items-center justify-center text-white shadow-inner">
                 <ShieldCheck className="w-6 h-6 text-teal-100 drop-shadow" />
               </div>
             </div>
@@ -200,7 +200,7 @@ export function LoginForm() {
                 Email or Username
               </label>
               <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-[#006970] transition-colors">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-muted group-focus-within:text-primary transition-colors">
                   <Mail className="w-4 h-4" />
                 </div>
                 <input
@@ -213,7 +213,7 @@ export function LoginForm() {
                     setFormData((prev) => ({ ...prev, identifier: e.target.value }))
                   }
                   required
-                  className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50/70 border border-slate-200/90 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 shadow-[inset_0_1px_3px_rgba(15,23,42,0.04)] focus:bg-white focus:outline-none focus:border-[#006970] focus:ring-4 focus:ring-[#006970]/10 transition-all duration-200"
+                  className="w-full pl-10 pr-3.5 py-2.5 bg-surface text-text-primary border border-border rounded-xl text-sm placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-focus-ring/20 transition-all duration-200"
                 />
               </div>
             </div>
@@ -221,7 +221,7 @@ export function LoginForm() {
             {/* Password field */}
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between">
-                <label htmlFor="password" className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+                <label htmlFor="password" className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
                   Password
                 </label>
                 <button
@@ -230,14 +230,14 @@ export function LoginForm() {
                     setMode("forgot");
                     setError(null);
                   }}
-                  className="text-xs font-medium text-[#006970] hover:text-[#004f54] hover:underline transition-colors focus:outline-none cursor-pointer"
+                  className="text-xs font-medium text-primary hover:text-primary-hover hover:underline transition-colors focus:outline-none cursor-pointer"
                 >
                   Forgot password?
                 </button>
               </div>
 
               <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-[#006970] transition-colors">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-muted group-focus-within:text-primary transition-colors">
                   <Lock className="w-4 h-4" />
                 </div>
                 <input
@@ -250,12 +250,12 @@ export function LoginForm() {
                     setFormData((prev) => ({ ...prev, password: e.target.value }))
                   }
                   required
-                  className="w-full pl-10 pr-11 py-2.5 bg-slate-50/70 border border-slate-200/90 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 shadow-[inset_0_1px_3px_rgba(15,23,42,0.04)] focus:bg-white focus:outline-none focus:border-[#006970] focus:ring-4 focus:ring-[#006970]/10 transition-all duration-200"
+                  className="w-full pl-10 pr-11 py-2.5 bg-surface text-text-primary border border-border rounded-xl text-sm placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-focus-ring/20 transition-all duration-200"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((prev) => !prev)}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors focus:outline-none cursor-pointer"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-text-muted hover:text-text-secondary transition-colors focus:outline-none cursor-pointer"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -267,9 +267,9 @@ export function LoginForm() {
             {error && (
               <div
                 role="alert"
-                className="p-3 rounded-xl bg-red-50 border border-red-200/80 flex items-start gap-2.5 text-xs text-red-700 shadow-sm"
+                className="p-3 rounded-xl bg-danger/10 border border-danger/20 flex items-start gap-2.5 text-xs text-danger shadow-sm"
               >
-                <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                <AlertCircle className="w-4 h-4 text-danger shrink-0 mt-0.5" />
                 <span>{error}</span>
               </div>
             )}
@@ -278,9 +278,8 @@ export function LoginForm() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full relative group overflow-hidden bg-gradient-to-b from-[#007a82] via-[#006970] to-[#005157] text-white font-medium py-2.5 px-4 rounded-xl text-sm transition-all duration-150 shadow-[0_4px_0_#00383c,0_10px_20px_rgba(0,105,112,0.3)] hover:brightness-105 active:translate-y-1 active:shadow-[0_1px_0_#00383c,0_4px_10px_rgba(0,105,112,0.2)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer mt-1"
+              className="w-full relative group overflow-hidden bg-primary hover:bg-primary-hover active:bg-primary-active text-white font-medium py-2.5 px-4 rounded-xl text-sm transition-all duration-150 shadow-sm disabled:opacity-disabled disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer mt-1"
             >
-              <div className="absolute inset-x-0 top-0 h-[1px] bg-white/30" />
               {isLoading ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -295,11 +294,11 @@ export function LoginForm() {
             </button>
 
             {/* Footer Sign Up Link */}
-            <div className="text-center text-xs text-slate-500 pt-3 border-t border-slate-100 mt-1">
+            <div className="text-center text-xs text-text-muted pt-3 border-t border-border mt-1">
               Don&apos;t have an account?{" "}
               <Link
                 to="/auth/signup"
-                className="font-semibold text-[#006970] hover:text-[#005157] hover:underline transition-colors"
+                className="font-semibold text-primary hover:text-primary-hover hover:underline transition-colors"
               >
                 Create one
               </Link>
@@ -370,28 +369,28 @@ export function LoginForm() {
 
 export function LoginPage() {
   return (
-    <main className="min-h-screen relative overflow-hidden flex items-center justify-center p-4 bg-[#f8fafc] text-slate-900 selection:bg-[#006970]/20 selection:text-[#006970]">
+    <main className="min-h-screen relative overflow-hidden flex items-center justify-center p-4 bg-background text-text-primary selection:bg-primary/20 selection:text-primary">
       {/* 3D Ambient Mesh Grid */}
       <div 
         className="pointer-events-none absolute inset-0 opacity-[0.035]" 
         style={{
-          backgroundImage: `radial-gradient(#0f172a 1px, transparent 1px)`,
+          backgroundImage: `radial-gradient(var(--color-text-primary) 1px, transparent 1px)`,
           backgroundSize: '24px 24px'
         }}
       />
 
       {/* Atmospheric 3D Lighting Orbs */}
-      <div className="pointer-events-none absolute -top-40 -left-40 w-96 h-96 rounded-full bg-gradient-to-br from-[#006970]/25 to-teal-400/10 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-40 -right-40 w-96 h-96 rounded-full bg-gradient-to-tl from-[#00b4bb]/20 to-emerald-400/10 blur-3xl" />
-      <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[520px] h-[520px] rounded-full bg-gradient-to-tr from-teal-500/5 to-cyan-500/5 blur-2xl" />
+      <div className="pointer-events-none absolute -top-40 -left-40 w-96 h-96 rounded-full bg-gradient-to-br from-primary/25 to-secondary/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-40 -right-40 w-96 h-96 rounded-full bg-gradient-to-tl from-secondary/20 to-accent/10 blur-3xl" />
+      <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[520px] h-[520px] rounded-full bg-gradient-to-tr from-primary/5 to-secondary/5 blur-2xl" />
 
       {/* Centered Floating 3D Card Shell */}
       <div className="relative w-full max-w-[390px] z-10 transition-all duration-300">
         {/* Soft 3D Glow Underlay */}
-        <div className="absolute -inset-1 rounded-3xl bg-gradient-to-b from-[#006970]/15 via-transparent to-[#00b4bb]/10 blur-xl opacity-75" />
+        <div className="absolute -inset-1 rounded-3xl bg-gradient-to-b from-primary/15 via-transparent to-secondary/10 blur-xl opacity-75" />
 
         {/* The 3D Elevated Card Body */}
-        <div className="relative rounded-2xl bg-white/95 backdrop-blur-xl border border-white/80 p-7 sm:p-8 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_16px_-2px_rgba(0,105,112,0.08),0_20px_40px_-4px_rgba(15,23,42,0.12),0_32px_64px_-8px_rgba(15,23,42,0.08),inset_0_1px_1px_rgba(255,255,255,1),inset_0_-1px_1px_rgba(0,0,0,0.04)] transition-all duration-300 hover:-translate-y-0.5">
+        <div className="relative rounded-2xl bg-surface/95 backdrop-blur-xl border border-border/80 p-7 sm:p-8 shadow-card transition-all duration-300 hover:-translate-y-0.5">
           <LoginForm />
         </div>
         

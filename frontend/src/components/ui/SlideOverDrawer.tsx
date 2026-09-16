@@ -50,19 +50,19 @@ export const SlideOverDrawer: React.FC<SlideOverDrawerProps> = ({
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm transition-opacity"
+      className="fixed inset-0 z-50 flex justify-end bg-overlay backdrop-blur-sm transition-opacity"
       onClick={handleBackdropClick}
     >
       <div 
         ref={drawerRef}
-        className={`w-full ${width} h-full bg-white dark:bg-gray-900 shadow-2xl flex flex-col transform transition-transform duration-250 ease-out animate-slide-in-right border-l border-gray-200 dark:border-gray-800`}
+        className={`w-full ${width} h-full bg-surface text-text-primary shadow-modal flex flex-col transform transition-transform duration-250 ease-out animate-slide-in-right border-l border-border`}
       >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center bg-gray-50/50 dark:bg-gray-900/50 backdrop-blur-md">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">{title}</h2>
+        <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-surface-hover/50 backdrop-blur-md">
+          <h2 className="text-xl font-bold text-text-primary tracking-tight">{title}</h2>
           <button 
             onClick={onClose}
-            className="p-2 rounded-full text-gray-500 hover:text-gray-900 hover:bg-gray-100 dark:hover:text-white dark:hover:bg-gray-800 transition-colors"
+            className="p-2 rounded-full text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
           >
             <X className="w-5 h-5" />
           </button>

@@ -384,7 +384,7 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
                         className={`flex items-center justify-between px-3 py-2 rounded-md transition-colors group ${isSelected ? 'bg-surface-hover ring-1 ring-focus-ring' : 'hover:bg-surface-hover'}`}
                       >
                         <div>
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 group-hover:text-[#006970] dark:group-hover:text-[#008990] flex items-center">
+                          <p className="text-sm font-medium text-text-primary group-hover:text-primary flex items-center">
                             {customer.name}
                             {getMatchBadge(customer, query, [
                               { key: 'name', label: 'Name' },
@@ -457,14 +457,14 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
                         className={`flex items-center justify-between px-3 py-2 rounded-md transition-colors group ${isSelected ? 'bg-surface-hover ring-1 ring-focus-ring' : 'hover:bg-surface-hover'}`}
                       >
                         <div>
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 group-hover:text-[#006970] dark:group-hover:text-[#008990] flex items-center">
+                          <p className="text-sm font-medium text-text-primary group-hover:text-primary flex items-center">
                             Invoice #{invoice.orderNumber || invoice.invoiceNumber}
                             {getMatchBadge(invoice, query, [
                               { key: 'invoiceNumber', label: 'Invoice #' },
                               { key: 'orderNumber', label: 'Order #' }
                             ])}
                           </p>
-                          <p className="text-xs text-gray-500">
+                          <p className="text-xs text-text-muted">
                             {typeof invoice.customerId === 'object' && invoice.customerId !== null ? invoice.customerId.name : 'Walk-in'}
                           </p>
                         </div>
