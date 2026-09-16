@@ -170,6 +170,49 @@ async function httpFetch<T>(path: string, options: RequestInit = {}): Promise<T>
   return JSON.parse(text) as T;
 }
 
+const WEB_PRODUCTS_STORAGE_KEY = 'niazi_web_products';
+const WEB_STOCK_STORAGE_KEY = 'niazi_web_stock_map';
+
+function getStoredWebProducts(): Product[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(WEB_PRODUCTS_STORAGE_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredWebProducts(products: Product[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(WEB_PRODUCTS_STORAGE_KEY, JSON.stringify(products));
+  } catch (e) {
+    console.warn('Failed to save web products to localStorage:', e);
+  }
+}
+
+function getStoredWebStockMap(): Record<string, number> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(WEB_STOCK_STORAGE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function saveStoredWebStockMap(map: Record<string, number>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(WEB_STOCK_STORAGE_KEY, JSON.stringify(map));
+  } catch (e) {
+    console.warn('Failed to save web stock map to localStorage:', e);
+  }
+}
+
 export const tauriClient = {
   isTauri: isTauriEnvironment,
 
@@ -675,7 +718,36 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Product>('product_create', { dto });
     }
-    throw new Error('Tauri environment required');
+    const products = getStoredWebProducts();
+    const now = new Date().toISOString();
+    const newProduct: Product = {
+      id: `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      name: dto.name,
+      sku: dto.sku,
+      barcode: dto.barcode || null,
+      category_id: dto.category_id,
+      brand_id: dto.brand_id || null,
+      unit_id: dto.unit_id || null,
+      purchase_price: Math.round(Number(dto.purchase_price) || 0),
+      average_cost: Math.round(Number(dto.average_cost ?? dto.purchase_price) || 0),
+      sale_price: Math.round(Number(dto.sale_price) || 0),
+      low_stock_threshold: Number(dto.low_stock_threshold) || 5,
+      is_active: true,
+      description: dto.description || null,
+      created_at: now,
+      updated_at: now,
+    };
+    products.unshift(newProduct);
+    saveStoredWebProducts(products);
+
+    const qty = dto.initial_quantity || 0;
+    if (qty > 0) {
+      const stockMap = getStoredWebStockMap();
+      stockMap[newProduct.id] = (stockMap[newProduct.id] || 0) + qty;
+      saveStoredWebStockMap(stockMap);
+    }
+
+    return newProduct;
   },
 
   async productUpdate(id: string, dto: UpdateProductDto): Promise<Product> {
@@ -683,7 +755,43 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Product>('product_update', { id, dto });
     }
-    throw new Error('Tauri environment required');
+    const products = getStoredWebProducts();
+    const idx = products.findIndex((p) => p.id === id);
+    if (idx === -1) {
+      throw new Error(`Product not found: ${id}`);
+    }
+    const existing = products[idx];
+    const updated: Product = {
+      ...existing,
+      name: dto.name ?? existing.name,
+      sku: dto.sku ?? existing.sku,
+      barcode: dto.barcode !== undefined ? dto.barcode : existing.barcode,
+      category_id: dto.category_id ?? existing.category_id,
+      brand_id: dto.brand_id !== undefined ? dto.brand_id : existing.brand_id,
+      unit_id: dto.unit_id !== undefined ? dto.unit_id : existing.unit_id,
+      purchase_price:
+        dto.purchase_price !== undefined && dto.purchase_price !== null
+          ? Math.round(Number(dto.purchase_price))
+          : existing.purchase_price,
+      average_cost:
+        dto.average_cost !== undefined && dto.average_cost !== null
+          ? Math.round(Number(dto.average_cost))
+          : existing.average_cost,
+      sale_price:
+        dto.sale_price !== undefined && dto.sale_price !== null
+          ? Math.round(Number(dto.sale_price))
+          : existing.sale_price,
+      low_stock_threshold:
+        dto.low_stock_threshold !== undefined && dto.low_stock_threshold !== null
+          ? Number(dto.low_stock_threshold)
+          : existing.low_stock_threshold,
+      is_active: dto.is_active !== undefined && dto.is_active !== null ? dto.is_active : existing.is_active,
+      description: dto.description !== undefined ? dto.description : existing.description,
+      updated_at: new Date().toISOString(),
+    };
+    products[idx] = updated;
+    saveStoredWebProducts(products);
+    return updated;
   },
 
   async productGet(id: string): Promise<Product> {
@@ -691,7 +799,10 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Product>('product_get', { id });
     }
-    throw new Error('Tauri environment required');
+    const products = getStoredWebProducts();
+    const found = products.find((p) => p.id === id);
+    if (!found) throw new Error(`Product not found: ${id}`);
+    return found;
   },
 
   async productGetBySku(sku: string): Promise<Product> {
@@ -699,7 +810,10 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Product>('product_get_by_sku', { sku });
     }
-    throw new Error('Tauri environment required');
+    const products = getStoredWebProducts();
+    const found = products.find((p) => p.sku.toLowerCase() === sku.toLowerCase());
+    if (!found) throw new Error(`Product not found with SKU: ${sku}`);
+    return found;
   },
 
   async productGetByBarcode(barcode: string): Promise<Product> {
@@ -707,7 +821,10 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Product>('product_get_by_barcode', { barcode });
     }
-    throw new Error('Tauri environment required');
+    const products = getStoredWebProducts();
+    const found = products.find((p) => p.barcode && p.barcode.toLowerCase() === barcode.toLowerCase());
+    if (!found) throw new Error(`Product not found with Barcode: ${barcode}`);
+    return found;
   },
 
   async productList(filter?: ProductFilter): Promise<Product[]> {
@@ -715,13 +832,48 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Product[]>('product_list', { filter });
     }
-    return [];
+    let list = getStoredWebProducts();
+    if (filter) {
+      if (filter.is_active !== undefined && filter.is_active !== null) {
+        list = list.filter((p) => p.is_active === filter.is_active);
+      }
+      if (filter.category_id) {
+        list = list.filter((p) => p.category_id === filter.category_id);
+      }
+      if (filter.brand_id) {
+        list = list.filter((p) => p.brand_id === filter.brand_id);
+      }
+      if (filter.search) {
+        const query = filter.search.toLowerCase();
+        list = list.filter(
+          (p) =>
+            p.name.toLowerCase().includes(query) ||
+            p.sku.toLowerCase().includes(query) ||
+            (p.barcode && p.barcode.toLowerCase().includes(query))
+        );
+      }
+      if (filter.offset) {
+        list = list.slice(filter.offset);
+      }
+      if (filter.limit) {
+        list = list.slice(0, filter.limit);
+      }
+    }
+    return list;
   },
 
   async productDeactivate(id: string): Promise<void> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('product_deactivate', { id });
+      return;
+    }
+    const products = getStoredWebProducts();
+    const idx = products.findIndex((p) => p.id === id);
+    if (idx !== -1) {
+      products[idx].is_active = false;
+      products[idx].updated_at = new Date().toISOString();
+      saveStoredWebProducts(products);
     }
   },
 
@@ -731,7 +883,12 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<number>('inventory_increase', { dto });
     }
-    throw new Error('Tauri environment required');
+    const stockMap = getStoredWebStockMap();
+    const current = stockMap[dto.product_id] || 0;
+    const next = current + (dto.quantity || 0);
+    stockMap[dto.product_id] = next;
+    saveStoredWebStockMap(stockMap);
+    return next;
   },
 
   async inventoryDecrease(dto: DecreaseStockDto): Promise<number> {
@@ -739,7 +896,12 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<number>('inventory_decrease', { dto });
     }
-    throw new Error('Tauri environment required');
+    const stockMap = getStoredWebStockMap();
+    const current = stockMap[dto.product_id] || 0;
+    const next = Math.max(0, current - (dto.quantity || 0));
+    stockMap[dto.product_id] = next;
+    saveStoredWebStockMap(stockMap);
+    return next;
   },
 
   async inventoryAdjust(dto: AdjustStockDto): Promise<number> {
@@ -747,7 +909,11 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<number>('inventory_adjust', { dto });
     }
-    throw new Error('Tauri environment required');
+    const stockMap = getStoredWebStockMap();
+    const next = dto.new_quantity;
+    stockMap[dto.product_id] = next;
+    saveStoredWebStockMap(stockMap);
+    return next;
   },
 
   async inventoryTransfer(dto: TransferStockDto): Promise<void> {
@@ -765,7 +931,8 @@ export const tauriClient = {
         branchId,
       });
     }
-    return 0;
+    const stockMap = getStoredWebStockMap();
+    return stockMap[productId] || 0;
   },
 
   async inventoryGetStockMap(branchId: string): Promise<Record<string, number>> {
@@ -775,7 +942,7 @@ export const tauriClient = {
         branchId,
       });
     }
-    return {};
+    return getStoredWebStockMap();
   },
 
   async inventoryGetMovements(
