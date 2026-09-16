@@ -3,7 +3,8 @@ import { InventoryTable, TableColumn } from '@/features/inventory/components/Inv
 import { useInventoryFilters } from '@/features/inventory/components/InventoryFilterContext';
 import { useProducts } from '@/features/inventory/hooks/useProducts';
 import { InventoryProduct, StockStatus } from '@/features/inventory/types';
-import { Loader2 } from 'lucide-react';
+import { useInventoryUIStore } from '@/features/inventory/store/inventory-ui.store';
+import { Loader2, Plus } from 'lucide-react';
 
 export function InventoryProductsPage() {
   const { filters } = useInventoryFilters();
@@ -64,6 +65,23 @@ export function InventoryProductsPage() {
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-gray-900">
+      {/* Action Toolbar */}
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/30">
+        <div>
+          <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+            Products Directory ({products.length})
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => useInventoryUIStore.getState().setAddProductOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#006970] hover:bg-[#005a60] rounded shadow-xs transition-colors cursor-pointer"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          + Add Product / Stock
+        </button>
+      </div>
+
       <div className="flex-1 overflow-hidden relative p-4">
         {isLoading ? (
           <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-gray-900/50 z-10">
