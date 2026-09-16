@@ -1,14 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { InventoryTable, TableColumn } from '@/features/inventory/components/InventoryTable';
 import { useInventoryFilters } from '@/features/inventory/components/InventoryFilterContext';
 import { useProducts } from '@/features/inventory/hooks/useProducts';
 import { InventoryProduct, StockStatus } from '@/features/inventory/types';
 import { useInventoryUIStore } from '@/features/inventory/store/inventory-ui.store';
-import { Loader2, Plus } from 'lucide-react';
+import { ProductEditModal } from '@/features/inventory/product/components/ProductEditModal';
+import { Loader2, Plus, Edit } from 'lucide-react';
 
 export function InventoryProductsPage() {
   const { filters } = useInventoryFilters();
-  
+  const [editingProduct, setEditingProduct] = useState<InventoryProduct | null>(null);
+
   const { products, isLoading, error } = useProducts({
     page: 1,
     limit: 50,
@@ -51,8 +53,13 @@ export function InventoryProductsPage() {
     { 
       key: 'actions', 
       label: 'Action', 
-      render: () => (
-        <button className="text-[#006970] dark:text-[#00B4BB] hover:underline font-medium cursor-pointer">
+      render: (row) => (
+        <button
+          type="button"
+          onClick={() => setEditingProduct(row)}
+          className="inline-flex items-center gap-1 text-[#006970] dark:text-[#00B4BB] hover:underline font-semibold cursor-pointer"
+        >
+          <Edit className="w-3.5 h-3.5" />
           Edit
         </button>
       )
@@ -90,6 +97,14 @@ export function InventoryProductsPage() {
         ) : null}
         <InventoryTable columns={columns} data={products} />
       </div>
+
+      {/* Product Edit Modal */}
+      {editingProduct && (
+        <ProductEditModal
+          product={editingProduct}
+          onClose={() => setEditingProduct(null)}
+        />
+      )}
     </div>
   );
 }

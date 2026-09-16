@@ -158,6 +158,68 @@ export const productService = {
       purchasePrice: created.purchase_price,
       status: initialQty > 0 ? StockStatus.HEALTHY : StockStatus.OUT_OF_STOCK,
     };
+  },
+
+  updateProduct: async (id: string, productData: any): Promise<InventoryProduct> => {
+    const updated = await tauriClient.productUpdate(id, {
+      name: productData.name,
+      sku: productData.sku,
+      barcode: productData.barcode || null,
+      category_id: productData.categoryId || productData.category_id || productData.category,
+      brand_id: productData.brandId || productData.brand_id || productData.brand || null,
+      company_id: productData.companyId || productData.company_id || productData.company || null,
+      color_id: productData.colorId || productData.color_id || productData.color || null,
+      quality_id: productData.qualityId || productData.quality_id || productData.quality || null,
+      purchase_price: productData.purchasePrice !== undefined ? Math.round(Number(productData.purchasePrice)) : undefined,
+      sale_price: productData.price !== undefined ? Math.round(Number(productData.price)) : undefined,
+      low_stock_threshold: productData.lowStockThreshold !== undefined ? Number(productData.lowStockThreshold) : undefined,
+      description: productData.description || null,
+    });
+
+    if (productData.quantity !== undefined && productData.quantity !== null) {
+      await tauriClient.inventoryAdjust({
+        product_id: id,
+        branch_id: '00000000-0000-0000-0000-000000000002',
+        target_quantity: Number(productData.quantity),
+      });
+    }
+
+    const [categories, brands, companies, colors, qualities, stockMap] = await Promise.all([
+      categoryService.getCategories().catch(() => []),
+      brandService.getBrands().catch(() => []),
+      companyService.getCompanies().catch(() => []),
+      colorService.getColors().catch(() => []),
+      qualityService.getQualities().catch(() => []),
+      tauriClient.inventoryGetStockMap('00000000-0000-0000-0000-000000000002').catch(() => ({}) as Record<string, number>),
+    ]);
+
+    const catName = categories.find(c => c.id === updated.category_id)?.name || 'General';
+    const brandName = updated.brand_id ? (brands.find(b => b.id === updated.brand_id)?.name || updated.brand_id) : '-';
+    const compName = updated.company_id ? (companies.find(c => c.id === updated.company_id)?.name || updated.company_id) : '-';
+    const colorName = updated.color_id ? (colors.find(c => c.id === updated.color_id)?.name || updated.color_id) : '-';
+    const qualityName = updated.quality_id ? (qualities.find(q => q.id === updated.quality_id)?.name || updated.quality_id) : '-';
+    const currentStock = productData.quantity !== undefined ? Number(productData.quantity) : (stockMap[updated.id] ?? 0);
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      sku: updated.sku,
+      category: catName,
+      categoryId: updated.category_id,
+      brand: brandName,
+      brandId: updated.brand_id || undefined,
+      company: compName,
+      companyId: updated.company_id || undefined,
+      color: colorName,
+      colorId: updated.color_id || undefined,
+      quality: qualityName,
+      qualityId: updated.quality_id || undefined,
+      stock: currentStock,
+      minStockThreshold: updated.low_stock_threshold,
+      price: updated.sale_price,
+      purchasePrice: updated.purchase_price,
+      status: currentStock > 0 ? StockStatus.HEALTHY : StockStatus.OUT_OF_STOCK,
+    };
   }
 };
 

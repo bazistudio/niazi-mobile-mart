@@ -1,262 +1,281 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import * as z from 'zod';
-import { X, Loader2, Save, UploadCloud } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Loader2, Save } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { InventoryProduct } from '@/features/inventory/types';
-import {
-  selectUpdateProduct,
-  selectCategories,
-  selectFetchCategories,
-} from '@/features/inventory/core/inventory.selectors';
+import { DynamicMasterSelect } from '@/features/inventory/components/master-data/DynamicMasterSelect';
+import { useProducts } from '@/features/inventory/hooks/useProducts';
 
-const editSchema = z.object({
-  name: z.string().min(1, 'Product name is required'),
-  price: z.number().min(0, "Price cannot be negative"),
-  purchasePrice: z.number().min(0).optional(),
-  quantity: z.number().min(0, "Quantity cannot be negative"),
-  sku: z.string().optional(),
-  barcode: z.string().optional(),
-  category: z.string().min(1, 'Category is required'),
-  brand: z.string().optional(),
-  description: z.string().optional(),
-  lowStockThreshold: z.number().min(0).optional(),
-});
-
-type EditFormValues = z.infer<typeof editSchema>;
-
-interface ProductEditModalProps {
+export interface ProductEditModalProps {
   product: InventoryProduct;
   onClose: () => void;
 }
 
-export const ProductEditModal = ({ product, onClose }: ProductEditModalProps) => {
-  const updateProduct = selectUpdateProduct();
-  const categories = selectCategories();
-  const fetchCategories = selectFetchCategories();
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(product.image || null);
+export function ProductEditModal({ product, onClose }: ProductEditModalProps) {
+  const { updateProduct, isUpdating } = useProducts({ page: 1, limit: 10 }, { enabled: false });
 
-  const { register, handleSubmit, formState: { errors } } = useForm<EditFormValues>({
-    resolver: zodResolver(editSchema),
-    defaultValues: {
-      name: product.name,
-      price: product.price,
-      purchasePrice: product.purchasePrice,
-      quantity: product.stock,
-      sku: product.sku,
-      barcode: product.barcode,
-      category: product.categoryId || product.category,
-      brand: product.brand,
-      description: product.description,
-      lowStockThreshold: product.minStockThreshold,
-    },
+  const [formData, setFormData] = useState({
+    name: product.name || '',
+    sku: product.sku || '',
+    barcode: product.barcode || '',
+    description: product.description || '',
+
+    categoryId: product.categoryId || '',
+    brandId: product.brandId || '',
+    companyId: product.companyId || '',
+    colorId: product.colorId || '',
+    qualityId: product.qualityId || '',
+
+    quantity: product.stock !== undefined ? String(product.stock) : '0',
+    minStockThreshold: product.minStockThreshold !== undefined ? String(product.minStockThreshold) : '2',
+
+    purchasePrice: product.purchasePrice !== undefined ? String(product.purchasePrice) : '0',
+    price: product.price !== undefined ? String(product.price) : '0',
   });
 
-  useEffect(() => {
-    if (categories.length === 0) fetchCategories();
-  }, [categories.length, fetchCategories]);
-
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
+  const handleChange = (field: string, value: any) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const onSubmit = async (data: EditFormValues) => {
-    try {
-      setIsSubmitting(true);
-      await updateProduct(product.id, {
-        name: data.name,
-        price: data.price,
-        purchasePrice: data.purchasePrice,
-        quantity: data.quantity,
-        sku: data.sku,
-        barcode: data.barcode,
-        category: data.category,
-        brand: data.brand,
-        description: data.description,
-        lowStockThreshold: data.lowStockThreshold,
-      }, imageFile || undefined);
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.name.trim()) {
+      toast.error('Product name is required');
+      return;
+    }
 
-      toast.success(`${data.name} updated successfully`);
+    try {
+      await updateProduct({
+        id: product.id,
+        data: {
+          name: formData.name.trim(),
+          sku: formData.sku.trim(),
+          barcode: formData.barcode.trim(),
+          description: formData.description.trim(),
+          categoryId: formData.categoryId,
+          brandId: formData.brandId,
+          companyId: formData.companyId,
+          colorId: formData.colorId,
+          qualityId: formData.qualityId,
+          quantity: Number(formData.quantity) || 0,
+          minStockThreshold: Number(formData.minStockThreshold) || 2,
+          purchasePrice: Number(formData.purchasePrice) || 0,
+          price: Number(formData.price) || 0,
+        },
+      });
+
+      toast.success(`${formData.name} updated successfully!`);
       onClose();
-    } catch {
-      // Error toast shown by global interceptor
-    } finally {
-      setIsSubmitting(false);
+    } catch (err) {
+      console.error('Failed to update product', err);
+      toast.error('Failed to update product');
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-
-      <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-gray-900 shadow-2xl border border-gray-100 dark:border-gray-800 animate-in zoom-in-95 duration-200">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-[900px] max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
-        <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-white">Edit Product</h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/50">
+          <div>
+            <h2 className="text-base font-bold text-gray-900 dark:text-white">Edit Product: {product.name}</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Correct mistakes or update company, brand, color, quality, price & stock.</p>
+          </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            className="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 transition-colors p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
           >
-            <X className="h-4 w-4" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="p-5 space-y-4">
-          {/* Name */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Product Name *</label>
-            <input
-              {...register('name')}
-              className="block w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 py-2.5 px-4 text-sm dark:text-white focus:border-[#006970] focus:ring-[#006970] transition-colors"
-            />
-            {errors.name && <p className="mt-1 text-xs text-red-500">{errors.name.message}</p>}
-          </div>
+        {/* Body */}
+        <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-6 space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* LEFT COLUMN: Basic Info & Pricing */}
+            <div className="space-y-4">
+              <h3 className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider border-b border-gray-200 dark:border-gray-800 pb-2">
+                1. Basic Information
+              </h3>
 
-          {/* Category */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Category *</label>
-            <select
-              {...register('category')}
-              className="block w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 py-2.5 px-4 text-sm dark:text-white focus:border-[#006970] transition-colors"
-            >
-              <option value="">Select category...</option>
-              {categories.map((cat: any) => (
-                <option key={cat.id} value={cat.id}>{cat.name}</option>
-              ))}
-            </select>
-            {errors.category && <p className="mt-1 text-xs text-red-500">{errors.category.message}</p>}
-          </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Product Name *</label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => handleChange('name', e.target.value)}
+                  className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
+                  required
+                />
+              </div>
 
-          {/* Price row */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Sale Price (PKR) *</label>
-              <input
-                type="number"
-                {...register('price', { valueAsNumber: true })}
-                className="block w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 py-2.5 px-4 text-sm dark:text-white focus:border-[#006970] transition-colors"
-              />
-              {errors.price && <p className="mt-1 text-xs text-red-500">{errors.price.message}</p>}
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Purchase (PKR)</label>
-              <input
-                type="number"
-                {...register('purchasePrice', { valueAsNumber: true })}
-                className="block w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 py-2.5 px-4 text-sm dark:text-white focus:border-[#006970] transition-colors"
-              />
-            </div>
-          </div>
-
-          {/* Stock row */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Stock Quantity *</label>
-              <input
-                type="number"
-                {...register('quantity', { valueAsNumber: true })}
-                className="block w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 py-2.5 px-4 text-sm dark:text-white focus:border-[#006970] transition-colors"
-              />
-              {errors.quantity && <p className="mt-1 text-xs text-red-500">{errors.quantity.message}</p>}
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Low Stock Alert</label>
-              <input
-                type="number"
-                {...register('lowStockThreshold', { valueAsNumber: true })}
-                className="block w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 py-2.5 px-4 text-sm dark:text-white focus:border-[#006970] transition-colors"
-              />
-            </div>
-          </div>
-
-          {/* SKU + Barcode */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">SKU</label>
-              <input
-                {...register('sku')}
-                className="block w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 py-2.5 px-4 text-sm dark:text-white focus:border-[#006970] transition-colors"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Barcode</label>
-              <input
-                {...register('barcode')}
-                className="block w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 py-2.5 px-4 text-sm dark:text-white focus:border-[#006970] transition-colors"
-              />
-            </div>
-          </div>
-
-          {/* Brand + Description */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Brand</label>
-            <input
-              {...register('brand')}
-              className="block w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 py-2.5 px-4 text-sm dark:text-white focus:border-[#006970] transition-colors"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
-            <textarea
-              {...register('description')}
-              rows={2}
-              className="block w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 py-2.5 px-4 text-sm dark:text-white focus:border-[#006970] transition-colors resize-none"
-            />
-          </div>
-
-          {/* Image */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Product Image (optional)</label>
-            <label className="flex items-center gap-3 cursor-pointer rounded-xl border border-dashed border-gray-300 dark:border-gray-600 p-3 hover:border-[#006970] transition-colors">
-              {imagePreview ? (
-                <img src={imagePreview} alt="Preview" className="h-10 w-10 rounded-lg object-cover" />
-              ) : (
-                <div className="h-10 w-10 rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-                  <UploadCloud className="h-5 w-5 text-gray-400" />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Purchase Price (PKR)</label>
+                  <input
+                    type="number"
+                    value={formData.purchasePrice}
+                    onChange={(e) => handleChange('purchasePrice', e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
+                  />
                 </div>
-              )}
-              <span className="text-sm text-gray-500 dark:text-gray-400">
-                {imageFile ? imageFile.name : 'Change image...'}
-              </span>
-              <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
-            </label>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Sale Price (PKR) *</label>
+                  <input
+                    type="number"
+                    value={formData.price}
+                    onChange={(e) => handleChange('price', e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Stock Quantity</label>
+                  <input
+                    type="number"
+                    value={formData.quantity}
+                    onChange={(e) => handleChange('quantity', e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Min Stock Alert</label>
+                  <input
+                    type="number"
+                    value={formData.minStockThreshold}
+                    onChange={(e) => handleChange('minStockThreshold', e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">SKU</label>
+                  <input
+                    type="text"
+                    value={formData.sku}
+                    onChange={(e) => handleChange('sku', e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Barcode</label>
+                  <input
+                    type="text"
+                    value={formData.barcode}
+                    onChange={(e) => handleChange('barcode', e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => handleChange('description', e.target.value)}
+                  rows={3}
+                  className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm resize-none"
+                />
+              </div>
+            </div>
+
+            {/* RIGHT COLUMN: Product Classification */}
+            <div className="space-y-4">
+              <h3 className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider border-b border-gray-200 dark:border-gray-800 pb-2">
+                2. Product Classification
+              </h3>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Category *</label>
+                <DynamicMasterSelect
+                  showAddButton
+                  hideAllOption
+                  entity="category"
+                  value={formData.categoryId}
+                  onChange={(v) => handleChange('categoryId', v)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Brand</label>
+                <DynamicMasterSelect
+                  showAddButton
+                  hideAllOption
+                  entity="brand"
+                  value={formData.brandId}
+                  onChange={(v) => handleChange('brandId', v)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Company</label>
+                <DynamicMasterSelect
+                  showAddButton
+                  hideAllOption
+                  entity="company"
+                  value={formData.companyId}
+                  onChange={(v) => handleChange('companyId', v)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Color</label>
+                <DynamicMasterSelect
+                  showAddButton
+                  hideAllOption
+                  entity="color"
+                  value={formData.colorId}
+                  onChange={(v) => handleChange('colorId', v)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Quality</label>
+                <DynamicMasterSelect
+                  showAddButton
+                  hideAllOption
+                  entity="quality"
+                  value={formData.qualityId}
+                  onChange={(v) => handleChange('qualityId', v)}
+                />
+              </div>
+            </div>
           </div>
 
-          {/* Actions */}
-          <div className="flex gap-3 pt-2">
+          {/* Footer Actions */}
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 dark:border-gray-800">
             <button
               type="button"
               onClick={onClose}
-              disabled={isSubmitting}
-              className="flex-1 rounded-xl border border-gray-200 dark:border-gray-700 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
+              className="px-5 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="flex-1 rounded-xl bg-[#006970] hover:bg-[#005a60] py-2.5 text-sm font-medium text-white transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              disabled={isUpdating}
+              className="px-6 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#006970] hover:bg-[#005a60] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#006970] disabled:opacity-50 transition-colors flex items-center gap-2"
             >
-              {isSubmitting ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> Saving...</>
-              ) : (
-                <><Save className="h-4 w-4" /> Save Changes</>
-              )}
+              {isUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {isUpdating ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
         </form>
       </div>
     </div>
   );
-};
+}
 
 export default ProductEditModal;

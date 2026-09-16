@@ -3,16 +3,23 @@ import { productService } from '../services/product.service';
 import { PaginationParams } from '../types';
 
 export const useProducts = (params: PaginationParams, options?: { enabled?: boolean }) => {
+  const queryClient = useQueryClient();
+
   const { data, isLoading, error } = useQuery({
     queryKey: ['products', params],
     queryFn: () => productService.getProducts(params),
     enabled: options?.enabled !== false,
   });
 
-  const queryClient = useQueryClient();
-
   const createMutation = useMutation({
     mutationFn: productService.createProduct,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => productService.updateProduct(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
     },
@@ -25,5 +32,7 @@ export const useProducts = (params: PaginationParams, options?: { enabled?: bool
     error,
     createProduct: createMutation.mutateAsync,
     isCreating: createMutation.isPending,
+    updateProduct: updateMutation.mutateAsync,
+    isUpdating: updateMutation.isPending,
   };
 };
