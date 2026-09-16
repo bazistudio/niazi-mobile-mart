@@ -727,6 +727,9 @@ export const tauriClient = {
       barcode: dto.barcode || null,
       category_id: dto.category_id,
       brand_id: dto.brand_id || null,
+      company_id: dto.company_id || null,
+      color_id: dto.color_id || null,
+      quality_id: dto.quality_id || null,
       unit_id: dto.unit_id || null,
       purchase_price: Math.round(Number(dto.purchase_price) || 0),
       average_cost: Math.round(Number(dto.average_cost ?? dto.purchase_price) || 0),
@@ -768,6 +771,9 @@ export const tauriClient = {
       barcode: dto.barcode !== undefined ? dto.barcode : existing.barcode,
       category_id: dto.category_id ?? existing.category_id,
       brand_id: dto.brand_id !== undefined ? dto.brand_id : existing.brand_id,
+      company_id: dto.company_id !== undefined ? dto.company_id : existing.company_id,
+      color_id: dto.color_id !== undefined ? dto.color_id : existing.color_id,
+      quality_id: dto.quality_id !== undefined ? dto.quality_id : existing.quality_id,
       unit_id: dto.unit_id !== undefined ? dto.unit_id : existing.unit_id,
       purchase_price:
         dto.purchase_price !== undefined && dto.purchase_price !== null
@@ -842,6 +848,15 @@ export const tauriClient = {
       }
       if (filter.brand_id) {
         list = list.filter((p) => p.brand_id === filter.brand_id);
+      }
+      if (filter.company_id) {
+        list = list.filter((p) => p.company_id === filter.company_id);
+      }
+      if (filter.color_id) {
+        list = list.filter((p) => p.color_id === filter.color_id);
+      }
+      if (filter.quality_id) {
+        list = list.filter((p) => p.quality_id === filter.quality_id);
       }
       if (filter.search) {
         const query = filter.search.toLowerCase();
@@ -1707,6 +1722,9 @@ export interface Product {
   barcode: string | null;
   category_id: string;
   brand_id: string | null;
+  company_id?: string | null;
+  color_id?: string | null;
+  quality_id?: string | null;
   unit_id: string | null;
   purchase_price: number; // Stored in whole Pakistani Rupees - Last Purchase Cost (1 stored integer = 1 PKR)
   average_cost: number;   // Stored in whole Pakistani Rupees - Weighted Average Cost (1 stored integer = 1 PKR)
@@ -1724,6 +1742,9 @@ export interface CreateProductDto {
   barcode?: string | null;
   category_id: string;
   brand_id?: string | null;
+  company_id?: string | null;
+  color_id?: string | null;
+  quality_id?: string | null;
   unit_id?: string | null;
   purchase_price: number;
   average_cost?: number | null;
@@ -1741,6 +1762,9 @@ export interface UpdateProductDto {
   barcode?: string | null;
   category_id?: string | null;
   brand_id?: string | null;
+  company_id?: string | null;
+  color_id?: string | null;
+  quality_id?: string | null;
   unit_id?: string | null;
   purchase_price?: number | null;
   average_cost?: number | null;
@@ -1753,6 +1777,9 @@ export interface UpdateProductDto {
 export interface ProductFilter {
   category_id?: string | null;
   brand_id?: string | null;
+  company_id?: string | null;
+  color_id?: string | null;
+  quality_id?: string | null;
   search?: string | null;
   is_active?: boolean | null;
   limit?: number | null;
