@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { AlertTriangle, ArrowRight } from 'lucide-react';
-import { InventoryProduct, StockStatus } from '../../features/inventory/types';
+import { InventoryProduct, StockStatus } from '@/features/inventory/types';
 import { StockStatusBadge } from './StockStatusBadge';
 
 interface LowStockAlertProps {

@@ -11,7 +11,7 @@ import {
 } from '@/features/inventory/core/inventory.selectors';
 import { useInventoryData } from '@/features/inventory/hooks/useInventoryData';
 import { StockTable } from './StockTable';
-import { LowStockAlert } from '@/components/inventory/LowStockAlert';
+import { LowStockAlert } from '@/features/inventory/components/LowStockAlert';
 import { StockStatus } from './stock.types';
 import { ErrorState } from '@/shared/components/error-state/ErrorState';
 import { LoadingState } from '@/shared/components/loading-state/LoadingState';

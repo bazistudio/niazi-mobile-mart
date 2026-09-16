@@ -1,8 +1,8 @@
 'use client';
 
 import React from 'react';
-import { selectActiveFilter, selectSetFilter } from '../../features/inventory/core/inventory.selectors';
-import { InventoryFilterType } from '../../features/inventory/types';
+import { selectActiveFilter, selectSetFilter } from '@/features/inventory/core/inventory.selectors';
+import { InventoryFilterType } from '@/features/inventory/types';
 
 const filters: { label: string; value: InventoryFilterType }[] = [
   { label: 'All Products', value: 'all' },

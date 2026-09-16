@@ -11,8 +11,8 @@ import {
   selectInventoryError 
 } from '@/features/inventory/core/inventory.selectors';
 import { useInventoryData } from '@/features/inventory/hooks/useInventoryData';
-import { InventorySearchBar } from '@/components/inventory/InventorySearchBar';
-import { InventoryFilters } from '@/components/inventory/InventoryFilters';
+import { InventorySearchBar } from '@/features/inventory/components/InventorySearchBar';
+import { InventoryFilters } from '@/features/inventory/components/InventoryFilters';
 import { ProductTable } from './ProductTable';
 import { ErrorState } from '@/shared/components/error-state/ErrorState';
 import { LoadingState } from '@/shared/components/loading-state/LoadingState';

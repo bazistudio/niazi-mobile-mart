@@ -5,7 +5,7 @@ import { PERMISSIONS } from '@/constants/permissions';
 import { ShopAdminDashboard } from '@/features/dashboard/components/shop-admin/ShopAdminDashboard';
 import { POSPage } from '@/pages/dashboard/shop-admin/POSPage';
 import { ProductsPage } from '@/pages/dashboard/shop-admin/ProductsPage';
-import { InventoryWorkspaceLayout } from '@/components/inventory/InventoryWorkspaceLayout';
+import { InventoryWorkspaceLayout } from '@/features/inventory/components/InventoryWorkspaceLayout';
 import { InventoryProductsPage } from '@/pages/dashboard/shop-admin/inventory/InventoryProductsPage';
 import { InventoryStockPage } from '@/pages/dashboard/shop-admin/inventory/InventoryStockPage';
 import { InventoryImportPage } from '@/pages/dashboard/shop-admin/inventory/InventoryImportPage';

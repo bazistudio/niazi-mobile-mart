@@ -2,7 +2,7 @@
 
 import React, { useRef } from 'react';
 import { Search, X } from 'lucide-react';
-import { selectSearchTerm, selectSetSearch } from '../../features/inventory/core/inventory.selectors';
+import { selectSearchTerm, selectSetSearch } from '@/features/inventory/core/inventory.selectors';
 
 export const InventorySearchBar = () => {
   const searchTerm = selectSearchTerm();

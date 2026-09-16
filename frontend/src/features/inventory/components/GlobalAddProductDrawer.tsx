@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { useInventoryUIStore } from '../store/inventory-ui.store';
-import { AddProductDrawer } from '@/components/inventory/AddProductDrawer';
+import { AddProductDrawer } from './AddProductDrawer';
 
 export function GlobalAddProductDrawer() {
   const { isAddProductOpen, setAddProductOpen } = useInventoryUIStore();

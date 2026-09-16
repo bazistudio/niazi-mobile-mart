@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { InventoryProduct, SortField, SortDirection, StockStatus } from '@/features/inventory/types';
-import { StockStatusBadge } from '@/components/inventory/StockStatusBadge';
+import { StockStatusBadge } from '@/features/inventory/components/StockStatusBadge';
 import { ProductActions } from './components/ProductActions';
 import { ProductEditModal } from './components/ProductEditModal';
 import { ProductDeleteDialog } from './components/ProductDeleteDialog';

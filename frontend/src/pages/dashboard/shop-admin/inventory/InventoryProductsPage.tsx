@@ -1,6 +1,6 @@
 import React from 'react';
-import { InventoryTable, TableColumn } from '@/components/inventory/InventoryTable';
-import { useInventoryFilters } from '@/components/inventory/InventoryFilterContext';
+import { InventoryTable, TableColumn } from '@/features/inventory/components/InventoryTable';
+import { useInventoryFilters } from '@/features/inventory/components/InventoryFilterContext';
 import { useProducts } from '@/features/inventory/hooks/useProducts';
 import { InventoryProduct, StockStatus } from '@/features/inventory/types';
 import { Loader2 } from 'lucide-react';

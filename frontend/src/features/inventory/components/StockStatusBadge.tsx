@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { StockStatus } from '../../features/inventory/types';
+import { StockStatus } from '@/features/inventory/types';
 
 export const StockStatusBadge = ({ status }: { status: StockStatus }) => {
   if (status === StockStatus.OUT_OF_STOCK) {

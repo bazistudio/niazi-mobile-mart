@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Package, Tag, Hash, ShoppingBag, BarChart2, Clock, Edit2 } from 'lucide-react';
 import { InventoryProduct, StockStatus } from '@/features/inventory/types';
-import { StockStatusBadge } from '@/components/inventory/StockStatusBadge';
+import { StockStatusBadge } from '@/features/inventory/components/StockStatusBadge';
 import { tauriClient, ProductProfitabilityDto } from '@/lib/tauri/tauriClient';
 
 interface ProductDetailsDrawerProps {
