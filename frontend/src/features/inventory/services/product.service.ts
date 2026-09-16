@@ -1,4 +1,5 @@
 import { tauriClient } from '@/lib/tauri/tauriClient';
+import { shopApi } from '@/services/shop.api';
 import { InventoryProduct, PaginationParams } from '../types';
 
 export const productService = {
@@ -35,6 +36,18 @@ export const productService = {
   },
 
   createProduct: async (productData: any): Promise<InventoryProduct> => {
+    const initialQty = Number(productData.initial_quantity ?? productData.initialQuantity ?? productData.quantity ?? 0);
+
+    let branchId = productData.branch_id || productData.branchId || null;
+    if (initialQty > 0 && !branchId) {
+      try {
+        const shopRes = await shopApi.getMyShop();
+        branchId = shopRes?.data?._id || '00000000-0000-0000-0000-000000000002';
+      } catch {
+        branchId = '00000000-0000-0000-0000-000000000002';
+      }
+    }
+
     const created = await tauriClient.productCreate({
       name: productData.name,
       sku: productData.sku || `SKU-${Date.now()}`,
@@ -46,6 +59,9 @@ export const productService = {
       sale_price: Math.round(Number(productData.price || productData.sale_price || 0)),
       low_stock_threshold: Number(productData.lowStockThreshold || productData.minStock || 5),
       description: productData.description || null,
+      initial_quantity: initialQty > 0 ? initialQty : null,
+      branch_id: initialQty > 0 ? branchId : null,
+      initial_branch_id: initialQty > 0 ? branchId : null,
     });
 
     return {
@@ -54,7 +70,7 @@ export const productService = {
       sku: created.sku,
       category: 'Catalog Item',
       categoryId: created.category_id,
-      stock: 0,
+      stock: initialQty > 0 ? initialQty : 0,
       minStockThreshold: created.low_stock_threshold,
       price: created.sale_price,
       purchasePrice: created.purchase_price,

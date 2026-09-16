@@ -1517,6 +1517,7 @@ export interface CreateProductDto {
   description?: string | null;
   initial_branch_id?: string | null;
   initial_quantity?: number | null;
+  branch_id?: string | null;
 }
 
 export interface UpdateProductDto {
