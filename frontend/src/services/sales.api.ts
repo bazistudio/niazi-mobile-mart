@@ -76,6 +76,8 @@ export const salesApi = {
         items: payload.items.map((i) => ({
           product_id: i.productId,
           quantity: Math.max(1, i.quantity),
+          unit_price: i.price,
+          price: i.price,
           discount: i.discount || 0,
         })),
         discount: payload.discount ?? null,

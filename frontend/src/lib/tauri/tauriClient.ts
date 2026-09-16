@@ -1054,11 +1054,13 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<OrganizationDashboardStats>('organization_get_dashboard_stats');
     }
+    const prods = getStoredWebProducts();
+    const lowStockCount = prods.filter((p) => p.quantity <= (p.min_stock_level || 5)).length;
     return {
-      product_count: 0,
+      product_count: prods.length,
       category_count: 0,
       active_staff_count: 1,
-      low_stock_count: 0,
+      low_stock_count: lowStockCount,
       active_branch_count: 1,
     };
   },
@@ -1182,7 +1184,7 @@ export const tauriClient = {
 
     (dto.items || []).forEach((item, idx) => {
       const prod = products.find((p) => p.id === item.product_id);
-      const unitPrice = prod ? prod.sale_price : 1000;
+      const unitPrice = (item as any).unit_price ?? (item as any).price ?? (prod ? prod.sale_price : 1000);
       const costPrice = prod ? (prod.purchase_price || prod.average_cost || 800) : 800;
       const lineDisc = item.discount || 0;
       const lineTotal = Math.max(0, unitPrice * item.quantity - lineDisc);
@@ -1772,19 +1774,48 @@ export const tauriClient = {
         branchId: branchId || null,
       });
     }
-    const emptyMetrics: ProfitMetricsDto = {
-      gross_revenue: 0,
-      discounts: 0,
-      net_revenue: 0,
-      cogs: 0,
-      gross_profit: 0,
-      gross_margin: 0,
-      orders_count: 0,
+    const sales = getStoredWebSales();
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const thisMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    const calcMetrics = (filterFn: (s: StoredWebSale) => boolean): ProfitMetricsDto => {
+      const matches = sales.filter((s) => s.sale && s.sale.sale_status === 'COMPLETED' && filterFn(s));
+      let gross_revenue = 0;
+      let discounts = 0;
+      let net_revenue = 0;
+      let cogs = 0;
+
+      for (const item of matches) {
+        const s = item.sale;
+        gross_revenue += s.subtotal || 0;
+        discounts += s.discount || 0;
+        net_revenue += s.total_amount || 0;
+        if (item.lines && item.lines.length > 0) {
+          for (const line of item.lines) {
+            cogs += (line.cost_price_snapshot || 0) * (line.quantity || 1);
+          }
+        }
+      }
+
+      const gross_profit = net_revenue - cogs;
+      const gross_margin = net_revenue > 0 ? (gross_profit / net_revenue) * 100 : 0;
+
+      return {
+        gross_revenue,
+        discounts,
+        net_revenue,
+        cogs,
+        gross_profit,
+        gross_margin,
+        orders_count: matches.length,
+      };
     };
+
     return {
-      today: emptyMetrics,
-      this_month: emptyMetrics,
-      total: emptyMetrics,
+      today: calcMetrics((s) => (s.sale.created_at || '').startsWith(todayStr)),
+      this_month: calcMetrics((s) => (s.sale.created_at || '').startsWith(thisMonthStr)),
+      total: calcMetrics(() => true),
     };
   },
 };

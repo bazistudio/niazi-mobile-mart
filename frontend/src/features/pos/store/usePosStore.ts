@@ -8,6 +8,8 @@ import { shopApi } from '@/services/shop.api';
 import { ledgerApi } from '@/services/ledger.api';
 import { platformAdapter } from '@/lib/platformAdapter';
 import { InvoiceDocument } from '../services/document/document.service';
+import { getQueryClient } from '@/components/providers/ReactQueryProvider';
+import { queryKeys } from '@/lib/react-query/queryKeys';
 
 // Migrate legacy POS storage key if present
 if (typeof window !== 'undefined' && !localStorage.getItem('niazi-pos')) {
@@ -582,6 +584,15 @@ export const usePosStore = create<PosStore>()(
           
           // Re-fetch inventory globally using decoupled event
           platformAdapter.emitEvent('inventory-updated');
+
+          try {
+            const qc = getQueryClient();
+            qc.invalidateQueries({ queryKey: queryKeys.dashboard });
+            qc.invalidateQueries({ queryKey: ['sales'] });
+            qc.invalidateQueries({ queryKey: ['products'] });
+          } catch (qcErr) {
+            console.warn('Query cache invalidation failed:', qcErr);
+          }
 
           return result;
         } catch (error: any) {
