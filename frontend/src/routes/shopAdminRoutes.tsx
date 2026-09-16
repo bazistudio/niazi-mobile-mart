@@ -24,7 +24,6 @@ import { RepairDetailPage } from '@/pages/dashboard/shop-admin/RepairDetailPage'
 import { ExpensesPage } from '@/pages/dashboard/shop-admin/ExpensesPage';
 import { CashManagementPage } from '@/pages/dashboard/shop-admin/CashManagementPage';
 import { BusinessLedgerPage } from '@/pages/dashboard/shop-admin/BusinessLedgerPage';
-import { KdsPage } from '@/pages/dashboard/shop-admin/KdsPage';
 import { MarketingPage } from '@/pages/dashboard/shop-admin/MarketingPage';
 import { ProfilePage } from '@/pages/dashboard/shop-admin/ProfilePage';
 import { AuditPage } from '@/pages/dashboard/shop-admin/AuditPage';
@@ -42,10 +41,9 @@ export const shopAdminCoreRoutes = (
     <Route index element={<ShopAdminDashboard />} />
     <Route path="profile" element={<ProfilePage />} />
 
-    {/* Point of Sale & Kitchen Display */}
+    {/* Point of Sale */}
     <Route element={<PermissionGuard requiredPermission={PERMISSIONS.POS_USE} />}>
       <Route path="pos" element={<POSPage />} />
-      <Route path="kds" element={<KdsPage />} />
     </Route>
 
     {/* Products Catalog */}

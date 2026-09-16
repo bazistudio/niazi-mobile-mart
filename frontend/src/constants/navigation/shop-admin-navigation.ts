@@ -13,7 +13,6 @@ import {
   FileUp,
   Bug,
   BookOpen,
-  ChefHat,
   Megaphone,
   Coins,
   Building2,
@@ -25,7 +24,7 @@ export const shopAdminNavigation: NavigationGroup[] = [
   {
     items: [
       { name: 'Dashboard', href: '/dashboard/shop-admin', icon: LayoutDashboard },
-      { name: 'Organization Control (17 Pages)', href: '/dashboard/organization', icon: Building2 },
+      { name: 'Organization Control', href: '/dashboard/organization', icon: Building2, permission: PERMISSIONS.SETTINGS_VIEW },
     ],
   },
   {
@@ -46,7 +45,6 @@ export const shopAdminNavigation: NavigationGroup[] = [
     items: [
       { name: 'Cash Management', href: '/dashboard/shop-admin/cash', icon: Coins, permission: PERMISSIONS.FINANCE_VIEW },
       { name: 'Expenses', href: '/dashboard/shop-admin/expenses', icon: Receipt, permission: PERMISSIONS.EXPENSES_VIEW },
-      { name: 'Kitchen Display (KDS)', href: '/dashboard/shop-admin/kds', icon: ChefHat, permission: PERMISSIONS.POS_USE },
       { name: 'Marketing & Broadcasts', href: '/dashboard/shop-admin/marketing', icon: Megaphone, permission: PERMISSIONS.REPORTS_VIEW },
       { name: 'Repairs', href: '/dashboard/shop-admin/repairs', icon: Wrench, permission: PERMISSIONS.REPAIRS_VIEW },
     ],

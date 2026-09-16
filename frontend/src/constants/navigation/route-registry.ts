@@ -27,9 +27,6 @@ export const VALID_ROUTES = [
   '/dashboard/shop-admin/settings',
   '/dashboard/shop-admin/profile',
 
-  // Operations & Kitchen
-  '/dashboard/shop-admin/kds',
-
   // Marketing
   '/dashboard/shop-admin/marketing',
 
