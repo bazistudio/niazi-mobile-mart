@@ -121,10 +121,10 @@ export function FirstAdminBootstrapPage() {
 
   if (checkingStatus) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f8fafc]">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 rounded-full border-2 border-[#006970] border-t-transparent animate-spin" />
-          <p className="text-xs text-slate-500 font-medium animate-pulse">
+          <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          <p className="text-xs text-text-muted font-medium animate-pulse">
             Verifying system initialization state...
           </p>
         </div>
@@ -133,30 +133,30 @@ export function FirstAdminBootstrapPage() {
   }
 
   return (
-    <main className="min-h-screen relative overflow-hidden flex items-center justify-center p-4 bg-[#f8fafc] text-slate-900 selection:bg-[#006970]/20 selection:text-[#006970]">
+    <main className="min-h-screen relative overflow-hidden flex items-center justify-center p-4 bg-background text-text-primary selection:bg-primary/20 selection:text-primary">
       {/* 3D Ambient Mesh Grid */}
       <div
         className="pointer-events-none absolute inset-0 opacity-[0.035]"
         style={{
-          backgroundImage: `radial-gradient(#0f172a 1px, transparent 1px)`,
+          backgroundImage: `radial-gradient(var(--color-text-primary) 1px, transparent 1px)`,
           backgroundSize: "24px 24px",
         }}
       />
 
       {/* Atmospheric Lighting Orbs */}
-      <div className="pointer-events-none absolute -top-40 -left-40 w-96 h-96 rounded-full bg-gradient-to-br from-[#006970]/25 to-teal-400/10 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-40 -right-40 w-96 h-96 rounded-full bg-gradient-to-tl from-[#00b4bb]/20 to-emerald-400/10 blur-3xl" />
+      <div className="pointer-events-none absolute -top-40 -left-40 w-96 h-96 rounded-full bg-gradient-to-br from-primary/25 to-secondary/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-40 -right-40 w-96 h-96 rounded-full bg-gradient-to-tl from-secondary/20 to-accent/10 blur-3xl" />
 
       <div className="relative w-full max-w-[440px] z-10 transition-all duration-300">
-        <div className="absolute -inset-1 rounded-3xl bg-gradient-to-b from-[#006970]/15 via-transparent to-[#00b4bb]/10 blur-xl opacity-75" />
+        <div className="absolute -inset-1 rounded-3xl bg-gradient-to-b from-primary/15 via-transparent to-secondary/10 blur-xl opacity-75" />
 
-        <div className="relative rounded-2xl bg-white/95 backdrop-blur-xl border border-white/80 p-7 sm:p-8 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_16px_-2px_rgba(0,105,112,0.08),0_20px_40px_-4px_rgba(15,23,42,0.12),0_32px_64px_-8px_rgba(15,23,42,0.08),inset_0_1px_1px_rgba(255,255,255,1)]">
+        <div className="relative rounded-2xl bg-surface/95 backdrop-blur-xl border border-border/80 p-7 sm:p-8 shadow-card">
           {!recoveryKey ? (
             /* First-Run Setup Form */
             <div>
               <div className="text-center mb-6">
-                <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#006970] to-[#00b4bb] p-[1px] shadow-[0_8px_16px_-2px_rgba(0,105,112,0.35),0_3px_6px_rgba(0,0,0,0.08)] mb-3">
-                  <div className="w-full h-full rounded-[15px] bg-gradient-to-b from-[#006970] to-[#005157] flex items-center justify-center">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-tr from-primary to-secondary p-[1px] shadow-sm mb-3">
+                  <div className="w-full h-full rounded-[15px] bg-gradient-to-b from-primary to-primary-active flex items-center justify-center">
                     <ShieldCheck className="w-6 h-6 text-white stroke-[2.2]" />
                   </div>
                 </div>
