@@ -177,7 +177,7 @@ impl SaleService {
 
         let now = Utc::now().to_rfc3339();
         let uid = user_id.map(|s| s.to_string());
-        let p_method = dto.payment_method.unwrap_or_else(|| "CASH".to_string()).to_uppercase();
+        let p_method = dto.payment_method.as_deref().unwrap_or("CASH").to_uppercase();
         let notes_cloned = dto.notes.clone();
 
         let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(self.db.as_ref().unwrap().clone());
