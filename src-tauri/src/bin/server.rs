@@ -1,7 +1,7 @@
-/// Niazi Mobile Mart — Cloud Run HTTP Server binary
+﻿/// Niazi Mobile Mart â€” Cloud Run HTTP Server binary
 ///
 /// Architecture contract:
-/// - Axum handlers are TRANSPORT ONLY — they call service methods, never raw SQL
+/// - Axum handlers are TRANSPORT ONLY â€” they call service methods, never raw SQL
 /// - Business rules live in the service layer (services/*.rs)
 /// - The repository layer owns persistence (SQLite or PostgreSQL)
 /// - This binary shares all service + domain + repository code with the Tauri desktop binary
@@ -28,7 +28,7 @@ use niazi_mobile_mart_lib::db::PostgresAdapter;
 use niazi_mobile_mart_lib::state::AppState;
 
 /// Shared server state threaded through Axum via `.with_state()`
-/// Handlers call service methods on `app_state` — never raw SQL.
+/// Handlers call service methods on `app_state` â€” never raw SQL.
 #[derive(Clone)]
 pub struct ServerState {
     pub app_state: Arc<AppState>,
@@ -92,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_state = if let Ok(database_url) = std::env::var("DATABASE_URL") {
         match PostgresAdapter::from_url(&database_url).await {
             Ok(pg_adapter) => {
-                info!("PostgreSQL connection pool ready — pg_mode: active");
+                info!("PostgreSQL connection pool ready â€” pg_mode: active");
                 let pool = pg_adapter.pool().clone();
                 Arc::new(AppState::new_postgres(env!("CARGO_PKG_VERSION"), pool).with_jwt_secret(&jwt_secret))
             }
@@ -103,12 +103,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     } else {
-        info!("DATABASE_URL not set — running in SQLite-only mode (local desktop / dev mode)");
+        info!("DATABASE_URL not set â€” running in SQLite-only mode (local desktop / dev mode)");
         let db_path = niazi_mobile_mart_lib::db::connection::DatabaseConnection::default_db_path();
         let base_state = match niazi_mobile_mart_lib::db::connection::DatabaseConnection::open_file(db_path) {
             Ok(db) => AppState::new_sqlite(env!("CARGO_PKG_VERSION"), db).with_jwt_secret(&jwt_secret),
             Err(e) => {
-                warn!("Persistent SQLite path unavailable ({e}) — using in-memory SQLite.");
+                warn!("Persistent SQLite path unavailable ({e}) â€” using in-memory SQLite.");
                 AppState::in_memory(env!("CARGO_PKG_VERSION")).with_jwt_secret(&jwt_secret)
             }
         };
@@ -159,24 +159,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 7. Bind and start
     let listener = tokio::net::TcpListener::bind(bind_addr).await?;
     info!("Niazi Cloud Run HTTP Server listening on http://{bind_addr}");
-    info!("  GET  /api/health → {bind_addr}/api/health");
-    info!("  GET  /api/v1/health → {bind_addr}/api/v1/health");
-    info!("  POST /api/auth/login → {bind_addr}/api/auth/login");
-    info!("  POST /api/auth/logout → {bind_addr}/api/auth/logout");
-    info!("  GET  /api/auth/me → {bind_addr}/api/auth/me");
-    info!("  GET  /api/products → {bind_addr}/api/products");
-    info!("  POST /api/products → {bind_addr}/api/products");
-    info!("  GET  /api/inventory → {bind_addr}/api/inventory");
-    info!("  POST /api/sales → {bind_addr}/api/sales");
-    info!("  GET  /api/customers → {bind_addr}/api/customers");
-    info!("  POST /api/customers → {bind_addr}/api/customers");
-    info!("  GET  /api/suppliers → {bind_addr}/api/suppliers");
-    info!("  POST /api/suppliers → {bind_addr}/api/suppliers");
-    info!("  POST /api/purchases → {bind_addr}/api/purchases");
-    info!("  GET  /api/expenses → {bind_addr}/api/expenses");
-    info!("  POST /api/expenses → {bind_addr}/api/expenses");
-    info!("  GET  /api/reports/profit → {bind_addr}/api/reports/profit");
-    info!("  FALLBACK SPA serving → React dist directory (index.html)");
+    info!("  GET  /api/health â†’ {bind_addr}/api/health");
+    info!("  GET  /api/v1/health â†’ {bind_addr}/api/v1/health");
+    info!("  POST /api/auth/login â†’ {bind_addr}/api/auth/login");
+    info!("  POST /api/auth/logout â†’ {bind_addr}/api/auth/logout");
+    info!("  GET  /api/auth/me â†’ {bind_addr}/api/auth/me");
+    info!("  GET  /api/products â†’ {bind_addr}/api/products");
+    info!("  POST /api/products â†’ {bind_addr}/api/products");
+    info!("  GET  /api/inventory â†’ {bind_addr}/api/inventory");
+    info!("  POST /api/sales â†’ {bind_addr}/api/sales");
+    info!("  GET  /api/customers â†’ {bind_addr}/api/customers");
+    info!("  POST /api/customers â†’ {bind_addr}/api/customers");
+    info!("  GET  /api/suppliers â†’ {bind_addr}/api/suppliers");
+    info!("  POST /api/suppliers â†’ {bind_addr}/api/suppliers");
+    info!("  POST /api/purchases â†’ {bind_addr}/api/purchases");
+    info!("  GET  /api/expenses â†’ {bind_addr}/api/expenses");
+    info!("  POST /api/expenses â†’ {bind_addr}/api/expenses");
+    info!("  GET  /api/reports/profit â†’ {bind_addr}/api/reports/profit");
+    info!("  FALLBACK SPA serving â†’ React dist directory (index.html)");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -234,7 +234,7 @@ impl axum::extract::FromRequestParts<ServerState> for AuthenticatedUser {
 }
 
 // ---------------------------------------------------------------------------
-// Route Handlers — TRANSPORT LAYER ONLY
+// Route Handlers â€” TRANSPORT LAYER ONLY
 // Each handler must delegate business operations to a service method.
 // Direct SQL queries are PROHIBITED in this module.
 // ---------------------------------------------------------------------------
@@ -356,7 +356,7 @@ async fn bootstrap_first_admin_handler(
     }
 }
 
-/// POST /api/v1/users — Create staff user (Admin only)
+/// POST /api/v1/users â€” Create staff user (Admin only)
 async fn create_user_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -373,7 +373,7 @@ async fn create_user_handler(
     }
 }
 
-/// GET /api/v1/users — List all users (Admin/Manager)
+/// GET /api/v1/users â€” List all users (Admin/Manager)
 async fn list_users_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -394,7 +394,7 @@ async fn list_users_handler(
 /// GET /api/health
 /// Infrastructure-level health check.
 /// Reports server liveness and active database mode.
-/// No service calls required — reads connection state only.
+/// No service calls required â€” reads connection state only.
 async fn health_handler(State(state): State<ServerState>) -> impl IntoResponse {
     let db_mode = if state.app_state.pg_pool().is_some() {
         "postgresql"
@@ -413,10 +413,10 @@ async fn health_handler(State(state): State<ServerState>) -> impl IntoResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Domain API Handlers — TRANSPORT ONLY WITH STRICT SERVER-SIDE RBAC
+// Domain API Handlers â€” TRANSPORT ONLY WITH STRICT SERVER-SIDE RBAC
 // ---------------------------------------------------------------------------
 
-/// GET /api/products — List products with search filter
+/// GET /api/products â€” List products with search filter
 async fn list_products_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -432,7 +432,7 @@ async fn list_products_handler(
     }
 }
 
-/// GET /api/products/:id — Get product details
+/// GET /api/products/:id â€” Get product details
 async fn get_product_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -448,7 +448,7 @@ async fn get_product_handler(
     }
 }
 
-/// POST /api/products — Create new product
+/// POST /api/products â€” Create new product
 async fn create_product_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -464,7 +464,7 @@ async fn create_product_handler(
     }
 }
 
-/// GET /api/inventory — List inventory stock map with strict branch isolation
+/// GET /api/inventory â€” List inventory stock map with strict branch isolation
 async fn list_inventory_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -486,7 +486,7 @@ async fn list_inventory_handler(
     }
 }
 
-/// POST /api/sales — Complete retail sale checkout with strict branch isolation
+/// POST /api/sales â€” Complete retail sale checkout with strict branch isolation
 async fn complete_sale_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -510,7 +510,7 @@ async fn complete_sale_handler(
     }
 }
 
-/// GET /api/customers — List customers
+/// GET /api/customers â€” List customers
 async fn list_customers_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -526,7 +526,7 @@ async fn list_customers_handler(
     }
 }
 
-/// POST /api/customers — Create customer
+/// POST /api/customers â€” Create customer
 async fn create_customer_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -542,7 +542,7 @@ async fn create_customer_handler(
     }
 }
 
-/// GET /api/suppliers — List suppliers
+/// GET /api/suppliers â€” List suppliers
 async fn list_suppliers_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -558,7 +558,7 @@ async fn list_suppliers_handler(
     }
 }
 
-/// POST /api/suppliers — Create supplier
+/// POST /api/suppliers â€” Create supplier
 async fn create_supplier_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -574,7 +574,7 @@ async fn create_supplier_handler(
     }
 }
 
-/// POST /api/purchases — Complete purchase with strict branch isolation
+/// POST /api/purchases â€” Complete purchase with strict branch isolation
 async fn complete_purchase_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -598,7 +598,7 @@ async fn complete_purchase_handler(
     }
 }
 
-/// GET /api/expenses — List expenses with strict branch isolation
+/// GET /api/expenses â€” List expenses with strict branch isolation
 async fn list_expenses_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -622,7 +622,7 @@ async fn list_expenses_handler(
     }
 }
 
-/// POST /api/expenses — Create expense with strict branch isolation
+/// POST /api/expenses â€” Create expense with strict branch isolation
 async fn create_expense_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -646,7 +646,7 @@ async fn create_expense_handler(
     }
 }
 
-/// GET /api/reports/profit — Get profit summary report with strict branch isolation
+/// GET /api/reports/profit â€” Get profit summary report with strict branch isolation
 async fn profit_report_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -676,7 +676,7 @@ struct SyncPushPayload {
     events: Vec<niazi_mobile_mart_lib::domain::sync_queue::SyncQueueItem>,
 }
 
-/// POST /api/v1/sync/push — Central Outbox Event Ingestion & Deduplication Handler
+/// POST /api/v1/sync/push â€” Central Outbox Event Ingestion & Deduplication Handler
 async fn sync_push_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -711,13 +711,35 @@ async fn sync_push_handler(
         }
 
         if let Some(pg_pool) = state.app_state.pg_pool() {
-            let existing: Option<String> = sqlx::query_scalar("SELECT id FROM sync_audit WHERE client_event_id = $1")
-                .bind(&client_event_id)
-                .fetch_optional(pg_pool)
-                .await
-                .unwrap_or(None);
+            let mut tx = match pg_pool.begin().await {
+                Ok(t) => t,
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to initialize database transaction: {e}")
+                        })),
+                    );
+                }
+            };
+
+            let existing = match niazi_mobile_mart_lib::repositories::PostgresSyncAuditRepository::find_existing_event_id_tx(&mut tx, &client_event_id).await {
+                Ok(res) => res,
+                Err(e) => {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Idempotency check failed: {e}")
+                        })),
+                    );
+                }
+            };
 
             if let Some(existing_id) = existing {
+                let _ = tx.rollback().await;
                 results.push(json!({
                     "client_event_id": client_event_id,
                     "server_event_id": existing_id,
@@ -726,22 +748,37 @@ async fn sync_push_handler(
                 continue;
             }
 
-            let _ = sqlx::query(
-                "INSERT INTO sync_audit (id, client_event_id, terminal_id, organization_id, branch_id, event_type, payload, status, processed_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'SYNCED', NOW())
-                 ON CONFLICT (client_event_id) DO NOTHING;"
-            )
-            .bind(&server_event_id)
-            .bind(&client_event_id)
-            .bind(&event.terminal_id)
-            .bind(&event.organization_id)
-            .bind(&event.branch_id)
-            .bind(&event.event_type)
-            .bind(&event.payload)
-            .execute(pg_pool)
-            .await;
-        }
+            if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresSyncAuditRepository::record_audit_tx(
+                &mut tx,
+                &server_event_id,
+                &client_event_id,
+                &event.terminal_id,
+                &event.organization_id,
+                &event.branch_id,
+                &event.event_type,
+                &event.payload,
+                "SYNCED",
+            ).await {
+                let _ = tx.rollback().await;
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": "SERVER_ERROR",
+                        "message": format!("Failed to record sync audit in transaction: {e}")
+                    })),
+                );
+            }
 
+            if let Err(e) = tx.commit().await {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": "SERVER_ERROR",
+                        "message": format!("Failed to commit sync transaction: {e}")
+                    })),
+                );
+            }
+        }
         results.push(json!({
             "client_event_id": client_event_id,
             "server_event_id": server_event_id,
@@ -755,7 +792,7 @@ async fn sync_push_handler(
     )
 }
 
-/// GET /api/v1/sync/pull — 15-Minute Downstream Delta Reconciliation Pull Handler
+/// GET /api/v1/sync/pull â€” 15-Minute Downstream Delta Reconciliation Pull Handler
 async fn sync_pull_handler(
     State(state): State<ServerState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
@@ -771,7 +808,7 @@ async fn sync_pull_handler(
 }
 
 // ---------------------------------------------------------------------------
-// Graceful Shutdown — handles Ctrl+C (dev) and SIGTERM (Cloud Run)
+// Graceful Shutdown â€” handles Ctrl+C (dev) and SIGTERM (Cloud Run)
 // ---------------------------------------------------------------------------
 
 async fn shutdown_signal() {
@@ -793,8 +830,8 @@ async fn shutdown_signal() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => { info!("Ctrl+C received — shutting down."); },
-        _ = terminate => { info!("SIGTERM received — shutting down."); },
+        _ = ctrl_c => { info!("Ctrl+C received â€” shutting down."); },
+        _ = terminate => { info!("SIGTERM received â€” shutting down."); },
     }
 }
 

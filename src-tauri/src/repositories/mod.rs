@@ -1,4 +1,4 @@
-pub mod branch_repository;
+﻿pub mod branch_repository;
 pub mod cash_repository;
 pub mod catalog_repository;
 pub mod customer_repository;
@@ -31,7 +31,7 @@ pub mod postgres_sales_return_repo;
 pub mod postgres_supplier_repo;
 pub mod postgres_user_repo;
 
-pub use sync_queue_repository::SQLiteSyncQueueRepository;
+pub use sync_queue_repository::{PostgresSyncAuditRepository, SQLiteSyncQueueRepository};
 pub use terminal_repository::{PostgresTerminalRepository, SQLiteTerminalRepository, TerminalRepository};
 
 pub use branch_repository::{BranchRepository as SQLiteBranchRepository, OrganizationDashboardStats};
@@ -105,7 +105,7 @@ use crate::domain::supplier::{
 use crate::domain::user::User;
 use crate::errors::AppResult;
 
-// ── Unified Repository Enums satisfying the dual persistence boundary ────────
+// â”€â”€ Unified Repository Enums satisfying the dual persistence boundary â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[derive(Clone)]
 pub enum UserRepository {

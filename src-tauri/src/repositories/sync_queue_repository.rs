@@ -1,4 +1,4 @@
-use rusqlite::params;
+﻿use rusqlite::params;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -272,6 +272,75 @@ impl SQLiteSyncQueueRepository {
     }
 }
 
+/// Central PostgreSQL repository for sync audit logging & idempotency checks
+#[derive(Clone)]
+pub struct PostgresSyncAuditRepository {
+    pool: sqlx::PgPool,
+}
+
+impl PostgresSyncAuditRepository {
+    pub fn new(pool: sqlx::PgPool) -> Self {
+        Self { pool }
+    }
+
+    /// Checks if a client_event_id has already been processed centrally
+    pub async fn find_existing_event_id(&self, client_event_id: &str) -> AppResult<Option<String>> {
+        let row: Option<(String,)> = sqlx::query_as("SELECT id FROM sync_audit WHERE client_event_id = $1")
+            .bind(client_event_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Postgres sync audit query failed: {e}")))?;
+
+        Ok(row.map(|r| r.0))
+    }
+
+    /// Checks idempotency within an active PostgreSQL transaction handle
+    pub async fn find_existing_event_id_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        client_event_id: &str,
+    ) -> AppResult<Option<String>> {
+        let row: Option<(String,)> = sqlx::query_as("SELECT id FROM sync_audit WHERE client_event_id = $1")
+            .bind(client_event_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(format!("Postgres sync audit tx query failed: {e}")))?;
+
+        Ok(row.map(|r| r.0))
+    }
+
+    /// Inserts a sync_audit record within an active PostgreSQL transaction
+    pub async fn record_audit_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        server_event_id: &str,
+        client_event_id: &str,
+        terminal_id: &str,
+        organization_id: &str,
+        branch_id: &str,
+        event_type: &str,
+        payload: &str,
+        status: &str,
+    ) -> AppResult<()> {
+        sqlx::query(
+            "INSERT INTO sync_audit (id, client_event_id, terminal_id, organization_id, branch_id, event_type, payload, status, processed_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+             ON CONFLICT (client_event_id) DO NOTHING;"
+        )
+        .bind(server_event_id)
+        .bind(client_event_id)
+        .bind(terminal_id)
+        .bind(organization_id)
+        .bind(branch_id)
+        .bind(event_type)
+        .bind(payload)
+        .bind(status)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to record sync audit in Postgres transaction: {e}")))?;
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,3 +395,4 @@ mod tests {
         assert_eq!(count, 0);
     }
 }
+
