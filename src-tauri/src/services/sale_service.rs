@@ -180,6 +180,11 @@ impl SaleService {
         let p_method = dto.payment_method.unwrap_or_else(|| "CASH".to_string()).to_uppercase();
         let notes_cloned = dto.notes.clone();
 
+        let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(self.db.as_ref().unwrap().clone());
+        let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+        let terminal_id = current_terminal.id;
+        let dto_payload_json = serde_json::to_string(&dto).unwrap_or_default();
+
         // 6. Execute Atomic SQLite Checkout Transaction
         let db = self.db.as_ref().expect("SQLite database connection required");
         let result = with_transaction(db, move |tx| {
@@ -346,6 +351,17 @@ impl SaleService {
                     SQLiteCashRepository::insert_movement_in_tx(tx, &cash_movement)?;
                 }
             }
+
+            // H. Atomically enqueue SALE_CREATED event into offline_sync_queue in SQLite transaction
+            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                client_event_id: Some(sale_id.clone()),
+                terminal_id,
+                organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: branch_id.clone(),
+                event_type: "SALE_CREATED".to_string(),
+                payload: dto_payload_json,
+            };
+            crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
 
             let cogs: i64 = sale_lines.iter().map(|l| l.quantity * l.cost_price_snapshot).sum();
             let gross_profit = sale.total_amount - cogs;

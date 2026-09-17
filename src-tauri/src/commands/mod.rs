@@ -13,6 +13,7 @@ pub mod purchases;
 pub mod sales;
 pub mod sales_return;
 pub mod supplier;
+pub mod sync;
 pub mod terminal;
 pub mod updater;
 

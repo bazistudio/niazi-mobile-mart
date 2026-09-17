@@ -9,6 +9,7 @@ import { ShopSwitcher } from '@/components/layout/ShopSwitcher';
 import { UserMenu } from '@/components/layout/UserMenu';
 import { useTerminalStore } from '@/store/useTerminalStore';
 import { Lock } from 'lucide-react';
+import { SyncStatusBadge } from '@/components/common/SyncStatusBadge';
 
 export const PosHeader: React.FC = () => {
   const [isInvoiceLookupOpen, setInvoiceLookupOpen] = useState(false);
@@ -48,6 +49,9 @@ export const PosHeader: React.FC = () => {
 
         {/* Right Section: Actions Dropdown, Lock Terminal, Cashier Profile */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {/* Sync Engine Status Indicator */}
+          <SyncStatusBadge />
+
           {/* Real Return / Exchange Actions Dropdown */}
           <PosActionsDropdown onOpenInvoiceLookup={() => setInvoiceLookupOpen(true)} />
 

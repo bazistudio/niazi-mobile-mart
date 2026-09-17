@@ -1,6 +1,6 @@
 [package]
 name = "niazi-mobile-mart"
-version = "1.2.0"
+version = "1.2.1"
 description = "Niazi Mobile Mart - Desktop ERP & POS"
 authors = ["Niazi Mobile Mart"]
 edition = "2021"
@@ -40,3 +40,4 @@ chrono = { version = "0.4", features = ["serde"] }
 rusqlite = { version = "0.32", features = ["bundled", "chrono", "uuid"] }
 sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-native-tls", "chrono", "uuid", "migrate"] }
 jsonwebtoken = "9.3"
+reqwest = { version = "0.12", features = ["json"] }

@@ -13,6 +13,7 @@ pub mod purchase_service;
 pub mod sale_service;
 pub mod sales_return_service;
 pub mod supplier_service;
+pub mod sync_worker;
 pub mod terminal_service;
 pub mod token_service;
 
@@ -35,5 +36,6 @@ pub use purchase_service::PurchaseService;
 pub use sale_service::SaleService;
 pub use sales_return_service::SalesReturnService;
 pub use supplier_service::SupplierService;
+pub use sync_worker::{SyncEngineStatus, SyncWorkerDaemon};
 pub use terminal_service::TerminalService;
 

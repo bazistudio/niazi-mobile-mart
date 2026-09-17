@@ -83,6 +83,62 @@ impl SQLiteSyncQueueRepository {
         Ok(item)
     }
 
+    /// Enqueues a new offline event directly within an existing SQLite transaction
+    pub fn enqueue_in_tx(tx: &rusqlite::Transaction, dto: EnqueueOfflineEventDto) -> crate::db::errors::DbResult<SyncQueueItem> {
+        let id = Uuid::new_v4().to_string();
+        let client_event_id = dto
+            .client_event_id
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let now = Utc::now().to_rfc3339();
+
+        let item = SyncQueueItem {
+            id: id.clone(),
+            client_event_id: client_event_id.clone(),
+            terminal_id: dto.terminal_id,
+            organization_id: dto.organization_id,
+            branch_id: dto.branch_id,
+            event_type: dto.event_type,
+            payload: dto.payload,
+            status: SyncQueueStatus::Pending,
+            attempt_count: 0,
+            last_error: None,
+            last_attempt_at: None,
+            server_event_id: None,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        };
+
+        let sql = "
+            INSERT INTO offline_sync_queue (
+                id, client_event_id, terminal_id, organization_id, branch_id,
+                event_type, payload, status, attempt_count, last_error,
+                last_attempt_at, server_event_id, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14);
+        ";
+
+        tx.execute(
+            sql,
+            params![
+                &item.id,
+                &item.client_event_id,
+                &item.terminal_id,
+                &item.organization_id,
+                &item.branch_id,
+                &item.event_type,
+                &item.payload,
+                item.status.as_str(),
+                item.attempt_count,
+                &item.last_error,
+                &item.last_attempt_at,
+                &item.server_event_id,
+                &item.created_at,
+                &item.updated_at,
+            ],
+        )?;
+
+        Ok(item)
+    }
+
     /// Finds a queue item by unique client_event_id
     pub async fn get_by_client_event_id(&self, client_event_id: &str) -> AppResult<Option<SyncQueueItem>> {
         let conn_arc = self.db.inner();

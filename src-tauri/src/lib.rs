@@ -58,6 +58,10 @@ pub fn run() {
             let menu = Menu::with_items(handle, &[&file_menu, &help_menu])?;
             app.set_menu(menu)?;
 
+            // Start Rust background SyncWorkerDaemon for offline outbox processing
+            let sync_worker = services::SyncWorkerDaemon::new(std::sync::Arc::new(app_state.clone()));
+            sync_worker.start();
+
             Ok(())
         })
         .on_menu_event(|app_handle, event| match event.id().as_ref() {
@@ -223,6 +227,9 @@ pub fn run() {
             commands::profit::profit_get_product,
             commands::profit::profit_get_sale,
             commands::profit::profit_get_dashboard_summary,
+            // Offline Sync Engine Commands (Plan A)
+            commands::sync::sync_get_status,
+            commands::sync::sync_trigger_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Niazi Mobile Mart Tauri application");

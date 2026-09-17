@@ -12,6 +12,8 @@ import { useExpensesStore } from '@/features/expenses';
 import { useInventoryUIStore } from '@/features/inventory/store/inventory-ui.store';
 import { useTerminalStore } from '@/store/useTerminalStore';
 
+import { SyncStatusBadge } from '../common/SyncStatusBadge';
+
 interface TopbarProps {
   setMobileMenuOpen?: (isOpen: boolean) => void;
 }
@@ -59,6 +61,9 @@ export const Topbar = ({ setMobileMenuOpen }: TopbarProps = {}) => {
             <Plus className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
             <span className="hidden md:inline">Add Stock</span>
           </button>
+
+          {/* Sync Engine Status */}
+          <SyncStatusBadge />
 
           {/* Sync Inventory */}
           <button
