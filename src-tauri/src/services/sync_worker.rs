@@ -47,7 +47,7 @@ impl SyncWorkerDaemon {
     /// Spawns the background daemon Tokio loop
     pub fn start(&self) {
         let daemon = self.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             info!("Starting background SyncWorkerDaemon loop...");
             let mut pull_timer = tokio::time::interval(Duration::from_secs(900)); // 15-minute reconciliation pull interval
 
