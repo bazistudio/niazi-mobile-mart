@@ -36,6 +36,9 @@ export const AddShopModal: React.FC<AddShopModalProps> = ({ isOpen, onClose, onS
       const res = await shopApi.createShop(formData);
       if (res.success) {
         toast.success(res.message || 'Shop created successfully');
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('branch-updated'));
+        }
         onSuccess();
         onClose();
         setFormData({ name: '', phone: '', address: '', city: '' });

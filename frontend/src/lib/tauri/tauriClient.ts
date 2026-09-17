@@ -512,7 +512,35 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<SanitizedUser[]>('admin_list_users');
     }
-    return [];
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem('nmm_browser_staff_users') : null;
+      if (raw) {
+        const list = JSON.parse(raw);
+        if (Array.isArray(list) && list.length > 0) {
+          return list.map((u: any) => ({
+            id: u.id || u._id,
+            name: u.name,
+            username: u.username,
+            role: (u.roleId || u.role || 'ADMIN').toUpperCase() as StaffRole,
+            status: u.status || 'active',
+            is_active: u.status === 'active' || u.is_active !== false,
+            must_change_password: !!u.mustChangePassword,
+            has_pin: !!u.hasPin,
+            access_profile: u.access_profile || { role_name: u.roleName || 'Staff', permissions: [] },
+            created_at: u.createdAt || new Date().toISOString(),
+          }));
+        }
+      }
+    } catch {}
+
+    return [
+      { id: '00000000-0000-0000-0000-000000000001', name: 'IMRAN KHAN NIAZI', username: 'imran khan', role: 'ADMIN', status: 'active', is_active: true, must_change_password: false, has_pin: true, access_profile: { role_name: 'Organization Admin', permissions: [] }, created_at: '2026-01-01T00:00:00Z' },
+      { id: '00000000-0000-0000-0000-000000000002', name: 'ZAIN ULLAH', username: 'zk', role: 'MANAGER', status: 'active', is_active: true, must_change_password: false, has_pin: true, access_profile: { role_name: 'Manager', permissions: [] }, created_at: '2026-01-01T00:00:00Z' },
+      { id: '00000000-0000-0000-0000-000000000003', name: 'RAJA ABDUL REHMAN', username: 'raja', role: 'CASHIER', status: 'active', is_active: true, must_change_password: false, has_pin: true, access_profile: { role_name: 'Cashier', permissions: [] }, created_at: '2026-01-01T00:00:00Z' },
+      { id: '00000000-0000-0000-0000-000000000004', name: 'MOHAMMAD BAKHSH CHISHTI', username: 'bashi', role: 'SALESMAN', status: 'active', is_active: true, must_change_password: false, has_pin: true, access_profile: { role_name: 'Salesman', permissions: [] }, created_at: '2026-01-01T00:00:00Z' },
+      { id: '00000000-0000-0000-0000-000000000005', name: 'NAVEED GUL', username: 'gul', role: 'ACCOUNTANT', status: 'active', is_active: true, must_change_password: false, has_pin: true, access_profile: { role_name: 'Accountant', permissions: [] }, created_at: '2026-01-01T00:00:00Z' },
+      { id: '00000000-0000-0000-0000-000000000006', name: 'FAIZAN KHAN', username: 'faizan', role: 'REPAIR_MECHANIC', status: 'active', is_active: true, must_change_password: false, has_pin: true, access_profile: { role_name: 'Repair Mechanic', permissions: [] }, created_at: '2026-01-01T00:00:00Z' },
+    ];
   },
 
   async adminApproveStaff(userId: string): Promise<SanitizedUser> {
@@ -1056,10 +1084,21 @@ export const tauriClient = {
     }
     const prods = getStoredWebProducts();
     const lowStockCount = prods.filter((p) => p.quantity <= (p.min_stock_level || 5)).length;
+    let activeStaffCount = 6;
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem('nmm_browser_staff_users') : null;
+      if (raw) {
+        const staff = JSON.parse(raw);
+        if (Array.isArray(staff)) {
+          activeStaffCount = Math.max(1, staff.filter((u: any) => u.status === 'active').length);
+        }
+      }
+    } catch {}
+
     return {
       product_count: prods.length,
       category_count: 0,
-      active_staff_count: 1,
+      active_staff_count: activeStaffCount,
       low_stock_count: lowStockCount,
       active_branch_count: 1,
     };
@@ -1310,6 +1349,22 @@ export const tauriClient = {
       }
       if (filter.sale_status) {
         list = list.filter((s) => s.sale_status === filter.sale_status);
+      }
+      if (filter.start_date) {
+        list = list.filter((s) => {
+          if (!s.created_at) return true;
+          const d = new Date(s.created_at);
+          const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          return dateStr >= filter.start_date!;
+        });
+      }
+      if (filter.end_date) {
+        list = list.filter((s) => {
+          if (!s.created_at) return true;
+          const d = new Date(s.created_at);
+          const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          return dateStr <= filter.end_date!;
+        });
       }
       if (filter.search) {
         const q = filter.search.toLowerCase();

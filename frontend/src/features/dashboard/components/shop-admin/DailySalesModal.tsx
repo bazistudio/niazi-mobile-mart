@@ -74,13 +74,20 @@ export const DailySalesModal = ({ isOpen, onClose }: DailySalesModalProps) => {
 
   const getDates = () => {
     const now = new Date();
-    let start = now;
+    let start = new Date(now);
     if (dateFilter === 'week') start = startOfWeek(now, { weekStartsOn: 1 });
     if (dateFilter === 'month') start = startOfMonth(now);
-    
+
+    const toLocalDateStr = (d: Date) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
     return {
-      startDate: start.toISOString().split('T')[0],
-      endDate: now.toISOString().split('T')[0],
+      startDate: toLocalDateStr(start),
+      endDate: toLocalDateStr(now),
     };
   };
 
@@ -91,23 +98,33 @@ export const DailySalesModal = ({ isOpen, onClose }: DailySalesModalProps) => {
     queryFn: () => {
       const cleanSearch = debouncedSearch.trim().toUpperCase().replace(/^ORD-/, '');
       const queryOrderNumber = cleanSearch ? `ORD-${cleanSearch}` : undefined;
-      
-      return salesApi.getOrders({ 
-        startDate: queryOrderNumber ? undefined : startDate, 
+
+      return salesApi.getOrders({
+        startDate: queryOrderNumber ? undefined : startDate,
         endDate: queryOrderNumber ? undefined : endDate,
         orderNumber: queryOrderNumber,
-        limit: 500 
+        limit: 500,
       });
     },
     enabled: isOpen,
-    staleTime: 60000,
+    staleTime: 0,
   });
+
+  const rawOrders = salesResponse?.data || [];
+
+  const orders = useMemo(() => {
+    if (!rawOrders || rawOrders.length === 0) return [];
+    if (debouncedSearch.trim()) return rawOrders;
+    return rawOrders.filter((o: any) => {
+      if (!o.createdAt) return true;
+      const d = new Date(o.createdAt);
+      const orderDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      return orderDateStr >= startDate && orderDateStr <= endDate;
+    });
+  }, [rawOrders, startDate, endDate, debouncedSearch]);
 
   if (!isOpen) return null;
 
-  const orders = salesResponse?.data || [];
-  
-  // We no longer filter on frontend since backend handles global search
   const totalSalesAmount = orders.reduce((sum: number, order: any) => sum + (order.grandTotal || order.totalAmount || 0), 0);
 
   return (

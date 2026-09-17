@@ -176,28 +176,113 @@ export function saveRolePermissionGrants(
   notifyRolePermissionsChange();
 }
 
-function getBrowserStaff(): StaffUser[] {
+const DEFAULT_STAFF_USERS: StaffUser[] = [
+  {
+    id: '00000000-0000-0000-0000-000000000001',
+    _id: '00000000-0000-0000-0000-000000000001',
+    name: 'IMRAN KHAN NIAZI',
+    username: 'imran khan',
+    email: 'imran khan@local',
+    roleId: 'admin',
+    roleName: 'Organization Admin',
+    hasPin: true,
+    status: 'active',
+    mustChangePassword: false,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: '00000000-0000-0000-0000-000000000002',
+    _id: '00000000-0000-0000-0000-000000000002',
+    name: 'ZAIN ULLAH',
+    username: 'zk',
+    email: 'zk@local',
+    roleId: 'manager',
+    roleName: 'Manager',
+    hasPin: true,
+    status: 'active',
+    mustChangePassword: false,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: '00000000-0000-0000-0000-000000000003',
+    _id: '00000000-0000-0000-0000-000000000003',
+    name: 'RAJA ABDUL REHMAN',
+    username: 'raja',
+    email: 'raja@local',
+    roleId: 'cashier',
+    roleName: 'Cashier',
+    hasPin: true,
+    status: 'active',
+    mustChangePassword: false,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: '00000000-0000-0000-0000-000000000004',
+    _id: '00000000-0000-0000-0000-000000000004',
+    name: 'MOHAMMAD BAKHSH CHISHTI',
+    username: 'bashi',
+    email: 'bashi@local',
+    roleId: 'salesman',
+    roleName: 'Salesman',
+    hasPin: true,
+    status: 'active',
+    mustChangePassword: false,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: '00000000-0000-0000-0000-000000000005',
+    _id: '00000000-0000-0000-0000-000000000005',
+    name: 'NAVEED GUL',
+    username: 'gul',
+    email: 'gul@local',
+    roleId: 'accountant',
+    roleName: 'Accountant',
+    hasPin: true,
+    status: 'active',
+    mustChangePassword: false,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: '00000000-0000-0000-0000-000000000006',
+    _id: '00000000-0000-0000-0000-000000000006',
+    name: 'FAIZAN KHAN',
+    username: 'faizan',
+    email: 'faizan@local',
+    roleId: 'repair_mechanic',
+    roleName: 'Repair Mechanic',
+    hasPin: true,
+    status: 'active',
+    mustChangePassword: false,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  },
+];
+
+export function getBrowserStaff(): StaffUser[] {
+  let list: StaffUser[] = [];
   try {
     const raw = typeof window !== 'undefined' ? localStorage.getItem(BROWSER_STAFF_STORAGE_KEY) : null;
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      list = JSON.parse(raw);
+    }
   } catch {}
-  const seed: StaffUser[] = [
-    {
-      id: '00000000-0000-0000-0000-000000000001',
-      _id: '00000000-0000-0000-0000-000000000001',
-      name: 'System Administrator',
-      username: 'admin',
-      email: 'admin@local',
-      roleId: 'admin',
-      roleName: 'Organization Admin',
-      hasPin: true,
-      status: 'active',
-      mustChangePassword: false,
-      createdAt: new Date().toISOString(),
-    },
-  ];
-  saveBrowserStaff(seed);
-  return seed;
+
+  if (!Array.isArray(list)) list = [];
+
+  // Remove generic placeholders if present
+  const fakeNames = new Set(['System Administrator', 'Shop Branch Manager', 'Sales Associate', 'Finance Accountant', 'Repair Specialist']);
+  list = list.filter((u) => !fakeNames.has(u.name) && u.username !== 'admin' && u.username !== 'manager' && u.username !== 'cashier' && u.username !== 'salesman' && u.username !== 'accountant' && u.username !== 'mechanic');
+
+  for (const defaultUser of DEFAULT_STAFF_USERS) {
+    const exists = list.some(
+      (u) => u.id === defaultUser.id || u._id === defaultUser._id || u.username === defaultUser.username || u.name === defaultUser.name
+    );
+    if (!exists) {
+      list.push(defaultUser);
+    }
+  }
+
+  saveBrowserStaff(list);
+  return list;
 }
 
 function saveBrowserStaff(users: StaffUser[]) {
