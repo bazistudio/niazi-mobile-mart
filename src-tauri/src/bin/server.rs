@@ -679,6 +679,7 @@ struct SyncPushPayload {
 /// POST /api/v1/sync/push — Central Outbox Event Ingestion & Deduplication Handler
 async fn sync_push_handler(
     State(state): State<ServerState>,
+    auth: AuthenticatedUser,
     Json(payload): Json<SyncPushPayload>,
 ) -> impl IntoResponse {
     let mut results = Vec::new();
@@ -686,6 +687,28 @@ async fn sync_push_handler(
     for event in payload.events {
         let client_event_id = event.client_event_id.clone();
         let server_event_id = uuid::Uuid::new_v4().to_string();
+
+        // 1. Organization Authorization: Must match authenticated user's organization
+        if event.organization_id != auth.0.organization_id {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": "FORBIDDEN",
+                    "message": "Access denied: Cross-organization sync event prohibited"
+                })),
+            );
+        }
+
+        // 2. Branch Authorization: Must be authorized for authenticated user
+        if let Err(e) = auth.0.validate_context(Some(&event.organization_id), Some(&event.branch_id)) {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": "FORBIDDEN",
+                    "message": format!("Access denied: Unauthorized branch event: {}", e)
+                })),
+            );
+        }
 
         if let Some(pg_pool) = state.app_state.pg_pool() {
             let existing: Option<String> = sqlx::query_scalar("SELECT id FROM sync_audit WHERE client_event_id = $1")
