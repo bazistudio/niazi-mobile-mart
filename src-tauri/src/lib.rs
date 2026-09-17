@@ -20,12 +20,13 @@ pub fn run() {
         .try_init();
 
     let app_state = AppState::open_default(env!("CARGO_PKG_VERSION"));
+    let app_state_for_setup = app_state.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .setup(|app| {
+        .setup(move |app| {
             let handle = app.handle();
             let file_menu = SubmenuBuilder::new(handle, "File")
                 .id("file_menu")
@@ -59,7 +60,7 @@ pub fn run() {
             app.set_menu(menu)?;
 
             // Start Rust background SyncWorkerDaemon for offline outbox processing
-            let sync_worker = services::SyncWorkerDaemon::new(std::sync::Arc::new(app_state.clone()));
+            let sync_worker = services::SyncWorkerDaemon::new(std::sync::Arc::new(app_state_for_setup));
             sync_worker.start();
 
             Ok(())
