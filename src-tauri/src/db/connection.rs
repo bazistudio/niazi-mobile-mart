@@ -23,7 +23,20 @@ impl DatabaseConnection {
                 .map_err(|e| DbError::ConnectionError(format!("Failed to create database directory: {e}")))?;
         }
 
-        let mut conn = Connection::open(path_ref)?;
+        let mut attempts = 0;
+        let mut conn = loop {
+            match Connection::open(path_ref) {
+                Ok(c) => break c,
+                Err(e) => {
+                    attempts += 1;
+                    if attempts >= 10 {
+                        return Err(e.into());
+                    }
+                    std::thread::sleep(Duration::from_millis(300));
+                }
+            }
+        };
+
         Self::apply_pragmas(&conn)?;
         crate::db::migrations::MigrationRunner::run(&mut conn)?;
 

@@ -171,7 +171,16 @@ impl AppState {
     /// Opens the persistent default local application database
     pub fn open_default(app_version: impl Into<String>) -> Self {
         let path = DatabaseConnection::default_db_path();
-        let db = DatabaseConnection::open_file(path).expect("Failed to open persistent SQLite database");
+        let db = match DatabaseConnection::open_file(&path) {
+            Ok(db) => db,
+            Err(e) => {
+                tracing::error!("Failed to open persistent SQLite database at {}: {}", path.display(), e);
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                DatabaseConnection::open_file(&path).unwrap_or_else(|err| {
+                    panic!("Critical database error at {}: {}", path.display(), err);
+                })
+            }
+        };
         Self::new_sqlite(app_version, db)
     }
 

@@ -748,12 +748,20 @@ impl MigrationRunner {
                 let tx = conn.transaction()?;
 
                 // Execute migration batch
-                tx.execute_batch(migration.up).map_err(|e| {
-                    DbError::MigrationError(format!(
-                        "Failed migration {} ({}): {e}",
-                        migration.version, migration.name
-                    ))
-                })?;
+                if let Err(e) = tx.execute_batch(migration.up) {
+                    let err_str = e.to_string();
+                    if err_str.contains("duplicate column name") {
+                        info!(
+                            "Column already exists, proceeding with migration {} ({})",
+                            migration.version, migration.name
+                        );
+                    } else {
+                        return Err(DbError::MigrationError(format!(
+                            "Failed migration {} ({}): {e}",
+                            migration.version, migration.name
+                        )));
+                    }
+                }
 
                 // Record applied migration
                 let now = Utc::now().to_rfc3339();
