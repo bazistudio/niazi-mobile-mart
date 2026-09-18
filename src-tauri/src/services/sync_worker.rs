@@ -163,12 +163,29 @@ impl SyncWorkerDaemon {
         }
     }
 
-    /// Pulls updated central records every 15 minutes for downstream read cache update
+    /// Pulls updated central change log deltas and applies them to local SQLite
     pub async fn sync_downstream_pull(&self) {
         let session = self.app_state.get_session().await;
         let token = match &session.active_token {
             Some(t) if session.is_authenticated => t.clone(),
             _ => return, // Wait for user authentication
+        };
+
+        let db = match &self.app_state.db {
+            Some(db) => db.clone(),
+            None => return, // SQLite required for desktop apply
+        };
+
+        let cursor_repo = crate::repositories::SQLiteSyncCursorRepository::new(db.clone());
+        let org_id = crate::domain::organization::NIAZI_ORGANIZATION_ID;
+
+        let last_seq = match cursor_repo.get_last_applied_sequence("downstream_delta", org_id).await {
+            Ok(seq) => seq,
+            Err(e) => {
+                let mut st = self.status.write().await;
+                st.last_error = Some(format!("Failed to get downstream sync cursor: {e}"));
+                return;
+            }
         };
 
         let server_url = std::env::var("CENTRAL_SERVER_URL")
@@ -179,15 +196,58 @@ impl SyncWorkerDaemon {
             Err(_) => return,
         };
 
-        let pull_url = format!("{}/api/v1/sync/pull", server_url.trim_end_matches('/'));
-        let res = client
-            .get(&pull_url)
-            .header("Authorization", format!("Bearer {token}"))
-            .send()
-            .await;
-        if let Ok(resp) = res {
-            if resp.status().is_success() {
-                info!("15-minute downstream pull completed successfully");
+        let mut current_after_seq = last_seq;
+
+        loop {
+            let pull_url = format!(
+                "{}/api/v1/sync/pull?after_sequence={}&limit=100",
+                server_url.trim_end_matches('/'),
+                current_after_seq
+            );
+
+            let resp = match client
+                .get(&pull_url)
+                .header("Authorization", format!("Bearer {token}"))
+                .send()
+                .await
+            {
+                Ok(r) if r.status().is_success() => r,
+                Ok(r) => {
+                    let err_msg = format!("Sync pull HTTP {}", r.status());
+                    let mut st = self.status.write().await;
+                    st.last_error = Some(err_msg);
+                    break;
+                }
+                Err(e) => {
+                    let mut st = self.status.write().await;
+                    st.last_error = Some(format!("Sync pull network error: {e}"));
+                    break;
+                }
+            };
+
+            let pull_dto: crate::domain::change_log::DeltaPullResponseDto = match resp.json().await {
+                Ok(dto) => dto,
+                Err(e) => {
+                    let mut st = self.status.write().await;
+                    st.last_error = Some(format!("Failed to parse sync pull JSON: {e}"));
+                    break;
+                }
+            };
+
+            if pull_dto.changes.is_empty() {
+                break;
+            }
+
+            let applier = crate::services::change_applier::ChangeApplier::new(db.clone());
+            if let Err(e) = applier.apply_batch(org_id, &pull_dto.changes, pull_dto.next_sequence).await {
+                let mut st = self.status.write().await;
+                st.last_error = Some(format!("Failed to apply downstream sync batch: {e}"));
+                break;
+            }
+
+            current_after_seq = pull_dto.next_sequence;
+            if !pull_dto.has_more {
+                break;
             }
         }
     }

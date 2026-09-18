@@ -763,18 +763,55 @@ async fn sync_push_handler(
                     }
                 };
 
-                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresSaleRepository::complete_sale_tx(
+                let sale_result = match niazi_mobile_mart_lib::repositories::PostgresSaleRepository::complete_sale_tx(
                     &mut tx,
                     &dto,
                     Some(&auth.0.user_id),
                     Some(&client_event_id),
+                ).await {
+                    Ok(res) => res,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to project SALE_CREATED event centrally: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                let change_payload = match serde_json::to_string(&sale_result) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to serialize SALE_CREATED change_log payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "SALE_CREATED",
+                    "SALE",
+                    &sale_result.sale.id,
+                    &change_payload,
                 ).await {
                     let _ = tx.rollback().await;
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(json!({
                             "error": "SERVER_ERROR",
-                            "message": format!("Failed to project SALE_CREATED event centrally: {e}")
+                            "message": format!("Failed to append SALE_CREATED to change_log: {e}")
                         })),
                     );
                 }
@@ -795,18 +832,55 @@ async fn sync_push_handler(
                     }
                 };
 
-                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresPurchaseRepository::complete_purchase_tx(
+                let purchase_result = match niazi_mobile_mart_lib::repositories::PostgresPurchaseRepository::complete_purchase_tx(
                     &mut tx,
                     &dto,
                     Some(&auth.0.user_id),
                     None,
+                ).await {
+                    Ok(res) => res,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to project PURCHASE_CREATED event centrally: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                let change_payload = match serde_json::to_string(&purchase_result) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to serialize PURCHASE_CREATED change_log payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "PURCHASE_CREATED",
+                    "PURCHASE",
+                    &purchase_result.purchase.id,
+                    &change_payload,
                 ).await {
                     let _ = tx.rollback().await;
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(json!({
                             "error": "SERVER_ERROR",
-                            "message": format!("Failed to project PURCHASE_CREATED event centrally: {e}")
+                            "message": format!("Failed to append PURCHASE_CREATED to change_log: {e}")
                         })),
                     );
                 }
@@ -827,18 +901,55 @@ async fn sync_push_handler(
                     }
                 };
 
-                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresExpenseRepository::create_expense_tx(
+                let expense = match niazi_mobile_mart_lib::repositories::PostgresExpenseRepository::create_expense_tx(
                     &mut tx,
                     &dto,
                     Some(&auth.0.user_id),
                     None,
+                ).await {
+                    Ok(exp) => exp,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to project EXPENSE_CREATED event centrally: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                let change_payload = match serde_json::to_string(&expense) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to serialize EXPENSE_CREATED change_log payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "EXPENSE_CREATED",
+                    "EXPENSE",
+                    &expense.id,
+                    &change_payload,
                 ).await {
                     let _ = tx.rollback().await;
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(json!({
                             "error": "SERVER_ERROR",
-                            "message": format!("Failed to project EXPENSE_CREATED event centrally: {e}")
+                            "message": format!("Failed to append EXPENSE_CREATED to change_log: {e}")
                         })),
                     );
                 }
@@ -888,19 +999,50 @@ async fn sync_push_handler(
     )
 }
 
-/// GET /api/v1/sync/pull â€” 15-Minute Downstream Delta Reconciliation Pull Handler
+/// GET /api/v1/sync/pull — Downstream Delta Reconciliation Pull Handler
 async fn sync_pull_handler(
     State(state): State<ServerState>,
-    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    auth: AuthenticatedUser,
+    axum::extract::Query(query): axum::extract::Query<niazi_mobile_mart_lib::domain::change_log::DeltaPullQuery>,
 ) -> impl IntoResponse {
-    let now = chrono::Utc::now().to_rfc3339();
-    (
-        StatusCode::OK,
-        Json(json!({
-            "server_time": now,
-            "status": "up_to_date"
-        })),
-    )
+    let pg_pool = match &state.app_state.pg_pool {
+        Some(pool) => pool.clone(),
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "SERVER_ERROR",
+                    "message": "Central server running without PostgreSQL pool"
+                })),
+            );
+        }
+    };
+
+    let after_seq = query.after_sequence.unwrap_or(0).max(0);
+    let limit = query.limit.unwrap_or(100).clamp(1, 500);
+
+    let repo = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::new(pg_pool);
+    match repo.get_changes(&auth.0.organization_id, after_seq, limit).await {
+        Ok(changes) => {
+            let next_seq = changes.last().map(|c| c.sequence).unwrap_or(after_seq);
+            let has_more = changes.len() as i64 == limit;
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "changes": changes,
+                    "next_sequence": next_seq,
+                    "has_more": has_more
+                })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": "SERVER_ERROR",
+                "message": format!("Failed to pull delta changes: {e}")
+            })),
+        ),
+    }
 }
 
 // ---------------------------------------------------------------------------

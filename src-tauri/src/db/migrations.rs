@@ -709,6 +709,19 @@ pub const MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_sync_queue_terminal ON offline_sync_queue(terminal_id);
         "#,
     },
+    Migration {
+        version: 13,
+        name: "013_add_sync_cursors",
+        up: r#"
+        CREATE TABLE IF NOT EXISTS sync_cursors (
+            stream_name TEXT NOT NULL,
+            organization_id TEXT NOT NULL,
+            last_applied_sequence INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (stream_name, organization_id)
+        );
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction

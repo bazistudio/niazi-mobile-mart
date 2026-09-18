@@ -1,4 +1,4 @@
-﻿pub mod branch_repository;
+pub mod branch_repository;
 pub mod cash_repository;
 pub mod catalog_repository;
 pub mod customer_repository;
@@ -31,6 +31,11 @@ pub mod postgres_sales_return_repo;
 pub mod postgres_supplier_repo;
 pub mod postgres_user_repo;
 
+pub mod postgres_change_log_repo;
+pub mod sqlite_sync_cursor_repo;
+
+pub use postgres_change_log_repo::PostgresChangeLogRepository;
+pub use sqlite_sync_cursor_repo::SQLiteSyncCursorRepository;
 pub use sync_queue_repository::{PostgresSyncAuditRepository, SQLiteSyncQueueRepository};
 pub use terminal_repository::{PostgresTerminalRepository, SQLiteTerminalRepository, TerminalRepository};
 

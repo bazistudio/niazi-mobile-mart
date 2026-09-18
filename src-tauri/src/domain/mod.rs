@@ -1,6 +1,7 @@
 pub mod access_control;
 pub mod cash;
 pub mod catalog;
+pub mod change_log;
 pub mod customer;
 pub mod expense;
 pub mod identity;
@@ -17,6 +18,7 @@ pub mod supplier;
 pub mod terminal;
 pub mod user;
 
+pub use change_log::{ChangeLogEntry, DeltaPullQuery, DeltaPullResponseDto, SyncCursor};
 pub use sync_queue::{EnqueueOfflineEventDto, SyncQueueItem, SyncQueueStatus};
 pub use terminal::{RegisterTerminalDto, Terminal};
 

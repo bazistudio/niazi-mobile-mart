@@ -17,6 +17,9 @@ pub mod sync_worker;
 pub mod terminal_service;
 pub mod token_service;
 
+pub mod change_applier;
+
+pub use change_applier::ChangeApplier;
 pub use token_service::TokenManager;
 
 pub use admin_service::{
