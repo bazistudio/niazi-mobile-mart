@@ -66,6 +66,12 @@ impl SyncWorkerDaemon {
 
     /// Pushes pending outbox items to central Cloud Run API endpoint
     pub async fn sync_outbox_push(&self) {
+        let session = self.app_state.get_session().await;
+        let token = match &session.active_token {
+            Some(t) if session.is_authenticated => t.clone(),
+            _ => return, // Wait for user authentication: do not attempt HTTP push without JWT
+        };
+
         let sync_queue_repo = match &self.app_state.sync_queue_repo {
             Some(r) => r,
             None => return,
@@ -113,7 +119,13 @@ impl SyncWorkerDaemon {
             "events": pending_items
         });
 
-        match client.post(&push_url).json(&payload).send().await {
+        match client
+            .post(&push_url)
+            .header("Authorization", format!("Bearer {token}"))
+            .json(&payload)
+            .send()
+            .await
+        {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(ack_json) = resp.json::<serde_json::Value>().await {
                     if let Some(results) = ack_json.get("results").and_then(|r| r.as_array()) {
@@ -153,6 +165,12 @@ impl SyncWorkerDaemon {
 
     /// Pulls updated central records every 15 minutes for downstream read cache update
     pub async fn sync_downstream_pull(&self) {
+        let session = self.app_state.get_session().await;
+        let token = match &session.active_token {
+            Some(t) if session.is_authenticated => t.clone(),
+            _ => return, // Wait for user authentication
+        };
+
         let server_url = std::env::var("CENTRAL_SERVER_URL")
             .unwrap_or_else(|_| "http://localhost:8080".to_string());
 
@@ -162,7 +180,11 @@ impl SyncWorkerDaemon {
         };
 
         let pull_url = format!("{}/api/v1/sync/pull", server_url.trim_end_matches('/'));
-        let res = client.get(&pull_url).send().await;
+        let res = client
+            .get(&pull_url)
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await;
         if let Ok(resp) = res {
             if resp.status().is_success() {
                 info!("15-minute downstream pull completed successfully");

@@ -100,10 +100,13 @@ impl AuthService {
         user.login_locked_until_ms = None;
         repo.save(user.clone()).await?;
 
-        // Establish active native session in AppState
-        app_state.set_authenticated(&user).await;
+        let sanitized = user.sanitize();
+        let token = app_state.token_manager.create_token(sanitized.clone()).await;
 
-        Ok(user.sanitize())
+        // Establish active native session in AppState with active token
+        app_state.set_authenticated_with_token(&user, Some(token)).await;
+
+        Ok(sanitized)
     }
 
     /// Changes password for the currently authenticated user

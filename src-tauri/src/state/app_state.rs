@@ -26,6 +26,7 @@ pub struct SessionContext {
     pub role: Option<UserRole>,
     pub login_time_ms: Option<u128>,
     pub access_profile: Option<StaffAccessProfile>,
+    pub active_token: Option<String>,
 }
 
 impl Default for SessionContext {
@@ -38,6 +39,7 @@ impl Default for SessionContext {
             role: None,
             login_time_ms: None,
             access_profile: None,
+            active_token: None,
         }
     }
 }
@@ -195,6 +197,10 @@ impl AppState {
     }
 
     pub async fn set_authenticated(&self, user: &User) {
+        self.set_authenticated_with_token(user, None).await;
+    }
+
+    pub async fn set_authenticated_with_token(&self, user: &User, token: Option<String>) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -209,6 +215,7 @@ impl AppState {
             role: Some(user.role),
             login_time_ms: Some(now),
             access_profile: Some(user.access_profile.clone()),
+            active_token: token,
         };
     }
 
@@ -287,11 +294,12 @@ mod tests {
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
 
-        state.set_authenticated(&user).await;
+        state.set_authenticated_with_token(&user, Some("test_jwt_bearer_token".to_string())).await;
         let auth_session = state.get_session().await;
         assert!(auth_session.is_authenticated);
         assert!(!auth_session.is_locked);
         assert_eq!(auth_session.username, Some("teststaff".to_string()));
+        assert_eq!(auth_session.active_token, Some("test_jwt_bearer_token".to_string()));
 
         // Test lock
         assert!(state.lock_session().await);
@@ -303,11 +311,12 @@ mod tests {
         let unlocked_session = state.get_session().await;
         assert!(!unlocked_session.is_locked);
 
-        // Test logout
+        // Test logout (clear_session clears active_token)
         state.clear_session().await;
         let logged_out = state.get_session().await;
         assert!(!logged_out.is_authenticated);
         assert!(!logged_out.is_locked);
+        assert!(logged_out.active_token.is_none());
     }
 
     #[test]
