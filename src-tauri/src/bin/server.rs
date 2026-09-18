@@ -780,6 +780,70 @@ async fn sync_push_handler(
                 }
             }
 
+            if event.event_type == "PURCHASE_CREATED" {
+                let dto: niazi_mobile_mart_lib::domain::purchases::CompletePurchaseDto = match serde_json::from_str(&event.payload) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "BAD_REQUEST",
+                                "message": format!("Invalid PURCHASE_CREATED payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresPurchaseRepository::complete_purchase_tx(
+                    &mut tx,
+                    &dto,
+                    Some(&auth.0.user_id),
+                    None,
+                ).await {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to project PURCHASE_CREATED event centrally: {e}")
+                        })),
+                    );
+                }
+            }
+
+            if event.event_type == "EXPENSE_CREATED" {
+                let dto: niazi_mobile_mart_lib::domain::expense::CreateExpenseDto = match serde_json::from_str(&event.payload) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "BAD_REQUEST",
+                                "message": format!("Invalid EXPENSE_CREATED payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresExpenseRepository::create_expense_tx(
+                    &mut tx,
+                    &dto,
+                    Some(&auth.0.user_id),
+                    None,
+                ).await {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to project EXPENSE_CREATED event centrally: {e}")
+                        })),
+                    );
+                }
+            }
+
             if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresSyncAuditRepository::record_audit_tx(
                 &mut tx,
                 &server_event_id,

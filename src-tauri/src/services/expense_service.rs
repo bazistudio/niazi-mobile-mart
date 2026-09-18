@@ -218,6 +218,21 @@ impl ExpenseService {
                 SQLiteCashRepository::insert_movement_in_tx(tx, &cash_movement)?;
             }
 
+            // Atomically enqueue EXPENSE_CREATED event into offline_sync_queue in SQLite transaction
+            let dto_payload_json = serde_json::to_string(&dto).map_err(|e| {
+                DbError::ValidationError(format!("Failed to serialize expense DTO for sync: {e}"))
+            })?;
+
+            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                client_event_id: Some(expense_id.clone()),
+                terminal_id: None,
+                organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: branch_id.clone(),
+                event_type: "EXPENSE_CREATED".to_string(),
+                payload: dto_payload_json,
+            };
+            crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+
             Ok(expense)
         })
         .await?;

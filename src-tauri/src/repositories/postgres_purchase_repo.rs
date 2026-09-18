@@ -24,16 +24,26 @@ impl PostgresPurchaseRepository {
         dto: &CompletePurchaseDto,
         user_id: Option<&str>,
     ) -> AppResult<PurchaseResultDto> {
+        let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
+        let res = Self::complete_purchase_tx(&mut tx, dto, user_id, None).await?;
+        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(res)
+    }
+
+    pub async fn complete_purchase_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        dto: &CompletePurchaseDto,
+        user_id: Option<&str>,
+        purchase_id_override: Option<&str>,
+    ) -> AppResult<PurchaseResultDto> {
         if dto.items.is_empty() {
             return Err(AppError::Validation("Cannot complete purchase with empty items".to_string()));
         }
 
-        let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
-
         // Validate supplier
         let supplier_row = sqlx::query("SELECT id, name, credit_limit, is_active FROM suppliers WHERE id = $1")
             .bind(&dto.supplier_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -81,7 +91,7 @@ impl PostgresPurchaseRepository {
 
             let prod_row = sqlx::query("SELECT id, name, sku, is_active FROM products WHERE id = $1")
                 .bind(&item.product_id)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&mut **tx)
                 .await
                 .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -125,17 +135,21 @@ impl PostgresPurchaseRepository {
         };
 
         sqlx::query("UPDATE counters SET value = value + 1 WHERE name = 'purchase_number'")
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         let pur_val: (i64,) = sqlx::query_as("SELECT value FROM counters WHERE name = 'purchase_number'")
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         let purchase_number = format!("PUR-{:06}", pur_val.0);
-        let purchase_id = Uuid::new_v4().to_string();
+        let purchase_id = purchase_id_override
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
         let now = Utc::now().to_rfc3339();
         let uid = user_id.map(|s| s.to_string());
 
@@ -178,7 +192,7 @@ impl PostgresPurchaseRepository {
         .bind(purchase.performed_by.as_deref())
         .bind(&purchase.created_at)
         .bind(&purchase.updated_at)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -213,7 +227,7 @@ impl PostgresPurchaseRepository {
             .bind(pline.discount)
             .bind(pline.line_total)
             .bind(&pline.created_at)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -221,7 +235,7 @@ impl PostgresPurchaseRepository {
             let current_stock: (i64,) = sqlx::query_as("SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2")
                 .bind(&line.product_id)
                 .bind(&branch_id)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&mut **tx)
                 .await
                 .map_err(|e| AppError::Database(e.to_string()))?
                 .unwrap_or((0,));
@@ -237,7 +251,7 @@ impl PostgresPurchaseRepository {
             .bind(&branch_id)
             .bind(new_stock)
             .bind(&now)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -258,7 +272,7 @@ impl PostgresPurchaseRepository {
             .bind(uid.as_deref())
             .bind(&purchase_id)
             .bind(&now)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -272,7 +286,7 @@ impl PostgresPurchaseRepository {
                 "SELECT COALESCE(SUM(credit) - SUM(debit), 0) FROM supplier_ledger_entries WHERE supplier_id = $1",
             )
             .bind(&supplier_id)
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -295,7 +309,7 @@ impl PostgresPurchaseRepository {
             .bind(desc)
             .bind(uid.as_deref())
             .bind(&now)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
         }
@@ -306,7 +320,7 @@ impl PostgresPurchaseRepository {
                 "SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' LIMIT 1",
             )
             .bind(&branch_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?
             .map(|r: (String,)| r.0);
@@ -327,12 +341,10 @@ impl PostgresPurchaseRepository {
             .bind(desc)
             .bind(uid.as_deref())
             .bind(&now)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
         }
-
-        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok(PurchaseResultDto {
             purchase,

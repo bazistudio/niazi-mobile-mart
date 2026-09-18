@@ -84,19 +84,37 @@ impl PostgresExpenseRepository {
         user_id: Option<&str>,
     ) -> AppResult<Expense> {
         let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
+        let exp = Self::create_expense_tx(&mut tx, dto, user_id, None).await?;
+        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(exp)
+    }
+
+    pub async fn create_expense_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        dto: &CreateExpenseDto,
+        user_id: Option<&str>,
+        expense_id_override: Option<&str>,
+    ) -> AppResult<Expense> {
+        if dto.amount <= 0 {
+            return Err(AppError::Validation("Expense amount must be greater than 0".to_string()));
+        }
 
         sqlx::query("UPDATE counters SET value = value + 1 WHERE name = 'expense_number'")
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         let exp_val: (i64,) = sqlx::query_as("SELECT value FROM counters WHERE name = 'expense_number'")
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         let exp_number = format!("EXP-{:06}", exp_val.0);
-        let exp_id = Uuid::new_v4().to_string();
+        let exp_id = expense_id_override
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
         let now = Utc::now().to_rfc3339();
         let p_method = dto.payment_method.clone().unwrap_or_else(|| "CASH".to_string()).to_uppercase();
 
@@ -138,7 +156,7 @@ impl PostgresExpenseRepository {
         .bind(expense.performed_by.as_deref())
         .bind(&expense.created_at)
         .bind(&expense.updated_at)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -148,7 +166,7 @@ impl PostgresExpenseRepository {
                 "SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' LIMIT 1",
             )
             .bind(&branch_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?
             .map(|r: (String,)| r.0);
@@ -169,12 +187,11 @@ impl PostgresExpenseRepository {
             .bind(desc)
             .bind(user_id)
             .bind(&now)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
         }
 
-        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
         Ok(expense)
     }
 
