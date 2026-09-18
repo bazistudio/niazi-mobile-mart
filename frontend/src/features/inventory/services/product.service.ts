@@ -105,16 +105,25 @@ export const productService = {
       }
     }
 
+    const rawCatId = productData.categoryId || productData.category_id;
+    const categoryId = (rawCatId && rawCatId.length === 36) ? rawCatId : '00000000-0000-0000-0000-000000000010';
+
+    const rawBrandId = productData.brandId || productData.brand_id;
+    const brandId = (rawBrandId && rawBrandId.length === 36) ? rawBrandId : null;
+
+    const rawUnitId = productData.unitId || productData.unit_id;
+    const unitId = (rawUnitId && rawUnitId.length === 36) ? rawUnitId : null;
+
     const created = await tauriClient.productCreate({
       name: productData.name,
       sku: productData.sku || `SKU-${Date.now()}`,
       barcode: productData.barcode || null,
-      category_id: productData.categoryId || productData.category_id || 'cat_smartphones',
-      brand_id: productData.brandId || productData.brand_id || null,
+      category_id: categoryId,
+      brand_id: brandId,
       company_id: productData.companyId || productData.company_id || null,
       color_id: productData.colorId || productData.color_id || null,
       quality_id: productData.qualityId || productData.quality_id || null,
-      unit_id: productData.unitId || productData.unit_id || 'Piece',
+      unit_id: unitId,
       purchase_price: Math.round(Number(productData.purchasePrice || productData.purchase_price || 0)),
       sale_price: Math.round(Number(productData.price || productData.sale_price || 0)),
       low_stock_threshold: Number(productData.lowStockThreshold || productData.minStock || 5),
@@ -161,27 +170,41 @@ export const productService = {
   },
 
   updateProduct: async (id: string, productData: any): Promise<InventoryProduct> => {
+    const rawCatId = productData.categoryId || productData.category_id;
+    const categoryId = (rawCatId && rawCatId.length === 36) ? rawCatId : undefined;
+
+    const rawBrandId = productData.brandId || productData.brand_id;
+    const brandId = (rawBrandId && rawBrandId.length === 36) ? rawBrandId : undefined;
+
+    const rawUnitId = productData.unitId || productData.unit_id;
+    const unitId = (rawUnitId && rawUnitId.length === 36) ? rawUnitId : undefined;
+
     const updated = await tauriClient.productUpdate(id, {
       name: productData.name,
       sku: productData.sku,
       barcode: productData.barcode || null,
-      category_id: productData.categoryId || productData.category_id || productData.category,
-      brand_id: productData.brandId || productData.brand_id || productData.brand || null,
-      company_id: productData.companyId || productData.company_id || productData.company || null,
-      color_id: productData.colorId || productData.color_id || productData.color || null,
-      quality_id: productData.qualityId || productData.quality_id || productData.quality || null,
+      category_id: categoryId,
+      brand_id: brandId,
+      company_id: productData.companyId || productData.company_id || null,
+      color_id: productData.colorId || productData.color_id || null,
+      quality_id: productData.qualityId || productData.quality_id || null,
+      unit_id: unitId,
       purchase_price: productData.purchasePrice !== undefined ? Math.round(Number(productData.purchasePrice)) : undefined,
       sale_price: productData.price !== undefined ? Math.round(Number(productData.price)) : undefined,
       low_stock_threshold: productData.lowStockThreshold !== undefined ? Number(productData.lowStockThreshold) : undefined,
       description: productData.description || null,
     });
 
-    if (productData.quantity !== undefined && productData.quantity !== null) {
-      await tauriClient.inventoryAdjust({
-        product_id: id,
-        branch_id: '00000000-0000-0000-0000-000000000002',
-        target_quantity: Number(productData.quantity),
-      });
+    if (productData.quantity !== undefined && productData.quantity !== null && !isNaN(Number(productData.quantity))) {
+      try {
+        await tauriClient.inventoryAdjust({
+          product_id: id,
+          branch_id: '00000000-0000-0000-0000-000000000002',
+          target_quantity: Number(productData.quantity),
+        });
+      } catch (err) {
+        console.warn('inventoryAdjust non-fatal warning during product update:', err);
+      }
     }
 
     const [categories, brands, companies, colors, qualities, stockMap] = await Promise.all([

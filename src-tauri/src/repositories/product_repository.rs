@@ -15,16 +15,52 @@ impl SQLiteProductRepository {
         Self { db }
     }
 
+    fn ensure_default_master_data(guard: &rusqlite::Connection) {
+        let now = Utc::now().to_rfc3339();
+        let _ = guard.execute(
+            "INSERT OR IGNORE INTO categories (id, name, code, description, is_active, created_at, updated_at)
+             VALUES ('00000000-0000-0000-0000-000000000010', 'General', 'GEN', 'Default Category', 1, ?1, ?1)",
+            params![now],
+        );
+        let _ = guard.execute(
+            "INSERT OR IGNORE INTO units (id, name, symbol, conversion_factor, is_active, created_at, updated_at)
+             VALUES ('00000000-0000-0000-0000-000000000012', 'Piece', 'PCS', 1, 1, ?1, ?1)",
+            params![now],
+        );
+    }
+
     /// Creates a new product. Enforces unique SKU and unique non-null Barcode.
     pub async fn create_product(&self, id: &str, dto: &CreateProductDto) -> AppResult<Product> {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
+
+        Self::ensure_default_master_data(&guard);
 
         let now = Utc::now().to_rfc3339();
         let threshold = dto.low_stock_threshold.unwrap_or(5);
         let barcode_opt = dto.barcode.as_deref().map(str::trim).filter(|s| !s.is_empty());
 
         let initial_avg_cost = dto.average_cost.unwrap_or(dto.purchase_price);
+
+        let safe_category_id = if dto.category_id.trim().len() == 36 {
+            dto.category_id.trim().to_string()
+        } else {
+            "00000000-0000-0000-0000-000000000010".to_string()
+        };
+
+        let safe_brand_id = dto
+            .brand_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| s.len() == 36)
+            .map(String::from);
+
+        let safe_unit_id = dto
+            .unit_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| s.len() == 36)
+            .map(String::from);
 
         guard
             .execute(
@@ -35,9 +71,9 @@ impl SQLiteProductRepository {
                     dto.name.trim(),
                     dto.sku.trim().to_uppercase(),
                     barcode_opt,
-                    dto.category_id,
-                    dto.brand_id.as_deref(),
-                    dto.unit_id.as_deref(),
+                    safe_category_id,
+                    safe_brand_id,
+                    safe_unit_id,
                     dto.purchase_price,
                     initial_avg_cost,
                     dto.sale_price,
@@ -65,9 +101,9 @@ impl SQLiteProductRepository {
             name: dto.name.trim().to_string(),
             sku: dto.sku.trim().to_uppercase(),
             barcode: barcode_opt.map(|s| s.to_string()),
-            category_id: dto.category_id.clone(),
-            brand_id: dto.brand_id.clone(),
-            unit_id: dto.unit_id.clone(),
+            category_id: safe_category_id,
+            brand_id: safe_brand_id,
+            unit_id: safe_unit_id,
             purchase_price: dto.purchase_price,
             average_cost: initial_avg_cost,
             sale_price: dto.sale_price,
@@ -266,9 +302,21 @@ impl SQLiteProductRepository {
         } else {
             current.barcode
         };
-        let new_category = dto.category_id.as_deref().unwrap_or(&current.category_id);
-        let new_brand = dto.brand_id.as_deref().or(current.brand_id.as_deref());
-        let new_unit = dto.unit_id.as_deref().or(current.unit_id.as_deref());
+        let raw_category = dto.category_id.as_deref().unwrap_or(&current.category_id).trim();
+        let safe_category = if raw_category.len() == 36 {
+            raw_category
+        } else if current.category_id.len() == 36 {
+            &current.category_id
+        } else {
+            "00000000-0000-0000-0000-000000000010"
+        };
+
+        let raw_brand = dto.brand_id.as_deref().or(current.brand_id.as_deref());
+        let safe_brand = raw_brand.filter(|b| b.trim().len() == 36);
+
+        let raw_unit = dto.unit_id.as_deref().or(current.unit_id.as_deref());
+        let safe_unit = raw_unit.filter(|u| u.trim().len() == 36);
+
         let new_purchase = dto.purchase_price.unwrap_or(current.purchase_price);
         let new_avg_cost = dto.average_cost.unwrap_or(current.average_cost);
         let new_sale = dto.sale_price.unwrap_or(current.sale_price);
@@ -283,6 +331,8 @@ impl SQLiteProductRepository {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
 
+        Self::ensure_default_master_data(&guard);
+
         guard
             .execute(
                 "UPDATE products
@@ -293,9 +343,9 @@ impl SQLiteProductRepository {
                 params![
                     new_name,
                     new_barcode,
-                    new_category,
-                    new_brand,
-                    new_unit,
+                    safe_category,
+                    safe_brand,
+                    safe_unit,
                     new_purchase,
                     new_avg_cost,
                     new_sale,
@@ -322,9 +372,9 @@ impl SQLiteProductRepository {
             name: new_name.to_string(),
             sku: current.sku,
             barcode: new_barcode,
-            category_id: new_category.to_string(),
-            brand_id: new_brand.map(|s| s.to_string()),
-            unit_id: new_unit.map(|s| s.to_string()),
+            category_id: safe_category.to_string(),
+            brand_id: safe_brand.map(|s| s.to_string()),
+            unit_id: safe_unit.map(|s| s.to_string()),
             purchase_price: new_purchase,
             average_cost: new_avg_cost,
             sale_price: new_sale,

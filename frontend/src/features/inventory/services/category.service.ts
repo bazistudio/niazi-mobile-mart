@@ -4,13 +4,13 @@ import { ProductCategory } from '../types';
 const STORAGE_KEY = 'niazi_master_categories';
 
 const DEFAULT_CATEGORIES: ProductCategory[] = [
-  { id: 'cat_smartphones', name: 'Smartphones', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'cat_feature_phones', name: 'Feature Phones', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'cat_accessories', name: 'Accessories', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'cat_chargers', name: 'Chargers & Cables', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'cat_earbuds', name: 'Headphones & Earbuds', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'cat_covers', name: 'Covers & Protectors', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'cat_spare_parts', name: 'Spare Parts & Displays', organizationId: '00000000-0000-0000-0000-000000000001' },
+  { id: '00000000-0000-0000-0000-000000000010', name: 'Smartphones', organizationId: '00000000-0000-0000-0000-000000000001' },
+  { id: '00000000-0000-0000-0000-000000000011', name: 'Feature Phones', organizationId: '00000000-0000-0000-0000-000000000001' },
+  { id: '00000000-0000-0000-0000-000000000012', name: 'Accessories', organizationId: '00000000-0000-0000-0000-000000000001' },
+  { id: '00000000-0000-0000-0000-000000000013', name: 'Chargers & Cables', organizationId: '00000000-0000-0000-0000-000000000001' },
+  { id: '00000000-0000-0000-0000-000000000014', name: 'Headphones & Earbuds', organizationId: '00000000-0000-0000-0000-000000000001' },
+  { id: '00000000-0000-0000-0000-000000000015', name: 'Covers & Protectors', organizationId: '00000000-0000-0000-0000-000000000001' },
+  { id: '00000000-0000-0000-0000-000000000016', name: 'Spare Parts & Displays', organizationId: '00000000-0000-0000-0000-000000000001' },
 ];
 
 function getStoredCategories(): ProductCategory[] {
