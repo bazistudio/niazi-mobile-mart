@@ -1,4 +1,4 @@
-﻿/// Niazi Mobile Mart â€” Cloud Run HTTP Server binary
+/// Niazi Mobile Mart â€” Cloud Run HTTP Server binary
 ///
 /// Architecture contract:
 /// - Axum handlers are TRANSPORT ONLY â€” they call service methods, never raw SQL
@@ -746,6 +746,38 @@ async fn sync_push_handler(
                     "status": "SYNCED"
                 }));
                 continue;
+            }
+
+            if event.event_type == "SALE_CREATED" {
+                let dto: niazi_mobile_mart_lib::domain::sales::CompleteSaleDto = match serde_json::from_str(&event.payload) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "BAD_REQUEST",
+                                "message": format!("Invalid SALE_CREATED payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresSaleRepository::complete_sale_tx(
+                    &mut tx,
+                    &dto,
+                    Some(&auth.0.user_id),
+                    Some(&client_event_id),
+                ).await {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to project SALE_CREATED event centrally: {e}")
+                        })),
+                    );
+                }
             }
 
             if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresSyncAuditRepository::record_audit_tx(

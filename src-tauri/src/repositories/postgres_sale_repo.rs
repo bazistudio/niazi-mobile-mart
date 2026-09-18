@@ -27,11 +27,21 @@ impl PostgresSaleRepository {
         dto: &CompleteSaleDto,
         user_id: Option<&str>,
     ) -> AppResult<SaleResultDto> {
+        let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
+        let res = Self::complete_sale_tx(&mut tx, dto, user_id, None).await?;
+        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(res)
+    }
+
+    pub async fn complete_sale_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        dto: &CompleteSaleDto,
+        user_id: Option<&str>,
+        sale_id_override: Option<&str>,
+    ) -> AppResult<SaleResultDto> {
         if dto.items.is_empty() {
             return Err(AppError::Validation("Cannot complete sale with empty cart".to_string()));
         }
-
-        let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
 
         // 1. Resolve Branch ID
         let branch_id = match dto.branch_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
@@ -201,7 +211,11 @@ impl PostgresSaleRepository {
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         let invoice_number = format!("INV-{:06}", inv_val.0);
-        let sale_id = Uuid::new_v4().to_string();
+        let sale_id = sale_id_override
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
 
         // 8. Handle Customer Credit & Ledger Entry
         let mut customer_balance_after = None;
@@ -438,8 +452,6 @@ impl PostgresSaleRepository {
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
         }
-
-        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
 
         let credit_amount = (sale.total_amount - sale.paid_amount).max(0);
         Ok(SaleResultDto {
