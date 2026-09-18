@@ -372,6 +372,141 @@ impl PostgresProductRepository {
         }
     }
 
+    /// Central projection: Create product within an existing PostgreSQL transaction
+    pub async fn create_product_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        product: &Product,
+    ) -> AppResult<Product> {
+        let now = if product.created_at.is_empty() { Utc::now().to_rfc3339() } else { product.created_at.clone() };
+        let updated_at = Utc::now().to_rfc3339();
+        let sku = product.sku.trim().to_uppercase();
+        let name = product.name.trim();
+
+        sqlx::query(
+            "INSERT INTO products (id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+             ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                sku = EXCLUDED.sku,
+                barcode = EXCLUDED.barcode,
+                category_id = EXCLUDED.category_id,
+                brand_id = EXCLUDED.brand_id,
+                unit_id = EXCLUDED.unit_id,
+                purchase_price = EXCLUDED.purchase_price,
+                average_cost = EXCLUDED.average_cost,
+                sale_price = EXCLUDED.sale_price,
+                low_stock_threshold = EXCLUDED.low_stock_threshold,
+                is_active = EXCLUDED.is_active,
+                description = EXCLUDED.description,
+                updated_at = EXCLUDED.updated_at"
+        )
+        .bind(&product.id)
+        .bind(name)
+        .bind(&sku)
+        .bind(product.barcode.as_deref())
+        .bind(&product.category_id)
+        .bind(product.brand_id.as_deref())
+        .bind(product.unit_id.as_deref())
+        .bind(product.purchase_price)
+        .bind(product.average_cost)
+        .bind(product.sale_price)
+        .bind(product.low_stock_threshold)
+        .bind(if product.is_active { 1 } else { 0 })
+        .bind(product.description.as_deref())
+        .bind(&now)
+        .bind(&updated_at)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("products_sku_key") || msg.contains("products.sku") || (msg.contains("unique") && msg.contains("sku")) {
+                AppError::Conflict(format!("Product with SKU '{sku}' already exists"))
+            } else if msg.contains("products_barcode_key") || msg.contains("products.barcode") || (msg.contains("unique") && msg.contains("barcode")) {
+                AppError::Conflict(format!("Product with barcode '{}' already exists", product.barcode.as_deref().unwrap_or("")))
+            } else {
+                AppError::Database(format!("Failed to project PRODUCT_CREATED: {e}"))
+            }
+        })?;
+
+        let mut res = product.clone();
+        res.created_at = now;
+        res.updated_at = updated_at;
+        Ok(res)
+    }
+
+    /// Central projection: Update product within an existing PostgreSQL transaction
+    pub async fn update_product_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        product: &Product,
+    ) -> AppResult<Product> {
+        let updated_at = Utc::now().to_rfc3339();
+        let name = product.name.trim();
+
+        sqlx::query(
+            "INSERT INTO products (id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+             ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                sku = EXCLUDED.sku,
+                barcode = EXCLUDED.barcode,
+                category_id = EXCLUDED.category_id,
+                brand_id = EXCLUDED.brand_id,
+                unit_id = EXCLUDED.unit_id,
+                purchase_price = EXCLUDED.purchase_price,
+                average_cost = EXCLUDED.average_cost,
+                sale_price = EXCLUDED.sale_price,
+                low_stock_threshold = EXCLUDED.low_stock_threshold,
+                is_active = EXCLUDED.is_active,
+                description = EXCLUDED.description,
+                updated_at = EXCLUDED.updated_at"
+        )
+        .bind(&product.id)
+        .bind(name)
+        .bind(&product.sku)
+        .bind(product.barcode.as_deref())
+        .bind(&product.category_id)
+        .bind(product.brand_id.as_deref())
+        .bind(product.unit_id.as_deref())
+        .bind(product.purchase_price)
+        .bind(product.average_cost)
+        .bind(product.sale_price)
+        .bind(product.low_stock_threshold)
+        .bind(if product.is_active { 1 } else { 0 })
+        .bind(product.description.as_deref())
+        .bind(&product.created_at)
+        .bind(&updated_at)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("products_barcode_key") || msg.contains("products.barcode") || (msg.contains("unique") && msg.contains("barcode")) {
+                AppError::Conflict("Barcode is already used by another product".to_string())
+            } else {
+                AppError::Database(format!("Failed to project PRODUCT_UPDATED: {e}"))
+            }
+        })?;
+
+        let mut res = product.clone();
+        res.updated_at = updated_at;
+        Ok(res)
+    }
+
+    /// Central projection: Deactivate product within an existing PostgreSQL transaction
+    pub async fn deactivate_product_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        id: &str,
+    ) -> AppResult<()> {
+        let now = Utc::now().to_rfc3339();
+        sqlx::query("UPDATE products SET is_active = 0, updated_at = $1 WHERE id = $2")
+            .bind(&now)
+            .bind(id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to project PRODUCT_DEACTIVATED: {e}")))?;
+
+        Ok(())
+    }
+
     fn map_product_row(row: &sqlx::postgres::PgRow) -> AppResult<Product> {
         let is_active_int: i32 = row.try_get(11).unwrap_or(1);
         Ok(Product {

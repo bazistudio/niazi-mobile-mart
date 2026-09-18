@@ -6,7 +6,7 @@ use crate::db::errors::DbError;
 use crate::domain::change_log::ChangeLogEntry;
 use crate::errors::AppResult;
 use crate::repositories::{
-    SQLiteExpenseRepository, SQLiteInventoryRepository, SQLitePurchaseRepository,
+    SQLiteExpenseRepository, SQLiteInventoryRepository, SQLiteProductRepository, SQLitePurchaseRepository,
     SQLiteSaleRepository, SQLiteSyncCursorRepository,
 };
 
@@ -58,6 +58,45 @@ impl ChangeApplier {
 
     fn apply_single_change_in_tx(tx: &rusqlite::Transaction, change: &ChangeLogEntry) -> crate::db::errors::DbResult<()> {
         match change.event_type.as_str() {
+            "PRODUCT_CREATED" => {
+                let product: crate::domain::product::Product = match serde_json::from_str(&change.payload) {
+                    Ok(p) => p,
+                    Err(e) => return Err(DbError::ValidationError(format!("Invalid PRODUCT_CREATED payload in change_log: {e}"))),
+                };
+
+                let exists: bool = tx.query_row(
+                    "SELECT 1 FROM products WHERE id = ?1",
+                    params![product.id],
+                    |_| Ok(true),
+                ).unwrap_or(false);
+
+                if exists {
+                    return Ok(());
+                }
+
+                SQLiteProductRepository::insert_product_in_tx(tx, &product)?;
+            }
+            "PRODUCT_UPDATED" => {
+                let product: crate::domain::product::Product = match serde_json::from_str(&change.payload) {
+                    Ok(p) => p,
+                    Err(e) => return Err(DbError::ValidationError(format!("Invalid PRODUCT_UPDATED payload in change_log: {e}"))),
+                };
+
+                SQLiteProductRepository::insert_product_in_tx(tx, &product)?;
+            }
+            "PRODUCT_DEACTIVATED" => {
+                #[derive(serde::Deserialize)]
+                struct DeactivatePayload {
+                    id: String,
+                }
+
+                let payload: DeactivatePayload = match serde_json::from_str(&change.payload) {
+                    Ok(p) => p,
+                    Err(e) => return Err(DbError::ValidationError(format!("Invalid PRODUCT_DEACTIVATED payload in change_log: {e}"))),
+                };
+
+                SQLiteProductRepository::deactivate_product_in_tx(tx, &payload.id)?;
+            }
             "SALE_CREATED" => {
                 let result_dto: crate::domain::sales::SaleResultDto = match serde_json::from_str(&change.payload) {
                     Ok(d) => d,
@@ -160,5 +199,124 @@ impl ChangeApplier {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::migrations::MigrationRunner;
+    use crate::domain::product::Product;
+
+    fn setup_test_db() -> DatabaseConnection {
+        let db = DatabaseConnection::open_in_memory().unwrap();
+        {
+            let conn_arc = db.inner();
+            let mut guard = conn_arc.lock().blocking_lock();
+            MigrationRunner::run(&mut guard).unwrap();
+        }
+        db
+    }
+
+    #[tokio::test]
+    async fn test_downstream_product_apply_and_replay_safety() {
+        let db = setup_test_db();
+        let applier = ChangeApplier::new(db.clone());
+
+        let product_id = "550e8400-e29b-41d4-a716-446655440099".to_string();
+        let prod = Product {
+            id: product_id.clone(),
+            name: "Test Phone".to_string(),
+            sku: "SKU-TPHONE".to_string(),
+            barcode: Some("123456789".to_string()),
+            category_id: "00000000-0000-0000-0000-000000000010".to_string(),
+            brand_id: None,
+            unit_id: None,
+            purchase_price: 15000,
+            average_cost: 15000,
+            sale_price: 18000,
+            low_stock_threshold: 5,
+            is_active: true,
+            description: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        // 1. PRODUCT_CREATED apply
+        let change_created = ChangeLogEntry {
+            sequence: 1,
+            organization_id: "00000000-0000-0000-0000-000000000001".to_string(),
+            branch_id: "00000000-0000-0000-0000-000000000002".to_string(),
+            client_event_id: Some("evt_create_1".to_string()),
+            event_type: "PRODUCT_CREATED".to_string(),
+            entity_type: "PRODUCT".to_string(),
+            entity_id: product_id.clone(),
+            payload: serde_json::to_string(&prod).unwrap(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        applier
+            .apply_batch("00000000-0000-0000-0000-000000000001", &[change_created.clone()], 1)
+            .await
+            .unwrap();
+
+        // Verify product exists locally
+        let prod_repo = crate::repositories::SQLiteProductRepository::new(db.clone());
+        let fetched = prod_repo.get_product_by_id(&product_id).await.unwrap();
+        assert_eq!(fetched.name, "Test Phone");
+        assert_eq!(fetched.sale_price, 18000);
+
+        // 2. Replay PRODUCT_CREATED -> Must be no-op safely
+        applier
+            .apply_batch("00000000-0000-0000-0000-000000000001", &[change_created], 1)
+            .await
+            .unwrap();
+
+        // 3. PRODUCT_UPDATED apply
+        let mut updated_prod = prod.clone();
+        updated_prod.name = "Test Phone Pro".to_string();
+        updated_prod.sale_price = 22000;
+
+        let change_updated = ChangeLogEntry {
+            sequence: 2,
+            organization_id: "00000000-0000-0000-0000-000000000001".to_string(),
+            branch_id: "00000000-0000-0000-0000-000000000002".to_string(),
+            client_event_id: Some("evt_update_1".to_string()),
+            event_type: "PRODUCT_UPDATED".to_string(),
+            entity_type: "PRODUCT".to_string(),
+            entity_id: product_id.clone(),
+            payload: serde_json::to_string(&updated_prod).unwrap(),
+            created_at: "2026-01-01T00:01:00Z".to_string(),
+        };
+
+        applier
+            .apply_batch("00000000-0000-0000-0000-000000000001", &[change_updated], 2)
+            .await
+            .unwrap();
+
+        let fetched_updated = prod_repo.get_product_by_id(&product_id).await.unwrap();
+        assert_eq!(fetched_updated.name, "Test Phone Pro");
+        assert_eq!(fetched_updated.sale_price, 22000);
+
+        // 4. PRODUCT_DEACTIVATED apply
+        let change_deactivated = ChangeLogEntry {
+            sequence: 3,
+            organization_id: "00000000-0000-0000-0000-000000000001".to_string(),
+            branch_id: "00000000-0000-0000-0000-000000000002".to_string(),
+            client_event_id: Some("evt_deactivate_1".to_string()),
+            event_type: "PRODUCT_DEACTIVATED".to_string(),
+            entity_type: "PRODUCT".to_string(),
+            entity_id: product_id.clone(),
+            payload: serde_json::json!({ "id": product_id }).to_string(),
+            created_at: "2026-01-01T00:02:00Z".to_string(),
+        };
+
+        applier
+            .apply_batch("00000000-0000-0000-0000-000000000001", &[change_deactivated], 3)
+            .await
+            .unwrap();
+
+        let fetched_deactivated = prod_repo.get_product_by_id(&product_id).await.unwrap();
+        assert!(!fetched_deactivated.is_active);
     }
 }

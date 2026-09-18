@@ -955,6 +955,209 @@ async fn sync_push_handler(
                 }
             }
 
+            if event.event_type == "PRODUCT_CREATED" {
+                let product: niazi_mobile_mart_lib::domain::product::Product = match serde_json::from_str(&event.payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "BAD_REQUEST",
+                                "message": format!("Invalid PRODUCT_CREATED payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                let projected_product = match niazi_mobile_mart_lib::repositories::PostgresProductRepository::create_product_tx(
+                    &mut tx,
+                    &product,
+                ).await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to project PRODUCT_CREATED event centrally: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                let change_payload = match serde_json::to_string(&projected_product) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to serialize PRODUCT_CREATED change_log payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "PRODUCT_CREATED",
+                    "PRODUCT",
+                    &projected_product.id,
+                    &change_payload,
+                ).await {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append PRODUCT_CREATED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
+            if event.event_type == "PRODUCT_UPDATED" {
+                let product: niazi_mobile_mart_lib::domain::product::Product = match serde_json::from_str(&event.payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "BAD_REQUEST",
+                                "message": format!("Invalid PRODUCT_UPDATED payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                let projected_product = match niazi_mobile_mart_lib::repositories::PostgresProductRepository::update_product_tx(
+                    &mut tx,
+                    &product,
+                ).await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to project PRODUCT_UPDATED event centrally: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                let change_payload = match serde_json::to_string(&projected_product) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to serialize PRODUCT_UPDATED change_log payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "PRODUCT_UPDATED",
+                    "PRODUCT",
+                    &projected_product.id,
+                    &change_payload,
+                ).await {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append PRODUCT_UPDATED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
+            if event.event_type == "PRODUCT_DEACTIVATED" {
+                #[derive(serde::Deserialize, serde::Serialize)]
+                struct DeactivatePayload {
+                    id: String,
+                }
+
+                let deactivate_dto: DeactivatePayload = match serde_json::from_str(&event.payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "BAD_REQUEST",
+                                "message": format!("Invalid PRODUCT_DEACTIVATED payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresProductRepository::deactivate_product_tx(
+                    &mut tx,
+                    &deactivate_dto.id,
+                ).await {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to project PRODUCT_DEACTIVATED event centrally: {e}")
+                        })),
+                    );
+                }
+
+                let change_payload = match serde_json::to_string(&deactivate_dto) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to serialize PRODUCT_DEACTIVATED change_log payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "PRODUCT_DEACTIVATED",
+                    "PRODUCT",
+                    &deactivate_dto.id,
+                    &change_payload,
+                ).await {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append PRODUCT_DEACTIVATED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
             if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresSyncAuditRepository::record_audit_tx(
                 &mut tx,
                 &server_event_id,

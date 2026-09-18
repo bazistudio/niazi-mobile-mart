@@ -4,10 +4,12 @@ use uuid::Uuid;
 use crate::db::connection::DatabaseConnection;
 use crate::db::transaction::with_transaction;
 use crate::domain::inventory::{StockMovement, StockMovementType};
+use crate::domain::organization::{DEFAULT_MAIN_BRANCH_ID, NIAZI_ORGANIZATION_ID};
 use crate::domain::product::{CreateProductDto, Product, ProductFilter, UpdateProductDto};
 use crate::errors::{AppError, AppResult};
 use crate::repositories::{
     PostgresProductRepository, ProductRepository, SQLiteInventoryRepository, SQLiteProductRepository,
+    SQLiteSyncQueueRepository,
 };
 
 #[derive(Clone)]
@@ -61,40 +63,55 @@ impl ProductService {
             ProductRepository::Postgres(pg_repo) => {
                 pg_repo.create_product_with_initial_stock(&product_id, &dto, user_id).await
             }
-            ProductRepository::SQLite(sqlite_repo) => {
-                let product = sqlite_repo.create_product(&product_id, &dto).await?;
+            ProductRepository::SQLite(_) => {
+                let db = self.db.as_ref().expect("SQLite database connection required");
+                let target_branch = dto.branch_id.clone().unwrap_or_else(|| DEFAULT_MAIN_BRANCH_ID.to_string());
+                let uid = user_id.map(|s| s.to_string());
+                let pid = product_id.clone();
 
-                if let (Some(qty), Some(branch_id)) = (dto.initial_quantity, dto.branch_id) {
-                    if qty > 0 {
-                        let now = Utc::now().to_rfc3339();
-                        let pid = product_id.clone();
-                        let bid = branch_id.clone();
-                        let uid = user_id.map(|s| s.to_string());
+                let product = with_transaction(db, move |tx| {
+                    let product = SQLiteProductRepository::create_product_in_tx(tx, &pid, &dto)?;
 
-                        if let Some(ref db) = self.db {
-                            with_transaction(db, move |tx| {
-                                SQLiteInventoryRepository::set_stock_in_tx(tx, &pid, &bid, qty, &now)?;
+                    if let Some(qty) = dto.initial_quantity {
+                        if qty > 0 {
+                            let now = Utc::now().to_rfc3339();
+                            SQLiteInventoryRepository::set_stock_in_tx(tx, &pid, &target_branch, qty, &now)?;
 
-                                let movement = StockMovement {
-                                    id: Uuid::new_v4().to_string(),
-                                    product_id: pid,
-                                    branch_id: bid,
-                                    movement_type: StockMovementType::In,
-                                    quantity: qty,
-                                    previous_stock: 0,
-                                    resulting_stock: qty,
-                                    reason: Some("Opening Stock".to_string()),
-                                    performed_by: uid,
-                                    reference_id: Some("OPENING_BALANCE".to_string()),
-                                    created_at: now,
-                                };
-                                SQLiteInventoryRepository::insert_movement_in_tx(tx, &movement)?;
-                                Ok(())
-                            })
-                            .await?;
+                            let movement = StockMovement {
+                                id: Uuid::new_v4().to_string(),
+                                product_id: pid.clone(),
+                                branch_id: target_branch.clone(),
+                                movement_type: StockMovementType::In,
+                                quantity: qty,
+                                previous_stock: 0,
+                                resulting_stock: qty,
+                                reason: Some("Opening Stock".to_string()),
+                                performed_by: uid,
+                                reference_id: Some("OPENING_BALANCE".to_string()),
+                                created_at: now,
+                            };
+                            SQLiteInventoryRepository::insert_movement_in_tx(tx, &movement)?;
                         }
                     }
-                }
+
+                    // Enqueue PRODUCT_CREATED event into offline_sync_queue in SQLite transaction
+                    let payload_json = serde_json::to_string(&product).map_err(|e| {
+                        crate::db::errors::DbError::ValidationError(format!("Failed to serialize product for sync: {e}"))
+                    })?;
+
+                    let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                        client_event_id: Some(product.id.clone()),
+                        terminal_id: String::new(),
+                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                        branch_id: target_branch.clone(),
+                        event_type: "PRODUCT_CREATED".to_string(),
+                        payload: payload_json,
+                    };
+                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+
+                    Ok(product)
+                })
+                .await?;
 
                 Ok(product)
             }
@@ -123,7 +140,36 @@ impl ProductService {
             }
         }
 
-        self.repo.update_product(id, &dto).await
+        match &self.repo {
+            ProductRepository::Postgres(pg_repo) => pg_repo.update_product(id, &dto).await,
+            ProductRepository::SQLite(_) => {
+                let db = self.db.as_ref().expect("SQLite database connection required");
+                let id_owned = id.to_string();
+
+                let product = with_transaction(db, move |tx| {
+                    let product = SQLiteProductRepository::update_product_in_tx(tx, &id_owned, &dto)?;
+
+                    let payload_json = serde_json::to_string(&product).map_err(|e| {
+                        crate::db::errors::DbError::ValidationError(format!("Failed to serialize product for sync: {e}"))
+                    })?;
+
+                    let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                        client_event_id: Some(Uuid::new_v4().to_string()),
+                        terminal_id: String::new(),
+                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                        branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                        event_type: "PRODUCT_UPDATED".to_string(),
+                        payload: payload_json,
+                    };
+                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+
+                    Ok(product)
+                })
+                .await?;
+
+                Ok(product)
+            }
+        }
     }
 
     pub async fn get_product(&self, id: &str) -> AppResult<Product> {
@@ -144,7 +190,34 @@ impl ProductService {
 
     /// Deactivates a product. Guardrail: physical deletion is strictly rejected in business logic.
     pub async fn deactivate_product(&self, id: &str) -> AppResult<()> {
-        self.repo.deactivate_product(id).await
+        match &self.repo {
+            ProductRepository::Postgres(pg_repo) => pg_repo.deactivate_product(id).await,
+            ProductRepository::SQLite(_) => {
+                let db = self.db.as_ref().expect("SQLite database connection required");
+                let id_owned = id.to_string();
+
+                with_transaction(db, move |tx| {
+                    SQLiteProductRepository::deactivate_product_in_tx(tx, &id_owned)?;
+
+                    let deactivate_payload = serde_json::json!({ "id": id_owned }).to_string();
+
+                    let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                        client_event_id: Some(Uuid::new_v4().to_string()),
+                        terminal_id: String::new(),
+                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                        branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                        event_type: "PRODUCT_DEACTIVATED".to_string(),
+                        payload: deactivate_payload,
+                    };
+                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+
+                    Ok(())
+                })
+                .await?;
+
+                Ok(())
+            }
+        }
     }
 }
 
@@ -338,5 +411,86 @@ mod tests {
         service.deactivate_product(&prod1.id).await.unwrap();
         let deactivated = service.get_product(&prod1.id).await.unwrap();
         assert!(!deactivated.is_active);
+    }
+
+    #[tokio::test]
+    async fn test_product_sync_outbox_events() {
+        let (db, service, cat_id, unit_id) = setup_test_context().await;
+
+        // 1. Create product -> should enqueue PRODUCT_CREATED
+        let prod = service
+            .create_product(
+                CreateProductDto {
+                    name: "Sync Phone".to_string(),
+                    sku: "SKU-SYNC-1".to_string(),
+                    barcode: Some("111222333".to_string()),
+                    category_id: cat_id.clone(),
+                    brand_id: None,
+                    unit_id: Some(unit_id.clone()),
+                    purchase_price: 50000,
+                    average_cost: None,
+                    sale_price: 60000,
+                    low_stock_threshold: Some(3),
+                    description: Some("Outbox test phone".to_string()),
+                    initial_quantity: None,
+                    branch_id: None,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+        let queue_repo = crate::repositories::SQLiteSyncQueueRepository::new(db.clone());
+        let pending = queue_repo.get_pending_events(10).await.unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].event_type, "PRODUCT_CREATED");
+        assert_eq!(pending[0].client_event_id, prod.id);
+
+        let created_payload: Product = serde_json::from_str(&pending[0].payload).unwrap();
+        assert_eq!(created_payload.id, prod.id);
+        assert_eq!(created_payload.name, "Sync Phone");
+
+        // 2. Update product -> should enqueue PRODUCT_UPDATED
+        let updated = service
+            .update_product(
+                &prod.id,
+                UpdateProductDto {
+                    name: Some("Sync Phone Pro".to_string()),
+                    barcode: None,
+                    category_id: None,
+                    brand_id: None,
+                    unit_id: None,
+                    purchase_price: None,
+                    average_cost: None,
+                    sale_price: Some(65000),
+                    low_stock_threshold: None,
+                    description: None,
+                    is_active: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let pending_after_update = queue_repo.get_pending_events(10).await.unwrap();
+        assert_eq!(pending_after_update.len(), 2);
+        assert_eq!(pending_after_update[1].event_type, "PRODUCT_UPDATED");
+
+        let updated_payload: Product = serde_json::from_str(&pending_after_update[1].payload).unwrap();
+        assert_eq!(updated_payload.id, updated.id);
+        assert_eq!(updated_payload.name, "Sync Phone Pro");
+
+        // 3. Deactivate product -> should enqueue PRODUCT_DEACTIVATED
+        service.deactivate_product(&prod.id).await.unwrap();
+
+        let pending_after_deactivate = queue_repo.get_pending_events(10).await.unwrap();
+        assert_eq!(pending_after_deactivate.len(), 3);
+        assert_eq!(pending_after_deactivate[2].event_type, "PRODUCT_DEACTIVATED");
+
+        #[derive(serde::Deserialize)]
+        struct DeactivatePayload {
+            id: String,
+        }
+        let deactivate_payload: DeactivatePayload = serde_json::from_str(&pending_after_deactivate[2].payload).unwrap();
+        assert_eq!(deactivate_payload.id, prod.id);
     }
 }
