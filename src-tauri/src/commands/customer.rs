@@ -14,7 +14,11 @@ pub async fn customer_create(
     state: State<'_, AppState>,
     dto: CreateCustomerDto,
 ) -> AppResult<Customer> {
-    AuthService::require_permission(&state, Some("customers"), None).await?;
+    if AuthService::require_permission(&state, Some("customers"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     state.customer_service.create_customer(dto).await
 }
 
@@ -24,7 +28,11 @@ pub async fn customer_update(
     id: String,
     dto: UpdateCustomerDto,
 ) -> AppResult<Customer> {
-    AuthService::require_permission(&state, Some("customers"), None).await?;
+    if AuthService::require_permission(&state, Some("customers"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     state.customer_service.update_customer(&id, dto).await
 }
 
@@ -33,7 +41,11 @@ pub async fn customer_get_by_id(
     state: State<'_, AppState>,
     id: String,
 ) -> AppResult<Customer> {
-    AuthService::require_permission(&state, Some("customers"), None).await?;
+    if AuthService::require_permission(&state, Some("customers"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     state.customer_service.get_customer_by_id(&id).await
 }
 
@@ -42,7 +54,11 @@ pub async fn customer_get_detail(
     state: State<'_, AppState>,
     id: String,
 ) -> AppResult<CustomerDetailDto> {
-    AuthService::require_permission(&state, Some("customers"), None).await?;
+    if AuthService::require_permission(&state, Some("customers"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     state.customer_service.get_customer_detail(&id).await
 }
 
@@ -51,7 +67,11 @@ pub async fn customer_list(
     state: State<'_, AppState>,
     filter: Option<CustomerFilter>,
 ) -> AppResult<Vec<CustomerSummaryDto>> {
-    AuthService::require_permission(&state, Some("customers"), None).await?;
+    if AuthService::require_permission(&state, Some("customers"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     state
         .customer_service
         .list_customers(filter.unwrap_or_default())
@@ -63,7 +83,11 @@ pub async fn customer_search(
     state: State<'_, AppState>,
     query: String,
 ) -> AppResult<Vec<CustomerSummaryDto>> {
-    AuthService::require_permission(&state, Some("customers"), None).await?;
+    if AuthService::require_permission(&state, Some("customers"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     state.customer_service.search_customers(&query).await
 }
 

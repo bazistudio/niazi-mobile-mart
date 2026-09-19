@@ -82,7 +82,8 @@ export const CustomerFormDrawer: React.FC<CustomerFormDrawerProps> = ({ isOpen, 
       onClose();
     },
     onError: (error: any) => {
-      toast.error(error?.response?.data?.message || `Failed to ${editingCustomer ? 'update' : 'add'} customer`);
+      const msg = error?.response?.data?.message || error?.message || (typeof error === 'string' ? error : '') || `Failed to ${editingCustomer ? 'update' : 'add'} customer`;
+      toast.error(msg);
     }
   });
 

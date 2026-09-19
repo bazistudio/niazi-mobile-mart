@@ -98,6 +98,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
 
       await createProduct({
         ...formData,
+        categoryId: formData.categoryId || '00000000-0000-0000-0000-000000000010',
         purchasePrice: Number(formData.purchasePrice) || 0,
         price: Number(formData.price) || 0,
         quantity: Number(formData.quantity) || 0,
@@ -116,7 +117,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
     }
   };
 
-  const isValid = formData.name.trim() !== '' && formData.price !== '' && formData.quantity !== '' && formData.categoryId !== '';
+  const isValid = formData.name.trim() !== '' && formData.price !== '' && formData.quantity !== '';
 
   const margin = (Number(formData.price) || 0) - (Number(formData.purchasePrice) || 0);
 
