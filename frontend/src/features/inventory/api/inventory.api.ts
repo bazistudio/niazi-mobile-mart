@@ -124,7 +124,7 @@ export const inventoryApi = {
     const name = (formData.get('name') as string) || 'New Product';
     const sku = (formData.get('sku') as string) || `SKU-${Date.now()}`;
     const barcode = (formData.get('barcode') as string) || null;
-    const category = (formData.get('category') as string) || '00000000-0000-0000-0000-000000000001';
+    const category = (formData.get('category') as string) || '00000000-0000-0000-0000-000000000010';
     const price = Math.round(Number(formData.get('price')) || 0);
     const purchasePrice = Math.round(Number(formData.get('purchasePrice')) || 0);
     const lowStockThreshold = Number(formData.get('lowStockThreshold')) || 5;
@@ -136,7 +136,7 @@ export const inventoryApi = {
       barcode,
       category_id: category,
       brand_id: null,
-      unit_id: '00000000-0000-0000-0000-000000000001',
+      unit_id: '00000000-0000-0000-0000-000000000012',
       purchase_price: purchasePrice,
       sale_price: price,
       low_stock_threshold: lowStockThreshold,
