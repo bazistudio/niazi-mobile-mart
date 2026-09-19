@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { X, Package } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { DynamicMasterSelect } from './master-data/DynamicMasterSelect';
 import { useProducts } from '@/features/inventory/hooks/useProducts';
 
@@ -105,6 +106,8 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
         lowStockThreshold: Number(formData.minStockThreshold) || 2
       });
       
+      toast.success('Product created successfully!');
+
       // Reset main fields but keep master data
       setFormData(prev => ({
         ...prev,
@@ -112,8 +115,10 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
         quantity: '', purchasePrice: '', price: ''
       }));
       onClose();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to create product', err);
+      const msg = err?.response?.data?.message || err?.message || (typeof err === 'string' ? err : '') || 'Failed to create product';
+      toast.error(msg);
     }
   };
 

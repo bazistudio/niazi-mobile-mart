@@ -10,7 +10,12 @@ pub async fn product_create(
     state: State<'_, AppState>,
     dto: CreateProductDto,
 ) -> AppResult<Product> {
-    AuthService::require_permission(&state, Some("inventory"), Some("inventory:write")).await?;
+    if AuthService::require_permission(&state, Some("products"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("inventory"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     let session = state.get_session().await;
     state
         .product_service
@@ -24,19 +29,34 @@ pub async fn product_update(
     id: String,
     dto: UpdateProductDto,
 ) -> AppResult<Product> {
-    AuthService::require_permission(&state, Some("inventory"), Some("inventory:write")).await?;
+    if AuthService::require_permission(&state, Some("products"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("inventory"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     state.product_service.update_product(&id, dto).await
 }
 
 #[tauri::command]
 pub async fn product_get(state: State<'_, AppState>, id: String) -> AppResult<Product> {
-    AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await?;
+    if AuthService::require_permission(&state, Some("products"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("inventory"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     state.product_service.get_product(&id).await
 }
 
 #[tauri::command]
 pub async fn product_get_by_sku(state: State<'_, AppState>, sku: String) -> AppResult<Product> {
-    AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await?;
+    if AuthService::require_permission(&state, Some("products"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("inventory"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     state.product_service.get_product_by_sku(&sku).await
 }
 
@@ -45,7 +65,12 @@ pub async fn product_get_by_barcode(
     state: State<'_, AppState>,
     barcode: String,
 ) -> AppResult<Product> {
-    AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await?;
+    if AuthService::require_permission(&state, Some("products"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("inventory"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     state.product_service.get_product_by_barcode(&barcode).await
 }
 
@@ -54,7 +79,12 @@ pub async fn product_list(
     state: State<'_, AppState>,
     filter: Option<ProductFilter>,
 ) -> AppResult<Vec<Product>> {
-    AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await?;
+    if AuthService::require_permission(&state, Some("products"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("inventory"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     state
         .product_service
         .list_products(filter.unwrap_or_default())
@@ -64,6 +94,11 @@ pub async fn product_list(
 /// Deactivates a product. In accordance with Section 13, physical deletion is prohibited.
 #[tauri::command]
 pub async fn product_deactivate(state: State<'_, AppState>, id: String) -> AppResult<()> {
-    AuthService::require_permission(&state, Some("inventory"), Some("inventory:write")).await?;
+    if AuthService::require_permission(&state, Some("products"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("inventory"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     state.product_service.deactivate_product(&id).await
 }
