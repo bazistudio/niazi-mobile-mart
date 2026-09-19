@@ -114,7 +114,7 @@ impl ExpenseService {
             return Err(AppError::Validation("Expense amount must be greater than 0".to_string()));
         }
 
-        let desc = dto.description.trim();
+        let desc = dto.description.trim().to_string();
         if desc.is_empty() {
             return Err(AppError::Validation("Expense description is required".to_string()));
         }
@@ -183,7 +183,7 @@ impl ExpenseService {
                 branch_id: branch_id.clone(),
                 amount,
                 payment_method: payment_method.clone(),
-                description: desc.to_string(),
+                description: desc.clone(),
                 notes: notes.clone(),
                 expense_date: expense_date.clone(),
                 status: ExpenseStatus::Completed,

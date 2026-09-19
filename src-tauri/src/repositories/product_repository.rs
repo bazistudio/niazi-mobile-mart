@@ -478,7 +478,7 @@ impl SQLiteProductRepository {
             } else if err_str.contains("UNIQUE constraint failed: products.barcode") {
                 crate::db::errors::DbError::ValidationError(format!("Product with barcode '{}' already exists", dto.barcode.as_deref().unwrap_or("")))
             } else {
-                crate::db::errors::DbError::SqliteError(e)
+                crate::db::errors::DbError::from(e)
             }
         })?;
 
@@ -565,7 +565,7 @@ impl SQLiteProductRepository {
                 product.updated_at,
             ],
         )
-        .map_err(crate::db::errors::DbError::SqliteError)?;
+        .map_err(crate::db::errors::DbError::from)?;
 
         Ok(())
     }
@@ -605,7 +605,7 @@ impl SQLiteProductRepository {
             )
             .map_err(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => crate::db::errors::DbError::NotFound(format!("Product '{id}' not found")),
-                err => crate::db::errors::DbError::SqliteError(err),
+                err => crate::db::errors::DbError::from(err),
             })?;
 
         let now = Utc::now().to_rfc3339();
@@ -675,7 +675,7 @@ impl SQLiteProductRepository {
             if err_str.contains("UNIQUE constraint failed: products.barcode") {
                 crate::db::errors::DbError::ValidationError("Barcode is already used by another product".to_string())
             } else {
-                crate::db::errors::DbError::SqliteError(e)
+                crate::db::errors::DbError::from(e)
             }
         })?;
 
@@ -706,7 +706,7 @@ impl SQLiteProductRepository {
         let now = Utc::now().to_rfc3339();
         let affected = conn
             .execute("UPDATE products SET is_active = 0, updated_at = ?1 WHERE id = ?2", params![now, id])
-            .map_err(crate::db::errors::DbError::SqliteError)?;
+            .map_err(crate::db::errors::DbError::from)?;
 
         if affected == 0 {
             return Err(crate::db::errors::DbError::NotFound(format!("Product '{id}' not found")));
