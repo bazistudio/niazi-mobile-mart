@@ -225,7 +225,7 @@ impl ExpenseService {
 
             let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
                 client_event_id: Some(expense_id.clone()),
-                terminal_id: None,
+                terminal_id: String::new(),
                 organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
                 branch_id: branch_id.clone(),
                 event_type: "EXPENSE_CREATED".to_string(),

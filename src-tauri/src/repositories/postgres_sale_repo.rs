@@ -48,7 +48,7 @@ impl PostgresSaleRepository {
             Some(bid) => bid.to_string(),
             None => {
                 let row_opt: Option<(String,)> = sqlx::query_as("SELECT id FROM branches WHERE code = 'MAIN' LIMIT 1")
-                    .fetch_optional(&mut *tx)
+                    .fetch_optional(&mut **tx)
                     .await
                     .map_err(|e| AppError::Database(e.to_string()))?;
                 row_opt.map(|r| r.0).unwrap_or_else(|| DEFAULT_MAIN_BRANCH_ID.to_string())
@@ -62,7 +62,7 @@ impl PostgresSaleRepository {
             if !cid_trim.is_empty() && cid_trim != "walk-in" {
                 let row_opt = sqlx::query("SELECT id, name, credit_limit, is_active FROM customers WHERE id = $1")
                     .bind(cid_trim)
-                    .fetch_optional(&mut *tx)
+                    .fetch_optional(&mut **tx)
                     .await
                     .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -105,7 +105,7 @@ impl PostgresSaleRepository {
 
             let row_opt = sqlx::query("SELECT id, name, sku, purchase_price, average_cost, sale_price, is_active FROM products WHERE id = $1")
                 .bind(&item.product_id)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&mut **tx)
                 .await
                 .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -185,7 +185,7 @@ impl PostgresSaleRepository {
             )
             .bind(&line.product_id)
             .bind(&branch_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?
             .map(|r: (i64,)| r.0)
@@ -201,12 +201,12 @@ impl PostgresSaleRepository {
 
         // 7. Generate invoice number
         sqlx::query("UPDATE counters SET value = value + 1 WHERE name = 'invoice'")
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         let inv_val: (i64,) = sqlx::query_as("SELECT value FROM counters WHERE name = 'invoice'")
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -225,7 +225,7 @@ impl PostgresSaleRepository {
                 "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM customer_ledger_entries WHERE customer_id = $1",
             )
             .bind(cid)
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -258,7 +258,7 @@ impl PostgresSaleRepository {
             .bind(desc)
             .bind(uid.as_deref())
             .bind(&now)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
         }
@@ -308,7 +308,7 @@ impl PostgresSaleRepository {
         .bind(sale.notes.as_deref())
         .bind(&sale.created_at)
         .bind(&sale.updated_at)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -348,7 +348,7 @@ impl PostgresSaleRepository {
             .bind(sale_line.discount)
             .bind(sale_line.line_total)
             .bind(&sale_line.created_at)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -356,7 +356,7 @@ impl PostgresSaleRepository {
             let current_stock: (i64,) = sqlx::query_as("SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2")
                 .bind(&line.product_id)
                 .bind(&branch_id)
-                .fetch_one(&mut *tx)
+                .fetch_one(&mut **tx)
                 .await
                 .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -366,7 +366,7 @@ impl PostgresSaleRepository {
                 .bind(&now)
                 .bind(&line.product_id)
                 .bind(&branch_id)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -387,7 +387,7 @@ impl PostgresSaleRepository {
             .bind(uid.as_deref())
             .bind(&sale_id)
             .bind(&now)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -417,7 +417,7 @@ impl PostgresSaleRepository {
         .bind(sale_payment.reference_number.as_deref())
         .bind(sale_payment.notes.as_deref())
         .bind(&sale_payment.created_at)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -427,7 +427,7 @@ impl PostgresSaleRepository {
                 "SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' LIMIT 1",
             )
             .bind(&branch_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?
             .map(|r: (String,)| r.0);
@@ -448,7 +448,7 @@ impl PostgresSaleRepository {
             .bind(desc)
             .bind(uid.as_deref())
             .bind(&now)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
         }
