@@ -1,6 +1,7 @@
 import { tauriClient } from '@/lib/tauri/tauriClient';
 import { shopApi } from '@/services/shop.api';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
+import { platformAdapter } from '@/lib/platformAdapter';
 import { InventoryProduct, PaginationParams, StockStatus } from '../types';
 import { categoryService } from './category.service';
 import { brandService } from './brand.service';
@@ -155,6 +156,8 @@ export const productService = {
     const compName = created.company_id ? (companies.find(c => c.id === created.company_id)?.name || created.company_id) : '-';
     const colorName = created.color_id ? (colors.find(c => c.id === created.color_id)?.name || created.color_id) : '-';
     const qualityName = created.quality_id ? (qualities.find(q => q.id === created.quality_id)?.name || created.quality_id) : '-';
+
+    platformAdapter.emitEvent('inventory-updated');
 
     return {
       id: created.id,
