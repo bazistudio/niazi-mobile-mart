@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { X, Package } from 'lucide-react';
-import { toast } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { DynamicMasterSelect } from './master-data/DynamicMasterSelect';
 import { useProducts } from '@/features/inventory/hooks/useProducts';
 
@@ -99,6 +99,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
 
       await createProduct({
         ...formData,
+        categoryId: formData.categoryId || '00000000-0000-0000-0000-000000000010',
         purchasePrice: Number(formData.purchasePrice) || 0,
         price: Number(formData.price) || 0,
         quantity: Number(formData.quantity) || 0,
@@ -116,12 +117,12 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
       onClose();
     } catch (err: any) {
       console.error('[AddProductDrawer] Failed to create product:', err);
-      const errMsg = err?.message || err?.to_string || String(err) || 'Failed to create product';
+      const errMsg = err?.response?.data?.message || err?.message || (typeof err === 'string' ? err : '') || String(err) || 'Failed to create product';
       toast.error(`Product Creation Failed: ${errMsg}`);
     }
   };
 
-  const isValid = formData.name.trim() !== '' && formData.price !== '' && formData.quantity !== '' && formData.categoryId !== '';
+  const isValid = formData.name.trim() !== '' && formData.price !== '' && formData.quantity !== '';
 
   const margin = (Number(formData.price) || 0) - (Number(formData.purchasePrice) || 0);
 

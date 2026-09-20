@@ -65,6 +65,10 @@ impl ProductService {
             }
             ProductRepository::SQLite(_) => {
                 let db = self.db.as_ref().expect("SQLite database connection required");
+                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+                let terminal_id = current_terminal.id;
+
                 let target_branch = dto.branch_id.clone().unwrap_or_else(|| DEFAULT_MAIN_BRANCH_ID.to_string());
                 let uid = user_id.map(|s| s.to_string());
                 let pid = product_id.clone();
@@ -150,6 +154,10 @@ impl ProductService {
             ProductRepository::Postgres(pg_repo) => pg_repo.update_product(id, &dto).await,
             ProductRepository::SQLite(_) => {
                 let db = self.db.as_ref().expect("SQLite database connection required");
+                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+                let terminal_id = current_terminal.id;
+
                 let id_owned = id.to_string();
 
                 let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
@@ -204,6 +212,10 @@ impl ProductService {
             ProductRepository::Postgres(pg_repo) => pg_repo.deactivate_product(id).await,
             ProductRepository::SQLite(_) => {
                 let db = self.db.as_ref().expect("SQLite database connection required");
+                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+                let terminal_id = current_terminal.id;
+
                 let id_owned = id.to_string();
 
                 let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());

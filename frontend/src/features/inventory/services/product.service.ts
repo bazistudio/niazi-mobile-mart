@@ -1,5 +1,7 @@
 import { tauriClient } from '@/lib/tauri/tauriClient';
 import { shopApi } from '@/services/shop.api';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
+import { platformAdapter } from '@/lib/platformAdapter';
 import { InventoryProduct, PaginationParams, StockStatus } from '../types';
 import { categoryService } from './category.service';
 import { brandService } from './brand.service';
@@ -7,8 +9,21 @@ import { companyService } from './company.service';
 import { colorService } from './color.service';
 import { qualityService } from './quality.service';
 
+function getActiveBranchId(): string {
+  try {
+    const store = useOrganizationStore.getState();
+    const branchId = store.activeShop?._id || store.activeShopId;
+    if (branchId && branchId.length === 36) {
+      return branchId;
+    }
+  } catch {}
+  return '00000000-0000-0000-0000-000000000002';
+}
+
 export const productService = {
   getProducts: async (params: PaginationParams): Promise<{ products: InventoryProduct[], total: number }> => {
+    const branchId = getActiveBranchId();
+
     const [items, stockMap, categories, brands, companies, colors, qualities] = await Promise.all([
       tauriClient.productList({
         search: params.search,
@@ -18,8 +33,8 @@ export const productService = {
         color_id: params.colorId,
         quality_id: params.qualityId,
         is_active: true,
-      }),
-      tauriClient.inventoryGetStockMap('00000000-0000-0000-0000-000000000002').catch(() => ({}) as Record<string, number>),
+      }).catch(() => []),
+      tauriClient.inventoryGetStockMap(branchId).catch(() => ({}) as Record<string, number>),
       categoryService.getCategories().catch(() => []),
       brandService.getBrands().catch(() => []),
       companyService.getCompanies().catch(() => []),
@@ -97,12 +112,7 @@ export const productService = {
 
     let branchId = productData.branch_id || productData.branchId || null;
     if (initialQty > 0 && !branchId) {
-      try {
-        const shopRes = await shopApi.getMyShop();
-        branchId = shopRes?.data?._id || '00000000-0000-0000-0000-000000000002';
-      } catch {
-        branchId = '00000000-0000-0000-0000-000000000002';
-      }
+      branchId = getActiveBranchId();
     }
 
     const rawCatId = productData.categoryId || productData.category_id;
@@ -146,6 +156,8 @@ export const productService = {
     const compName = created.company_id ? (companies.find(c => c.id === created.company_id)?.name || created.company_id) : '-';
     const colorName = created.color_id ? (colors.find(c => c.id === created.color_id)?.name || created.color_id) : '-';
     const qualityName = created.quality_id ? (qualities.find(q => q.id === created.quality_id)?.name || created.quality_id) : '-';
+
+    platformAdapter.emitEvent('inventory-updated');
 
     return {
       id: created.id,
@@ -199,7 +211,7 @@ export const productService = {
       try {
         await tauriClient.inventoryAdjust({
           product_id: id,
-          branch_id: '00000000-0000-0000-0000-000000000002',
+          branch_id: getActiveBranchId(),
           target_quantity: Number(productData.quantity),
         });
       } catch (err) {
@@ -213,7 +225,7 @@ export const productService = {
       companyService.getCompanies().catch(() => []),
       colorService.getColors().catch(() => []),
       qualityService.getQualities().catch(() => []),
-      tauriClient.inventoryGetStockMap('00000000-0000-0000-0000-000000000002').catch(() => ({}) as Record<string, number>),
+      tauriClient.inventoryGetStockMap(getActiveBranchId()).catch(() => ({}) as Record<string, number>),
     ]);
 
     const catName = categories.find(c => c.id === updated.category_id)?.name || 'General';

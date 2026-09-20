@@ -47,7 +47,6 @@ pub async fn product_create(
         );
         return Err(auth_err);
     }
-
     let session = state.get_session().await;
     tracing::info!(
         "[product_create] Initiating product database transaction for user_id={:?}",
@@ -91,13 +90,23 @@ pub async fn product_update(
 
 #[tauri::command]
 pub async fn product_get(state: State<'_, AppState>, id: String) -> AppResult<Product> {
-    AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await?;
+    if AuthService::require_permission(&state, Some("products"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("inventory"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     state.product_service.get_product(&id).await
 }
 
 #[tauri::command]
 pub async fn product_get_by_sku(state: State<'_, AppState>, sku: String) -> AppResult<Product> {
-    AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await?;
+    if AuthService::require_permission(&state, Some("products"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("inventory"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     state.product_service.get_product_by_sku(&sku).await
 }
 
@@ -106,7 +115,12 @@ pub async fn product_get_by_barcode(
     state: State<'_, AppState>,
     barcode: String,
 ) -> AppResult<Product> {
-    AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await?;
+    if AuthService::require_permission(&state, Some("products"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("inventory"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     state.product_service.get_product_by_barcode(&barcode).await
 }
 
@@ -115,7 +129,12 @@ pub async fn product_list(
     state: State<'_, AppState>,
     filter: Option<ProductFilter>,
 ) -> AppResult<Vec<Product>> {
-    AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await?;
+    if AuthService::require_permission(&state, Some("products"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("inventory"), None).await.is_err()
+        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    {
+        AuthService::require_permission(&state, Some("sales"), None).await?;
+    }
     state
         .product_service
         .list_products(filter.unwrap_or_default())

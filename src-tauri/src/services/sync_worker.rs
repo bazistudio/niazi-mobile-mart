@@ -6,6 +6,8 @@ use tracing::{info, warn, error};
 use crate::domain::sync_queue::SyncQueueStatus;
 use crate::state::AppState;
 
+pub const DEFAULT_CENTRAL_SERVER_URL: &str = "https://niazi-server-860232188829.asia-south1.run.app";
+
 /// Status DTO representing live sync engine state for UI and monitoring
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SyncEngineStatus {
@@ -107,7 +109,7 @@ impl SyncWorkerDaemon {
         }
 
         let server_url = std::env::var("CENTRAL_SERVER_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+            .unwrap_or_else(|_| DEFAULT_CENTRAL_SERVER_URL.to_string());
 
         let client = match reqwest::Client::builder().timeout(Duration::from_secs(10)).build() {
             Ok(c) => c,
@@ -189,7 +191,7 @@ impl SyncWorkerDaemon {
         };
 
         let server_url = std::env::var("CENTRAL_SERVER_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+            .unwrap_or_else(|_| DEFAULT_CENTRAL_SERVER_URL.to_string());
 
         let client = match reqwest::Client::builder().timeout(Duration::from_secs(10)).build() {
             Ok(c) => c,

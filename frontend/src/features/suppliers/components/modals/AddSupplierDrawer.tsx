@@ -79,7 +79,8 @@ export const SupplierFormDrawer: React.FC<SupplierFormDrawerProps> = ({ isOpen, 
       onClose();
     },
     onError: (error: any) => {
-      toast.error(error?.response?.data?.message || `Failed to ${editingSupplier ? 'update' : 'add'} supplier`);
+      const msg = error?.response?.data?.message || error?.message || (typeof error === 'string' ? error : '') || `Failed to ${editingSupplier ? 'update' : 'add'} supplier`;
+      toast.error(msg);
     }
   });
 
