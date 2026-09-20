@@ -71,6 +71,7 @@ pub struct AppState {
     pub purchase_return_service: PurchaseReturnService,
     pub profit_service: ProfitService,
     pub token_manager: crate::services::TokenManager,
+    pub sync_worker: Arc<RwLock<Option<Arc<crate::services::SyncWorkerDaemon>>>>,
     pub is_initialized: Arc<RwLock<bool>>,
 }
 
@@ -116,6 +117,7 @@ impl AppState {
             purchase_return_service,
             profit_service,
             token_manager: crate::services::TokenManager::new(),
+            sync_worker: Arc::new(RwLock::new(None)),
             is_initialized: Arc::new(RwLock::new(false)),
         }
     }
@@ -161,6 +163,7 @@ impl AppState {
             purchase_return_service,
             profit_service,
             token_manager: crate::services::TokenManager::new(),
+            sync_worker: Arc::new(RwLock::new(None)),
             is_initialized: Arc::new(RwLock::new(false)),
         }
     }

@@ -2109,6 +2109,23 @@ export const tauriClient = {
       total: calcMetrics(() => true),
     };
   },
+
+  // ── Sync Engine Commands ───────────────────────────────────────────────────
+  async syncGetStatus(): Promise<SyncEngineStatus> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SyncEngineStatus>('sync_get_status');
+    }
+    return { pending_count: 0, is_online: true, is_syncing: false };
+  },
+
+  async syncTriggerNow(): Promise<SyncEngineStatus> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SyncEngineStatus>('sync_trigger_now');
+    }
+    return { pending_count: 0, is_online: true, is_syncing: false };
+  },
 };
 
 // ── Type Definitions for Organization & Branch ──────────────────────────────
@@ -3139,5 +3156,13 @@ export interface DashboardProfitSummaryDto {
   today: ProfitMetricsDto;
   this_month: ProfitMetricsDto;
   total: ProfitMetricsDto;
+}
+
+export interface SyncEngineStatus {
+  pending_count: number;
+  is_online: boolean;
+  is_syncing: boolean;
+  last_synced_at?: string;
+  last_error?: string;
 }
 

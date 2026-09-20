@@ -13,6 +13,7 @@ pub const DEFAULT_CENTRAL_SERVER_URL: &str = "https://niazi-server-860232188829.
 pub struct SyncEngineStatus {
     pub pending_count: i64,
     pub is_online: bool,
+    pub is_syncing: bool,
     pub last_synced_at: Option<String>,
     pub last_error: Option<String>,
 }
@@ -22,6 +23,7 @@ pub struct SyncEngineStatus {
 pub struct SyncWorkerDaemon {
     app_state: Arc<AppState>,
     status: Arc<RwLock<SyncEngineStatus>>,
+    execution_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl SyncWorkerDaemon {
@@ -31,9 +33,11 @@ impl SyncWorkerDaemon {
             status: Arc::new(RwLock::new(SyncEngineStatus {
                 pending_count: 0,
                 is_online: true,
+                is_syncing: false,
                 last_synced_at: None,
                 last_error: None,
             })),
+            execution_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -46,6 +50,44 @@ impl SyncWorkerDaemon {
         guard.clone()
     }
 
+    /// Asynchronous coordinator for manual sync execution (guaranteed execution, no try_lock preemption failure)
+    pub async fn run_manual_sync(&self) {
+        let _guard = self.execution_lock.lock().await;
+
+        {
+            let mut st = self.status.write().await;
+            st.is_syncing = true;
+        }
+
+        info!("[SyncWorkerDaemon] Starting manual sync pipeline (push outbox + pull downstream)...");
+        self.sync_outbox_push().await;
+        self.sync_downstream_pull().await;
+
+        let pending_count = match &self.app_state.sync_queue_repo {
+            Some(r) => r.count_pending().await.unwrap_or(0),
+            None => 0,
+        };
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let mut st = self.status.write().await;
+        st.is_syncing = false;
+        st.pending_count = pending_count;
+        if st.last_error.is_none() {
+            st.last_synced_at = Some(now);
+        }
+        info!("[SyncWorkerDaemon] Manual sync pipeline completed successfully (pending_count={})", pending_count);
+    }
+
+    /// Background outbox tick (defers gracefully if manual sync holds execution lock)
+    pub async fn run_background_tick(&self) {
+        let _guard = match self.execution_lock.try_lock() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+
+        self.sync_outbox_push().await;
+    }
+
     /// Spawns the background daemon Tokio loop
     pub fn start(&self) {
         let daemon = self.clone();
@@ -55,11 +97,14 @@ impl SyncWorkerDaemon {
 
             loop {
                 tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                        daemon.sync_outbox_push().await;
+                    _ = tokio::time::sleep(Duration::from_secs(15)) => {
+                        daemon.run_background_tick().await;
                     }
                     _ = pull_timer.tick() => {
-                        daemon.sync_downstream_pull().await;
+                        let _guard = daemon.execution_lock.try_lock();
+                        if _guard.is_ok() {
+                            daemon.sync_downstream_pull().await;
+                        }
                     }
                 }
             }

@@ -14,6 +14,7 @@ import { inventoryService } from '../services/inventory.service';
 import { DEFAULT_PAGE_SIZE } from '../constants/inventory.constants';
 import { CreateProductDTO } from '../dto/inventory.dto';
 import { productService } from '../product/product.service';
+import { tauriClient } from '@/lib/tauri/tauriClient';
 
 
 interface InventoryState {
@@ -87,9 +88,27 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
   },
 
   forceSync: async () => {
-    // Clear cache completely and force refetch from backend
-    set({ products: [], totalProducts: 0, status: 'loading', error: null });
-    await get().fetchProducts();
+    try {
+      set({ status: 'loading', error: null });
+      await tauriClient.syncTriggerNow().catch((err) => console.warn('[forceSync] Tauri sync warning:', err));
+      const requestParams: PaginationParams = {
+        page: 1,
+        limit: DEFAULT_PAGE_SIZE,
+        search: get().searchTerm,
+      };
+      const { products, total } = await inventoryService.getProducts(requestParams);
+      set({
+        products,
+        totalProducts: total,
+        status: 'success',
+        error: null,
+      });
+    } catch (error: any) {
+      set({
+        status: 'error',
+        error: error.message || 'Failed to sync inventory data',
+      });
+    }
   },
 
   updateProduct: async (id, data, image) => {

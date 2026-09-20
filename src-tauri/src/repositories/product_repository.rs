@@ -62,6 +62,15 @@ impl SQLiteProductRepository {
             .filter(|s| s.len() == 36)
             .map(String::from);
 
+        Self::check_composite_duplicate_in_tx(
+            &guard,
+            &dto.name,
+            &safe_category_id,
+            safe_unit_id.as_deref(),
+            safe_brand_id.as_deref(),
+            None,
+        )?;
+
         guard
             .execute(
                 "INSERT INTO products (id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
@@ -333,6 +342,15 @@ impl SQLiteProductRepository {
 
         Self::ensure_default_master_data(&guard);
 
+        Self::check_composite_duplicate_in_tx(
+            &guard,
+            new_name,
+            safe_category,
+            safe_unit,
+            safe_brand,
+            Some(id),
+        )?;
+
         guard
             .execute(
                 "UPDATE products
@@ -418,6 +436,112 @@ impl SQLiteProductRepository {
         Ok(())
     }
 
+    /// Transaction-aware helper to get a product by ID inside a SQLite transaction
+    pub fn get_product_by_id_in_tx(
+        conn: &rusqlite::Connection,
+        id: &str,
+    ) -> Result<Product, crate::db::errors::DbError> {
+        conn.query_row(
+            "SELECT id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at
+             FROM products WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(Product {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    sku: row.get(2)?,
+                    barcode: row.get(3)?,
+                    category_id: row.get(4)?,
+                    brand_id: row.get(5)?,
+                    unit_id: row.get(6)?,
+                    purchase_price: row.get(7)?,
+                    average_cost: row.get(8)?,
+                    sale_price: row.get(9)?,
+                    low_stock_threshold: row.get(10)?,
+                    is_active: row.get::<_, i64>(11)? == 1,
+                    description: row.get(12)?,
+                    created_at: row.get(13)?,
+                    updated_at: row.get(14)?,
+                })
+            },
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => crate::db::errors::DbError::NotFound(format!("Product '{id}' not found")),
+            err => crate::db::errors::DbError::from(err),
+        })
+    }
+
+    /// Checks for composite Product Master duplicate within an existing SQLite transaction.
+    /// Composite identity = (normalized name, category_id, unit_id, brand_id).
+    /// If exclude_id is provided (e.g. during update), that product ID is ignored.
+    pub fn check_composite_duplicate_in_tx(
+        conn: &rusqlite::Connection,
+        name: &str,
+        category_id: &str,
+        unit_id: Option<&str>,
+        brand_id: Option<&str>,
+        exclude_id: Option<&str>,
+    ) -> Result<(), crate::db::errors::DbError> {
+        let norm_name = name.trim().to_lowercase();
+        if norm_name.is_empty() {
+            return Ok(());
+        }
+
+        let safe_category_id = if category_id.trim().len() == 36 {
+            category_id.trim().to_string()
+        } else {
+            "00000000-0000-0000-0000-000000000010".to_string()
+        };
+
+        let norm_unit = unit_id.map(str::trim).filter(|s| s.len() == 36).map(String::from);
+        let norm_brand = brand_id.map(str::trim).filter(|s| s.len() == 36).map(String::from);
+
+        let mut stmt = conn.prepare(
+            "SELECT id, name, category_id, unit_id, brand_id FROM products WHERE is_active = 1"
+        )?;
+
+        let iter = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })?;
+
+        for item in iter {
+            let (id, existing_name, existing_cat, existing_unit, existing_brand) = item?;
+
+            if let Some(ex_id) = exclude_id {
+                if id == ex_id {
+                    continue;
+                }
+            }
+
+            let existing_norm_name = existing_name.trim().to_lowercase();
+            let existing_safe_cat = if existing_cat.trim().len() == 36 {
+                existing_cat.trim().to_string()
+            } else {
+                "00000000-0000-0000-0000-000000000010".to_string()
+            };
+            let existing_norm_unit = existing_unit.as_deref().map(str::trim).filter(|s| s.len() == 36).map(String::from);
+            let existing_norm_brand = existing_brand.as_deref().map(str::trim).filter(|s| s.len() == 36).map(String::from);
+
+            if existing_norm_name == norm_name
+                && existing_safe_cat == safe_category_id
+                && existing_norm_unit == norm_unit
+                && existing_norm_brand == norm_brand
+            {
+                return Err(crate::db::errors::DbError::ValidationError(
+                    "A product with the same name, category, unit, company, quality, and color already exists.".to_string()
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Transaction-aware helper to create a product inside a SQLite transaction
     pub fn create_product_in_tx(
         conn: &rusqlite::Connection,
@@ -450,6 +574,15 @@ impl SQLiteProductRepository {
             .map(str::trim)
             .filter(|s| s.len() == 36)
             .map(String::from);
+
+        Self::check_composite_duplicate_in_tx(
+            conn,
+            &dto.name,
+            &safe_category_id,
+            safe_unit_id.as_deref(),
+            safe_brand_id.as_deref(),
+            None,
+        )?;
 
         conn.execute(
             "INSERT INTO products (id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
@@ -647,6 +780,15 @@ impl SQLiteProductRepository {
         if new_purchase < 0 || new_avg_cost < 0 || new_sale < 0 || new_threshold < 0 {
             return Err(crate::db::errors::DbError::ValidationError("Prices and threshold cannot be negative".to_string()));
         }
+
+        Self::check_composite_duplicate_in_tx(
+            conn,
+            new_name,
+            safe_category,
+            safe_unit,
+            safe_brand,
+            Some(id),
+        )?;
 
         conn.execute(
             "UPDATE products
