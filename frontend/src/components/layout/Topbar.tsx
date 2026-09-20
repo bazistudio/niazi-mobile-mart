@@ -50,18 +50,6 @@ export const Topbar = ({ setMobileMenuOpen }: TopbarProps = {}) => {
             <span>New Sale</span>
           </Link>
 
-          {/* Add Product / Stock CTA */}
-          <button
-            type="button"
-            onClick={() => useInventoryUIStore.getState().setAddProductOpen(true)}
-            title="Add Stock / Product"
-            aria-label="Add stock or product"
-            className="inline-flex items-center gap-1.5 rounded-full bg-surface border border-border px-3 py-1.5 text-xs font-semibold text-text-primary shadow-xs hover:bg-surface-hover hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring transition-all duration-fast cursor-pointer"
-          >
-            <Plus className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-            <span className="hidden md:inline">Add Stock</span>
-          </button>
-
           {/* Sync Engine Status */}
           <SyncStatusBadge />
 

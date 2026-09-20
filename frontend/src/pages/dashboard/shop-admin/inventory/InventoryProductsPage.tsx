@@ -91,14 +91,6 @@ export function InventoryProductsPage() {
             Products Directory ({products.length})
           </span>
         </div>
-        <button
-          type="button"
-          onClick={() => useInventoryUIStore.getState().setAddProductOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#006970] hover:bg-[#005a60] rounded shadow-xs transition-colors cursor-pointer"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          + Add Product / Stock
-        </button>
       </div>
 
       <div className="flex-1 overflow-hidden relative p-4">
