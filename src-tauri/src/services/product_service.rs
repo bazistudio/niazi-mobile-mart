@@ -9,7 +9,7 @@ use crate::domain::product::{CreateProductDto, Product, ProductFilter, UpdatePro
 use crate::errors::{AppError, AppResult};
 use crate::repositories::{
     PostgresProductRepository, ProductRepository, SQLiteInventoryRepository, SQLiteProductRepository,
-    SQLiteSyncQueueRepository,
+    SQLiteSyncQueueRepository, SQLiteUserRepository,
 };
 
 #[derive(Clone)]
@@ -77,6 +77,8 @@ impl ProductService {
                             let now = Utc::now().to_rfc3339();
                             SQLiteInventoryRepository::set_stock_in_tx(tx, &pid, &target_branch, qty, &now)?;
 
+                            let valid_performed_by = SQLiteUserRepository::sanitize_performed_by_in_tx(tx, uid.as_deref())?;
+
                             let movement = StockMovement {
                                 id: Uuid::new_v4().to_string(),
                                 product_id: pid.clone(),
@@ -86,7 +88,7 @@ impl ProductService {
                                 previous_stock: 0,
                                 resulting_stock: qty,
                                 reason: Some("Opening Stock".to_string()),
-                                performed_by: uid,
+                                performed_by: valid_performed_by,
                                 reference_id: Some("OPENING_BALANCE".to_string()),
                                 created_at: now,
                             };

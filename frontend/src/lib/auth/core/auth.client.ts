@@ -198,7 +198,7 @@ export function logoutUser() {
 /**
  * GET ME (fetch current user via Tauri or Axum /api/auth/me)
  */
-export async function getMeUser() {
+export async function getMeUser(): Promise<AuthUser | null> {
   if (isTauriEnvironment()) {
     const rawUser = await tauriClient.getCurrentUser();
     if (!rawUser) return null;
@@ -209,7 +209,7 @@ export async function getMeUser() {
       username: rawUser.username,
       email: `${rawUser.username}@local`,
       role: (rawUser.role ? rawUser.role.toUpperCase() : "STAFF") as any,
-      status: (rawUser.status ? rawUser.status.toLowerCase() : (rawUser.is_active ? "active" : "suspended")) as any,
+      status: (rawUser.status ? rawUser.status.toLowerCase() : (rawUser.is_active ? "active" : "suspended")) as AuthUser["status"],
       mustChangePassword: rawUser.must_change_password,
       permissions: rawUser.access_profile ? rawUser.access_profile.allowed_actions : [],
       createdAt: rawUser.created_at,
@@ -239,8 +239,8 @@ export async function getMeUser() {
       name: identity.username,
       username: identity.username,
       email: `${identity.username}@local`,
-      role: identity.role ? identity.role.toUpperCase() : "STAFF",
-      status: "active",
+      role: (identity.role ? identity.role.toUpperCase() : "STAFF") as any,
+      status: "active" as const,
       mustChangePassword: false,
       permissions: [],
       createdAt: new Date().toISOString(),

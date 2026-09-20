@@ -10,14 +10,59 @@ pub mod state;
 use state::AppState;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 
+fn get_log_dir() -> std::path::PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            return std::path::PathBuf::from(appdata)
+                .join("bazistudio.niazimobilemart")
+                .join("logs");
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            return std::path::PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("bazistudio.niazimobilemart")
+                .join("logs");
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            return std::path::PathBuf::from(home)
+                .join(".config")
+                .join("bazistudio.niazimobilemart")
+                .join("logs");
+        }
+    }
+    std::path::PathBuf::from("logs")
+}
+
 pub fn run() {
-    // Initialize tracing subscriber for structured native logging
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "niazi_mobile_mart=info,tauri=info".into()),
-        )
+    // Initialize persistent dual logging (stdout + file appender in AppData)
+    let log_dir = get_log_dir();
+    let _ = std::fs::create_dir_all(&log_dir);
+    let file_appender = tracing_appender::rolling::never(&log_dir, "app.log");
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "niazi_mobile_mart=debug,tauri=info".into());
+
+    let _ = tracing_subscriber::registry()
+        .with(env_filter)
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
+        .with(tracing_subscriber::fmt::layer().with_writer(non_blocking).with_ansi(false))
         .try_init();
+
+    Box::leak(Box::new(guard));
+
+    tracing::info!("[run] Persistent logging initialized at path: {:?}", log_dir.join("app.log"));
 
     let app_state = AppState::open_default(env!("CARGO_PKG_VERSION"));
     let app_state_for_setup = app_state.clone();
@@ -27,6 +72,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
+            use tauri::Manager;
             let handle = app.handle();
             let file_menu = SubmenuBuilder::new(handle, "File")
                 .id("file_menu")
@@ -41,6 +87,14 @@ pub fn run() {
                 None::<&str>,
             )?;
 
+            let devtools_item = MenuItem::with_id(
+                handle,
+                "help_toggle_devtools",
+                "Toggle Developer Tools (F12)",
+                true,
+                Some("F12"),
+            )?;
+
             let about_item = MenuItem::with_id(
                 handle,
                 "help_about",
@@ -52,6 +106,7 @@ pub fn run() {
             let help_menu = SubmenuBuilder::new(handle, "Help")
                 .id("help_menu")
                 .item(&check_updates_item)
+                .item(&devtools_item)
                 .separator()
                 .item(&about_item)
                 .build()?;
@@ -63,9 +118,24 @@ pub fn run() {
             let sync_worker = services::SyncWorkerDaemon::new(std::sync::Arc::new(app_state_for_setup));
             sync_worker.start();
 
+            if let Some(window) = app.get_webview_window("main") {
+                #[cfg(debug_assertions)]
+                window.open_devtools();
+            }
+
             Ok(())
         })
         .on_menu_event(|app_handle, event| match event.id().as_ref() {
+            "help_toggle_devtools" => {
+                use tauri::Manager;
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    if window.is_devtools_open() {
+                        window.close_devtools();
+                    } else {
+                        window.open_devtools();
+                    }
+                }
+            }
             "help_about" => {
                 let version = app_handle.package_info().version.to_string();
                 let app_name = app_handle.package_info().name.clone();

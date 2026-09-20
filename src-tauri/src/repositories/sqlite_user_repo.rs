@@ -1,4 +1,4 @@
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use crate::db::connection::DatabaseConnection;
 use crate::domain::access_control::{StaffAccessProfile, StaffOperationalLimits};
@@ -12,6 +12,38 @@ pub struct SQLiteUserRepository {
 }
 
 impl SQLiteUserRepository {
+    /// Checks if a user ID exists in the local SQLite users table inside an active transaction.
+    /// Returns Ok(true) if exists, Ok(false) if absent, or Err(DbError) on query error.
+    pub fn user_exists_in_tx(conn: &rusqlite::Connection, id: &str) -> crate::db::errors::DbResult<bool> {
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM users WHERE id = ?1",
+                params![id],
+                |_| Ok(true),
+            )
+            .optional()
+            .map_err(|e| crate::db::errors::DbError::QueryError(format!("Failed to query user existence: {e}")))?
+            .unwrap_or(false);
+
+        Ok(exists)
+    }
+
+    /// Sanitizes an optional user ID for FK insertion: returns Some(user_id) if the user exists
+    /// in local SQLite users table, None if absent. Propagates database errors safely.
+    pub fn sanitize_performed_by_in_tx(
+        conn: &rusqlite::Connection,
+        user_id: Option<&str>,
+    ) -> crate::db::errors::DbResult<Option<String>> {
+        if let Some(uid) = user_id {
+            if Self::user_exists_in_tx(conn, uid)? {
+                Ok(Some(uid.to_string()))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
+    }
     /// Creates a repository backed by the given SQLite database connection
     pub fn new(db: DatabaseConnection) -> Self {
         Self { db }

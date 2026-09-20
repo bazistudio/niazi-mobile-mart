@@ -128,9 +128,15 @@ export const inventoryApi = {
     const price = Math.round(Number(formData.get('price')) || 0);
     const purchasePrice = Math.round(Number(formData.get('purchasePrice')) || 0);
     const lowStockThreshold = Number(formData.get('lowStockThreshold')) || 5;
+    const initialQuantity = Number(formData.get('quantity')) || 0;
     const description = (formData.get('description') as string) || null;
+    let branchId: string | undefined;
+    try {
+      const store = useOrganizationStore.getState();
+      branchId = store.activeShop?._id || store.activeShop?.id || store.activeShopId || undefined;
+    } catch {}
 
-    const created = await tauriClient.productCreate({
+    const payload = {
       name,
       sku,
       barcode,
@@ -141,28 +147,46 @@ export const inventoryApi = {
       sale_price: price,
       low_stock_threshold: lowStockThreshold,
       description,
-    });
-
-    const product: ProductDTO = {
-      _id: created.id,
-      name: created.name,
-      sku: created.sku,
-      barcode: created.barcode || undefined,
-      category: created.category_id,
-      price: created.sale_price,
-      purchasePrice: created.purchase_price,
-      quantity: 0,
-      lowStockThreshold: created.low_stock_threshold,
-      description: created.description || undefined,
-      status: 'active',
-      createdAt: created.created_at,
-      updatedAt: created.updated_at,
+      initial_quantity: initialQuantity,
+      branch_id: branchId,
     };
 
-    return {
-      message: 'Product created successfully',
-      product,
-    };
+    console.info('[inventoryApi.createProduct] Sending product payload to Tauri IPC:', payload);
+
+    try {
+      const created = await tauriClient.productCreate(payload);
+
+      const product: ProductDTO = {
+        _id: created.id,
+        name: created.name,
+        sku: created.sku,
+        barcode: created.barcode || undefined,
+        category: created.category_id,
+        price: created.sale_price,
+        purchasePrice: created.purchase_price,
+        quantity: initialQuantity,
+        lowStockThreshold: created.low_stock_threshold,
+        description: created.description || undefined,
+        status: 'active',
+        createdAt: created.created_at,
+        updatedAt: created.updated_at,
+      };
+
+      console.info('[inventoryApi.createProduct] Product created successfully:', product);
+
+      return {
+        message: 'Product created successfully',
+        product,
+      };
+    } catch (err: any) {
+      console.error('PRODUCT CREATION FAILED:', {
+        error: err,
+        message: err?.message || err,
+        payload,
+        stack: err?.stack,
+      });
+      throw err;
+    }
   },
 
   updateProduct: async (id: string, data: UpdateProductDTO | FormData): Promise<{ message: string; product: ProductDTO }> => {

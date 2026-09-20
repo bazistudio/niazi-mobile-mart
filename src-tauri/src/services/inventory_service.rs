@@ -11,7 +11,7 @@ use crate::domain::inventory::{
 use crate::errors::{AppError, AppResult};
 use crate::repositories::{
     InventoryRepository, PostgresInventoryRepository, PostgresProductRepository, ProductRepository,
-    SQLiteInventoryRepository, SQLiteProductRepository,
+    SQLiteInventoryRepository, SQLiteProductRepository, SQLiteUserRepository,
 };
 
 #[derive(Clone)]
@@ -70,6 +70,8 @@ impl InventoryService {
 
             SQLiteInventoryRepository::set_stock_in_tx(tx, &pid, &bid, new_qty, &now)?;
 
+            let valid_performed_by = SQLiteUserRepository::sanitize_performed_by_in_tx(tx, uid.as_deref())?;
+
             let movement = StockMovement {
                 id: Uuid::new_v4().to_string(),
                 product_id: pid,
@@ -79,7 +81,7 @@ impl InventoryService {
                 previous_stock: prev,
                 resulting_stock: new_qty,
                 reason: dto.reason,
-                performed_by: uid,
+                performed_by: valid_performed_by,
                 reference_id: dto.reference_id,
                 created_at: now,
             };
@@ -124,6 +126,8 @@ impl InventoryService {
             let new_qty = prev - dto.quantity;
             SQLiteInventoryRepository::set_stock_in_tx(tx, &pid, &bid, new_qty, &now)?;
 
+            let valid_performed_by = SQLiteUserRepository::sanitize_performed_by_in_tx(tx, uid.as_deref())?;
+
             let movement = StockMovement {
                 id: Uuid::new_v4().to_string(),
                 product_id: pid,
@@ -133,7 +137,7 @@ impl InventoryService {
                 previous_stock: prev,
                 resulting_stock: new_qty,
                 reason: dto.reason,
-                performed_by: uid,
+                performed_by: valid_performed_by,
                 reference_id: dto.reference_id,
                 created_at: now,
             };
@@ -182,6 +186,8 @@ impl InventoryService {
             let delta = (dto.target_quantity - prev).abs();
             SQLiteInventoryRepository::set_stock_in_tx(tx, &pid, &bid, dto.target_quantity, &now)?;
 
+            let valid_performed_by = SQLiteUserRepository::sanitize_performed_by_in_tx(tx, uid.as_deref())?;
+
             let movement = StockMovement {
                 id: Uuid::new_v4().to_string(),
                 product_id: pid,
@@ -191,7 +197,7 @@ impl InventoryService {
                 previous_stock: prev,
                 resulting_stock: dto.target_quantity,
                 reason: Some(dto.reason),
-                performed_by: uid,
+                performed_by: valid_performed_by,
                 reference_id: Some("MANUAL_ADJUSTMENT".to_string()),
                 created_at: now,
             };
@@ -241,6 +247,8 @@ impl InventoryService {
             let source_new = source_prev - dto.quantity;
             SQLiteInventoryRepository::set_stock_in_tx(tx, &pid, &from_bid, source_new, &now)?;
 
+            let valid_performed_by = SQLiteUserRepository::sanitize_performed_by_in_tx(tx, uid.as_deref())?;
+
             // 3. Record TRANSFER_OUT
             let out_movement = StockMovement {
                 id: Uuid::new_v4().to_string(),
@@ -251,7 +259,7 @@ impl InventoryService {
                 previous_stock: source_prev,
                 resulting_stock: source_new,
                 reason: dto.reason.clone(),
-                performed_by: uid.clone(),
+                performed_by: valid_performed_by.clone(),
                 reference_id: Some(transfer_ref.clone()),
                 created_at: now.clone(),
             };
@@ -272,7 +280,7 @@ impl InventoryService {
                 previous_stock: dest_prev,
                 resulting_stock: dest_new,
                 reason: dto.reason,
-                performed_by: uid,
+                performed_by: valid_performed_by,
                 reference_id: Some(transfer_ref),
                 created_at: now,
             };

@@ -1,6 +1,6 @@
 {
   "name": "niazi-mobile-mart-workspace",
-  "version": "1.2.9",
+  "version": "1.2.10",
   "private": true,
   "description": "Niazi Mobile Mart Desktop ERP & POS Workspace",
   "scripts": {
@@ -9,6 +9,7 @@
     "build:web": "cross-env VITE_APP_SURFACE=web npm --prefix frontend run build",
     "build:desktop": "cross-env VITE_APP_SURFACE=desktop npm --prefix frontend run build",
     "preview": "npm --prefix frontend run preview",
-    "lint": "npm --prefix frontend run lint"
+    "lint": "npm --prefix frontend run lint",
+    "tauri": "npx @tauri-apps/cli"
   }
 }

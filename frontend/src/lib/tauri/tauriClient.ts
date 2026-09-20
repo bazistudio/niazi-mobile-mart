@@ -32,9 +32,11 @@ export interface StaffOperationalLimits {
 }
 
 export interface StaffAccessProfile {
-  allowed_pages: string[];
-  allowed_actions: string[];
-  limits: StaffOperationalLimits;
+  role_name?: string;
+  permissions?: string[];
+  allowed_pages?: string[];
+  allowed_actions?: string[];
+  limits?: StaffOperationalLimits;
 }
 
 export type UserStatus = 'active' | 'disabled' | 'pending' | 'rejected';
@@ -1099,7 +1101,7 @@ export const tauriClient = {
       return await invoke<OrganizationDashboardStats>('organization_get_dashboard_stats');
     }
     const prods = getStoredWebProducts();
-    const lowStockCount = prods.filter((p) => p.quantity <= (p.min_stock_level || 5)).length;
+    const lowStockCount = prods.filter((p: any) => (p.quantity ?? 0) <= ((p.min_stock_level ?? p.low_stock_threshold) || 5)).length;
     let activeStaffCount = 6;
     try {
       const raw = typeof window !== 'undefined' ? localStorage.getItem('nmm_browser_staff_users') : null;
@@ -1993,6 +1995,8 @@ export interface Product {
   average_cost: number;   // Stored in whole Pakistani Rupees - Weighted Average Cost (1 stored integer = 1 PKR)
   sale_price: number;     // Stored in whole Pakistani Rupees (1 stored integer = 1 PKR)
   low_stock_threshold: number;
+  quantity?: number;
+  min_stock_level?: number;
   is_active: boolean;
   description: string | null;
   created_at: string;
@@ -2318,6 +2322,7 @@ export interface SaleFilterDto {
   sale_status?: string | null;
   start_date?: string | null;
   end_date?: string | null;
+  search?: string | null;
   limit?: number | null;
   offset?: number | null;
 }
