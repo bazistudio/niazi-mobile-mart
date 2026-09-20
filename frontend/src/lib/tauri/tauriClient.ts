@@ -348,6 +348,22 @@ export const tauriClient = {
     };
   },
 
+  async authSyncSession(token: string): Promise<SessionContext> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SessionContext>('auth_sync_session', { token });
+    }
+    return {
+      is_authenticated: true,
+      is_locked: false,
+      user_id: null,
+      username: null,
+      role: null,
+      login_time_ms: Date.now(),
+      access_profile: null,
+    };
+  },
+
   async authLogout(): Promise<void> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');

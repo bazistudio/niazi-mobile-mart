@@ -219,6 +219,30 @@ impl AppState {
         };
     }
 
+    pub async fn set_authenticated_from_identity(
+        &self,
+        identity: crate::domain::identity::RequestIdentity,
+        token: String,
+    ) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+
+        let mut session = self.session.write().await;
+        *session = SessionContext {
+            is_authenticated: true,
+            is_locked: false,
+            user_id: Some(identity.user_id),
+            username: Some(identity.username),
+            role: Some(identity.role),
+            login_time_ms: Some(now),
+            access_profile: Some(identity.access_profile),
+            active_token: Some(token),
+        };
+    }
+
+
     pub async fn lock_session(&self) -> bool {
         let mut session = self.session.write().await;
         if session.is_authenticated {

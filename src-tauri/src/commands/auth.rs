@@ -47,11 +47,21 @@ pub async fn auth_login(
     })
 }
 
+/// Synchronizes native SessionContext from a verified Central API Bearer JWT token
+#[tauri::command]
+pub async fn auth_sync_session(
+    state: State<'_, AppState>,
+    token: String,
+) -> AppResult<SessionContext> {
+    AuthService::sync_session_from_token(&state, &token).await
+}
+
 /// Destroys active native session
 #[tauri::command]
 pub async fn auth_logout(state: State<'_, AppState>) -> AppResult<()> {
     AuthService::logout(&state).await
 }
+
 
 /// Normal password change for authenticated user
 #[tauri::command]

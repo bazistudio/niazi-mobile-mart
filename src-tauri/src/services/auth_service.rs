@@ -285,11 +285,33 @@ impl AuthService {
         Ok(app_state.get_session().await)
     }
 
+    /// Synchronizes native SessionContext from a verified Central API Bearer JWT token
+    pub async fn sync_session_from_token(
+        app_state: &AppState,
+        token: &str,
+    ) -> AppResult<SessionContext> {
+        let clean_token = token.trim().strip_prefix("Bearer ").unwrap_or(token).trim();
+        if clean_token.is_empty() {
+            return Err(AppError::Unauthorized(
+                "Missing or empty authorization token".to_string(),
+            ));
+        }
+
+        let identity = app_state.token_manager.resolve_identity(clean_token).await?;
+
+        app_state
+            .set_authenticated_from_identity(identity, clean_token.to_string())
+            .await;
+
+        Ok(app_state.get_session().await)
+    }
+
     /// Logs out and destroys the active session
     pub async fn logout(app_state: &AppState) -> AppResult<()> {
         app_state.clear_session().await;
         Ok(())
     }
+
 
     /// Validates page or action permissions for the active session
     pub async fn require_permission(
@@ -483,7 +505,7 @@ mod tests {
     use crate::services::hasher::hash_credential;
 
     async fn create_test_user(
-        repo: &SQLiteUserRepository,
+        repo: &UserRepository,
         username: &str,
         password: &str,
         pin: Option<&str>,
@@ -641,5 +663,75 @@ mod tests {
         // New password succeeds
         let new_res = AuthService::login(repo, &state, "change_pwd_user", "BrandNewPwd456!").await;
         assert!(new_res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_sync_session_from_token_lifecycle() {
+        let state = AppState::in_memory("5.0.3");
+        let repo = &state.user_repo;
+
+        let user = create_test_user(
+            repo,
+            "jwt_sync_admin",
+            "Pass123!",
+            None,
+            UserRole::Admin,
+            UserStatus::Active,
+        )
+        .await;
+
+        let sanitized = user.sanitize();
+        let valid_token = state.token_manager.create_token(sanitized.clone()).await;
+
+        // 1. Valid JWT synchronization populates native AppState.session
+        let sync_res = AuthService::sync_session_from_token(&state, &valid_token).await;
+        assert!(sync_res.is_ok());
+
+        let session = state.get_session().await;
+        assert!(session.is_authenticated);
+        assert!(!session.is_locked);
+        assert_eq!(session.username, Some("jwt_sync_admin".to_string()));
+        assert_eq!(session.role, Some(UserRole::Admin));
+        assert_eq!(session.active_token, Some(valid_token.clone()));
+
+        // 2. Verified session preserves access profile and passes require_permission
+        assert!(AuthService::require_permission(&state, Some("inventory"), Some("inventory:write")).await.is_ok());
+
+        // 3. Expired / Invalid token synchronization fails and leaves unauthenticated
+        let state_unauth = AppState::in_memory("5.0.3");
+        let empty_res = AuthService::sync_session_from_token(&state_unauth, "").await;
+        assert!(matches!(empty_res, Err(AppError::Unauthorized(_))));
+        assert!(!state_unauth.get_session().await.is_authenticated);
+
+        let tampered_token = format!("{valid_token}tampered");
+        let tampered_res = AuthService::sync_session_from_token(&state_unauth, &tampered_token).await;
+        assert!(matches!(tampered_res, Err(AppError::Unauthorized(_))));
+        assert!(!state_unauth.get_session().await.is_authenticated);
+
+        // 4. Session replacement with new valid user token replaces state without stale data
+        let staff_user = create_test_user(
+            repo,
+            "jwt_sync_cashier",
+            "Pass123!",
+            None,
+            UserRole::Cashier,
+            UserStatus::Active,
+        )
+        .await;
+        let staff_token = state.token_manager.create_token(staff_user.sanitize()).await;
+
+        let replace_res = AuthService::sync_session_from_token(&state, &staff_token).await;
+        assert!(replace_res.is_ok());
+
+        let new_session = state.get_session().await;
+        assert_eq!(new_session.username, Some("jwt_sync_cashier".to_string()));
+        assert_eq!(new_session.role, Some(UserRole::Cashier));
+        assert_eq!(new_session.active_token, Some(staff_token));
+
+        // 5. Failed sync attempt on an already authenticated state maintains state isolation
+        let failed_sync_res = AuthService::sync_session_from_token(&state, "invalid_bearer_token").await;
+        assert!(failed_sync_res.is_err());
+        // State remains intact from previous valid session
+        assert_eq!(state.get_session().await.username, Some("jwt_sync_cashier".to_string()));
     }
 }

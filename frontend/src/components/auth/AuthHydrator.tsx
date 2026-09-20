@@ -24,6 +24,20 @@ export default function AuthHydrator() {
     const hydrate = async () => {
       if (isTauriEnvironment()) {
         try {
+          // 1. Check for stored Bearer JWT auth token (from Central API login)
+          const token = getAuthToken();
+          if (token) {
+            try {
+              // Attempt to restore native Rust session from stored token
+              await tauriClient.authSyncSession(token);
+            } catch (syncErr) {
+              console.warn("[AuthHydrator] Failed to sync native Rust session from stored token:", syncErr);
+              logout();
+              return;
+            }
+          }
+
+          // 2. Query authoritative native session state
           const session = await tauriClient.getCurrentSession();
           if (session && session.is_authenticated && session.user_id) {
             const rawUser = await tauriClient.getCurrentUser();
@@ -34,7 +48,7 @@ export default function AuthHydrator() {
                 email: `${rawUser.username}@local`,
                 role: rawUser.role as any,
                 status: rawUser.is_active ? "active" : "suspended",
-                permissions: rawUser.access_profile.allowed_actions,
+                permissions: rawUser.access_profile ? rawUser.access_profile.allowed_actions : [],
                 createdAt: rawUser.created_at,
               };
 
@@ -42,6 +56,7 @@ export default function AuthHydrator() {
                 expiresAt: Date.now() + 7 * 24 * 3600 * 1000,
                 deviceId: "native-desktop",
                 user,
+                token: token || undefined,
               });
 
               if (session.is_locked) {
