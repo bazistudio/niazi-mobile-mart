@@ -9,7 +9,7 @@
 
 import { useEffect } from "react";
 import { useAuthStore } from "@/lib/auth/core/auth.store";
-import { getSession, isSessionValid } from "@/lib/auth/core/auth.session";
+import { getSession, isSessionValid, getAuthToken } from "@/lib/auth/core/auth.session";
 import { getMeUser } from "@/lib/auth/core/auth.client";
 import { isTauriEnvironment, tauriClient } from "@/lib/tauri/tauriClient";
 import { useTerminalStore } from "@/store/useTerminalStore";
@@ -26,14 +26,12 @@ export default function AuthHydrator() {
         try {
           // 1. Check for stored Bearer JWT auth token (from Central API login)
           const token = getAuthToken();
-          if (token) {
+          if (token && token !== "native-tauri-session") {
             try {
               // Attempt to restore native Rust session from stored token
               await tauriClient.authSyncSession(token);
             } catch (syncErr) {
               console.warn("[AuthHydrator] Failed to sync native Rust session from stored token:", syncErr);
-              logout();
-              return;
             }
           }
 

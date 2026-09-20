@@ -48,7 +48,11 @@ export async function loginUser(identifier: string, password: string) {
 
     // Direct Native Rust Session Synchronization when running inside Tauri Desktop shell
     if (isTauriEnvironment()) {
-      await tauriClient.authSyncSession(token);
+      try {
+        await tauriClient.authSyncSession(token);
+      } catch (syncErr) {
+        console.warn("[loginUser] Failed to sync native Rust session from token:", syncErr);
+      }
     }
 
     const user: AuthUser = {

@@ -297,6 +297,13 @@ impl AuthService {
             ));
         }
 
+        if clean_token == "native-tauri-session" {
+            let session = app_state.get_session().await;
+            if session.is_authenticated {
+                return Ok(session);
+            }
+        }
+
         let identity = app_state.token_manager.resolve_identity(clean_token).await?;
 
         app_state
