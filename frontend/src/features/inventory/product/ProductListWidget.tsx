@@ -14,8 +14,9 @@ import { PERMISSIONS } from '@/constants/permissions';
 import { useInventoryUIStore } from '@/features/inventory/store/inventory-ui.store';
 
 export const ProductListWidget = () => {
-  const { hasPermission } = usePermissions();
-  const canManageProducts = hasPermission(PERMISSIONS.PRODUCTS_MANAGE);
+  const { hasPermission, role } = usePermissions();
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
+  const canManageProducts = hasPermission(PERMISSIONS.PRODUCTS_MANAGE) && isOrgAdmin;
 
   const fetchProducts = selectFetchProducts();
   const forceSync = selectForceSync();

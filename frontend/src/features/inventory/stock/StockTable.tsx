@@ -22,8 +22,9 @@ function SortIcon({ field, activeField, direction }: { field: SortField; activeF
 }
 
 export const StockTable = ({ products, isLoading }: StockTableProps) => {
-  const { hasPermission } = usePermissions();
+  const { hasPermission, role } = usePermissions();
   const canAdjustStock = hasPermission(PERMISSIONS.INVENTORY_EDIT);
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
 
   const sort = selectSortConfig();
   const setSort = selectSetSort();
@@ -52,6 +53,12 @@ export const StockTable = ({ products, isLoading }: StockTableProps) => {
       if (product) {
         const oldStock = product.stock;
         if (oldStock !== newStock) {
+          if (newStock > oldStock && !isOrgAdmin) {
+            import('react-hot-toast').then(m => m.default.error('Branch users cannot increase stock. Organization Admin required.'));
+            setEditingId(null);
+            return;
+          }
+
           const type = newStock > oldStock 
             ? InventoryAdjustmentType.INCREASE 
             : InventoryAdjustmentType.DECREASE;

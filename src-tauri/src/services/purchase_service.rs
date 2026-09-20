@@ -82,6 +82,10 @@ impl PurchaseService {
         let user_id_owned = user_id.map(str::to_string);
 
         let db = self.db.as_ref().expect("SQLite database connection required");
+        let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+        let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+        let terminal_id = current_terminal.id;
+
         let result = with_transaction(db, move |tx| {
             let now = Utc::now().to_rfc3339();
 
@@ -434,7 +438,7 @@ fn calculate_weighted_average_cost(
 
             let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
                 client_event_id: Some(purchase_id.clone()),
-                terminal_id: String::new(),
+                terminal_id: terminal_id.clone(),
                 organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
                 branch_id: branch_id.clone(),
                 event_type: "PURCHASE_CREATED".to_string(),

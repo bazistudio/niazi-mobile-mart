@@ -12,7 +12,7 @@ pub async fn purchase_complete(
     state: State<'_, AppState>,
     mut dto: CompletePurchaseDto,
 ) -> AppResult<PurchaseResultDto> {
-    AuthService::require_permission(&state, Some("purchases"), None).await?;
+    AuthService::require_org_admin(&state).await?;
     let authorized_branch = AuthService::require_branch_access(&state, dto.branch_id.as_deref()).await?;
     dto.branch_id = Some(authorized_branch);
     let user_id = { state.session.read().await.user_id.clone() };

@@ -157,6 +157,10 @@ impl ExpenseService {
         let amount = dto.amount;
 
         let db = self.db.as_ref().expect("SQLite database connection required");
+        let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+        let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+        let terminal_id = current_terminal.id;
+
         let result = with_transaction(db, move |tx| {
             let now = Utc::now().to_rfc3339();
 
@@ -225,7 +229,7 @@ impl ExpenseService {
 
             let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
                 client_event_id: Some(expense_id.clone()),
-                terminal_id: String::new(),
+                terminal_id: terminal_id.clone(),
                 organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
                 branch_id: branch_id.clone(),
                 event_type: "EXPENSE_CREATED".to_string(),

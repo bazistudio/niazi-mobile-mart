@@ -69,6 +69,10 @@ impl ProductService {
                 let uid = user_id.map(|s| s.to_string());
                 let pid = product_id.clone();
 
+                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+                let terminal_id = current_terminal.id;
+
                 let product = with_transaction(db, move |tx| {
                     let product = SQLiteProductRepository::create_product_in_tx(tx, &pid, &dto)?;
 
@@ -103,7 +107,7 @@ impl ProductService {
 
                     let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
                         client_event_id: Some(product.id.clone()),
-                        terminal_id: String::new(),
+                        terminal_id: terminal_id.clone(),
                         organization_id: NIAZI_ORGANIZATION_ID.to_string(),
                         branch_id: target_branch.clone(),
                         event_type: "PRODUCT_CREATED".to_string(),
@@ -148,6 +152,10 @@ impl ProductService {
                 let db = self.db.as_ref().expect("SQLite database connection required");
                 let id_owned = id.to_string();
 
+                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+                let terminal_id = current_terminal.id;
+
                 let product = with_transaction(db, move |tx| {
                     let product = SQLiteProductRepository::update_product_in_tx(tx, &id_owned, &dto)?;
 
@@ -157,7 +165,7 @@ impl ProductService {
 
                     let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
                         client_event_id: Some(Uuid::new_v4().to_string()),
-                        terminal_id: String::new(),
+                        terminal_id: terminal_id.clone(),
                         organization_id: NIAZI_ORGANIZATION_ID.to_string(),
                         branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
                         event_type: "PRODUCT_UPDATED".to_string(),
@@ -198,6 +206,10 @@ impl ProductService {
                 let db = self.db.as_ref().expect("SQLite database connection required");
                 let id_owned = id.to_string();
 
+                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+                let terminal_id = current_terminal.id;
+
                 with_transaction(db, move |tx| {
                     SQLiteProductRepository::deactivate_product_in_tx(tx, &id_owned)?;
 
@@ -205,7 +217,7 @@ impl ProductService {
 
                     let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
                         client_event_id: Some(Uuid::new_v4().to_string()),
-                        terminal_id: String::new(),
+                        terminal_id: terminal_id.clone(),
                         organization_id: NIAZI_ORGANIZATION_ID.to_string(),
                         branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
                         event_type: "PRODUCT_DEACTIVATED".to_string(),
@@ -443,7 +455,7 @@ mod tests {
             .unwrap();
 
         let queue_repo = crate::repositories::SQLiteSyncQueueRepository::new(db.clone());
-        let pending = queue_repo.get_pending_events(10).await.unwrap();
+        let pending = queue_repo.get_pending(10).await.unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].event_type, "PRODUCT_CREATED");
         assert_eq!(pending[0].client_event_id, prod.id);
@@ -473,7 +485,7 @@ mod tests {
             .await
             .unwrap();
 
-        let pending_after_update = queue_repo.get_pending_events(10).await.unwrap();
+        let pending_after_update = queue_repo.get_pending(10).await.unwrap();
         assert_eq!(pending_after_update.len(), 2);
         assert_eq!(pending_after_update[1].event_type, "PRODUCT_UPDATED");
 
@@ -484,7 +496,7 @@ mod tests {
         // 3. Deactivate product -> should enqueue PRODUCT_DEACTIVATED
         service.deactivate_product(&prod.id).await.unwrap();
 
-        let pending_after_deactivate = queue_repo.get_pending_events(10).await.unwrap();
+        let pending_after_deactivate = queue_repo.get_pending(10).await.unwrap();
         assert_eq!(pending_after_deactivate.len(), 3);
         assert_eq!(pending_after_deactivate[2].event_type, "PRODUCT_DEACTIVATED");
 

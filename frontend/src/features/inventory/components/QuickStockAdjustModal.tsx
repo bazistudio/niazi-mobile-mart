@@ -22,13 +22,14 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
   onClose,
   onSuccess
 }) => {
-  const { hasPermission } = usePermissions();
+  const { hasPermission, role } = usePermissions();
   const canManageInventory = hasPermission(PERMISSIONS.INVENTORY_EDIT);
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
   const fetchProducts = useInventoryStore(state => state.fetchProducts);
 
-  const [direction, setDirection] = useState<'increase' | 'decrease'>('increase');
+  const [direction, setDirection] = useState<'increase' | 'decrease'>(isOrgAdmin ? 'increase' : 'decrease');
   const [amount, setAmount] = useState<number>(1);
-  const [adjustmentType, setAdjustmentType] = useState<string>('RESTOCK');
+  const [adjustmentType, setAdjustmentType] = useState<string>(isOrgAdmin ? 'RESTOCK' : 'DAMAGE');
   const [reason, setReason] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +50,13 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
     e.preventDefault();
     if (!canManageInventory) {
       toast.error('Permission denied: inventory.edit permission required.');
+      return;
+    }
+
+    if (direction === 'increase' && !isOrgAdmin) {
+      const msg = 'Branch users cannot increase stock. Organization Admin required.';
+      setError(msg);
+      toast.error(msg);
       return;
     }
 
@@ -163,15 +171,18 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
+                disabled={!isOrgAdmin}
                 onClick={() => {
+                  if (!isOrgAdmin) return;
                   setDirection('increase');
                   if (adjustmentType === 'DAMAGE') setAdjustmentType('RESTOCK');
                 }}
+                title={!isOrgAdmin ? 'Branch users are not authorized to increase stock.' : undefined}
                 className={`py-2.5 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border transition-all ${
                   direction === 'increase'
                     ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
                     : 'bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700/50'
-                }`}
+                } ${!isOrgAdmin ? 'opacity-40 cursor-not-allowed' : ''}`}
               >
                 <Plus className="w-4 h-4" /> Increase (+)
               </button>

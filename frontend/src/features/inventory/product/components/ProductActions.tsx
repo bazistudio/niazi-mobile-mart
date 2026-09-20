@@ -15,8 +15,9 @@ interface ProductActionsProps {
 }
 
 export const ProductActions = ({ product, onView, onEdit, onDelete, onAdjustStock }: ProductActionsProps) => {
-  const { hasPermission } = usePermissions();
-  const canManageProducts = hasPermission(PERMISSIONS.PRODUCTS_MANAGE);
+  const { hasPermission, role } = usePermissions();
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
+  const canManageProducts = hasPermission(PERMISSIONS.PRODUCTS_MANAGE) && isOrgAdmin;
   const canAdjustStock = hasPermission(PERMISSIONS.INVENTORY_EDIT);
 
   const [open, setOpen] = useState(false);

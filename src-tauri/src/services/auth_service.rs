@@ -320,6 +320,48 @@ impl AuthService {
     }
 
 
+    /// Checks if the active session has Organization Admin authority
+    pub async fn is_org_admin(app_state: &AppState) -> bool {
+        let session = app_state.get_session().await;
+        if !session.is_authenticated || session.is_locked {
+            return false;
+        }
+        match session.role {
+            Some(crate::domain::user::UserRole::Admin) => true,
+            _ => {
+                if let Some(ref profile) = session.access_profile {
+                    profile.allowed_pages.iter().any(|p| p == "*")
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    /// Requires Organization Admin authority for organization-level operations
+    pub async fn require_org_admin(app_state: &AppState) -> AppResult<()> {
+        let session = app_state.get_session().await;
+        if !session.is_authenticated {
+            return Err(AppError::Unauthorized(
+                "Authentication required to perform this action".to_string(),
+            ));
+        }
+
+        if session.is_locked {
+            return Err(AppError::Locked(
+                "Terminal is locked. Please enter your PIN to resume.".to_string(),
+            ));
+        }
+
+        if Self::is_org_admin(app_state).await {
+            Ok(())
+        } else {
+            Err(AppError::Forbidden(
+                "Access denied: Organization Admin authority required for this operation".to_string(),
+            ))
+        }
+    }
+
     /// Validates page or action permissions for the active session
     pub async fn require_permission(
         app_state: &AppState,
@@ -339,18 +381,7 @@ impl AuthService {
             ));
         }
 
-        let is_org_admin = match session.role {
-            Some(crate::domain::user::UserRole::Admin) => true,
-            _ => {
-                if let Some(ref profile) = session.access_profile {
-                    profile.allowed_pages.iter().any(|p| p == "*")
-                } else {
-                    false
-                }
-            }
-        };
-
-        if is_org_admin {
+        if Self::is_org_admin(app_state).await {
             return Ok(());
         }
 

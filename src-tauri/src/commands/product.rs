@@ -37,10 +37,10 @@ pub async fn product_create(
         return Err(crate::errors::AppError::Validation("Sale price cannot be negative".to_string()));
     }
 
-    if let Err(auth_err) = AuthService::require_permission(&state, Some("inventory"), Some("inventory:write")).await {
+    if let Err(auth_err) = AuthService::require_org_admin(&state).await {
         let session = state.get_session().await;
         tracing::error!(
-            "[product_create] Permission check failed for user_id={:?}, role={:?}: {:?}",
+            "[product_create] Org Admin authority check failed for user_id={:?}, role={:?}: {:?}",
             session.user_id,
             session.role,
             auth_err
@@ -85,7 +85,7 @@ pub async fn product_update(
     id: String,
     dto: UpdateProductDto,
 ) -> AppResult<Product> {
-    AuthService::require_permission(&state, Some("inventory"), Some("inventory:write")).await?;
+    AuthService::require_org_admin(&state).await?;
     state.product_service.update_product(&id, dto).await
 }
 
@@ -125,6 +125,6 @@ pub async fn product_list(
 /// Deactivates a product. In accordance with Section 13, physical deletion is prohibited.
 #[tauri::command]
 pub async fn product_deactivate(state: State<'_, AppState>, id: String) -> AppResult<()> {
-    AuthService::require_permission(&state, Some("inventory"), Some("inventory:write")).await?;
+    AuthService::require_org_admin(&state).await?;
     state.product_service.deactivate_product(&id).await
 }

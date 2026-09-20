@@ -1,7 +1,24 @@
 import React from 'react';
-import { Upload, Download, FileText } from 'lucide-react';
+import { Upload, Download, FileText, ShieldAlert } from 'lucide-react';
+import { usePermissions } from '@/lib/auth/usePermissions';
 
 export function InventoryImportPage() {
+  const { role } = usePermissions();
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
+
+  if (!isOrgAdmin) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-8 bg-white dark:bg-gray-900 text-center">
+        <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-600 dark:text-amber-400 mb-3">
+          <ShieldAlert className="w-6 h-6" />
+        </div>
+        <h3 className="text-base font-bold text-gray-900 dark:text-white">Organization Import Restricted</h3>
+        <p className="text-xs text-gray-500 max-w-sm mt-1">
+          Product Master imports and bulk opening stock creation are restricted to Organization Admin.
+        </p>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col h-full bg-white dark:bg-gray-900 p-6 overflow-y-auto">
       <div className="max-w-4xl mx-auto w-full">

@@ -7,8 +7,12 @@ import { useInventoryUIStore } from '@/features/inventory/store/inventory-ui.sto
 import { ProductEditModal } from '@/features/inventory/product/components/ProductEditModal';
 import { ProductDeleteDialog } from '@/features/inventory/product/components/ProductDeleteDialog';
 import { Loader2, Plus, Edit, Trash2 } from 'lucide-react';
+import { usePermissions } from '@/lib/auth/usePermissions';
 
 export function InventoryProductsPage() {
+  const { role } = usePermissions();
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
+
   const { filters } = useInventoryFilters();
   const [editingProduct, setEditingProduct] = useState<InventoryProduct | null>(null);
   const [deletingProduct, setDeletingProduct] = useState<InventoryProduct | null>(null);
@@ -52,10 +56,10 @@ export function InventoryProductsPage() {
       label: 'Value', 
       render: (row) => <span className="font-medium text-[#006970] dark:text-[#00B4BB]">Rs. {((row.stock || 0) * (row.purchasePrice || 0)).toLocaleString()}</span>
     },
-    { 
-      key: 'actions', 
+    ...(isOrgAdmin ? [{ 
+      key: 'actions' as const, 
       label: 'Action', 
-      render: (row) => (
+      render: (row: InventoryProduct) => (
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -75,7 +79,7 @@ export function InventoryProductsPage() {
           </button>
         </div>
       )
-    },
+    }] : []),
   ];
 
   if (error) {

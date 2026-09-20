@@ -13,7 +13,7 @@ pub async fn inventory_increase(
     state: State<'_, AppState>,
     mut dto: IncreaseStockDto,
 ) -> AppResult<i64> {
-    AuthService::require_permission(&state, Some("inventory"), Some("inventory:write")).await?;
+    AuthService::require_org_admin(&state).await?;
     let authorized_branch = AuthService::require_branch_access(&state, Some(&dto.branch_id)).await?;
     dto.branch_id = authorized_branch;
     let session = state.get_session().await;
@@ -43,6 +43,17 @@ pub async fn inventory_adjust(state: State<'_, AppState>, mut dto: AdjustStockDt
     AuthService::require_permission(&state, Some("inventory"), Some("inventory:adjust")).await?;
     let authorized_branch = AuthService::require_branch_access(&state, Some(&dto.branch_id)).await?;
     dto.branch_id = authorized_branch;
+
+    // Check if this adjustment increases stock. Stock increases require Organization Admin authority.
+    let current_stock = state
+        .inventory_service
+        .get_stock(&dto.product_id, &dto.branch_id)
+        .await?;
+
+    if dto.target_quantity > current_stock {
+        AuthService::require_org_admin(&state).await?;
+    }
+
     let session = state.get_session().await;
     state
         .inventory_service
@@ -55,7 +66,7 @@ pub async fn inventory_transfer(
     state: State<'_, AppState>,
     dto: TransferStockDto,
 ) -> AppResult<()> {
-    AuthService::require_permission(&state, Some("inventory"), Some("inventory:transfer")).await?;
+    AuthService::require_org_admin(&state).await?;
     // Both source and destination branches must be validated
     AuthService::require_branch_access(&state, Some(&dto.from_branch_id)).await?;
     // Destination branch must also exist and be within the authorized organization
@@ -204,5 +215,18 @@ mod tests {
 
         let perm_adj = AuthService::require_permission(&state, Some("inventory"), Some("inventory:adjust")).await;
         assert!(perm_adj.is_ok());
+
+        let org_admin_perm = AuthService::require_org_admin(&state).await;
+        assert!(org_admin_perm.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_shop_admin_restricted_from_org_admin_operations() {
+        let state = setup_state_with_user(UserRole::Cashier, StaffAccessProfile::shop_admin_default()).await;
+
+        // Shop Admin is restricted from Org Admin operations
+        let org_admin_perm = AuthService::require_org_admin(&state).await;
+        assert!(org_admin_perm.is_err());
+        assert!(matches!(org_admin_perm.unwrap_err(), crate::errors::AppError::Forbidden(_)));
     }
 }
