@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::{info, warn, error};
+use tracing::info;
 
 use crate::domain::sync_queue::SyncQueueStatus;
 use crate::state::AppState;
