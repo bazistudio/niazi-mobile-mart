@@ -353,7 +353,7 @@ mod tests {
             .await
             .expect("Custom company creation should succeed");
         assert_eq!(new_comp.name, "Custom Importer");
-        assert_eq!(new_comp.code, "CMP-CUSTOM");
+        assert_eq!(new_comp.code, "CMP_CUSTOM");
 
         // 3. Create custom Quality
         let new_qlt = service

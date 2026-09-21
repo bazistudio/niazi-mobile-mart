@@ -373,6 +373,9 @@ mod tests {
                     category_id: cat.id,
                     brand_id: None,
                     unit_id: Some(unit.id),
+                    company_id: None,
+                    quality_id: None,
+                    color_id: None,
                     purchase_price: 1500, // Rs 1,500
                     average_cost: None,
                     sale_price: 2000,     // Rs 2,000

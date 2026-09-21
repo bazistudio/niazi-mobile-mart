@@ -196,10 +196,11 @@ mod tests {
         let prod_id = Uuid::new_v4().to_string();
         let conn_arc = db.inner();
         let conn = conn_arc.lock().await;
+        let norm_name = crate::domain::product::normalize_product_name(name);
         conn.execute(
-            "INSERT INTO products (id, name, sku, category_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, created_at, updated_at)
-             VALUES (?1, ?2, ?3, '00000000-0000-0000-0000-000000000010', ?4, ?5, ?6, 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            params![prod_id, name, sku, purchase_price, average_cost, sale_price],
+            "INSERT INTO products (id, name, normalized_name, sku, category_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, '00000000-0000-0000-0000-000000000010', ?5, ?6, ?7, 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            params![prod_id, name, norm_name, sku, purchase_price, average_cost, sale_price],
         ).unwrap();
         conn.execute(
             "INSERT INTO stock (product_id, branch_id, quantity, updated_at)

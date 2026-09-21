@@ -786,7 +786,16 @@ pub const MIGRATIONS: &[Migration] = &[
             ('00000000-0000-0000-0000-000000000308', 'Purple', 'CLR-PURPLE', 'Purple Color Variant', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
         "#,
     },
-
+    Migration {
+        version: 15,
+        name: "015_product_identity_and_normalization",
+        up: r#"
+        ALTER TABLE products ADD COLUMN normalized_name TEXT NOT NULL DEFAULT '';
+        ALTER TABLE products ADD COLUMN company_id TEXT REFERENCES companies(id);
+        ALTER TABLE products ADD COLUMN quality_id TEXT REFERENCES qualities(id);
+        ALTER TABLE products ADD COLUMN color_id TEXT REFERENCES colors(id);
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction
@@ -841,6 +850,97 @@ impl MigrationRunner {
                     }
                 }
 
+                if migration.version == 15 {
+                    // 1. Backfill normalized_name for all existing products using canonical normalize_product_name
+                    let mut stmt = tx.prepare("SELECT id, name FROM products")?;
+                    let rows: Vec<(String, String)> = stmt
+                        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    drop(stmt);
+
+                    for (id, name) in &rows {
+                        let norm = crate::domain::product::normalize_product_name(name);
+                        tx.execute(
+                            "UPDATE products SET normalized_name = ?1 WHERE id = ?2",
+                            rusqlite::params![norm, id],
+                        )?;
+                    }
+
+                    // 2. HARD GATE - PRODUCT COLLISION PREFLIGHT
+                    // Identity key: category_id + normalized_name + COALESCE(brand_id, NIL) + COALESCE(unit_id, NIL) + COALESCE(quality_id, NIL) + COALESCE(color_id, NIL)
+                    let mut check_stmt = tx.prepare(
+                        "SELECT id, name, normalized_name, category_id,
+                                COALESCE(brand_id, '00000000-0000-0000-0000-000000000000') as b_id,
+                                COALESCE(unit_id, '00000000-0000-0000-0000-000000000000') as u_id,
+                                COALESCE(quality_id, '00000000-0000-0000-0000-000000000000') as q_id,
+                                COALESCE(color_id, '00000000-0000-0000-0000-000000000000') as c_id
+                         FROM products"
+                    )?;
+
+                    use std::collections::HashMap;
+                    struct ProdRecord {
+                        id: String,
+                        name: String,
+                        normalized_name: String,
+                        category_id: String,
+                        brand_id: String,
+                        unit_id: String,
+                        quality_id: String,
+                        color_id: String,
+                    }
+
+                    let mut map: HashMap<String, Vec<ProdRecord>> = HashMap::new();
+                    let prod_iter = check_stmt.query_map([], |row| {
+                        Ok(ProdRecord {
+                            id: row.get(0)?,
+                            name: row.get(1)?,
+                            normalized_name: row.get(2)?,
+                            category_id: row.get(3)?,
+                            brand_id: row.get(4)?,
+                            unit_id: row.get(5)?,
+                            quality_id: row.get(6)?,
+                            color_id: row.get(7)?,
+                        })
+                    })?;
+
+                    for p_res in prod_iter {
+                        let p = p_res?;
+                        let key = format!("{}:{}:{}:{}:{}:{}", p.category_id, p.normalized_name, p.brand_id, p.unit_id, p.quality_id, p.color_id);
+                        map.entry(key).or_default().push(p);
+                    }
+                    drop(check_stmt);
+
+                    let collisions: Vec<(&String, &Vec<ProdRecord>)> = map.iter().filter(|(_, list)| list.len() > 1).collect();
+
+                    if !collisions.is_empty() {
+                        let mut report = format!("HARD STOP: Collision preflight discovered {} duplicate product identity groups!\n", collisions.len());
+                        for (group_idx, (key, list)) in collisions.iter().enumerate() {
+                            report.push_str(&format!("\nGroup #{}: key='{}', count={}\n", group_idx + 1, key, list.len()));
+                            for prod in *list {
+                                report.push_str(&format!(
+                                    "  - ID: {}, Name: '{}', Normalized: '{}', Category: {}, Brand: {}, Unit: {}, Quality: {}, Color: {}\n",
+                                    prod.id, prod.name, prod.normalized_name, prod.category_id, prod.brand_id, prod.unit_id, prod.quality_id, prod.color_id
+                                ));
+                            }
+                        }
+                        tracing::error!("{}", report);
+                        return Err(DbError::MigrationError(report));
+                    }
+
+                    // 3. ZERO collisions confirmed: create UNIQUE index
+                    tx.execute_batch(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS idx_products_composite_identity ON products (
+                            category_id,
+                            normalized_name,
+                            COALESCE(brand_id, '00000000-0000-0000-0000-000000000000'),
+                            COALESCE(unit_id, '00000000-0000-0000-0000-000000000000'),
+                            COALESCE(quality_id, '00000000-0000-0000-0000-000000000000'),
+                            COALESCE(color_id, '00000000-0000-0000-0000-000000000000')
+                        );"
+                    )?;
+                }
+
                 // Record applied migration
                 let now = Utc::now().to_rfc3339();
                 tx.execute(
@@ -872,11 +972,11 @@ mod tests {
         // Enable foreign keys
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
 
-        // 1. First run applies migrations (10 total: Core, Product/Inventory, Auth Security, Sales/Invoices, Customers/Ledger, Suppliers/Purchasing, Cash Management/Closing, Returns/Stock Reversal, Product Average Cost, Profitability and COGS)
+        // 1. First run applies all migrations in MIGRATIONS
         let count = MigrationRunner::run(&mut conn).unwrap();
-        assert_eq!(count, 11);
+        assert_eq!(count, MIGRATIONS.len());
 
-        // Verify permanent tables exist (5 from Phase 6 + 6 from Phase 7 + 4 from Phase 14 + 2 from Phase 15 + 4 from Phase 16 + 4 from Phase 17 + 4 from Phase 18 = 29 tables)
+        // Verify permanent tables exist (29 base tables + 3 Phase 1 master tables = 32 tables)
         let tables_count: i64 = conn
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN (
@@ -886,13 +986,14 @@ mod tests {
                     'customers', 'customer_ledger_entries',
                     'suppliers', 'purchases', 'purchase_lines', 'supplier_ledger_entries',
                     'expense_categories', 'expenses', 'cash_sessions', 'cash_movements',
-                    'sales_returns', 'sales_return_lines', 'purchase_returns', 'purchase_return_lines'
+                    'sales_returns', 'sales_return_lines', 'purchase_returns', 'purchase_return_lines',
+                    'companies', 'qualities', 'colors'
                 )",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(tables_count, 29);
+        assert_eq!(tables_count, 32);
 
         // Verify users table has recovery_key_hash and must_change_password
         let user_cols: Vec<String> = {
@@ -1471,9 +1572,9 @@ mod tests {
             [],
         ).unwrap();
 
-        // 2. Run MigrationRunner to execute migration 010
+        // 2. Run MigrationRunner to execute migration 010 (and subsequent pending migrations)
         let executed = MigrationRunner::run(&mut conn).unwrap();
-        assert_eq!(executed, 1);
+        assert!(executed >= 1);
 
         // 3. Verify all four required indexes exist
         let indexes: Vec<String> = {

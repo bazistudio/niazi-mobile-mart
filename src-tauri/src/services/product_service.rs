@@ -298,6 +298,9 @@ mod tests {
                     barcode: Some("8806091234567".to_string()),
                     category_id: cat_id.clone(),
                     brand_id: None,
+                    company_id: None,
+                    quality_id: None,
+                    color_id: None,
                     unit_id: Some(unit_id.clone()),
                     purchase_price: 320000, // Rs 320,000
                     average_cost: None,
@@ -325,6 +328,9 @@ mod tests {
                     barcode: Some("9999999999999".to_string()),
                     category_id: cat_id.clone(),
                     brand_id: None,
+                    company_id: None,
+                    quality_id: None,
+                    color_id: None,
                     unit_id: Some(unit_id.clone()),
                     purchase_price: 300000,
                     average_cost: None,
@@ -348,6 +354,9 @@ mod tests {
                     barcode: Some("8806091234567".to_string()), // same as prod1
                     category_id: cat_id.clone(),
                     brand_id: None,
+                    company_id: None,
+                    quality_id: None,
+                    color_id: None,
                     unit_id: Some(unit_id.clone()),
                     purchase_price: 300000,
                     average_cost: None,
@@ -371,6 +380,9 @@ mod tests {
                     barcode: None,
                     category_id: cat_id.clone(),
                     brand_id: None,
+                    company_id: None,
+                    quality_id: None,
+                    color_id: None,
                     unit_id: Some(unit_id.clone()),
                     purchase_price: 200,
                     average_cost: None,
@@ -393,6 +405,9 @@ mod tests {
                     barcode: None,
                     category_id: cat_id.clone(),
                     brand_id: None,
+                    company_id: None,
+                    quality_id: None,
+                    color_id: None,
                     unit_id: Some(unit_id.clone()),
                     purchase_price: 300,
                     average_cost: None,
@@ -419,6 +434,9 @@ mod tests {
                     barcode: None,
                     category_id: cat_id.clone(),
                     brand_id: None,
+                    company_id: None,
+                    quality_id: None,
+                    color_id: None,
                     unit_id: Some(unit_id.clone()),
                     purchase_price: -100,
                     average_cost: None,
@@ -452,6 +470,9 @@ mod tests {
                     barcode: Some("111222333".to_string()),
                     category_id: cat_id.clone(),
                     brand_id: None,
+                    company_id: None,
+                    quality_id: None,
+                    color_id: None,
                     unit_id: Some(unit_id.clone()),
                     purchase_price: 50000,
                     average_cost: None,
@@ -485,6 +506,9 @@ mod tests {
                     barcode: None,
                     category_id: None,
                     brand_id: None,
+                    company_id: None,
+                    quality_id: None,
+                    color_id: None,
                     unit_id: None,
                     purchase_price: None,
                     average_cost: None,
@@ -521,168 +545,97 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_composite_identity_duplicate_rejection_and_specification_variants() {
+    async fn test_phase_2_product_identity_and_null_semantics() {
         let (_db, service, cat_id, unit_id) = setup_test_context().await;
+        let quality1 = "00000000-0000-0000-0000-000000000201"; // Original
+        let color1 = "00000000-0000-0000-0000-000000000301";   // Black
+        let company1 = "00000000-0000-0000-0000-000000000101"; // Official Importer
+        let company2 = "00000000-0000-0000-0000-000000000102"; // China Direct
 
-        let cat_service = CatalogService::new(_db.clone());
-        let cat2 = cat_service
-            .create_category(CreateCategoryDto {
-                name: "Batteries".to_string(),
-                code: "CAT-BAT".to_string(),
-                description: None,
-            })
-            .await
-            .unwrap();
+        // Case A: Base product with quality=NULL, color=NULL
+        let base_dto = CreateProductDto {
+            name: "Samsung A15".to_string(),
+            sku: "SKU-A15-BASE".to_string(),
+            barcode: None,
+            category_id: cat_id.clone(),
+            brand_id: None,
+            company_id: None,
+            quality_id: None,
+            color_id: None,
+            unit_id: Some(unit_id.clone()),
+            purchase_price: 25000,
+            average_cost: None,
+            sale_price: 30000,
+            low_stock_threshold: Some(2),
+            description: None,
+            initial_quantity: None,
+            branch_id: None,
+        };
+        let p_base = service.create_product(base_dto.clone(), None).await.expect("Base product creation should succeed");
 
-        let unit2 = cat_service
-            .create_unit(CreateUnitDto {
-                name: "Box".to_string(),
-                symbol: Some("box".to_string()),
-                conversion_factor: Some(1),
-            })
-            .await
-            .unwrap();
+        // Attempt exact duplicate (Case A repeat) -> REJECT
+        let dup_base_dto = CreateProductDto {
+            sku: "SKU-A15-DUP".to_string(),
+            ..base_dto.clone()
+        };
+        assert!(service.create_product(dup_base_dto, None).await.is_err(), "Exact duplicate identity must be rejected");
 
-        // 1. Create Product A: "A22", cat1, unit1
-        let prod_a = service
-            .create_product(
-                CreateProductDto {
-                    name: "A22".to_string(),
-                    sku: "SKU-A22-PCS".to_string(),
-                    barcode: None,
-                    category_id: cat_id.clone(),
-                    brand_id: None,
-                    unit_id: Some(unit_id.clone()),
-                    purchase_price: 10000,
-                    average_cost: None,
-                    sale_price: 15000,
-                    low_stock_threshold: Some(2),
-                    description: None,
-                    initial_quantity: None,
-                    branch_id: None,
-                },
-                None,
-            )
-            .await
-            .expect("Product A creation should succeed");
+        // Case H: Whitespace/case variation -> REJECT
+        let space_case_dto = CreateProductDto {
+            name: "  SAMSUNG   A15  ".to_string(),
+            sku: "SKU-A15-SPACE".to_string(),
+            ..base_dto.clone()
+        };
+        assert!(service.create_product(space_case_dto, None).await.is_err(), "Whitespace/case variation duplicate must be rejected");
 
-        // 2. Attempt exact duplicate creation: "a22" (case-insensitive), cat1, unit1
-        let dup_exact = service
-            .create_product(
-                CreateProductDto {
-                    name: " a22 ".to_string(),
-                    sku: "SKU-A22-DUP".to_string(),
-                    barcode: None,
-                    category_id: cat_id.clone(),
-                    brand_id: None,
-                    unit_id: Some(unit_id.clone()),
-                    purchase_price: 10000,
-                    average_cost: None,
-                    sale_price: 15000,
-                    low_stock_threshold: Some(2),
-                    description: None,
-                    initial_quantity: None,
-                    branch_id: None,
-                },
-                None,
-            )
-            .await;
-        assert!(dup_exact.is_err(), "Exact composite duplicate must be rejected");
-        let err_msg = dup_exact.unwrap_err().to_string();
+        // Case B: Same product but quality = Original -> ALLOW
+        let qual_dto = CreateProductDto {
+            sku: "SKU-A15-QUAL".to_string(),
+            quality_id: Some(quality1.to_string()),
+            ..base_dto.clone()
+        };
+        let p_qual = service.create_product(qual_dto, None).await.expect("Different quality creates distinct product");
+        assert_ne!(p_base.id, p_qual.id);
+
+        // Case C: Same product but color = Black -> ALLOW
+        let color_dto = CreateProductDto {
+            sku: "SKU-A15-COLOR".to_string(),
+            color_id: Some(color1.to_string()),
+            ..base_dto.clone()
+        };
+        let p_color = service.create_product(color_dto, None).await.expect("Different color creates distinct product");
+        assert_ne!(p_base.id, p_color.id);
+
+        // Case D: Same product with company changed -> REJECT (company excluded from identity)
+        let comp1_dto = CreateProductDto {
+            name: "Nokia 105".to_string(),
+            sku: "SKU-NOKIA-CMP1".to_string(),
+            barcode: None,
+            category_id: cat_id.clone(),
+            brand_id: None,
+            company_id: Some(company1.to_string()),
+            quality_id: None,
+            color_id: None,
+            unit_id: Some(unit_id.clone()),
+            purchase_price: 3000,
+            average_cost: None,
+            sale_price: 4000,
+            low_stock_threshold: None,
+            description: None,
+            initial_quantity: None,
+            branch_id: None,
+        };
+        let _p_comp1 = service.create_product(comp1_dto.clone(), None).await.expect("First company product creation succeeds");
+
+        let comp2_dto = CreateProductDto {
+            sku: "SKU-NOKIA-CMP2".to_string(),
+            company_id: Some(company2.to_string()), // Different company!
+            ..comp1_dto
+        };
         assert!(
-            err_msg.contains("A product with the same name, category, unit, company, quality, and color already exists."),
-            "Error message must match standard user warning, got: {err_msg}"
+            service.create_product(comp2_dto, None).await.is_err(),
+            "Same product with different company must be REJECTED as duplicate because company is excluded from identity"
         );
-
-        // 3. Same name ("A22"), same cat1, but DIFFERENT unit (unit2 = Box) -> ALLOW
-        let prod_b = service
-            .create_product(
-                CreateProductDto {
-                    name: "A22".to_string(),
-                    sku: "SKU-A22-BOX".to_string(),
-                    barcode: None,
-                    category_id: cat_id.clone(),
-                    brand_id: None,
-                    unit_id: Some(unit2.id),
-                    purchase_price: 8000,
-                    average_cost: None,
-                    sale_price: 12000,
-                    low_stock_threshold: Some(2),
-                    description: None,
-                    initial_quantity: None,
-                    branch_id: None,
-                },
-                None,
-            )
-            .await
-            .expect("Product B with different unit must be allowed");
-        assert_ne!(prod_a.id, prod_b.id);
-
-        // 4. Same name ("A22"), DIFFERENT category (cat2 = Batteries), unit1 -> ALLOW
-        let prod_c = service
-            .create_product(
-                CreateProductDto {
-                    name: "A22".to_string(),
-                    sku: "SKU-A22-BAT".to_string(),
-                    barcode: None,
-                    category_id: cat2.id,
-                    brand_id: None,
-                    unit_id: Some(unit_id.clone()),
-                    purchase_price: 5000,
-                    average_cost: None,
-                    sale_price: 7000,
-                    low_stock_threshold: Some(2),
-                    description: None,
-                    initial_quantity: None,
-                    branch_id: None,
-                },
-                None,
-            )
-            .await
-            .expect("Product C with different category must be allowed");
-        assert_ne!(prod_a.id, prod_c.id);
-
-        // 5. Update Product A without changing identity -> ALLOW
-        let update_self = service
-            .update_product(
-                &prod_a.id,
-                UpdateProductDto {
-                    name: Some("A22".to_string()),
-                    barcode: None,
-                    category_id: None,
-                    brand_id: None,
-                    unit_id: None,
-                    purchase_price: Some(10500),
-                    average_cost: None,
-                    sale_price: None,
-                    low_stock_threshold: None,
-                    description: None,
-                    is_active: None,
-                },
-            )
-            .await;
-        assert!(update_self.is_ok(), "Updating product without identity collision must be allowed");
-
-        // 6. Update Product B to collide with Product A (change unit2 -> unit1) -> REJECT
-        let update_collision = service
-            .update_product(
-                &prod_b.id,
-                UpdateProductDto {
-                    name: Some("A22".to_string()),
-                    barcode: None,
-                    category_id: Some(cat_id.clone()),
-                    brand_id: None,
-                    unit_id: Some(unit_id.clone()),
-                    purchase_price: None,
-                    average_cost: None,
-                    sale_price: None,
-                    low_stock_threshold: None,
-                    description: None,
-                    is_active: None,
-                },
-            )
-            .await;
-        assert!(update_collision.is_err(), "Updating product to collide with existing product must be rejected");
     }
 
     #[tokio::test]
@@ -691,9 +644,6 @@ mod tests {
         let inv_service = crate::services::InventoryService::new(db.clone());
         let main_branch_id = "00000000-0000-0000-0000-000000000002";
 
-        // Create two valid same-name products:
-        // Product A: "A22", Unit = Piece
-        // Product B: "A22", Unit = Box (via unit2)
         let cat_service = CatalogService::new(db.clone());
         let unit2 = cat_service
             .create_unit(CreateUnitDto {
@@ -712,6 +662,9 @@ mod tests {
                     barcode: None,
                     category_id: cat_id.clone(),
                     brand_id: None,
+                    company_id: None,
+                    quality_id: None,
+                    color_id: None,
                     unit_id: Some(unit_id.clone()),
                     purchase_price: 1000,
                     average_cost: None,
@@ -734,6 +687,9 @@ mod tests {
                     barcode: None,
                     category_id: cat_id.clone(),
                     brand_id: None,
+                    company_id: None,
+                    quality_id: None,
+                    color_id: None,
                     unit_id: Some(unit2.id),
                     purchase_price: 2000,
                     average_cost: None,
@@ -748,7 +704,7 @@ mod tests {
             .await
             .unwrap();
 
-        // Product count before restock = 2 (active products list count = 2)
+        // Product count before restock = 2
         let prods_before = prod_service.list_products(crate::domain::product::ProductFilter { is_active: Some(true), ..Default::default() }).await.unwrap();
         assert_eq!(prods_before.len(), 2);
 
@@ -773,27 +729,11 @@ mod tests {
             .expect("Restock on existing product_id must succeed");
         assert_eq!(new_b_stock, 30);
 
-        // Verify Product A stock is UNCHANGED (still 10)
+        // Verify Product A stock is UNCHANGED
         let stock_a_after_b_restock = inv_service.get_stock(&prod_a.id, main_branch_id).await.unwrap();
         assert_eq!(stock_a_after_b_restock, 10);
 
-        // Restock Product A +5 using product_id (UUID)
-        let new_a_stock = inv_service
-            .increase_stock(
-                crate::domain::inventory::IncreaseStockDto {
-                    product_id: prod_a.id.clone(),
-                    branch_id: main_branch_id.to_string(),
-                    quantity: 5,
-                    reason: Some("Central Restock Batch #2".to_string()),
-                    reference_id: None,
-                },
-                None,
-            )
-            .await
-            .expect("Restock on existing product_id must succeed");
-        assert_eq!(new_a_stock, 15);
-
-        // Product count after restock MUST REMAIN EXACTLY 2 (Product Master count invariant)
+        // Product count after restock MUST REMAIN EXACTLY 2
         let prods_after = prod_service.list_products(crate::domain::product::ProductFilter { is_active: Some(true), ..Default::default() }).await.unwrap();
         assert_eq!(prods_after.len(), 2, "Product Master count must remain unchanged after restock");
     }

@@ -23,17 +23,22 @@ impl PostgresProductRepository {
         let initial_avg_cost = dto.average_cost.unwrap_or(dto.purchase_price);
         let sku = dto.sku.trim().to_uppercase();
         let name = dto.name.trim();
+        let norm_name = crate::domain::product::normalize_product_name(name);
 
         sqlx::query(
-            "INSERT INTO products (id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1, $12, $13, $14)"
+            "INSERT INTO products (id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 1, $16, $17, $18)"
         )
         .bind(id)
         .bind(name)
+        .bind(&norm_name)
         .bind(&sku)
         .bind(barcode_opt)
         .bind(&dto.category_id)
         .bind(dto.brand_id.as_deref())
+        .bind(dto.company_id.as_deref())
+        .bind(dto.quality_id.as_deref())
+        .bind(dto.color_id.as_deref())
         .bind(dto.unit_id.as_deref())
         .bind(dto.purchase_price)
         .bind(initial_avg_cost)
@@ -46,12 +51,14 @@ impl PostgresProductRepository {
         .await
         .map_err(|e| {
             let msg = e.to_string();
-            if msg.contains("products_sku_key") || msg.contains("products.sku") || (msg.contains("unique") && msg.contains("sku")) {
+            if msg.contains("products_composite_identity_key") || msg.contains("idx_products_composite_identity") {
+                AppError::Conflict("An equivalent product already exists.".to_string())
+            } else if msg.contains("products_sku_key") || msg.contains("products.sku") || (msg.contains("unique") && msg.contains("sku")) {
                 AppError::Conflict(format!("Product with SKU '{sku}' already exists"))
             } else if msg.contains("products_barcode_key") || msg.contains("products.barcode") || (msg.contains("unique") && msg.contains("barcode")) {
                 AppError::Conflict(format!("Product with barcode '{}' already exists", dto.barcode.as_deref().unwrap_or("")))
             } else if msg.contains("foreign key") || msg.contains("FOREIGN KEY") {
-                AppError::Validation(format!("Invalid category, brand, or unit reference in product: {e}"))
+                AppError::Validation(format!("Invalid category, brand, company, quality, color, or unit reference in product: {e}"))
             } else {
                 AppError::Database(format!("Failed to create product: {e}"))
             }
@@ -60,10 +67,14 @@ impl PostgresProductRepository {
         Ok(Product {
             id: id.to_string(),
             name: name.to_string(),
+            normalized_name: norm_name,
             sku,
             barcode: barcode_opt.map(|s| s.to_string()),
             category_id: dto.category_id.clone(),
             brand_id: dto.brand_id.clone(),
+            company_id: dto.company_id.clone(),
+            quality_id: dto.quality_id.clone(),
+            color_id: dto.color_id.clone(),
             unit_id: dto.unit_id.clone(),
             purchase_price: dto.purchase_price,
             average_cost: initial_avg_cost,
@@ -89,17 +100,22 @@ impl PostgresProductRepository {
         let initial_avg_cost = dto.average_cost.unwrap_or(dto.purchase_price);
         let sku = dto.sku.trim().to_uppercase();
         let name = dto.name.trim();
+        let norm_name = crate::domain::product::normalize_product_name(name);
 
         sqlx::query(
-            "INSERT INTO products (id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1, $12, $13, $14)"
+            "INSERT INTO products (id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 1, $16, $17, $18)"
         )
         .bind(id)
         .bind(name)
+        .bind(&norm_name)
         .bind(&sku)
         .bind(barcode_opt)
         .bind(&dto.category_id)
         .bind(dto.brand_id.as_deref())
+        .bind(dto.company_id.as_deref())
+        .bind(dto.quality_id.as_deref())
+        .bind(dto.color_id.as_deref())
         .bind(dto.unit_id.as_deref())
         .bind(dto.purchase_price)
         .bind(initial_avg_cost)
@@ -112,7 +128,9 @@ impl PostgresProductRepository {
         .await
         .map_err(|e| {
             let msg = e.to_string();
-            if msg.contains("products_sku_key") || msg.contains("products.sku") || (msg.contains("unique") && msg.contains("sku")) {
+            if msg.contains("products_composite_identity_key") || msg.contains("idx_products_composite_identity") {
+                AppError::Conflict("An equivalent product already exists.".to_string())
+            } else if msg.contains("products_sku_key") || msg.contains("products.sku") || (msg.contains("unique") && msg.contains("sku")) {
                 AppError::Conflict(format!("Product with SKU '{sku}' already exists"))
             } else if msg.contains("products_barcode_key") || msg.contains("products.barcode") || (msg.contains("unique") && msg.contains("barcode")) {
                 AppError::Conflict(format!("Product with barcode '{}' already exists", dto.barcode.as_deref().unwrap_or("")))
@@ -159,10 +177,14 @@ impl PostgresProductRepository {
         Ok(Product {
             id: id.to_string(),
             name: name.to_string(),
+            normalized_name: norm_name,
             sku,
             barcode: barcode_opt.map(|s| s.to_string()),
             category_id: dto.category_id.clone(),
             brand_id: dto.brand_id.clone(),
+            company_id: dto.company_id.clone(),
+            quality_id: dto.quality_id.clone(),
+            color_id: dto.color_id.clone(),
             unit_id: dto.unit_id.clone(),
             purchase_price: dto.purchase_price,
             average_cost: initial_avg_cost,
@@ -176,7 +198,7 @@ impl PostgresProductRepository {
     }
 
     pub async fn get_product_by_id(&self, id: &str) -> AppResult<Product> {
-        let sql = "SELECT id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at FROM products WHERE id = $1";
+        let sql = "SELECT id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at FROM products WHERE id = $1";
         let row_opt = sqlx::query(sql)
             .bind(id)
             .fetch_optional(&self.pool)
@@ -191,7 +213,7 @@ impl PostgresProductRepository {
 
     pub async fn get_product_by_sku(&self, sku: &str) -> AppResult<Product> {
         let clean = sku.trim().to_uppercase();
-        let sql = "SELECT id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at FROM products WHERE sku = $1";
+        let sql = "SELECT id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at FROM products WHERE sku = $1";
         let row_opt = sqlx::query(sql)
             .bind(&clean)
             .fetch_optional(&self.pool)
@@ -206,7 +228,7 @@ impl PostgresProductRepository {
 
     pub async fn get_product_by_barcode(&self, barcode: &str) -> AppResult<Product> {
         let clean = barcode.trim();
-        let sql = "SELECT id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at FROM products WHERE barcode = $1";
+        let sql = "SELECT id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at FROM products WHERE barcode = $1";
         let row_opt = sqlx::query(sql)
             .bind(clean)
             .fetch_optional(&self.pool)
@@ -220,7 +242,7 @@ impl PostgresProductRepository {
     }
 
     pub async fn list_products(&self, filter: &ProductFilter) -> AppResult<Vec<Product>> {
-        let mut query = "SELECT id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at FROM products WHERE 1=1".to_string();
+        let mut query = "SELECT id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at FROM products WHERE 1=1".to_string();
         let mut param_index = 1;
 
         if filter.search.is_some() {
@@ -235,6 +257,21 @@ impl PostgresProductRepository {
 
         if filter.brand_id.is_some() {
             query.push_str(&format!(" AND brand_id = ${param_index}"));
+            param_index += 1;
+        }
+
+        if filter.company_id.is_some() {
+            query.push_str(&format!(" AND company_id = ${param_index}"));
+            param_index += 1;
+        }
+
+        if filter.quality_id.is_some() {
+            query.push_str(&format!(" AND quality_id = ${param_index}"));
+            param_index += 1;
+        }
+
+        if filter.color_id.is_some() {
+            query.push_str(&format!(" AND color_id = ${param_index}"));
             param_index += 1;
         }
 
@@ -260,6 +297,18 @@ impl PostgresProductRepository {
             q = q.bind(brand_id);
         }
 
+        if let Some(company_id) = &filter.company_id {
+            q = q.bind(company_id);
+        }
+
+        if let Some(quality_id) = &filter.quality_id {
+            q = q.bind(quality_id);
+        }
+
+        if let Some(color_id) = &filter.color_id {
+            q = q.bind(color_id);
+        }
+
         if let Some(active) = filter.is_active {
             q = q.bind(if active { 1 } else { 0 });
         }
@@ -282,6 +331,8 @@ impl PostgresProductRepository {
         let now = Utc::now().to_rfc3339();
 
         let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
+        let new_norm_name = crate::domain::product::normalize_product_name(new_name);
+
         let new_barcode = if let Some(bc) = &dto.barcode {
             let trimmed = bc.trim();
             if trimmed.is_empty() {
@@ -294,6 +345,9 @@ impl PostgresProductRepository {
         };
         let new_category = dto.category_id.as_deref().unwrap_or(&current.category_id);
         let new_brand = dto.brand_id.as_deref().or(current.brand_id.as_deref());
+        let new_company = dto.company_id.as_deref().or(current.company_id.as_deref());
+        let new_quality = dto.quality_id.as_deref().or(current.quality_id.as_deref());
+        let new_color = dto.color_id.as_deref().or(current.color_id.as_deref());
         let new_unit = dto.unit_id.as_deref().or(current.unit_id.as_deref());
         let new_purchase = dto.purchase_price.unwrap_or(current.purchase_price);
         let new_avg_cost = dto.average_cost.unwrap_or(current.average_cost);
@@ -308,15 +362,20 @@ impl PostgresProductRepository {
 
         sqlx::query(
             "UPDATE products
-             SET name = $1, barcode = $2, category_id = $3, brand_id = $4, unit_id = $5,
-                 purchase_price = $6, average_cost = $7, sale_price = $8, low_stock_threshold = $9,
-                 is_active = $10, description = $11, updated_at = $12
-             WHERE id = $13"
+             SET name = $1, normalized_name = $2, barcode = $3, category_id = $4, brand_id = $5,
+                 company_id = $6, quality_id = $7, color_id = $8, unit_id = $9,
+                 purchase_price = $10, average_cost = $11, sale_price = $12, low_stock_threshold = $13,
+                 is_active = $14, description = $15, updated_at = $16
+             WHERE id = $17"
         )
         .bind(new_name)
+        .bind(&new_norm_name)
         .bind(new_barcode.as_deref())
         .bind(new_category)
         .bind(new_brand)
+        .bind(new_company)
+        .bind(new_quality)
+        .bind(new_color)
         .bind(new_unit)
         .bind(new_purchase)
         .bind(new_avg_cost)
@@ -330,7 +389,9 @@ impl PostgresProductRepository {
         .await
         .map_err(|e| {
             let msg = e.to_string();
-            if msg.contains("products_barcode_key") || msg.contains("products.barcode") || (msg.contains("unique") && msg.contains("barcode")) {
+            if msg.contains("products_composite_identity_key") || msg.contains("idx_products_composite_identity") {
+                AppError::Conflict("An equivalent product already exists.".to_string())
+            } else if msg.contains("products_barcode_key") || msg.contains("products.barcode") || (msg.contains("unique") && msg.contains("barcode")) {
                 AppError::Conflict("Barcode is already used by another product".to_string())
             } else {
                 AppError::Database(format!("Failed to update product: {e}"))
@@ -340,10 +401,14 @@ impl PostgresProductRepository {
         Ok(Product {
             id: id.to_string(),
             name: new_name.to_string(),
+            normalized_name: new_norm_name,
             sku: current.sku,
             barcode: new_barcode,
             category_id: new_category.to_string(),
             brand_id: new_brand.map(|s| s.to_string()),
+            company_id: new_company.map(|s| s.to_string()),
+            quality_id: new_quality.map(|s| s.to_string()),
+            color_id: new_color.map(|s| s.to_string()),
             unit_id: new_unit.map(|s| s.to_string()),
             purchase_price: new_purchase,
             average_cost: new_avg_cost,
@@ -381,16 +446,25 @@ impl PostgresProductRepository {
         let updated_at = Utc::now().to_rfc3339();
         let sku = product.sku.trim().to_uppercase();
         let name = product.name.trim();
+        let norm_name = if product.normalized_name.is_empty() {
+            crate::domain::product::normalize_product_name(name)
+        } else {
+            product.normalized_name.clone()
+        };
 
         sqlx::query(
-            "INSERT INTO products (id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            "INSERT INTO products (id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
              ON CONFLICT (id) DO UPDATE SET
                 name = EXCLUDED.name,
+                normalized_name = EXCLUDED.normalized_name,
                 sku = EXCLUDED.sku,
                 barcode = EXCLUDED.barcode,
                 category_id = EXCLUDED.category_id,
                 brand_id = EXCLUDED.brand_id,
+                company_id = EXCLUDED.company_id,
+                quality_id = EXCLUDED.quality_id,
+                color_id = EXCLUDED.color_id,
                 unit_id = EXCLUDED.unit_id,
                 purchase_price = EXCLUDED.purchase_price,
                 average_cost = EXCLUDED.average_cost,
@@ -402,10 +476,14 @@ impl PostgresProductRepository {
         )
         .bind(&product.id)
         .bind(name)
+        .bind(&norm_name)
         .bind(&sku)
         .bind(product.barcode.as_deref())
         .bind(&product.category_id)
         .bind(product.brand_id.as_deref())
+        .bind(product.company_id.as_deref())
+        .bind(product.quality_id.as_deref())
+        .bind(product.color_id.as_deref())
         .bind(product.unit_id.as_deref())
         .bind(product.purchase_price)
         .bind(product.average_cost)
@@ -419,7 +497,9 @@ impl PostgresProductRepository {
         .await
         .map_err(|e| {
             let msg = e.to_string();
-            if msg.contains("products_sku_key") || msg.contains("products.sku") || (msg.contains("unique") && msg.contains("sku")) {
+            if msg.contains("products_composite_identity_key") || msg.contains("idx_products_composite_identity") {
+                AppError::Conflict("An equivalent product already exists.".to_string())
+            } else if msg.contains("products_sku_key") || msg.contains("products.sku") || (msg.contains("unique") && msg.contains("sku")) {
                 AppError::Conflict(format!("Product with SKU '{sku}' already exists"))
             } else if msg.contains("products_barcode_key") || msg.contains("products.barcode") || (msg.contains("unique") && msg.contains("barcode")) {
                 AppError::Conflict(format!("Product with barcode '{}' already exists", product.barcode.as_deref().unwrap_or("")))
@@ -429,6 +509,7 @@ impl PostgresProductRepository {
         })?;
 
         let mut res = product.clone();
+        res.normalized_name = norm_name;
         res.created_at = now;
         res.updated_at = updated_at;
         Ok(res)
@@ -441,16 +522,25 @@ impl PostgresProductRepository {
     ) -> AppResult<Product> {
         let updated_at = Utc::now().to_rfc3339();
         let name = product.name.trim();
+        let norm_name = if product.normalized_name.is_empty() {
+            crate::domain::product::normalize_product_name(name)
+        } else {
+            product.normalized_name.clone()
+        };
 
         sqlx::query(
-            "INSERT INTO products (id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            "INSERT INTO products (id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
              ON CONFLICT (id) DO UPDATE SET
                 name = EXCLUDED.name,
+                normalized_name = EXCLUDED.normalized_name,
                 sku = EXCLUDED.sku,
                 barcode = EXCLUDED.barcode,
                 category_id = EXCLUDED.category_id,
                 brand_id = EXCLUDED.brand_id,
+                company_id = EXCLUDED.company_id,
+                quality_id = EXCLUDED.quality_id,
+                color_id = EXCLUDED.color_id,
                 unit_id = EXCLUDED.unit_id,
                 purchase_price = EXCLUDED.purchase_price,
                 average_cost = EXCLUDED.average_cost,
@@ -462,10 +552,14 @@ impl PostgresProductRepository {
         )
         .bind(&product.id)
         .bind(name)
+        .bind(&norm_name)
         .bind(&product.sku)
         .bind(product.barcode.as_deref())
         .bind(&product.category_id)
         .bind(product.brand_id.as_deref())
+        .bind(product.company_id.as_deref())
+        .bind(product.quality_id.as_deref())
+        .bind(product.color_id.as_deref())
         .bind(product.unit_id.as_deref())
         .bind(product.purchase_price)
         .bind(product.average_cost)
@@ -479,7 +573,9 @@ impl PostgresProductRepository {
         .await
         .map_err(|e| {
             let msg = e.to_string();
-            if msg.contains("products_barcode_key") || msg.contains("products.barcode") || (msg.contains("unique") && msg.contains("barcode")) {
+            if msg.contains("products_composite_identity_key") || msg.contains("idx_products_composite_identity") {
+                AppError::Conflict("An equivalent product already exists.".to_string())
+            } else if msg.contains("products_barcode_key") || msg.contains("products.barcode") || (msg.contains("unique") && msg.contains("barcode")) {
                 AppError::Conflict("Barcode is already used by another product".to_string())
             } else {
                 AppError::Database(format!("Failed to project PRODUCT_UPDATED: {e}"))
@@ -487,6 +583,7 @@ impl PostgresProductRepository {
         })?;
 
         let mut res = product.clone();
+        res.normalized_name = norm_name;
         res.updated_at = updated_at;
         Ok(res)
     }
@@ -508,23 +605,28 @@ impl PostgresProductRepository {
     }
 
     fn map_product_row(row: &sqlx::postgres::PgRow) -> AppResult<Product> {
-        let is_active_int: i32 = row.try_get(11).unwrap_or(1);
+        let is_active_int: i32 = row.try_get(15).unwrap_or(1);
         Ok(Product {
             id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
             name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-            sku: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
-            barcode: row.try_get(3).unwrap_or(None),
-            category_id: row.try_get(4).map_err(|e| AppError::Database(e.to_string()))?,
-            brand_id: row.try_get(5).unwrap_or(None),
-            unit_id: row.try_get(6).unwrap_or(None),
-            purchase_price: row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?,
-            average_cost: row.try_get(8).map_err(|e| AppError::Database(e.to_string()))?,
-            sale_price: row.try_get(9).map_err(|e| AppError::Database(e.to_string()))?,
-            low_stock_threshold: row.try_get(10).map_err(|e| AppError::Database(e.to_string()))?,
+            normalized_name: row.try_get(2).unwrap_or_default(),
+            sku: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
+            barcode: row.try_get(4).unwrap_or(None),
+            category_id: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
+            brand_id: row.try_get(6).unwrap_or(None),
+            company_id: row.try_get(7).unwrap_or(None),
+            quality_id: row.try_get(8).unwrap_or(None),
+            color_id: row.try_get(9).unwrap_or(None),
+            unit_id: row.try_get(10).unwrap_or(None),
+            purchase_price: row.try_get(11).map_err(|e| AppError::Database(e.to_string()))?,
+            average_cost: row.try_get(12).map_err(|e| AppError::Database(e.to_string()))?,
+            sale_price: row.try_get(13).map_err(|e| AppError::Database(e.to_string()))?,
+            low_stock_threshold: row.try_get(14).map_err(|e| AppError::Database(e.to_string()))?,
             is_active: is_active_int == 1,
-            description: row.try_get(12).unwrap_or(None),
-            created_at: row.try_get(13).map_err(|e| AppError::Database(e.to_string()))?,
-            updated_at: row.try_get(14).map_err(|e| AppError::Database(e.to_string()))?,
+            description: row.try_get(16).unwrap_or(None),
+            created_at: row.try_get(17).map_err(|e| AppError::Database(e.to_string()))?,
+            updated_at: row.try_get(18).map_err(|e| AppError::Database(e.to_string()))?,
         })
     }
+
 }

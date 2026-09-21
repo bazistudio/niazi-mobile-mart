@@ -1,15 +1,31 @@
 use serde::{Deserialize, Serialize};
 
+/// Authoritative product name normalization helper:
+/// 1. trim leading/trailing whitespace
+/// 2. collapse all internal whitespace runs into a single ASCII space
+/// 3. convert to lowercase
+pub fn normalize_product_name(raw: &str) -> String {
+    raw.trim()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
 /// Product domain entity for Niazi Mobile Mart retail catalog.
 /// All monetary values are integer whole Pakistani Rupees (PKR): 1 stored integer = 1 PKR.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Product {
     pub id: String,
     pub name: String,
+    pub normalized_name: String,
     pub sku: String,
     pub barcode: Option<String>,
     pub category_id: String,
     pub brand_id: Option<String>,
+    pub company_id: Option<String>,
+    pub quality_id: Option<String>,
+    pub color_id: Option<String>,
     pub unit_id: Option<String>,
     pub purchase_price: i64, // Whole PKR - Last Purchase Cost (e.g. 1800 = Rs 1,800)
     pub average_cost: i64,   // Whole PKR - Weighted Average Cost (e.g. 1800 = Rs 1,800)
@@ -58,6 +74,9 @@ pub struct CreateProductDto {
     pub barcode: Option<String>,
     pub category_id: String,
     pub brand_id: Option<String>,
+    pub company_id: Option<String>,
+    pub quality_id: Option<String>,
+    pub color_id: Option<String>,
     pub unit_id: Option<String>,
     pub purchase_price: i64, // Whole PKR (Last Purchase Cost)
     pub average_cost: Option<i64>, // Optional initial average cost; defaults to purchase_price
@@ -75,6 +94,9 @@ pub struct UpdateProductDto {
     pub barcode: Option<String>,
     pub category_id: Option<String>,
     pub brand_id: Option<String>,
+    pub company_id: Option<String>,
+    pub quality_id: Option<String>,
+    pub color_id: Option<String>,
     pub unit_id: Option<String>,
     pub purchase_price: Option<i64>, // Whole PKR (Last Purchase Cost)
     pub average_cost: Option<i64>,   // Whole PKR (Average Cost)
@@ -89,6 +111,9 @@ pub struct ProductFilter {
     pub search: Option<String>,
     pub category_id: Option<String>,
     pub brand_id: Option<String>,
+    pub company_id: Option<String>,
+    pub quality_id: Option<String>,
+    pub color_id: Option<String>,
     pub is_active: Option<bool>,
 }
 
@@ -97,14 +122,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_name_normalization() {
+        assert_eq!(normalize_product_name("Samsung A15"), "samsung a15");
+        assert_eq!(normalize_product_name("  Samsung A15  "), "samsung a15");
+        assert_eq!(normalize_product_name("Samsung   A15"), "samsung a15");
+        assert_eq!(
+            normalize_product_name(" SAMSUNG    GALAXY   A15 "),
+            "samsung galaxy a15"
+        );
+        assert_eq!(normalize_product_name("  Samsung   Galaxy   A15  "), "samsung galaxy a15");
+    }
+
+    #[test]
     fn test_product_pricing_and_validation() {
         let valid_product = Product {
             id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
             name: "Samsung Galaxy S24 Ultra".to_string(),
+            normalized_name: "samsung galaxy s24 ultra".to_string(),
             sku: "SKU-S24-U".to_string(),
             barcode: Some("8806091234567".to_string()),
             category_id: "cat_1".to_string(),
             brand_id: Some("brand_1".to_string()),
+            company_id: None,
+            quality_id: None,
+            color_id: None,
             unit_id: Some("unit_1".to_string()),
             purchase_price: 320000, // Rs 320,000
             average_cost: 320000,   // Rs 320,000

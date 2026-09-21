@@ -476,8 +476,8 @@ use crate::domain::supplier::CreateSupplierDto;
                 [],
             ).unwrap();
             guard.execute(
-                "INSERT INTO products (id, name, sku, category_id, brand_id, unit_id, purchase_price, sale_price, low_stock_threshold, is_active, created_at, updated_at)
-                 VALUES (?1, 'Samsung Galaxy A55', 'SMA55-256', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000012', 110000, 130000, 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                "INSERT INTO products (id, name, normalized_name, sku, category_id, brand_id, unit_id, purchase_price, sale_price, low_stock_threshold, is_active, created_at, updated_at)
+                 VALUES (?1, 'Samsung Galaxy A55', 'samsung galaxy a55', 'SMA55-256', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000012', 110000, 130000, 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
                 rusqlite::params![prod_id],
             ).unwrap();
             guard.execute(

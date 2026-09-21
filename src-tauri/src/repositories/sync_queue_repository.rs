@@ -1,4 +1,4 @@
-﻿use rusqlite::params;
+use rusqlite::params;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -350,10 +350,25 @@ mod tests {
     #[tokio::test]
     async fn test_sync_queue_persistence_and_uniqueness() {
         let db = DatabaseConnection::open_in_memory().unwrap();
+        {
+            let conn_arc = db.inner();
+            let mut conn = conn_arc.lock().await;
+            crate::db::migrations::MigrationRunner::run(&mut conn).unwrap();
+        }
         let repo = SQLiteSyncQueueRepository::new(db.clone());
 
         let client_event_id = Uuid::new_v4().to_string();
         let terminal_id = Uuid::new_v4().to_string();
+
+        {
+            let conn_arc = db.inner();
+            let conn = conn_arc.lock().await;
+            conn.execute(
+                "INSERT INTO terminals (id, organization_id, branch_id, device_name, is_active, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'Test Terminal', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                rusqlite::params![terminal_id, NIAZI_ORGANIZATION_ID, DEFAULT_MAIN_BRANCH_ID],
+            ).unwrap();
+        }
 
         let dto = EnqueueOfflineEventDto {
             client_event_id: Some(client_event_id.clone()),

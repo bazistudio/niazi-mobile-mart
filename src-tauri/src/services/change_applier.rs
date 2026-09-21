@@ -208,11 +208,11 @@ mod tests {
     use crate::db::migrations::MigrationRunner;
     use crate::domain::product::Product;
 
-    fn setup_test_db() -> DatabaseConnection {
+    async fn setup_test_db() -> DatabaseConnection {
         let db = DatabaseConnection::open_in_memory().unwrap();
         {
             let conn_arc = db.inner();
-            let mut guard = conn_arc.lock().blocking_lock();
+            let mut guard = conn_arc.lock().await;
             MigrationRunner::run(&mut guard).unwrap();
         }
         db
@@ -220,18 +220,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_downstream_product_apply_and_replay_safety() {
-        let db = setup_test_db();
+        let db = setup_test_db().await;
         let applier = ChangeApplier::new(db.clone());
 
         let product_id = "550e8400-e29b-41d4-a716-446655440099".to_string();
         let prod = Product {
             id: product_id.clone(),
             name: "Test Phone".to_string(),
+            normalized_name: crate::domain::product::normalize_product_name("Test Phone"),
             sku: "SKU-TPHONE".to_string(),
             barcode: Some("123456789".to_string()),
             category_id: "00000000-0000-0000-0000-000000000010".to_string(),
             brand_id: None,
             unit_id: None,
+            company_id: None,
+            quality_id: None,
+            color_id: None,
             purchase_price: 15000,
             average_cost: 15000,
             sale_price: 18000,

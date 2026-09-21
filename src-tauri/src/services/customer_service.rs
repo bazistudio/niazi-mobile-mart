@@ -519,7 +519,7 @@ mod tests {
 
         // 1. Partial payment: Rs 4,000
         let pay_res = service
-            .record_payment(
+            .record_customer_payment(
                 Some(&user_id),
                 RecordCustomerPaymentDto {
                     customer_id: customer.id.clone(),
@@ -542,7 +542,7 @@ mod tests {
 
         // 2. Overpayment rejection: trying to pay 7,000 when balance is 6,000
         let overpay_err = service
-            .record_payment(
+            .record_customer_payment(
                 None,
                 RecordCustomerPaymentDto {
                     customer_id: customer.id.clone(),
@@ -561,7 +561,7 @@ mod tests {
 
         // 3. Full payment of remaining 6,000
         let full_pay_res = service
-            .record_payment(
+            .record_customer_payment(
                 None,
                 RecordCustomerPaymentDto {
                     customer_id: customer.id.clone(),

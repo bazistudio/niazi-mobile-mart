@@ -33,95 +33,7 @@ impl SQLiteProductRepository {
     pub async fn create_product(&self, id: &str, dto: &CreateProductDto) -> AppResult<Product> {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
-
-        Self::ensure_default_master_data(&guard);
-
-        let now = Utc::now().to_rfc3339();
-        let threshold = dto.low_stock_threshold.unwrap_or(5);
-        let barcode_opt = dto.barcode.as_deref().map(str::trim).filter(|s| !s.is_empty());
-
-        let initial_avg_cost = dto.average_cost.unwrap_or(dto.purchase_price);
-
-        let safe_category_id = if dto.category_id.trim().len() == 36 {
-            dto.category_id.trim().to_string()
-        } else {
-            "00000000-0000-0000-0000-000000000010".to_string()
-        };
-
-        let safe_brand_id = dto
-            .brand_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| s.len() == 36)
-            .map(String::from);
-
-        let safe_unit_id = dto
-            .unit_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| s.len() == 36)
-            .map(String::from);
-
-        Self::check_composite_duplicate_in_tx(
-            &guard,
-            &dto.name,
-            &safe_category_id,
-            safe_unit_id.as_deref(),
-            safe_brand_id.as_deref(),
-            None,
-        )?;
-
-        guard
-            .execute(
-                "INSERT INTO products (id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, ?12, ?13, ?14)",
-                params![
-                    id,
-                    dto.name.trim(),
-                    dto.sku.trim().to_uppercase(),
-                    barcode_opt,
-                    safe_category_id,
-                    safe_brand_id,
-                    safe_unit_id,
-                    dto.purchase_price,
-                    initial_avg_cost,
-                    dto.sale_price,
-                    threshold,
-                    dto.description.as_deref(),
-                    now,
-                    now,
-                ],
-            )
-            .map_err(|e| {
-                let err_str = e.to_string();
-                if err_str.contains("UNIQUE constraint failed: products.sku") {
-                    AppError::Conflict(format!("Product with SKU '{}' already exists", dto.sku))
-                } else if err_str.contains("UNIQUE constraint failed: products.barcode") {
-                    AppError::Conflict(format!("Product with barcode '{}' already exists", dto.barcode.as_deref().unwrap_or("")))
-                } else if err_str.contains("FOREIGN KEY constraint failed") {
-                    AppError::Validation(format!("Invalid category, brand, or unit reference in product: {e}"))
-                } else {
-                    AppError::Database(format!("Failed to create product: {e}"))
-                }
-            })?;
-
-        Ok(Product {
-            id: id.to_string(),
-            name: dto.name.trim().to_string(),
-            sku: dto.sku.trim().to_uppercase(),
-            barcode: barcode_opt.map(|s| s.to_string()),
-            category_id: safe_category_id,
-            brand_id: safe_brand_id,
-            unit_id: safe_unit_id,
-            purchase_price: dto.purchase_price,
-            average_cost: initial_avg_cost,
-            sale_price: dto.sale_price,
-            low_stock_threshold: threshold,
-            is_active: true,
-            description: dto.description.clone(),
-            created_at: now.clone(),
-            updated_at: now,
-        })
+        Self::create_product_in_tx(&guard, id, dto).map_err(AppError::from)
     }
 
     pub async fn get_product_by_id(&self, id: &str) -> AppResult<Product> {
@@ -130,26 +42,30 @@ impl SQLiteProductRepository {
 
         guard
             .query_row(
-                "SELECT id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at
+                "SELECT id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at
                  FROM products WHERE id = ?1",
                 params![id],
                 |row| {
                     Ok(Product {
                         id: row.get(0)?,
                         name: row.get(1)?,
-                        sku: row.get(2)?,
-                        barcode: row.get(3)?,
-                        category_id: row.get(4)?,
-                        brand_id: row.get(5)?,
-                        unit_id: row.get(6)?,
-                        purchase_price: row.get(7)?,
-                        average_cost: row.get(8)?,
-                        sale_price: row.get(9)?,
-                        low_stock_threshold: row.get(10)?,
-                        is_active: row.get::<_, i64>(11)? == 1,
-                        description: row.get(12)?,
-                        created_at: row.get(13)?,
-                        updated_at: row.get(14)?,
+                        normalized_name: row.get(2)?,
+                        sku: row.get(3)?,
+                        barcode: row.get(4)?,
+                        category_id: row.get(5)?,
+                        brand_id: row.get(6)?,
+                        company_id: row.get(7)?,
+                        quality_id: row.get(8)?,
+                        color_id: row.get(9)?,
+                        unit_id: row.get(10)?,
+                        purchase_price: row.get(11)?,
+                        average_cost: row.get(12)?,
+                        sale_price: row.get(13)?,
+                        low_stock_threshold: row.get(14)?,
+                        is_active: row.get::<_, i64>(15)? == 1,
+                        description: row.get(16)?,
+                        created_at: row.get(17)?,
+                        updated_at: row.get(18)?,
                     })
                 },
             )
@@ -165,26 +81,30 @@ impl SQLiteProductRepository {
 
         guard
             .query_row(
-                "SELECT id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at
+                "SELECT id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at
                  FROM products WHERE sku = ?1",
                 params![sku.trim().to_uppercase()],
                 |row| {
                     Ok(Product {
                         id: row.get(0)?,
                         name: row.get(1)?,
-                        sku: row.get(2)?,
-                        barcode: row.get(3)?,
-                        category_id: row.get(4)?,
-                        brand_id: row.get(5)?,
-                        unit_id: row.get(6)?,
-                        purchase_price: row.get(7)?,
-                        average_cost: row.get(8)?,
-                        sale_price: row.get(9)?,
-                        low_stock_threshold: row.get(10)?,
-                        is_active: row.get::<_, i64>(11)? == 1,
-                        description: row.get(12)?,
-                        created_at: row.get(13)?,
-                        updated_at: row.get(14)?,
+                        normalized_name: row.get(2)?,
+                        sku: row.get(3)?,
+                        barcode: row.get(4)?,
+                        category_id: row.get(5)?,
+                        brand_id: row.get(6)?,
+                        company_id: row.get(7)?,
+                        quality_id: row.get(8)?,
+                        color_id: row.get(9)?,
+                        unit_id: row.get(10)?,
+                        purchase_price: row.get(11)?,
+                        average_cost: row.get(12)?,
+                        sale_price: row.get(13)?,
+                        low_stock_threshold: row.get(14)?,
+                        is_active: row.get::<_, i64>(15)? == 1,
+                        description: row.get(16)?,
+                        created_at: row.get(17)?,
+                        updated_at: row.get(18)?,
                     })
                 },
             )
@@ -200,26 +120,30 @@ impl SQLiteProductRepository {
 
         guard
             .query_row(
-                "SELECT id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at
+                "SELECT id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at
                  FROM products WHERE barcode = ?1",
                 params![barcode.trim()],
                 |row| {
                     Ok(Product {
                         id: row.get(0)?,
                         name: row.get(1)?,
-                        sku: row.get(2)?,
-                        barcode: row.get(3)?,
-                        category_id: row.get(4)?,
-                        brand_id: row.get(5)?,
-                        unit_id: row.get(6)?,
-                        purchase_price: row.get(7)?,
-                        average_cost: row.get(8)?,
-                        sale_price: row.get(9)?,
-                        low_stock_threshold: row.get(10)?,
-                        is_active: row.get::<_, i64>(11)? == 1,
-                        description: row.get(12)?,
-                        created_at: row.get(13)?,
-                        updated_at: row.get(14)?,
+                        normalized_name: row.get(2)?,
+                        sku: row.get(3)?,
+                        barcode: row.get(4)?,
+                        category_id: row.get(5)?,
+                        brand_id: row.get(6)?,
+                        company_id: row.get(7)?,
+                        quality_id: row.get(8)?,
+                        color_id: row.get(9)?,
+                        unit_id: row.get(10)?,
+                        purchase_price: row.get(11)?,
+                        average_cost: row.get(12)?,
+                        sale_price: row.get(13)?,
+                        low_stock_threshold: row.get(14)?,
+                        is_active: row.get::<_, i64>(15)? == 1,
+                        description: row.get(16)?,
+                        created_at: row.get(17)?,
+                        updated_at: row.get(18)?,
                     })
                 },
             )
@@ -233,7 +157,7 @@ impl SQLiteProductRepository {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
 
-        let mut query = "SELECT id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at FROM products WHERE 1=1".to_string();
+        let mut query = "SELECT id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at FROM products WHERE 1=1".to_string();
         let mut param_values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
         if let Some(search) = &filter.search {
@@ -254,6 +178,21 @@ impl SQLiteProductRepository {
             param_values.push(Box::new(brand_id.clone()));
         }
 
+        if let Some(company_id) = &filter.company_id {
+            query.push_str(" AND company_id = ?");
+            param_values.push(Box::new(company_id.clone()));
+        }
+
+        if let Some(quality_id) = &filter.quality_id {
+            query.push_str(" AND quality_id = ?");
+            param_values.push(Box::new(quality_id.clone()));
+        }
+
+        if let Some(color_id) = &filter.color_id {
+            query.push_str(" AND color_id = ?");
+            param_values.push(Box::new(color_id.clone()));
+        }
+
         if let Some(active) = filter.is_active {
             query.push_str(" AND is_active = ?");
             param_values.push(Box::new(if active { 1 } else { 0 }));
@@ -272,19 +211,23 @@ impl SQLiteProductRepository {
                 Ok(Product {
                     id: row.get(0)?,
                     name: row.get(1)?,
-                    sku: row.get(2)?,
-                    barcode: row.get(3)?,
-                    category_id: row.get(4)?,
-                    brand_id: row.get(5)?,
-                    unit_id: row.get(6)?,
-                    purchase_price: row.get(7)?,
-                    average_cost: row.get(8)?,
-                    sale_price: row.get(9)?,
-                    low_stock_threshold: row.get(10)?,
-                    is_active: row.get::<_, i64>(11)? == 1,
-                    description: row.get(12)?,
-                    created_at: row.get(13)?,
-                    updated_at: row.get(14)?,
+                    normalized_name: row.get(2)?,
+                    sku: row.get(3)?,
+                    barcode: row.get(4)?,
+                    category_id: row.get(5)?,
+                    brand_id: row.get(6)?,
+                    company_id: row.get(7)?,
+                    quality_id: row.get(8)?,
+                    color_id: row.get(9)?,
+                    unit_id: row.get(10)?,
+                    purchase_price: row.get(11)?,
+                    average_cost: row.get(12)?,
+                    sale_price: row.get(13)?,
+                    low_stock_threshold: row.get(14)?,
+                    is_active: row.get::<_, i64>(15)? == 1,
+                    description: row.get(16)?,
+                    created_at: row.get(17)?,
+                    updated_at: row.get(18)?,
                 })
             })
             .map_err(|e| AppError::Database(format!("Failed to query products: {e}")))?;
@@ -297,111 +240,9 @@ impl SQLiteProductRepository {
     }
 
     pub async fn update_product(&self, id: &str, dto: &UpdateProductDto) -> AppResult<Product> {
-        let current = self.get_product_by_id(id).await?;
-        let now = Utc::now().to_rfc3339();
-
-        let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
-        let new_barcode = if let Some(bc) = &dto.barcode {
-            let trimmed = bc.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        } else {
-            current.barcode
-        };
-        let raw_category = dto.category_id.as_deref().unwrap_or(&current.category_id).trim();
-        let safe_category = if raw_category.len() == 36 {
-            raw_category
-        } else if current.category_id.len() == 36 {
-            &current.category_id
-        } else {
-            "00000000-0000-0000-0000-000000000010"
-        };
-
-        let raw_brand = dto.brand_id.as_deref().or(current.brand_id.as_deref());
-        let safe_brand = raw_brand.filter(|b| b.trim().len() == 36);
-
-        let raw_unit = dto.unit_id.as_deref().or(current.unit_id.as_deref());
-        let safe_unit = raw_unit.filter(|u| u.trim().len() == 36);
-
-        let new_purchase = dto.purchase_price.unwrap_or(current.purchase_price);
-        let new_avg_cost = dto.average_cost.unwrap_or(current.average_cost);
-        let new_sale = dto.sale_price.unwrap_or(current.sale_price);
-        let new_threshold = dto.low_stock_threshold.unwrap_or(current.low_stock_threshold);
-        let new_desc = dto.description.as_deref().or(current.description.as_deref());
-        let new_active = dto.is_active.unwrap_or(current.is_active);
-
-        if new_purchase < 0 || new_avg_cost < 0 || new_sale < 0 || new_threshold < 0 {
-            return Err(AppError::Validation("Prices and threshold cannot be negative".to_string()));
-        }
-
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
-
-        Self::ensure_default_master_data(&guard);
-
-        Self::check_composite_duplicate_in_tx(
-            &guard,
-            new_name,
-            safe_category,
-            safe_unit,
-            safe_brand,
-            Some(id),
-        )?;
-
-        guard
-            .execute(
-                "UPDATE products
-                 SET name = ?1, barcode = ?2, category_id = ?3, brand_id = ?4, unit_id = ?5,
-                     purchase_price = ?6, average_cost = ?7, sale_price = ?8, low_stock_threshold = ?9,
-                     is_active = ?10, description = ?11, updated_at = ?12
-                 WHERE id = ?13",
-                params![
-                    new_name,
-                    new_barcode,
-                    safe_category,
-                    safe_brand,
-                    safe_unit,
-                    new_purchase,
-                    new_avg_cost,
-                    new_sale,
-                    new_threshold,
-                    if new_active { 1 } else { 0 },
-                    new_desc,
-                    now,
-                    id,
-                ],
-            )
-            .map_err(|e| {
-                let err_str = e.to_string();
-                if err_str.contains("UNIQUE constraint failed: products.barcode") {
-                    AppError::Conflict("Barcode is already used by another product".to_string())
-                } else if err_str.contains("FOREIGN KEY constraint failed") {
-                    AppError::Validation(format!("Invalid category, brand, or unit: {e}"))
-                } else {
-                    AppError::Database(format!("Failed to update product: {e}"))
-                }
-            })?;
-
-        Ok(Product {
-            id: id.to_string(),
-            name: new_name.to_string(),
-            sku: current.sku,
-            barcode: new_barcode,
-            category_id: safe_category.to_string(),
-            brand_id: safe_brand.map(|s| s.to_string()),
-            unit_id: safe_unit.map(|s| s.to_string()),
-            purchase_price: new_purchase,
-            average_cost: new_avg_cost,
-            sale_price: new_sale,
-            low_stock_threshold: new_threshold,
-            is_active: new_active,
-            description: new_desc.map(|s| s.to_string()),
-            created_at: current.created_at,
-            updated_at: now,
-        })
+        Self::update_product_in_tx(&guard, id, dto).map_err(AppError::from)
     }
 
     /// Update product average_cost and last purchase_price atomically in an existing SQLite transaction
@@ -442,26 +283,30 @@ impl SQLiteProductRepository {
         id: &str,
     ) -> Result<Product, crate::db::errors::DbError> {
         conn.query_row(
-            "SELECT id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at
+            "SELECT id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at
              FROM products WHERE id = ?1",
             params![id],
             |row| {
                 Ok(Product {
                     id: row.get(0)?,
                     name: row.get(1)?,
-                    sku: row.get(2)?,
-                    barcode: row.get(3)?,
-                    category_id: row.get(4)?,
-                    brand_id: row.get(5)?,
-                    unit_id: row.get(6)?,
-                    purchase_price: row.get(7)?,
-                    average_cost: row.get(8)?,
-                    sale_price: row.get(9)?,
-                    low_stock_threshold: row.get(10)?,
-                    is_active: row.get::<_, i64>(11)? == 1,
-                    description: row.get(12)?,
-                    created_at: row.get(13)?,
-                    updated_at: row.get(14)?,
+                    normalized_name: row.get(2)?,
+                    sku: row.get(3)?,
+                    barcode: row.get(4)?,
+                    category_id: row.get(5)?,
+                    brand_id: row.get(6)?,
+                    company_id: row.get(7)?,
+                    quality_id: row.get(8)?,
+                    color_id: row.get(9)?,
+                    unit_id: row.get(10)?,
+                    purchase_price: row.get(11)?,
+                    average_cost: row.get(12)?,
+                    sale_price: row.get(13)?,
+                    low_stock_threshold: row.get(14)?,
+                    is_active: row.get::<_, i64>(15)? == 1,
+                    description: row.get(16)?,
+                    created_at: row.get(17)?,
+                    updated_at: row.get(18)?,
                 })
             },
         )
@@ -472,7 +317,8 @@ impl SQLiteProductRepository {
     }
 
     /// Checks for composite Product Master duplicate within an existing SQLite transaction.
-    /// Composite identity = (normalized name, category_id, unit_id, brand_id).
+    /// Composite identity = (normalized name, category_id, brand_id, unit_id, quality_id, color_id).
+    /// Company (company_id) is EXCLUDED from Product identity.
     /// If exclude_id is provided (e.g. during update), that product ID is ignored.
     pub fn check_composite_duplicate_in_tx(
         conn: &rusqlite::Connection,
@@ -480,9 +326,11 @@ impl SQLiteProductRepository {
         category_id: &str,
         unit_id: Option<&str>,
         brand_id: Option<&str>,
+        quality_id: Option<&str>,
+        color_id: Option<&str>,
         exclude_id: Option<&str>,
     ) -> Result<(), crate::db::errors::DbError> {
-        let norm_name = name.trim().to_lowercase();
+        let norm_name = crate::domain::product::normalize_product_name(name);
         if norm_name.is_empty() {
             return Ok(());
         }
@@ -495,9 +343,11 @@ impl SQLiteProductRepository {
 
         let norm_unit = unit_id.map(str::trim).filter(|s| s.len() == 36).map(String::from);
         let norm_brand = brand_id.map(str::trim).filter(|s| s.len() == 36).map(String::from);
+        let norm_quality = quality_id.map(str::trim).filter(|s| s.len() == 36).map(String::from);
+        let norm_color = color_id.map(str::trim).filter(|s| s.len() == 36).map(String::from);
 
         let mut stmt = conn.prepare(
-            "SELECT id, name, category_id, unit_id, brand_id FROM products WHERE is_active = 1"
+            "SELECT id, name, normalized_name, category_id, unit_id, brand_id, quality_id, color_id FROM products WHERE is_active = 1"
         )?;
 
         let iter = stmt.query_map([], |row| {
@@ -505,13 +355,16 @@ impl SQLiteProductRepository {
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(3)?,
                 row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
             ))
         })?;
 
         for item in iter {
-            let (id, existing_name, existing_cat, existing_unit, existing_brand) = item?;
+            let (id, _existing_name, existing_norm_name, existing_cat, existing_unit, existing_brand, existing_quality, existing_color) = item?;
 
             if let Some(ex_id) = exclude_id {
                 if id == ex_id {
@@ -519,7 +372,6 @@ impl SQLiteProductRepository {
                 }
             }
 
-            let existing_norm_name = existing_name.trim().to_lowercase();
             let existing_safe_cat = if existing_cat.trim().len() == 36 {
                 existing_cat.trim().to_string()
             } else {
@@ -527,14 +379,18 @@ impl SQLiteProductRepository {
             };
             let existing_norm_unit = existing_unit.as_deref().map(str::trim).filter(|s| s.len() == 36).map(String::from);
             let existing_norm_brand = existing_brand.as_deref().map(str::trim).filter(|s| s.len() == 36).map(String::from);
+            let existing_norm_quality = existing_quality.as_deref().map(str::trim).filter(|s| s.len() == 36).map(String::from);
+            let existing_norm_color = existing_color.as_deref().map(str::trim).filter(|s| s.len() == 36).map(String::from);
 
             if existing_norm_name == norm_name
                 && existing_safe_cat == safe_category_id
                 && existing_norm_unit == norm_unit
                 && existing_norm_brand == norm_brand
+                && existing_norm_quality == norm_quality
+                && existing_norm_color == norm_color
             {
                 return Err(crate::db::errors::DbError::ValidationError(
-                    "A product with the same name, category, unit, company, quality, and color already exists.".to_string()
+                    "An equivalent product already exists.".to_string()
                 ));
             }
         }
@@ -555,6 +411,8 @@ impl SQLiteProductRepository {
         let barcode_opt = dto.barcode.as_deref().map(str::trim).filter(|s| !s.is_empty());
         let initial_avg_cost = dto.average_cost.unwrap_or(dto.purchase_price);
 
+        let norm_name = crate::domain::product::normalize_product_name(&dto.name);
+
         let safe_category_id = if dto.category_id.trim().len() == 36 {
             dto.category_id.trim().to_string()
         } else {
@@ -563,6 +421,27 @@ impl SQLiteProductRepository {
 
         let safe_brand_id = dto
             .brand_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| s.len() == 36)
+            .map(String::from);
+
+        let safe_company_id = dto
+            .company_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| s.len() == 36)
+            .map(String::from);
+
+        let safe_quality_id = dto
+            .quality_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| s.len() == 36)
+            .map(String::from);
+
+        let safe_color_id = dto
+            .color_id
             .as_deref()
             .map(str::trim)
             .filter(|s| s.len() == 36)
@@ -581,19 +460,25 @@ impl SQLiteProductRepository {
             &safe_category_id,
             safe_unit_id.as_deref(),
             safe_brand_id.as_deref(),
+            safe_quality_id.as_deref(),
+            safe_color_id.as_deref(),
             None,
         )?;
 
         conn.execute(
-            "INSERT INTO products (id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, ?12, ?13, ?14)",
+            "INSERT INTO products (id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 1, ?16, ?17, ?18)",
             params![
                 id,
                 dto.name.trim(),
+                norm_name,
                 dto.sku.trim().to_uppercase(),
                 barcode_opt,
                 safe_category_id,
                 safe_brand_id,
+                safe_company_id,
+                safe_quality_id,
+                safe_color_id,
                 safe_unit_id,
                 dto.purchase_price,
                 initial_avg_cost,
@@ -606,7 +491,9 @@ impl SQLiteProductRepository {
         )
         .map_err(|e| {
             let err_str = e.to_string();
-            if err_str.contains("UNIQUE constraint failed: products.sku") {
+            if err_str.contains("idx_products_composite_identity") || err_str.contains("products_composite_identity_key") {
+                crate::db::errors::DbError::ValidationError("An equivalent product already exists.".to_string())
+            } else if err_str.contains("UNIQUE constraint failed: products.sku") {
                 crate::db::errors::DbError::ValidationError(format!("Product with SKU '{}' already exists", dto.sku))
             } else if err_str.contains("UNIQUE constraint failed: products.barcode") {
                 crate::db::errors::DbError::ValidationError(format!("Product with barcode '{}' already exists", dto.barcode.as_deref().unwrap_or("")))
@@ -618,10 +505,14 @@ impl SQLiteProductRepository {
         Ok(Product {
             id: id.to_string(),
             name: dto.name.trim().to_string(),
+            normalized_name: norm_name,
             sku: dto.sku.trim().to_uppercase(),
             barcode: barcode_opt.map(|s| s.to_string()),
             category_id: safe_category_id,
             brand_id: safe_brand_id,
+            company_id: safe_company_id,
+            quality_id: safe_quality_id,
+            color_id: safe_color_id,
             unit_id: safe_unit_id,
             purchase_price: dto.purchase_price,
             average_cost: initial_avg_cost,
@@ -642,6 +533,11 @@ impl SQLiteProductRepository {
         Self::ensure_default_master_data(conn);
 
         let barcode_opt = product.barcode.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let norm_name = if product.normalized_name.is_empty() {
+            crate::domain::product::normalize_product_name(&product.name)
+        } else {
+            product.normalized_name.clone()
+        };
 
         let safe_category_id = if product.category_id.trim().len() == 36 {
             product.category_id.trim().to_string()
@@ -656,6 +552,27 @@ impl SQLiteProductRepository {
             .filter(|s| s.len() == 36)
             .map(String::from);
 
+        let safe_company_id = product
+            .company_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| s.len() == 36)
+            .map(String::from);
+
+        let safe_quality_id = product
+            .quality_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| s.len() == 36)
+            .map(String::from);
+
+        let safe_color_id = product
+            .color_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| s.len() == 36)
+            .map(String::from);
+
         let safe_unit_id = product
             .unit_id
             .as_deref()
@@ -664,14 +581,18 @@ impl SQLiteProductRepository {
             .map(String::from);
 
         conn.execute(
-            "INSERT INTO products (id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+            "INSERT INTO products (id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
              ON CONFLICT (id) DO UPDATE SET
                 name = EXCLUDED.name,
+                normalized_name = EXCLUDED.normalized_name,
                 sku = EXCLUDED.sku,
                 barcode = EXCLUDED.barcode,
                 category_id = EXCLUDED.category_id,
                 brand_id = EXCLUDED.brand_id,
+                company_id = EXCLUDED.company_id,
+                quality_id = EXCLUDED.quality_id,
+                color_id = EXCLUDED.color_id,
                 unit_id = EXCLUDED.unit_id,
                 purchase_price = EXCLUDED.purchase_price,
                 average_cost = EXCLUDED.average_cost,
@@ -683,10 +604,14 @@ impl SQLiteProductRepository {
             params![
                 product.id,
                 product.name.trim(),
+                norm_name,
                 product.sku.trim().to_uppercase(),
                 barcode_opt,
                 safe_category_id,
                 safe_brand_id,
+                safe_company_id,
+                safe_quality_id,
+                safe_color_id,
                 safe_unit_id,
                 product.purchase_price,
                 product.average_cost,
@@ -711,39 +636,13 @@ impl SQLiteProductRepository {
     ) -> Result<Product, crate::db::errors::DbError> {
         Self::ensure_default_master_data(conn);
 
-        let current: Product = conn
-            .query_row(
-                "SELECT id, name, sku, barcode, category_id, brand_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at
-                 FROM products WHERE id = ?1",
-                params![id],
-                |row| {
-                    Ok(Product {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                        sku: row.get(2)?,
-                        barcode: row.get(3)?,
-                        category_id: row.get(4)?,
-                        brand_id: row.get(5)?,
-                        unit_id: row.get(6)?,
-                        purchase_price: row.get(7)?,
-                        average_cost: row.get(8)?,
-                        sale_price: row.get(9)?,
-                        low_stock_threshold: row.get(10)?,
-                        is_active: row.get::<_, i64>(11)? == 1,
-                        description: row.get(12)?,
-                        created_at: row.get(13)?,
-                        updated_at: row.get(14)?,
-                    })
-                },
-            )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => crate::db::errors::DbError::NotFound(format!("Product '{id}' not found")),
-                err => crate::db::errors::DbError::from(err),
-            })?;
+        let current: Product = Self::get_product_by_id_in_tx(conn, id)?;
 
         let now = Utc::now().to_rfc3339();
 
         let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
+        let new_norm_name = crate::domain::product::normalize_product_name(new_name);
+
         let new_barcode = if let Some(bc) = &dto.barcode {
             let trimmed = bc.trim();
             if trimmed.is_empty() {
@@ -767,6 +666,15 @@ impl SQLiteProductRepository {
         let raw_brand = dto.brand_id.as_deref().or(current.brand_id.as_deref());
         let safe_brand = raw_brand.filter(|b| b.trim().len() == 36);
 
+        let raw_company = dto.company_id.as_deref().or(current.company_id.as_deref());
+        let safe_company = raw_company.filter(|c| c.trim().len() == 36);
+
+        let raw_quality = dto.quality_id.as_deref().or(current.quality_id.as_deref());
+        let safe_quality = raw_quality.filter(|q| q.trim().len() == 36);
+
+        let raw_color = dto.color_id.as_deref().or(current.color_id.as_deref());
+        let safe_color = raw_color.filter(|c| c.trim().len() == 36);
+
         let raw_unit = dto.unit_id.as_deref().or(current.unit_id.as_deref());
         let safe_unit = raw_unit.filter(|u| u.trim().len() == 36);
 
@@ -787,20 +695,27 @@ impl SQLiteProductRepository {
             safe_category,
             safe_unit,
             safe_brand,
+            safe_quality,
+            safe_color,
             Some(id),
         )?;
 
         conn.execute(
             "UPDATE products
-             SET name = ?1, barcode = ?2, category_id = ?3, brand_id = ?4, unit_id = ?5,
-                 purchase_price = ?6, average_cost = ?7, sale_price = ?8, low_stock_threshold = ?9,
-                 is_active = ?10, description = ?11, updated_at = ?12
-             WHERE id = ?13",
+             SET name = ?1, normalized_name = ?2, barcode = ?3, category_id = ?4, brand_id = ?5,
+                 company_id = ?6, quality_id = ?7, color_id = ?8, unit_id = ?9,
+                 purchase_price = ?10, average_cost = ?11, sale_price = ?12, low_stock_threshold = ?13,
+                 is_active = ?14, description = ?15, updated_at = ?16
+             WHERE id = ?17",
             params![
                 new_name,
+                new_norm_name,
                 new_barcode,
                 safe_category,
                 safe_brand,
+                safe_company,
+                safe_quality,
+                safe_color,
                 safe_unit,
                 new_purchase,
                 new_avg_cost,
@@ -814,7 +729,9 @@ impl SQLiteProductRepository {
         )
         .map_err(|e| {
             let err_str = e.to_string();
-            if err_str.contains("UNIQUE constraint failed: products.barcode") {
+            if err_str.contains("idx_products_composite_identity") || err_str.contains("products_composite_identity_key") {
+                crate::db::errors::DbError::ValidationError("An equivalent product already exists.".to_string())
+            } else if err_str.contains("UNIQUE constraint failed: products.barcode") {
                 crate::db::errors::DbError::ValidationError("Barcode is already used by another product".to_string())
             } else {
                 crate::db::errors::DbError::from(e)
@@ -824,10 +741,14 @@ impl SQLiteProductRepository {
         Ok(Product {
             id: id.to_string(),
             name: new_name.to_string(),
+            normalized_name: new_norm_name,
             sku: current.sku,
             barcode: new_barcode,
             category_id: safe_category.to_string(),
             brand_id: safe_brand.map(|s| s.to_string()),
+            company_id: safe_company.map(|s| s.to_string()),
+            quality_id: safe_quality.map(|s| s.to_string()),
+            color_id: safe_color.map(|s| s.to_string()),
             unit_id: safe_unit.map(|s| s.to_string()),
             purchase_price: new_purchase,
             average_cost: new_avg_cost,

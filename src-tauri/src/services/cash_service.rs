@@ -385,8 +385,8 @@ pub mod tests {
             ).unwrap();
 
             conn.execute(
-                "INSERT INTO products (id, name, sku, category_id, unit_id, purchase_price, sale_price, low_stock_threshold, is_active, created_at, updated_at)
-                 VALUES ('00000000-0000-0000-0000-000000000030', 'Galaxy S24', 'GAL-S24', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000020', 60000, 75000, 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                "INSERT INTO products (id, name, normalized_name, sku, category_id, unit_id, purchase_price, sale_price, low_stock_threshold, is_active, created_at, updated_at)
+                 VALUES ('00000000-0000-0000-0000-000000000030', 'Galaxy S24', 'galaxy s24', 'GAL-S24', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000020', 60000, 75000, 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
                 [],
             ).unwrap();
 
@@ -760,7 +760,7 @@ pub mod tests {
             .unwrap();
 
         let cust_pay = customer_svc
-            .record_payment(
+            .record_customer_payment(
                 Some(TEST_USER_ID),
                 RecordCustomerPaymentDto {
                     customer_id: cust.id.clone(),
@@ -991,7 +991,7 @@ pub mod tests {
             .unwrap();
 
         customer_svc
-            .record_payment(
+            .record_customer_payment(
                 Some(TEST_USER_ID),
                 RecordCustomerPaymentDto {
                     customer_id: cust.id.clone(),

@@ -472,6 +472,9 @@ mod tests {
                     category_id: "11111111-1111-1111-1111-111111111111".to_string(),
                     brand_id: None,
                     unit_id: Some("22222222-2222-2222-2222-222222222222".to_string()),
+                    company_id: None,
+                    quality_id: None,
+                    color_id: None,
                     purchase_price: 500,
                     average_cost: None,
                     sale_price: 1000,
@@ -799,7 +802,7 @@ mod tests {
         // INV-000001 receives 5,000 -> fully PAID
         // INV-000002 receives 1,000 -> PARTIALLY_PAID (remaining 2,000)
         let pay_res = customer_service
-            .record_payment(
+            .record_customer_payment(
                 None,
                 RecordCustomerPaymentDto {
                     customer_id: customer.id.clone(),

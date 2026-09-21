@@ -84,7 +84,19 @@ impl SupplierService {
             updated_at: now,
         };
 
-        self.supplier_repo.create_supplier(&supplier).await
+        match &self.supplier_repo {
+            SupplierRepository::SQLite(_) => {
+                let db = self.db.as_ref().expect("SQLite database connection required");
+                let supplier_cloned = supplier.clone();
+                with_transaction(db, move |tx| {
+                    SQLiteSupplierRepository::insert_supplier_in_tx(tx, &supplier_cloned)?;
+                    Ok(supplier_cloned)
+                })
+                .await
+                .map_err(Into::into)
+            }
+            SupplierRepository::Postgres(r) => r.create_supplier(&supplier).await,
+        }
     }
 
     pub async fn get_supplier_by_id(&self, id: &str) -> AppResult<Option<Supplier>> {

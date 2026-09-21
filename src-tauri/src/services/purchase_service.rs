@@ -48,6 +48,20 @@ impl PurchaseService {
         }
     }
 
+    pub fn calculate_weighted_average_cost(
+        existing_stock: i64,
+        existing_avg_cost: i64,
+        new_stock: i64,
+        new_cost: i64,
+    ) -> i64 {
+        let total_stock = existing_stock + new_stock;
+        if total_stock <= 0 {
+            return new_cost;
+        }
+        let total_value = (existing_stock * existing_avg_cost) + (new_stock * new_cost);
+        (total_value + (total_stock / 2)) / total_stock
+    }
+
     /// Atomically completes a supplier purchase
     pub async fn complete_purchase(
         &self,
@@ -315,23 +329,8 @@ impl PurchaseService {
                     )
                     .map_err(|e| DbError::QueryError(format!("Failed to read product cost for {}: {e}", line.product_id)))?;
 
-/// Calculates deterministic weighted-average cost in whole PKR
-fn calculate_weighted_average_cost(
-    existing_stock: i64,
-    existing_avg_cost: i64,
-    new_stock: i64,
-    new_cost: i64,
-) -> i64 {
-    let total_stock = existing_stock + new_stock;
-    if total_stock <= 0 {
-        return new_cost;
-    }
-    let total_value = (existing_stock * existing_avg_cost) + (new_stock * new_cost);
-    total_value / total_stock
-}
-
                 // Calculate deterministic weighted-average cost in whole PKR
-                let new_average_cost = calculate_weighted_average_cost(
+                let new_average_cost = Self::calculate_weighted_average_cost(
                     existing_total_stock,
                     current_avg_cost,
                     line.quantity,
@@ -670,14 +669,14 @@ pub mod tests {
             ).unwrap();
 
             conn.execute(
-                "INSERT INTO products (id, name, sku, category_id, unit_id, purchase_price, sale_price, low_stock_threshold, is_active, created_at, updated_at)
-                 VALUES ('00000000-0000-0000-0000-000000000030', 'Samsung A15', 'SAM-A15', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000020', 30000, 35000, 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                "INSERT INTO products (id, name, normalized_name, sku, category_id, unit_id, purchase_price, sale_price, low_stock_threshold, is_active, created_at, updated_at)
+                 VALUES ('00000000-0000-0000-0000-000000000030', 'Samsung A15', 'samsung a15', 'SAM-A15', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000020', 30000, 35000, 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
                 [],
             ).unwrap();
 
             conn.execute(
-                "INSERT INTO products (id, name, sku, category_id, unit_id, purchase_price, sale_price, low_stock_threshold, is_active, created_at, updated_at)
-                 VALUES ('00000000-0000-0000-0000-000000000031', 'Redmi Note 13', 'RED-N13', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000020', 40000, 46000, 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                "INSERT INTO products (id, name, normalized_name, sku, category_id, unit_id, purchase_price, sale_price, low_stock_threshold, is_active, created_at, updated_at)
+                 VALUES ('00000000-0000-0000-0000-000000000031', 'Redmi Note 13', 'redmi note 13', 'RED-N13', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000020', 40000, 46000, 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
                 [],
             ).unwrap();
         }
@@ -1136,11 +1135,11 @@ pub mod tests {
         // Test 3 & 4 — Unequal Quantity and Deterministic Rounding:
         // Verification of helper formula directly:
         // 10 @ 100 + 20 @ 105 = 3100 / 30 = 103.333 -> 103 (remainder 10 * 2 = 20 < 30 -> round down)
-        assert_eq!(calculate_weighted_average_cost(10, 100, 20, 105), 103);
+        assert_eq!(PurchaseService::calculate_weighted_average_cost(10, 100, 20, 105), 103);
 
         // Rounding up case:
         // 10 @ 100 + 10 @ 105 = 2050 / 20 = 102 remainder 10 (10 * 2 >= 20 -> 103)
-        assert_eq!(calculate_weighted_average_cost(10, 100, 10, 105), 103);
+        assert_eq!(PurchaseService::calculate_weighted_average_cost(10, 100, 10, 105), 103);
 
         // Test 5 — Multiple Purchases Evolving Cost:
         // From existing state: stock 20 @ 103

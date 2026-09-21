@@ -346,8 +346,8 @@ mod tests {
         assert!(logged_out.active_token.is_none());
     }
 
-    #[test]
-    fn test_cloud_composition_isolation_and_postgres_selection() {
+    #[tokio::test]
+    async fn test_cloud_composition_isolation_and_postgres_selection() {
         let pool = sqlx::PgPool::connect_lazy("postgres://localhost/dummy_db").expect("connect_lazy should succeed");
         let state = AppState::new_postgres("1.0.1", pool);
 
