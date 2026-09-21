@@ -50,8 +50,13 @@ export async function loginUser(identifier: string, password: string) {
     if (isTauriEnvironment()) {
       try {
         await tauriClient.authSyncSession(token);
-      } catch (syncErr) {
-        console.warn("[loginUser] Failed to sync native Rust session from token:", syncErr);
+      } catch {
+        try {
+          await tauriClient.authLogin(identifier, password);
+        } catch (nativeErr: any) {
+          console.error("[loginUser] Failed to sync native desktop session:", nativeErr);
+          throw new Error(`Desktop Session Error: ${nativeErr?.message || nativeErr || 'Native session synchronization failed'}`);
+        }
       }
     }
 

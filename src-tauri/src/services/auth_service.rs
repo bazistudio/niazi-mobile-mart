@@ -772,4 +772,53 @@ mod tests {
         // State remains intact from previous valid session
         assert_eq!(state.get_session().await.username, Some("jwt_sync_cashier".to_string()));
     }
+
+    #[tokio::test]
+    async fn test_require_org_admin_authorization_boundary() {
+        let state = AppState::in_memory("5.0.3");
+        let repo = &state.user_repo;
+
+        // 1. Unauthenticated state rejects with Unauthorized
+        let unauth_res = AuthService::require_org_admin(&state).await;
+        assert!(matches!(unauth_res, Err(AppError::Unauthorized(ref msg)) if msg.contains("Authentication required")));
+
+        // 2. Admin native session passes require_org_admin
+        let _admin_user = create_test_user(
+            repo,
+            "org_admin_test",
+            "Pass123!",
+            None,
+            UserRole::Admin,
+            UserStatus::Active,
+        )
+        .await;
+
+        let login_res = AuthService::login(repo, &state, "org_admin_test", "Pass123!").await;
+        assert!(login_res.is_ok());
+
+        let admin_res = AuthService::require_org_admin(&state).await;
+        assert!(admin_res.is_ok(), "Admin session must pass require_org_admin");
+
+        // 3. Cashier native session is rejected with Forbidden
+        let _cashier_user = create_test_user(
+            repo,
+            "cashier_test",
+            "Pass123!",
+            None,
+            UserRole::Cashier,
+            UserStatus::Active,
+        )
+        .await;
+
+        let cashier_login = AuthService::login(repo, &state, "cashier_test", "Pass123!").await;
+        assert!(cashier_login.is_ok());
+
+        let cashier_res = AuthService::require_org_admin(&state).await;
+        assert!(matches!(cashier_res, Err(AppError::Forbidden(ref msg)) if msg.contains("Organization Admin authority required")));
+
+        // 4. Logout clears native session back to Unauthorized
+        AuthService::logout(&state).await.unwrap();
+        let logout_res = AuthService::require_org_admin(&state).await;
+        assert!(matches!(logout_res, Err(AppError::Unauthorized(_))));
+    }
 }
