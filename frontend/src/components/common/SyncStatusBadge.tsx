@@ -62,6 +62,19 @@ export const SyncStatusBadge: React.FC = () => {
     );
   }
 
+  if (status.is_auth_paused) {
+    return (
+      <div
+        onClick={handleManualSync}
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-500 border border-amber-500/30 cursor-pointer hover:bg-amber-500/25 transition-all"
+        title="Authentication required to resume central sync"
+      >
+        <WifiOff className="w-3.5 h-3.5 text-amber-500" />
+        <span>Auth Paused</span>
+      </div>
+    );
+  }
+
   if (!status.is_online) {
     return (
       <div

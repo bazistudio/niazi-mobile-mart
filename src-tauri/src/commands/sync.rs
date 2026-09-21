@@ -9,14 +9,21 @@ pub async fn sync_get_status(state: State<'_, AppState>) -> AppResult<SyncEngine
     if let Some(worker) = worker_guard.as_ref() {
         Ok(worker.get_status().await)
     } else {
-        let pending_count = match &state.sync_queue_repo {
-            Some(r) => r.count_pending().await.unwrap_or(0),
-            None => 0,
+        let (pending_count, conflict_count, failed_count) = match &state.sync_queue_repo {
+            Some(r) => (
+                r.count_pending().await.unwrap_or(0),
+                r.count_conflict().await.unwrap_or(0),
+                r.count_failed_permanent().await.unwrap_or(0),
+            ),
+            None => (0, 0, 0),
         };
         Ok(SyncEngineStatus {
             pending_count,
             is_online: true,
             is_syncing: false,
+            is_auth_paused: false,
+            conflict_count,
+            failed_count,
             last_synced_at: None,
             last_error: None,
         })
@@ -47,6 +54,9 @@ pub async fn sync_trigger_now(state: State<'_, AppState>) -> AppResult<SyncEngin
         pending_count: 0,
         is_online: true,
         is_syncing: false,
+        is_auth_paused: false,
+        conflict_count: 0,
+        failed_count: 0,
         last_synced_at: None,
         last_error: None,
     })

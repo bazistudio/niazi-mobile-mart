@@ -3258,6 +3258,9 @@ export interface SyncEngineStatus {
   pending_count: number;
   is_online: boolean;
   is_syncing: boolean;
+  is_auth_paused?: boolean;
+  conflict_count?: number;
+  failed_count?: number;
   last_synced_at?: string;
   last_error?: string;
 }

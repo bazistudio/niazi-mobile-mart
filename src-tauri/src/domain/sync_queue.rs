@@ -8,6 +8,8 @@ pub enum SyncQueueStatus {
     Syncing,
     Failed,
     Synced,
+    Conflict,
+    FailedPermanent,
 }
 
 impl SyncQueueStatus {
@@ -17,16 +19,49 @@ impl SyncQueueStatus {
             Self::Syncing => "SYNCING",
             Self::Failed => "FAILED",
             Self::Synced => "SYNCED",
+            Self::Conflict => "CONFLICT",
+            Self::FailedPermanent => "FAILED_PERMANENT",
         }
     }
 
     pub fn from_str(s: &str) -> Self {
         match s.to_uppercase().as_str() {
             "SYNCING" => Self::Syncing,
-            "FAILED" => Self::Failed,
+            "FAILED" => Self::FailedPermanent,
+            "FAILED_PERMANENT" => Self::FailedPermanent,
+            "CONFLICT" => Self::Conflict,
             "SYNCED" => Self::Synced,
             _ => Self::Pending,
         }
+    }
+}
+
+pub const MAX_RETRIES: i32 = 10;
+
+impl SyncQueueItem {
+    pub fn calculate_backoff_secs(attempt_count: i32) -> u64 {
+        if attempt_count <= 0 {
+            return 0;
+        }
+        let exp = (attempt_count as u32).min(30);
+        let secs = 2u64.saturating_pow(exp);
+        secs.min(300)
+    }
+
+    pub fn is_eligible_for_retry(&self, now: chrono::DateTime<chrono::Utc>) -> bool {
+        if self.status != SyncQueueStatus::Pending || self.attempt_count >= MAX_RETRIES {
+            return false;
+        }
+        if let Some(ref last_attempt) = self.last_attempt_at {
+            if let Ok(last_time) = chrono::DateTime::parse_from_rfc3339(last_attempt) {
+                let delay = Self::calculate_backoff_secs(self.attempt_count);
+                let elapsed = now.signed_duration_since(last_time.with_timezone(&chrono::Utc));
+                if elapsed.num_seconds() < delay as i64 {
+                    return false;
+                }
+            }
+        }
+        true
     }
 }
 

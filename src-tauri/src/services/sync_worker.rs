@@ -14,6 +14,9 @@ pub struct SyncEngineStatus {
     pub pending_count: i64,
     pub is_online: bool,
     pub is_syncing: bool,
+    pub is_auth_paused: bool,
+    pub conflict_count: i64,
+    pub failed_count: i64,
     pub last_synced_at: Option<String>,
     pub last_error: Option<String>,
 }
@@ -34,6 +37,9 @@ impl SyncWorkerDaemon {
                 pending_count: 0,
                 is_online: true,
                 is_syncing: false,
+                is_auth_paused: false,
+                conflict_count: 0,
+                failed_count: 0,
                 last_synced_at: None,
                 last_error: None,
             })),
@@ -63,19 +69,25 @@ impl SyncWorkerDaemon {
         self.sync_outbox_push().await;
         self.sync_downstream_pull().await;
 
-        let pending_count = match &self.app_state.sync_queue_repo {
-            Some(r) => r.count_pending().await.unwrap_or(0),
-            None => 0,
+        let (pending_count, conflict_count, failed_count) = match &self.app_state.sync_queue_repo {
+            Some(r) => (
+                r.count_pending().await.unwrap_or(0),
+                r.count_conflict().await.unwrap_or(0),
+                r.count_failed_permanent().await.unwrap_or(0),
+            ),
+            None => (0, 0, 0),
         };
         let now = chrono::Utc::now().to_rfc3339();
 
         let mut st = self.status.write().await;
         st.is_syncing = false;
         st.pending_count = pending_count;
+        st.conflict_count = conflict_count;
+        st.failed_count = failed_count;
         if st.last_error.is_none() {
             st.last_synced_at = Some(now);
         }
-        info!("[SyncWorkerDaemon] Manual sync pipeline completed successfully (pending_count={})", pending_count);
+        info!("[SyncWorkerDaemon] Manual sync pipeline completed (pending={}, conflicts={}, failed={})", pending_count, conflict_count, failed_count);
     }
 
     /// Background outbox tick (defers gracefully if manual sync holds execution lock)
@@ -115,8 +127,16 @@ impl SyncWorkerDaemon {
     pub async fn sync_outbox_push(&self) {
         let session = self.app_state.get_session().await;
         let token = match &session.active_token {
-            Some(t) if session.is_authenticated => t.clone(),
-            _ => return, // Wait for user authentication: do not attempt HTTP push without JWT
+            Some(t) if session.is_authenticated => {
+                let mut st = self.status.write().await;
+                st.is_auth_paused = false;
+                t.clone()
+            }
+            _ => {
+                let mut st = self.status.write().await;
+                st.is_auth_paused = true;
+                return; // Wait for user authentication: do not attempt HTTP push without JWT
+            }
         };
 
         let sync_queue_repo = match &self.app_state.sync_queue_repo {
@@ -124,14 +144,15 @@ impl SyncWorkerDaemon {
             None => return,
         };
 
-        let pending_count = match sync_queue_repo.count_pending().await {
-            Ok(c) => c,
-            Err(_) => 0,
-        };
+        let pending_count = sync_queue_repo.count_pending().await.unwrap_or(0);
+        let conflict_count = sync_queue_repo.count_conflict().await.unwrap_or(0);
+        let failed_count = sync_queue_repo.count_failed_permanent().await.unwrap_or(0);
 
         {
             let mut st = self.status.write().await;
             st.pending_count = pending_count;
+            st.conflict_count = conflict_count;
+            st.failed_count = failed_count;
         }
 
         if pending_count == 0 {
@@ -189,23 +210,105 @@ impl SyncWorkerDaemon {
                     }
                 }
                 let now = chrono::Utc::now().to_rfc3339();
-                let remaining = sync_queue_repo.count_pending().await.unwrap_or(0);
+                let remaining_pending = sync_queue_repo.count_pending().await.unwrap_or(0);
+                let remaining_conflict = sync_queue_repo.count_conflict().await.unwrap_or(0);
+                let remaining_failed = sync_queue_repo.count_failed_permanent().await.unwrap_or(0);
+
                 let mut st = self.status.write().await;
-                st.pending_count = remaining;
+                st.pending_count = remaining_pending;
+                st.conflict_count = remaining_conflict;
+                st.failed_count = remaining_failed;
                 st.is_online = true;
+                st.is_auth_paused = false;
                 st.last_synced_at = Some(now);
                 st.last_error = None;
             }
             Ok(resp) => {
-                let err_msg = format!("Sync push HTTP {}", resp.status());
+                let status_code = resp.status();
+                let status_u16 = status_code.as_u16();
+                let err_body = resp.text().await.unwrap_or_else(|_| "Unknown server response".to_string());
+                let err_msg = format!("Sync push HTTP {status_u16}: {err_body}");
+
+                match status_u16 {
+                    401 => {
+                        for item in &pending_items {
+                            let _ = sync_queue_repo
+                                .update_status(&item.client_event_id, SyncQueueStatus::Pending, Some(&err_msg), None)
+                                .await;
+                        }
+                        let mut st = self.status.write().await;
+                        st.is_online = true;
+                        st.is_auth_paused = true;
+                        st.last_error = Some("Authentication required (401 Unauthorized)".to_string());
+                    }
+                    403 => {
+                        for item in &pending_items {
+                            let _ = sync_queue_repo
+                                .update_status(&item.client_event_id, SyncQueueStatus::FailedPermanent, Some(&err_msg), None)
+                                .await;
+                        }
+                        let mut st = self.status.write().await;
+                        st.is_online = true;
+                        st.last_error = Some(format!("Event authorization rejected (403 Forbidden): {err_body}"));
+                    }
+                    409 => {
+                        for item in &pending_items {
+                            let _ = sync_queue_repo
+                                .update_status(&item.client_event_id, SyncQueueStatus::Conflict, Some(&err_msg), None)
+                                .await;
+                        }
+                        let mut st = self.status.write().await;
+                        st.is_online = true;
+                        st.last_error = Some(format!("Sync conflict (409): {err_body}"));
+                    }
+                    400 | 404 | 422 => {
+                        for item in &pending_items {
+                            let _ = sync_queue_repo
+                                .update_status(&item.client_event_id, SyncQueueStatus::FailedPermanent, Some(&err_msg), None)
+                                .await;
+                        }
+                        let mut st = self.status.write().await;
+                        st.is_online = true;
+                        st.last_error = Some(format!("Sync permanent error ({status_u16}): {err_body}"));
+                    }
+                    _ => {
+                        for item in &pending_items {
+                            let _ = sync_queue_repo
+                                .update_status(&item.client_event_id, SyncQueueStatus::Pending, Some(&err_msg), None)
+                                .await;
+                        }
+                        let mut st = self.status.write().await;
+                        st.is_online = true;
+                        st.last_error = Some(format!("Sync retryable error ({status_u16}): {err_body}"));
+                    }
+                }
+
+                let remaining_pending = sync_queue_repo.count_pending().await.unwrap_or(0);
+                let remaining_conflict = sync_queue_repo.count_conflict().await.unwrap_or(0);
+                let remaining_failed = sync_queue_repo.count_failed_permanent().await.unwrap_or(0);
+
                 let mut st = self.status.write().await;
-                st.is_online = false;
-                st.last_error = Some(err_msg);
+                st.pending_count = remaining_pending;
+                st.conflict_count = remaining_conflict;
+                st.failed_count = remaining_failed;
             }
             Err(e) => {
+                let err_msg = format!("Server unreachable: {e}");
+                for item in &pending_items {
+                    let _ = sync_queue_repo
+                        .update_status(&item.client_event_id, SyncQueueStatus::Pending, Some(&err_msg), None)
+                        .await;
+                }
+                let remaining_pending = sync_queue_repo.count_pending().await.unwrap_or(0);
+                let remaining_conflict = sync_queue_repo.count_conflict().await.unwrap_or(0);
+                let remaining_failed = sync_queue_repo.count_failed_permanent().await.unwrap_or(0);
+
                 let mut st = self.status.write().await;
                 st.is_online = false;
-                st.last_error = Some(format!("Server unreachable: {e}"));
+                st.pending_count = remaining_pending;
+                st.conflict_count = remaining_conflict;
+                st.failed_count = remaining_failed;
+                st.last_error = Some(err_msg);
             }
         }
     }
