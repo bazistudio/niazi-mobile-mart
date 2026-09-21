@@ -322,6 +322,9 @@ pub fn run() {
             // Offline Sync Engine Commands (Plan A)
             commands::sync::sync_get_status,
             commands::sync::sync_trigger_now,
+            commands::sync::sync_list_conflicts,
+            commands::sync::sync_list_failed,
+            commands::sync::sync_retry_failed_item,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Niazi Mobile Mart Tauri application");

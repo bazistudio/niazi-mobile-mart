@@ -2222,6 +2222,30 @@ export const tauriClient = {
     }
     return { pending_count: 0, is_online: true, is_syncing: false };
   },
+
+  async syncListConflicts(limit?: number): Promise<SyncQueueItem[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SyncQueueItem[]>('sync_list_conflicts', { limit });
+    }
+    return [];
+  },
+
+  async syncListFailed(limit?: number): Promise<SyncQueueItem[]> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SyncQueueItem[]>('sync_list_failed', { limit });
+    }
+    return [];
+  },
+
+  async syncRetryFailedItem(clientEventId: string): Promise<SyncQueueItem> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<SyncQueueItem>('sync_retry_failed_item', { clientEventId });
+    }
+    throw new Error('Sync queue retry requires native Tauri environment');
+  },
 };
 
 // ── Type Definitions for Organization & Branch ──────────────────────────────
@@ -3265,3 +3289,19 @@ export interface SyncEngineStatus {
   last_error?: string;
 }
 
+export interface SyncQueueItem {
+  id: string;
+  client_event_id: string;
+  terminal_id: string;
+  organization_id: string;
+  branch_id: string;
+  event_type: string;
+  payload: string;
+  status: 'PENDING' | 'SYNCING' | 'FAILED' | 'SYNCED' | 'CONFLICT' | 'FAILED_PERMANENT';
+  attempt_count: number;
+  last_error?: string | null;
+  last_attempt_at?: string | null;
+  server_event_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}

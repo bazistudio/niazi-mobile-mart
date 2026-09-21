@@ -308,6 +308,144 @@ impl SQLiteSyncQueueRepository {
         Ok(count)
     }
 
+    /// Retrieves CONFLICT items from the queue up to limit, ordered by created_at ASC
+    pub async fn list_conflicts(&self, limit: usize) -> AppResult<Vec<SyncQueueItem>> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        let fetch_limit = if limit == 0 { 100 } else { limit };
+
+        let sql = "
+            SELECT id, client_event_id, terminal_id, organization_id, branch_id,
+                   event_type, payload, status, attempt_count, last_error,
+                   last_attempt_at, server_event_id, created_at, updated_at
+            FROM offline_sync_queue
+            WHERE status = 'CONFLICT'
+            ORDER BY created_at ASC
+            LIMIT ?1;
+        ";
+
+        let mut stmt = guard
+            .prepare(sql)
+            .map_err(|e| AppError::Database(format!("Failed to prepare list_conflicts query: {e}")))?;
+
+        let rows = stmt
+            .query_map(params![fetch_limit as i64], Self::map_row)
+            .map_err(|e| AppError::Database(format!("Query conflict sync items failed: {e}")))?;
+
+        let mut items = Vec::new();
+        for r in rows {
+            let item = r.map_err(|e| AppError::Database(format!("Error mapping sync queue item: {e}")))?;
+            items.push(item);
+        }
+
+        Ok(items)
+    }
+
+    /// Retrieves FAILED_PERMANENT items from the queue up to limit, ordered by created_at ASC
+    pub async fn list_failed_permanent(&self, limit: usize) -> AppResult<Vec<SyncQueueItem>> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        let fetch_limit = if limit == 0 { 100 } else { limit };
+
+        let sql = "
+            SELECT id, client_event_id, terminal_id, organization_id, branch_id,
+                   event_type, payload, status, attempt_count, last_error,
+                   last_attempt_at, server_event_id, created_at, updated_at
+            FROM offline_sync_queue
+            WHERE status = 'FAILED_PERMANENT' OR status = 'FAILED' OR (status = 'PENDING' AND attempt_count >= 10)
+            ORDER BY created_at ASC
+            LIMIT ?1;
+        ";
+
+        let mut stmt = guard
+            .prepare(sql)
+            .map_err(|e| AppError::Database(format!("Failed to prepare list_failed_permanent query: {e}")))?;
+
+        let rows = stmt
+            .query_map(params![fetch_limit as i64], Self::map_row)
+            .map_err(|e| AppError::Database(format!("Query failed permanent sync items failed: {e}")))?;
+
+        let mut items = Vec::new();
+        for r in rows {
+            let item = r.map_err(|e| AppError::Database(format!("Error mapping sync queue item: {e}")))?;
+            items.push(item);
+        }
+
+        Ok(items)
+    }
+
+    /// Resets a FAILED_PERMANENT item back to PENDING for manual retry, verifying organization context and status
+    pub async fn reset_failed_permanent_for_retry(
+        &self,
+        client_event_id: &str,
+        organization_id: &str,
+    ) -> AppResult<SyncQueueItem> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        // 1. Verify item existence
+        let sql_select = "
+            SELECT id, client_event_id, terminal_id, organization_id, branch_id,
+                   event_type, payload, status, attempt_count, last_error,
+                   last_attempt_at, server_event_id, created_at, updated_at
+            FROM offline_sync_queue
+            WHERE client_event_id = ?1;
+        ";
+
+        let item = guard
+            .query_row(sql_select, params![client_event_id], Self::map_row)
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    AppError::NotFound(format!("Sync queue item with client_event_id '{client_event_id}' not found"))
+                }
+                other => AppError::Database(format!("Error querying sync queue item: {other}")),
+            })?;
+
+        // 2. Verify organization context
+        if item.organization_id != organization_id {
+            return Err(AppError::Forbidden(format!(
+                "Cross-organization retry prohibited for client_event_id '{client_event_id}'"
+            )));
+        }
+
+        // 3. Verify status is exactly FAILED_PERMANENT (or FAILED / max attempt PENDING)
+        let is_failed_perm = item.status == SyncQueueStatus::FailedPermanent
+            || item.status == SyncQueueStatus::Failed
+            || (item.status == SyncQueueStatus::Pending && item.attempt_count >= crate::domain::sync_queue::MAX_RETRIES);
+
+        if !is_failed_perm {
+            return Err(AppError::Validation(format!(
+                "Cannot reset item '{client_event_id}' for retry: current status is '{:?}' and attempt_count is {}, which is not FAILED_PERMANENT",
+                item.status, item.attempt_count
+            )));
+        }
+
+        // 4. Update status to PENDING, reset attempt_count to 0, clear error & attempt time, update timestamp
+        let now = Utc::now().to_rfc3339();
+        let sql_update = "
+            UPDATE offline_sync_queue
+            SET status = 'PENDING',
+                attempt_count = 0,
+                last_error = NULL,
+                last_attempt_at = NULL,
+                updated_at = ?1
+            WHERE client_event_id = ?2 AND organization_id = ?3;
+        ";
+
+        guard
+            .execute(sql_update, params![&now, client_event_id, organization_id])
+            .map_err(|e| AppError::Database(format!("Failed to reset sync queue item for retry: {e}")))?;
+
+        // 5. Query and return updated item
+        let updated_item = guard
+            .query_row(sql_select, params![client_event_id], Self::map_row)
+            .map_err(|e| AppError::Database(format!("Failed to fetch updated sync queue item: {e}")))?;
+
+        Ok(updated_item)
+    }
+
     fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SyncQueueItem> {
         let status_str: String = r.get(7)?;
         Ok(SyncQueueItem {
@@ -665,5 +803,237 @@ mod tests {
         assert_eq!(item.attempt_count, 1);
         assert_eq!(item.last_error, Some("403 Forbidden".to_string()));
     }
-}
 
+    #[tokio::test]
+    async fn test_list_conflicts_and_failed_permanent() {
+        let db = DatabaseConnection::open_in_memory().unwrap();
+        {
+            let conn_arc = db.inner();
+            let mut conn = conn_arc.lock().await;
+            crate::db::migrations::MigrationRunner::run(&mut conn).unwrap();
+        }
+        let repo = SQLiteSyncQueueRepository::new(db.clone());
+        let terminal_id = Uuid::new_v4().to_string();
+
+        {
+            let conn_arc = db.inner();
+            let conn = conn_arc.lock().await;
+            conn.execute(
+                "INSERT INTO terminals (id, organization_id, branch_id, device_name, is_active, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'Test Terminal', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                rusqlite::params![terminal_id, NIAZI_ORGANIZATION_ID, DEFAULT_MAIN_BRANCH_ID],
+            ).unwrap();
+        }
+
+        let id_conflict = Uuid::new_v4().to_string();
+        let id_failed = Uuid::new_v4().to_string();
+        let id_pending = Uuid::new_v4().to_string();
+
+        let _evt_a = repo.enqueue(EnqueueOfflineEventDto {
+            client_event_id: Some(id_conflict.clone()),
+            terminal_id: terminal_id.clone(),
+            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+            event_type: "SALE_CREATED".to_string(),
+            payload: r#"{"id":"CONFLICT"}"#.to_string(),
+        }).await.unwrap();
+
+        let _evt_b = repo.enqueue(EnqueueOfflineEventDto {
+            client_event_id: Some(id_failed.clone()),
+            terminal_id: terminal_id.clone(),
+            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+            event_type: "SALE_CREATED".to_string(),
+            payload: r#"{"id":"FAILED"}"#.to_string(),
+        }).await.unwrap();
+
+        let _evt_c = repo.enqueue(EnqueueOfflineEventDto {
+            client_event_id: Some(id_pending.clone()),
+            terminal_id: terminal_id.clone(),
+            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+            event_type: "SALE_CREATED".to_string(),
+            payload: r#"{"id":"PENDING"}"#.to_string(),
+        }).await.unwrap();
+
+        repo.update_status(&id_conflict, SyncQueueStatus::Conflict, Some("409 Conflict"), None).await.unwrap();
+        repo.update_status(&id_failed, SyncQueueStatus::FailedPermanent, Some("400 Bad Request"), None).await.unwrap();
+
+        let conflicts = repo.list_conflicts(10).await.unwrap();
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].client_event_id, id_conflict);
+
+        let failed_items = repo.list_failed_permanent(10).await.unwrap();
+        assert_eq!(failed_items.len(), 1);
+        assert_eq!(failed_items[0].client_event_id, id_failed);
+    }
+
+    #[tokio::test]
+    async fn test_reset_failed_permanent_for_retry_success() {
+        let db = DatabaseConnection::open_in_memory().unwrap();
+        {
+            let conn_arc = db.inner();
+            let mut conn = conn_arc.lock().await;
+            crate::db::migrations::MigrationRunner::run(&mut conn).unwrap();
+        }
+        let repo = SQLiteSyncQueueRepository::new(db.clone());
+        let terminal_id = Uuid::new_v4().to_string();
+
+        {
+            let conn_arc = db.inner();
+            let conn = conn_arc.lock().await;
+            conn.execute(
+                "INSERT INTO terminals (id, organization_id, branch_id, device_name, is_active, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'Test Terminal', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                rusqlite::params![terminal_id, NIAZI_ORGANIZATION_ID, DEFAULT_MAIN_BRANCH_ID],
+            ).unwrap();
+        }
+
+        let evt_id = Uuid::new_v4().to_string();
+        let original_payload = r#"{"product_id":"prod_xyz","price":500}"#;
+        let evt = repo.enqueue(EnqueueOfflineEventDto {
+            client_event_id: Some(evt_id.clone()),
+            terminal_id: terminal_id.clone(),
+            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+            event_type: "PRODUCT_CREATED".to_string(),
+            payload: original_payload.to_string(),
+        }).await.unwrap();
+
+        repo.update_status(&evt.client_event_id, SyncQueueStatus::FailedPermanent, Some("422 Invalid Payload"), None).await.unwrap();
+        let failed_item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
+        assert_eq!(failed_item.status, SyncQueueStatus::FailedPermanent);
+        assert_eq!(failed_item.attempt_count, 1);
+
+        // Explicit Admin Reset for Retry
+        let retried_item = repo
+            .reset_failed_permanent_for_retry(&evt_id, NIAZI_ORGANIZATION_ID)
+            .await
+            .expect("Reset should succeed");
+
+        assert_eq!(retried_item.status, SyncQueueStatus::Pending);
+        assert_eq!(retried_item.attempt_count, 0);
+        assert_eq!(retried_item.last_error, None);
+        assert_eq!(retried_item.last_attempt_at, None);
+        assert_eq!(retried_item.client_event_id, evt_id);
+        assert_eq!(retried_item.payload, original_payload);
+        assert_eq!(retried_item.event_type, "PRODUCT_CREATED");
+        assert_eq!(retried_item.terminal_id, terminal_id);
+        assert_eq!(retried_item.organization_id, NIAZI_ORGANIZATION_ID);
+        assert_eq!(retried_item.branch_id, DEFAULT_MAIN_BRANCH_ID);
+
+        // Pending count should now be 1
+        assert_eq!(repo.count_pending().await.unwrap(), 1);
+        assert_eq!(repo.count_failed_permanent().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_reset_failed_permanent_for_retry_invalid_state_rejection() {
+        let db = DatabaseConnection::open_in_memory().unwrap();
+        {
+            let conn_arc = db.inner();
+            let mut conn = conn_arc.lock().await;
+            crate::db::migrations::MigrationRunner::run(&mut conn).unwrap();
+        }
+        let repo = SQLiteSyncQueueRepository::new(db.clone());
+        let terminal_id = Uuid::new_v4().to_string();
+
+        {
+            let conn_arc = db.inner();
+            let conn = conn_arc.lock().await;
+            conn.execute(
+                "INSERT INTO terminals (id, organization_id, branch_id, device_name, is_active, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'Test Terminal', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                rusqlite::params![terminal_id, NIAZI_ORGANIZATION_ID, DEFAULT_MAIN_BRANCH_ID],
+            ).unwrap();
+        }
+
+        let id_pending = Uuid::new_v4().to_string();
+        let id_conflict = Uuid::new_v4().to_string();
+        let id_synced = Uuid::new_v4().to_string();
+
+        let _evt_p = repo.enqueue(EnqueueOfflineEventDto {
+            client_event_id: Some(id_pending.clone()),
+            terminal_id: terminal_id.clone(),
+            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+            event_type: "SALE_CREATED".to_string(),
+            payload: r#"{}"#.to_string(),
+        }).await.unwrap();
+
+        let _evt_c = repo.enqueue(EnqueueOfflineEventDto {
+            client_event_id: Some(id_conflict.clone()),
+            terminal_id: terminal_id.clone(),
+            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+            event_type: "SALE_CREATED".to_string(),
+            payload: r#"{}"#.to_string(),
+        }).await.unwrap();
+
+        let _evt_s = repo.enqueue(EnqueueOfflineEventDto {
+            client_event_id: Some(id_synced.clone()),
+            terminal_id: terminal_id.clone(),
+            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+            event_type: "SALE_CREATED".to_string(),
+            payload: r#"{}"#.to_string(),
+        }).await.unwrap();
+
+        repo.update_status(&id_conflict, SyncQueueStatus::Conflict, Some("409 Conflict"), None).await.unwrap();
+        repo.update_status(&id_synced, SyncQueueStatus::Synced, None, Some("SRV-1")).await.unwrap();
+
+        // 1. Retry PENDING -> Must be rejected
+        let res_p = repo.reset_failed_permanent_for_retry(&id_pending, NIAZI_ORGANIZATION_ID).await;
+        assert!(res_p.is_err());
+        assert!(res_p.unwrap_err().to_string().contains("is not FAILED_PERMANENT"));
+
+        // 2. Retry CONFLICT -> Must be rejected
+        let res_c = repo.reset_failed_permanent_for_retry(&id_conflict, NIAZI_ORGANIZATION_ID).await;
+        assert!(res_c.is_err());
+        assert!(res_c.unwrap_err().to_string().contains("is not FAILED_PERMANENT"));
+
+        // 3. Retry SYNCED -> Must be rejected
+        let res_s = repo.reset_failed_permanent_for_retry(&id_synced, NIAZI_ORGANIZATION_ID).await;
+        assert!(res_s.is_err());
+        assert!(res_s.unwrap_err().to_string().contains("is not FAILED_PERMANENT"));
+    }
+
+    #[tokio::test]
+    async fn test_reset_failed_permanent_for_retry_organization_isolation() {
+        let db = DatabaseConnection::open_in_memory().unwrap();
+        {
+            let conn_arc = db.inner();
+            let mut conn = conn_arc.lock().await;
+            crate::db::migrations::MigrationRunner::run(&mut conn).unwrap();
+        }
+        let repo = SQLiteSyncQueueRepository::new(db.clone());
+        let terminal_id = Uuid::new_v4().to_string();
+
+        {
+            let conn_arc = db.inner();
+            let conn = conn_arc.lock().await;
+            conn.execute(
+                "INSERT INTO terminals (id, organization_id, branch_id, device_name, is_active, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'Test Terminal', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                rusqlite::params![terminal_id, NIAZI_ORGANIZATION_ID, DEFAULT_MAIN_BRANCH_ID],
+            ).unwrap();
+        }
+
+        let evt_id = Uuid::new_v4().to_string();
+        let _evt = repo.enqueue(EnqueueOfflineEventDto {
+            client_event_id: Some(evt_id.clone()),
+            terminal_id: terminal_id.clone(),
+            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+            event_type: "SALE_CREATED".to_string(),
+            payload: r#"{}"#.to_string(),
+        }).await.unwrap();
+
+        repo.update_status(&evt_id, SyncQueueStatus::FailedPermanent, Some("403 Forbidden"), None).await.unwrap();
+
+        // Cross-org retry attempt must be rejected with Forbidden error
+        let res_other_org = repo.reset_failed_permanent_for_retry(&evt_id, "other_org_uuid").await;
+        assert!(res_other_org.is_err());
+        assert!(res_other_org.unwrap_err().to_string().contains("Cross-organization retry prohibited"));
+    }
+}
