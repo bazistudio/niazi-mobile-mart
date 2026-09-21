@@ -2,8 +2,9 @@ use chrono::Utc;
 use sqlx::{PgPool, Row};
 
 use crate::domain::catalog::{
-    Brand, Category, CreateBrandDto, CreateCategoryDto, CreateUnitDto, Unit, UpdateBrandDto,
-    UpdateCategoryDto, UpdateUnitDto,
+    Brand, Category, Color, Company, CreateBrandDto, CreateCategoryDto, CreateColorDto,
+    CreateCompanyDto, CreateQualityDto, CreateUnitDto, Quality, Unit, UpdateBrandDto,
+    UpdateCategoryDto, UpdateColorDto, UpdateCompanyDto, UpdateQualityDto, UpdateUnitDto,
 };
 use crate::errors::{AppError, AppResult};
 
@@ -355,6 +356,366 @@ impl PostgresCatalogRepository {
             name: new_name.to_string(),
             symbol: new_sym.map(|s| s.to_string()),
             conversion_factor: new_factor,
+            is_active: new_active,
+            created_at: current.created_at,
+            updated_at: now,
+        })
+    }
+
+    // --- COMPANIES ---
+
+    pub async fn create_company(&self, id: &str, dto: &CreateCompanyDto) -> AppResult<Company> {
+        let now = Utc::now().to_rfc3339();
+        let code = dto
+            .code
+            .as_deref()
+            .unwrap_or(&dto.name)
+            .trim()
+            .to_uppercase()
+            .replace(|c: char| !c.is_alphanumeric(), "_");
+        let name = dto.name.trim();
+
+        sqlx::query(
+            "INSERT INTO companies (id, name, code, description, is_active, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, 1, $5, $6)",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(&code)
+        .bind(dto.description.as_deref())
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("unique") || msg.contains("UNIQUE") {
+                AppError::Conflict(format!("Company '{name}' or code '{code}' already exists"))
+            } else {
+                AppError::Database(format!("Failed to create company: {e}"))
+            }
+        })?;
+
+        Ok(Company {
+            id: id.to_string(),
+            name: name.to_string(),
+            code,
+            description: dto.description.clone(),
+            is_active: true,
+            created_at: now.clone(),
+            updated_at: now,
+        })
+    }
+
+    pub async fn get_company_by_id(&self, id: &str) -> AppResult<Company> {
+        let row_opt = sqlx::query("SELECT id, name, code, description, is_active, created_at, updated_at FROM companies WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to get company: {e}")))?;
+
+        match row_opt {
+            Some(row) => {
+                let is_active_int: i32 = row.try_get(4).unwrap_or(1);
+                Ok(Company {
+                    id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
+                    name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+                    code: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                    description: row.try_get(3).unwrap_or(None),
+                    is_active: is_active_int == 1,
+                    created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
+                    updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                })
+            }
+            None => Err(AppError::NotFound(format!("Company '{id}' not found"))),
+        }
+    }
+
+    pub async fn list_companies(&self) -> AppResult<Vec<Company>> {
+        let rows = sqlx::query("SELECT id, name, code, description, is_active, created_at, updated_at FROM companies ORDER BY name ASC")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to query companies: {e}")))?;
+
+        let mut companies = Vec::with_capacity(rows.len());
+        for row in rows {
+            let is_active_int: i32 = row.try_get(4).unwrap_or(1);
+            companies.push(Company {
+                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
+                name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+                code: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                description: row.try_get(3).unwrap_or(None),
+                is_active: is_active_int == 1,
+                created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
+                updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+            });
+        }
+        Ok(companies)
+    }
+
+    pub async fn update_company(&self, id: &str, dto: &UpdateCompanyDto) -> AppResult<Company> {
+        let current = self.get_company_by_id(id).await?;
+        let now = Utc::now().to_rfc3339();
+
+        let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
+        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_active = dto.is_active.unwrap_or(current.is_active);
+
+        sqlx::query("UPDATE companies SET name = $1, description = $2, is_active = $3, updated_at = $4 WHERE id = $5")
+            .bind(new_name)
+            .bind(new_desc)
+            .bind(if new_active { 1 } else { 0 })
+            .bind(&now)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to update company: {e}")))?;
+
+        Ok(Company {
+            id: id.to_string(),
+            name: new_name.to_string(),
+            code: current.code,
+            description: new_desc.map(|s| s.to_string()),
+            is_active: new_active,
+            created_at: current.created_at,
+            updated_at: now,
+        })
+    }
+
+    // --- QUALITIES ---
+
+    pub async fn create_quality(&self, id: &str, dto: &CreateQualityDto) -> AppResult<Quality> {
+        let now = Utc::now().to_rfc3339();
+        let code = dto
+            .code
+            .as_deref()
+            .unwrap_or(&dto.name)
+            .trim()
+            .to_uppercase()
+            .replace(|c: char| !c.is_alphanumeric(), "_");
+        let name = dto.name.trim();
+
+        sqlx::query(
+            "INSERT INTO qualities (id, name, code, description, is_active, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, 1, $5, $6)",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(&code)
+        .bind(dto.description.as_deref())
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("unique") || msg.contains("UNIQUE") {
+                AppError::Conflict(format!("Quality '{name}' or code '{code}' already exists"))
+            } else {
+                AppError::Database(format!("Failed to create quality: {e}"))
+            }
+        })?;
+
+        Ok(Quality {
+            id: id.to_string(),
+            name: name.to_string(),
+            code,
+            description: dto.description.clone(),
+            is_active: true,
+            created_at: now.clone(),
+            updated_at: now,
+        })
+    }
+
+    pub async fn get_quality_by_id(&self, id: &str) -> AppResult<Quality> {
+        let row_opt = sqlx::query("SELECT id, name, code, description, is_active, created_at, updated_at FROM qualities WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to get quality: {e}")))?;
+
+        match row_opt {
+            Some(row) => {
+                let is_active_int: i32 = row.try_get(4).unwrap_or(1);
+                Ok(Quality {
+                    id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
+                    name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+                    code: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                    description: row.try_get(3).unwrap_or(None),
+                    is_active: is_active_int == 1,
+                    created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
+                    updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                })
+            }
+            None => Err(AppError::NotFound(format!("Quality '{id}' not found"))),
+        }
+    }
+
+    pub async fn list_qualities(&self) -> AppResult<Vec<Quality>> {
+        let rows = sqlx::query("SELECT id, name, code, description, is_active, created_at, updated_at FROM qualities ORDER BY name ASC")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to query qualities: {e}")))?;
+
+        let mut qualities = Vec::with_capacity(rows.len());
+        for row in rows {
+            let is_active_int: i32 = row.try_get(4).unwrap_or(1);
+            qualities.push(Quality {
+                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
+                name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+                code: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                description: row.try_get(3).unwrap_or(None),
+                is_active: is_active_int == 1,
+                created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
+                updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+            });
+        }
+        Ok(qualities)
+    }
+
+    pub async fn update_quality(&self, id: &str, dto: &UpdateQualityDto) -> AppResult<Quality> {
+        let current = self.get_quality_by_id(id).await?;
+        let now = Utc::now().to_rfc3339();
+
+        let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
+        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_active = dto.is_active.unwrap_or(current.is_active);
+
+        sqlx::query("UPDATE qualities SET name = $1, description = $2, is_active = $3, updated_at = $4 WHERE id = $5")
+            .bind(new_name)
+            .bind(new_desc)
+            .bind(if new_active { 1 } else { 0 })
+            .bind(&now)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to update quality: {e}")))?;
+
+        Ok(Quality {
+            id: id.to_string(),
+            name: new_name.to_string(),
+            code: current.code,
+            description: new_desc.map(|s| s.to_string()),
+            is_active: new_active,
+            created_at: current.created_at,
+            updated_at: now,
+        })
+    }
+
+    // --- COLORS ---
+
+    pub async fn create_color(&self, id: &str, dto: &CreateColorDto) -> AppResult<Color> {
+        let now = Utc::now().to_rfc3339();
+        let code = dto
+            .code
+            .as_deref()
+            .unwrap_or(&dto.name)
+            .trim()
+            .to_uppercase()
+            .replace(|c: char| !c.is_alphanumeric(), "_");
+        let name = dto.name.trim();
+
+        sqlx::query(
+            "INSERT INTO colors (id, name, code, description, is_active, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, 1, $5, $6)",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(&code)
+        .bind(dto.description.as_deref())
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("unique") || msg.contains("UNIQUE") {
+                AppError::Conflict(format!("Color '{name}' or code '{code}' already exists"))
+            } else {
+                AppError::Database(format!("Failed to create color: {e}"))
+            }
+        })?;
+
+        Ok(Color {
+            id: id.to_string(),
+            name: name.to_string(),
+            code,
+            description: dto.description.clone(),
+            is_active: true,
+            created_at: now.clone(),
+            updated_at: now,
+        })
+    }
+
+    pub async fn get_color_by_id(&self, id: &str) -> AppResult<Color> {
+        let row_opt = sqlx::query("SELECT id, name, code, description, is_active, created_at, updated_at FROM colors WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to get color: {e}")))?;
+
+        match row_opt {
+            Some(row) => {
+                let is_active_int: i32 = row.try_get(4).unwrap_or(1);
+                Ok(Color {
+                    id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
+                    name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+                    code: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                    description: row.try_get(3).unwrap_or(None),
+                    is_active: is_active_int == 1,
+                    created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
+                    updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                })
+            }
+            None => Err(AppError::NotFound(format!("Color '{id}' not found"))),
+        }
+    }
+
+    pub async fn list_colors(&self) -> AppResult<Vec<Color>> {
+        let rows = sqlx::query("SELECT id, name, code, description, is_active, created_at, updated_at FROM colors ORDER BY name ASC")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to query colors: {e}")))?;
+
+        let mut colors = Vec::with_capacity(rows.len());
+        for row in rows {
+            let is_active_int: i32 = row.try_get(4).unwrap_or(1);
+            colors.push(Color {
+                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
+                name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+                code: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                description: row.try_get(3).unwrap_or(None),
+                is_active: is_active_int == 1,
+                created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
+                updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+            });
+        }
+        Ok(colors)
+    }
+
+    pub async fn update_color(&self, id: &str, dto: &UpdateColorDto) -> AppResult<Color> {
+        let current = self.get_color_by_id(id).await?;
+        let now = Utc::now().to_rfc3339();
+
+        let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
+        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_active = dto.is_active.unwrap_or(current.is_active);
+
+        sqlx::query("UPDATE colors SET name = $1, description = $2, is_active = $3, updated_at = $4 WHERE id = $5")
+            .bind(new_name)
+            .bind(new_desc)
+            .bind(if new_active { 1 } else { 0 })
+            .bind(&now)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to update color: {e}")))?;
+
+        Ok(Color {
+            id: id.to_string(),
+            name: new_name.to_string(),
+            code: current.code,
+            description: new_desc.map(|s| s.to_string()),
             is_active: new_active,
             created_at: current.created_at,
             updated_at: now,

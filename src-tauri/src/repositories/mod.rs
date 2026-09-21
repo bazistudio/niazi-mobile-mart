@@ -74,8 +74,9 @@ use crate::domain::cash::{
     CashMovement, CashSession, CloseCashSessionDto, CreateCashAdjustmentDto, OpenCashSessionDto,
 };
 use crate::domain::catalog::{
-    Brand, Category, CreateBrandDto, CreateCategoryDto, CreateUnitDto, Unit, UpdateBrandDto,
-    UpdateCategoryDto, UpdateUnitDto,
+    Brand, Category, Color, Company, CreateBrandDto, CreateCategoryDto, CreateColorDto,
+    CreateCompanyDto, CreateQualityDto, CreateUnitDto, Quality, Unit, UpdateBrandDto,
+    UpdateCategoryDto, UpdateColorDto, UpdateCompanyDto, UpdateQualityDto, UpdateUnitDto,
 };
 use crate::domain::customer::{
     Customer, CustomerDetailDto, CustomerFilter, CustomerLedgerEntry, CustomerPaymentResultDto,
@@ -318,6 +319,90 @@ impl CatalogRepository {
         match self {
             Self::SQLite(r) => r.update_unit(id, dto).await,
             Self::Postgres(r) => r.update_unit(id, dto).await,
+        }
+    }
+
+    pub async fn create_company(&self, id: &str, dto: &CreateCompanyDto) -> AppResult<Company> {
+        match self {
+            Self::SQLite(r) => r.create_company(id, dto).await,
+            Self::Postgres(r) => r.create_company(id, dto).await,
+        }
+    }
+
+    pub async fn get_company_by_id(&self, id: &str) -> AppResult<Company> {
+        match self {
+            Self::SQLite(r) => r.get_company_by_id(id).await,
+            Self::Postgres(r) => r.get_company_by_id(id).await,
+        }
+    }
+
+    pub async fn list_companies(&self) -> AppResult<Vec<Company>> {
+        match self {
+            Self::SQLite(r) => r.list_companies().await,
+            Self::Postgres(r) => r.list_companies().await,
+        }
+    }
+
+    pub async fn update_company(&self, id: &str, dto: &UpdateCompanyDto) -> AppResult<Company> {
+        match self {
+            Self::SQLite(r) => r.update_company(id, dto).await,
+            Self::Postgres(r) => r.update_company(id, dto).await,
+        }
+    }
+
+    pub async fn create_quality(&self, id: &str, dto: &CreateQualityDto) -> AppResult<Quality> {
+        match self {
+            Self::SQLite(r) => r.create_quality(id, dto).await,
+            Self::Postgres(r) => r.create_quality(id, dto).await,
+        }
+    }
+
+    pub async fn get_quality_by_id(&self, id: &str) -> AppResult<Quality> {
+        match self {
+            Self::SQLite(r) => r.get_quality_by_id(id).await,
+            Self::Postgres(r) => r.get_quality_by_id(id).await,
+        }
+    }
+
+    pub async fn list_qualities(&self) -> AppResult<Vec<Quality>> {
+        match self {
+            Self::SQLite(r) => r.list_qualities().await,
+            Self::Postgres(r) => r.list_qualities().await,
+        }
+    }
+
+    pub async fn update_quality(&self, id: &str, dto: &UpdateQualityDto) -> AppResult<Quality> {
+        match self {
+            Self::SQLite(r) => r.update_quality(id, dto).await,
+            Self::Postgres(r) => r.update_quality(id, dto).await,
+        }
+    }
+
+    pub async fn create_color(&self, id: &str, dto: &CreateColorDto) -> AppResult<Color> {
+        match self {
+            Self::SQLite(r) => r.create_color(id, dto).await,
+            Self::Postgres(r) => r.create_color(id, dto).await,
+        }
+    }
+
+    pub async fn get_color_by_id(&self, id: &str) -> AppResult<Color> {
+        match self {
+            Self::SQLite(r) => r.get_color_by_id(id).await,
+            Self::Postgres(r) => r.get_color_by_id(id).await,
+        }
+    }
+
+    pub async fn list_colors(&self) -> AppResult<Vec<Color>> {
+        match self {
+            Self::SQLite(r) => r.list_colors().await,
+            Self::Postgres(r) => r.list_colors().await,
+        }
+    }
+
+    pub async fn update_color(&self, id: &str, dto: &UpdateColorDto) -> AppResult<Color> {
+        match self {
+            Self::SQLite(r) => r.update_color(id, dto).await,
+            Self::Postgres(r) => r.update_color(id, dto).await,
         }
     }
 }

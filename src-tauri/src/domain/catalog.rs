@@ -79,3 +79,81 @@ pub struct UpdateUnitDto {
     pub conversion_factor: Option<i64>,
     pub is_active: Option<bool>,
 }
+
+/// Company domain entity for suppliers, importers, and sourcing channels
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Company {
+    pub id: String,
+    pub name: String,
+    pub code: String,
+    pub description: Option<String>,
+    pub is_active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateCompanyDto {
+    pub name: String,
+    pub code: Option<String>,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateCompanyDto {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub is_active: Option<bool>,
+}
+
+/// Quality domain entity for product grades and quality specifications
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Quality {
+    pub id: String,
+    pub name: String,
+    pub code: String,
+    pub description: Option<String>,
+    pub is_active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateQualityDto {
+    pub name: String,
+    pub code: Option<String>,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateQualityDto {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub is_active: Option<bool>,
+}
+
+/// Color domain entity for physical product color specifications
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Color {
+    pub id: String,
+    pub name: String,
+    pub code: String,
+    pub description: Option<String>,
+    pub is_active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateColorDto {
+    pub name: String,
+    pub code: Option<String>,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateColorDto {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub is_active: Option<bool>,
+}

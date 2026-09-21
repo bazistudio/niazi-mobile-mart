@@ -2,7 +2,11 @@ use chrono::Utc;
 use rusqlite::params;
 
 use crate::db::connection::DatabaseConnection;
-use crate::domain::catalog::{Brand, Category, CreateBrandDto, CreateCategoryDto, CreateUnitDto, Unit, UpdateBrandDto, UpdateCategoryDto, UpdateUnitDto};
+use crate::domain::catalog::{
+    Brand, Category, Color, Company, CreateBrandDto, CreateCategoryDto, CreateColorDto,
+    CreateCompanyDto, CreateQualityDto, CreateUnitDto, Quality, Unit, UpdateBrandDto,
+    UpdateCategoryDto, UpdateColorDto, UpdateCompanyDto, UpdateQualityDto, UpdateUnitDto,
+};
 use crate::errors::{AppError, AppResult};
 
 #[derive(Clone)]
@@ -363,6 +367,378 @@ impl SQLiteCatalogRepository {
             name: new_name.to_string(),
             symbol: new_sym.map(|s| s.to_string()),
             conversion_factor: new_factor,
+            is_active: new_active,
+            created_at: current.created_at,
+            updated_at: now,
+        })
+    }
+
+    // --- COMPANIES ---
+
+    pub async fn create_company(&self, id: &str, dto: &CreateCompanyDto) -> AppResult<Company> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        let now = Utc::now().to_rfc3339();
+        let code = dto
+            .code
+            .as_deref()
+            .unwrap_or(&dto.name)
+            .trim()
+            .to_uppercase()
+            .replace(|c: char| !c.is_alphanumeric(), "_");
+
+        guard
+            .execute(
+                "INSERT INTO companies (id, name, code, description, is_active, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6)",
+                params![id, dto.name.trim(), code, dto.description.as_deref(), now, now],
+            )
+            .map_err(|e| {
+                if e.to_string().contains("UNIQUE constraint failed") {
+                    AppError::Conflict(format!("Company '{}' or code '{}' already exists", dto.name, code))
+                } else {
+                    AppError::Database(format!("Failed to create company: {e}"))
+                }
+            })?;
+
+        Ok(Company {
+            id: id.to_string(),
+            name: dto.name.trim().to_string(),
+            code,
+            description: dto.description.clone(),
+            is_active: true,
+            created_at: now.clone(),
+            updated_at: now,
+        })
+    }
+
+    pub async fn get_company_by_id(&self, id: &str) -> AppResult<Company> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        guard
+            .query_row(
+                "SELECT id, name, code, description, is_active, created_at, updated_at FROM companies WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(Company {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        code: row.get(2)?,
+                        description: row.get(3)?,
+                        is_active: row.get::<_, i64>(4)? == 1,
+                        created_at: row.get(5)?,
+                        updated_at: row.get(6)?,
+                    })
+                },
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Company '{id}' not found")),
+                err => AppError::Database(format!("Failed to get company: {err}")),
+            })
+    }
+
+    pub async fn list_companies(&self) -> AppResult<Vec<Company>> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        let mut stmt = guard
+            .prepare("SELECT id, name, code, description, is_active, created_at, updated_at FROM companies ORDER BY name ASC")
+            .map_err(|e| AppError::Database(format!("Failed to prepare company statement: {e}")))?;
+
+        let iter = stmt
+            .query_map([], |row| {
+                Ok(Company {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    code: row.get(2)?,
+                    description: row.get(3)?,
+                    is_active: row.get::<_, i64>(4)? == 1,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            })
+            .map_err(|e| AppError::Database(format!("Failed to query companies: {e}")))?;
+
+        let mut companies = Vec::new();
+        for c in iter {
+            companies.push(c.map_err(|e| AppError::Database(format!("Company row error: {e}")))?);
+        }
+        Ok(companies)
+    }
+
+    pub async fn update_company(&self, id: &str, dto: &UpdateCompanyDto) -> AppResult<Company> {
+        let current = self.get_company_by_id(id).await?;
+        let now = Utc::now().to_rfc3339();
+
+        let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
+        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_active = dto.is_active.unwrap_or(current.is_active);
+
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        guard
+            .execute(
+                "UPDATE companies SET name = ?1, description = ?2, is_active = ?3, updated_at = ?4 WHERE id = ?5",
+                params![new_name, new_desc, if new_active { 1 } else { 0 }, now, id],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to update company: {e}")))?;
+
+        Ok(Company {
+            id: id.to_string(),
+            name: new_name.to_string(),
+            code: current.code,
+            description: new_desc.map(|s| s.to_string()),
+            is_active: new_active,
+            created_at: current.created_at,
+            updated_at: now,
+        })
+    }
+
+    // --- QUALITIES ---
+
+    pub async fn create_quality(&self, id: &str, dto: &CreateQualityDto) -> AppResult<Quality> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        let now = Utc::now().to_rfc3339();
+        let code = dto
+            .code
+            .as_deref()
+            .unwrap_or(&dto.name)
+            .trim()
+            .to_uppercase()
+            .replace(|c: char| !c.is_alphanumeric(), "_");
+
+        guard
+            .execute(
+                "INSERT INTO qualities (id, name, code, description, is_active, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6)",
+                params![id, dto.name.trim(), code, dto.description.as_deref(), now, now],
+            )
+            .map_err(|e| {
+                if e.to_string().contains("UNIQUE constraint failed") {
+                    AppError::Conflict(format!("Quality '{}' or code '{}' already exists", dto.name, code))
+                } else {
+                    AppError::Database(format!("Failed to create quality: {e}"))
+                }
+            })?;
+
+        Ok(Quality {
+            id: id.to_string(),
+            name: dto.name.trim().to_string(),
+            code,
+            description: dto.description.clone(),
+            is_active: true,
+            created_at: now.clone(),
+            updated_at: now,
+        })
+    }
+
+    pub async fn get_quality_by_id(&self, id: &str) -> AppResult<Quality> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        guard
+            .query_row(
+                "SELECT id, name, code, description, is_active, created_at, updated_at FROM qualities WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(Quality {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        code: row.get(2)?,
+                        description: row.get(3)?,
+                        is_active: row.get::<_, i64>(4)? == 1,
+                        created_at: row.get(5)?,
+                        updated_at: row.get(6)?,
+                    })
+                },
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Quality '{id}' not found")),
+                err => AppError::Database(format!("Failed to get quality: {err}")),
+            })
+    }
+
+    pub async fn list_qualities(&self) -> AppResult<Vec<Quality>> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        let mut stmt = guard
+            .prepare("SELECT id, name, code, description, is_active, created_at, updated_at FROM qualities ORDER BY name ASC")
+            .map_err(|e| AppError::Database(format!("Failed to prepare quality statement: {e}")))?;
+
+        let iter = stmt
+            .query_map([], |row| {
+                Ok(Quality {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    code: row.get(2)?,
+                    description: row.get(3)?,
+                    is_active: row.get::<_, i64>(4)? == 1,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            })
+            .map_err(|e| AppError::Database(format!("Failed to query qualities: {e}")))?;
+
+        let mut qualities = Vec::new();
+        for q in iter {
+            qualities.push(q.map_err(|e| AppError::Database(format!("Quality row error: {e}")))?);
+        }
+        Ok(qualities)
+    }
+
+    pub async fn update_quality(&self, id: &str, dto: &UpdateQualityDto) -> AppResult<Quality> {
+        let current = self.get_quality_by_id(id).await?;
+        let now = Utc::now().to_rfc3339();
+
+        let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
+        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_active = dto.is_active.unwrap_or(current.is_active);
+
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        guard
+            .execute(
+                "UPDATE qualities SET name = ?1, description = ?2, is_active = ?3, updated_at = ?4 WHERE id = ?5",
+                params![new_name, new_desc, if new_active { 1 } else { 0 }, now, id],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to update quality: {e}")))?;
+
+        Ok(Quality {
+            id: id.to_string(),
+            name: new_name.to_string(),
+            code: current.code,
+            description: new_desc.map(|s| s.to_string()),
+            is_active: new_active,
+            created_at: current.created_at,
+            updated_at: now,
+        })
+    }
+
+    // --- COLORS ---
+
+    pub async fn create_color(&self, id: &str, dto: &CreateColorDto) -> AppResult<Color> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        let now = Utc::now().to_rfc3339();
+        let code = dto
+            .code
+            .as_deref()
+            .unwrap_or(&dto.name)
+            .trim()
+            .to_uppercase()
+            .replace(|c: char| !c.is_alphanumeric(), "_");
+
+        guard
+            .execute(
+                "INSERT INTO colors (id, name, code, description, is_active, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6)",
+                params![id, dto.name.trim(), code, dto.description.as_deref(), now, now],
+            )
+            .map_err(|e| {
+                if e.to_string().contains("UNIQUE constraint failed") {
+                    AppError::Conflict(format!("Color '{}' or code '{}' already exists", dto.name, code))
+                } else {
+                    AppError::Database(format!("Failed to create color: {e}"))
+                }
+            })?;
+
+        Ok(Color {
+            id: id.to_string(),
+            name: dto.name.trim().to_string(),
+            code,
+            description: dto.description.clone(),
+            is_active: true,
+            created_at: now.clone(),
+            updated_at: now,
+        })
+    }
+
+    pub async fn get_color_by_id(&self, id: &str) -> AppResult<Color> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        guard
+            .query_row(
+                "SELECT id, name, code, description, is_active, created_at, updated_at FROM colors WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(Color {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        code: row.get(2)?,
+                        description: row.get(3)?,
+                        is_active: row.get::<_, i64>(4)? == 1,
+                        created_at: row.get(5)?,
+                        updated_at: row.get(6)?,
+                    })
+                },
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Color '{id}' not found")),
+                err => AppError::Database(format!("Failed to get color: {err}")),
+            })
+    }
+
+    pub async fn list_colors(&self) -> AppResult<Vec<Color>> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        let mut stmt = guard
+            .prepare("SELECT id, name, code, description, is_active, created_at, updated_at FROM colors ORDER BY name ASC")
+            .map_err(|e| AppError::Database(format!("Failed to prepare color statement: {e}")))?;
+
+        let iter = stmt
+            .query_map([], |row| {
+                Ok(Color {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    code: row.get(2)?,
+                    description: row.get(3)?,
+                    is_active: row.get::<_, i64>(4)? == 1,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            })
+            .map_err(|e| AppError::Database(format!("Failed to query colors: {e}")))?;
+
+        let mut colors = Vec::new();
+        for clr in iter {
+            colors.push(clr.map_err(|e| AppError::Database(format!("Color row error: {e}")))?);
+        }
+        Ok(colors)
+    }
+
+    pub async fn update_color(&self, id: &str, dto: &UpdateColorDto) -> AppResult<Color> {
+        let current = self.get_color_by_id(id).await?;
+        let now = Utc::now().to_rfc3339();
+
+        let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
+        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_active = dto.is_active.unwrap_or(current.is_active);
+
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        guard
+            .execute(
+                "UPDATE colors SET name = ?1, description = ?2, is_active = ?3, updated_at = ?4 WHERE id = ?5",
+                params![new_name, new_desc, if new_active { 1 } else { 0 }, now, id],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to update color: {e}")))?;
+
+        Ok(Color {
+            id: id.to_string(),
+            name: new_name.to_string(),
+            code: current.code,
+            description: new_desc.map(|s| s.to_string()),
             is_active: new_active,
             created_at: current.created_at,
             updated_at: now,
