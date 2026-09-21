@@ -52,10 +52,10 @@ export async function loginUser(identifier: string, password: string) {
         await tauriClient.authSyncSession(token);
       } catch {
         try {
-          await tauriClient.authLogin(identifier, password);
+          const localUsername = rawUser?.username || identifier;
+          await tauriClient.authLogin(localUsername, password);
         } catch (nativeErr: any) {
-          console.error("[loginUser] Failed to sync native desktop session:", nativeErr);
-          throw new Error(`Desktop Session Error: ${nativeErr?.message || nativeErr || 'Native session synchronization failed'}`);
+          console.warn("[loginUser] Native local desktop session sync warning:", nativeErr?.message || nativeErr);
         }
       }
     }

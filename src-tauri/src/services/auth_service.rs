@@ -821,4 +821,40 @@ mod tests {
         let logout_res = AuthService::require_org_admin(&state).await;
         assert!(matches!(logout_res, Err(AppError::Unauthorized(_))));
     }
+
+    #[tokio::test]
+    async fn test_native_login_credential_validation_and_invalid_user_rejection() {
+        let state = AppState::in_memory("5.0.3");
+        let repo = &state.user_repo;
+
+        // 1. Empty username or password rejected with Validation
+        let empty_res = AuthService::login(repo, &state, "", "").await;
+        assert!(matches!(empty_res, Err(AppError::Validation(_))));
+
+        // 2. Non-existent user rejected with Unauthorized invalid credentials message
+        let invalid_user_res = AuthService::login(repo, &state, "unknown_user", "Pass123!").await;
+        assert!(matches!(invalid_user_res, Err(AppError::Unauthorized(ref msg)) if msg.contains("Invalid credentials")));
+
+        // 3. Register user and verify wrong password rejection
+        let _user = create_test_user(
+            repo,
+            "valid_user",
+            "CorrectPass123!",
+            None,
+            UserRole::Admin,
+            UserStatus::Active,
+        )
+        .await;
+
+        let wrong_pass_res = AuthService::login(repo, &state, "valid_user", "WrongPass!").await;
+        assert!(matches!(wrong_pass_res, Err(AppError::Unauthorized(ref msg)) if msg.contains("Invalid credentials")));
+
+        // 4. Correct credentials succeed and populate AppState.session
+        let valid_res = AuthService::login(repo, &state, "valid_user", "CorrectPass123!").await;
+        assert!(valid_res.is_ok());
+        let session = state.get_session().await;
+        assert!(session.is_authenticated);
+        assert_eq!(session.username, Some("valid_user".to_string()));
+        assert_eq!(session.role, Some(UserRole::Admin));
+    }
 }
