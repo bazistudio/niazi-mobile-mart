@@ -796,6 +796,29 @@ pub const MIGRATIONS: &[Migration] = &[
         ALTER TABLE products ADD COLUMN color_id TEXT REFERENCES colors(id);
         "#,
     },
+    Migration {
+        version: 16,
+        name: "016_local_auth_snapshot",
+        up: r#"
+        CREATE TABLE IF NOT EXISTS local_auth_snapshot (
+            user_id TEXT PRIMARY KEY,
+            username TEXT NOT NULL COLLATE NOCASE,
+            organization_id TEXT NOT NULL,
+            branch_id TEXT,
+            role TEXT NOT NULL,
+            credential_hash TEXT NOT NULL,
+            access_profile_json TEXT NOT NULL DEFAULT '{}',
+            credential_version INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'ACTIVE',
+            synced_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_auth_snapshot_username ON local_auth_snapshot(username);
+        CREATE INDEX IF NOT EXISTS idx_auth_snapshot_status ON local_auth_snapshot(status);
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction
@@ -976,7 +999,7 @@ mod tests {
         let count = MigrationRunner::run(&mut conn).unwrap();
         assert_eq!(count, MIGRATIONS.len());
 
-        // Verify permanent tables exist (29 base tables + 3 Phase 1 master tables = 32 tables)
+        // Verify permanent tables exist (29 base tables + 3 Phase 1 master tables + 1 auth snapshot = 33 tables)
         let tables_count: i64 = conn
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN (
@@ -987,13 +1010,13 @@ mod tests {
                     'suppliers', 'purchases', 'purchase_lines', 'supplier_ledger_entries',
                     'expense_categories', 'expenses', 'cash_sessions', 'cash_movements',
                     'sales_returns', 'sales_return_lines', 'purchase_returns', 'purchase_return_lines',
-                    'companies', 'qualities', 'colors'
+                    'companies', 'qualities', 'colors', 'local_auth_snapshot'
                 )",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(tables_count, 32);
+        assert_eq!(tables_count, 33);
 
         // Verify users table has recovery_key_hash and must_change_password
         let user_cols: Vec<String> = {
