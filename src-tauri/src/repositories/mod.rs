@@ -1,3 +1,4 @@
+pub mod auth_snapshot_repo;
 pub mod branch_repository;
 pub mod cash_repository;
 pub mod catalog_repository;
@@ -34,6 +35,7 @@ pub mod postgres_user_repo;
 pub mod postgres_change_log_repo;
 pub mod sqlite_sync_cursor_repo;
 
+pub use auth_snapshot_repo::SQLiteAuthSnapshotRepository;
 pub use postgres_change_log_repo::PostgresChangeLogRepository;
 pub use sqlite_sync_cursor_repo::SQLiteSyncCursorRepository;
 pub use sync_queue_repository::{PostgresSyncAuditRepository, SQLiteSyncQueueRepository};

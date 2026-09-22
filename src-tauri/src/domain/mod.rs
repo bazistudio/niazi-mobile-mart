@@ -16,7 +16,10 @@ pub mod sales_return;
 pub mod sync_queue;
 pub mod supplier;
 pub mod terminal;
+pub mod auth_snapshot;
 pub mod user;
+
+pub use auth_snapshot::AuthSnapshot;
 
 pub use change_log::{ChangeLogEntry, DeltaPullQuery, DeltaPullResponseDto, SyncCursor};
 pub use sync_queue::{EnqueueOfflineEventDto, SyncQueueItem, SyncQueueStatus};
