@@ -47,6 +47,20 @@ pub async fn auth_login(
     })
 }
 
+/// Staff login command using local SQLite authentication snapshot
+#[tauri::command]
+pub async fn auth_login_snapshot(
+    state: State<'_, AppState>,
+    username: String,
+    credential: String,
+) -> AppResult<SessionContext> {
+    let snapshot_repo = state
+        .auth_snapshot_repo()
+        .ok_or_else(|| crate::errors::AppError::Internal("Auth snapshot repository unavailable".to_string()))?;
+    AuthService::login_with_snapshot(&snapshot_repo, &state, &username, &credential).await
+}
+
+
 /// Synchronizes native SessionContext from a verified Central API Bearer JWT token
 #[tauri::command]
 pub async fn auth_sync_session(

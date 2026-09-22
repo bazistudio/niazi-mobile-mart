@@ -1,8 +1,9 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::domain::access_control::StaffAccessProfile;
 use crate::domain::user::{SanitizedUser, UserStatus};
 use crate::errors::{AppError, AppResult};
-use crate::repositories::{SQLiteUserRepository, UserRepository};
+use crate::repositories::{SQLiteAuthSnapshotRepository, SQLiteUserRepository, UserRepository};
 use crate::services::hasher::verify_credential;
 use crate::state::{AppState, SessionContext};
 
@@ -107,6 +108,72 @@ impl AuthService {
         app_state.set_authenticated_with_token(&user, Some(token)).await;
 
         Ok(sanitized)
+    }
+
+    /// Authenticates a staff member against a local SQLite authentication snapshot
+    pub async fn login_with_snapshot(
+        snapshot_repo: &SQLiteAuthSnapshotRepository,
+        app_state: &AppState,
+        username: &str,
+        credential: &str,
+    ) -> AppResult<SessionContext> {
+        let clean_username = username.trim();
+        if clean_username.is_empty() || credential.is_empty() {
+            return Err(AppError::Validation(
+                "Username and credential are required".to_string(),
+            ));
+        }
+
+        // 1. Retrieve snapshot by username (respects COLLATE NOCASE)
+        let snapshot = match snapshot_repo.find_by_username(clean_username).await? {
+            Some(s) => s,
+            None => {
+                return Err(AppError::Unauthorized(
+                    "Invalid credentials. Please verify your username and credential.".to_string(),
+                ));
+            }
+        };
+
+        // 2. Validate snapshot status (Active allowed; Disabled, Pending, Rejected fail closed)
+        match snapshot.status {
+            UserStatus::Active => {}
+            UserStatus::Pending => {
+                return Err(AppError::Forbidden(
+                    "ACCOUNT_PENDING: Your registration is pending administrator approval.".to_string(),
+                ));
+            }
+            UserStatus::Rejected => {
+                return Err(AppError::Forbidden(
+                    "ACCOUNT_REJECTED: Your account registration was rejected by administration.".to_string(),
+                ));
+            }
+            UserStatus::Disabled => {
+                return Err(AppError::Forbidden(
+                    "ACCOUNT_DISABLED: This account is disabled. Please contact your administrator.".to_string(),
+                ));
+            }
+        }
+
+        // 3. Verify Argon2id credential hash
+        if !verify_credential(credential, &snapshot.credential_hash) {
+            return Err(AppError::Unauthorized(
+                "Invalid credentials. Please verify your username and credential.".to_string(),
+            ));
+        }
+
+        // 4. Parse access_profile_json (FAIL CLOSED if deserialization fails)
+        let access_profile = serde_json::from_str::<StaffAccessProfile>(&snapshot.access_profile_json)
+            .map_err(|e| {
+                AppError::Unauthorized(format!(
+                    "Invalid or malformed access profile in authentication snapshot: {}",
+                    e
+                ))
+            })?;
+
+        // 5. Establish native AppState.session with active_token = None
+        app_state.set_authenticated_from_snapshot(&snapshot, access_profile).await;
+
+        Ok(app_state.get_session().await)
     }
 
     /// Changes password for the currently authenticated user
@@ -504,13 +571,23 @@ impl AuthService {
             let db = app_state.db.as_ref().expect("SQLite database connection required");
             let conn_arc = db.inner();
             let guard = conn_arc.lock().await;
-            guard
-                .query_row(
-                    "SELECT branch_id FROM users WHERE id = ?1",
-                    rusqlite::params![user_id],
-                    |row| row.get::<_, Option<String>>(0),
-                )
-                .map_err(|e| AppError::Database(format!("Failed to retrieve user branch: {e}")))?
+
+            let snapshot_branch: Result<Option<String>, _> = guard.query_row(
+                "SELECT branch_id FROM local_auth_snapshot WHERE user_id = ?1",
+                rusqlite::params![user_id],
+                |row| row.get(0),
+            );
+
+            match snapshot_branch {
+                Ok(branch) => branch,
+                Err(_) => guard
+                    .query_row(
+                        "SELECT branch_id FROM users WHERE id = ?1",
+                        rusqlite::params![user_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .map_err(|e| AppError::Database(format!("Failed to retrieve user branch: {e}")))?,
+            }
         };
 
         let authorized_branch = match user_branch_id {
@@ -856,5 +933,320 @@ mod tests {
         assert!(session.is_authenticated);
         assert_eq!(session.username, Some("valid_user".to_string()));
         assert_eq!(session.role, Some(UserRole::Admin));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Phase D — Local Authentication Snapshot Unit Tests
+    // ─────────────────────────────────────────────────────────────
+
+    use crate::domain::auth_snapshot::AuthSnapshot;
+
+    fn make_test_snapshot(
+        user_id: &str,
+        username: &str,
+        credential: &str,
+        role: UserRole,
+        status: UserStatus,
+        branch_id: Option<String>,
+        access_profile_json: Option<String>,
+    ) -> AuthSnapshot {
+        let hash = hash_credential(credential).unwrap();
+        let profile_json = access_profile_json.unwrap_or_else(|| {
+            serde_json::to_string(&match role {
+                UserRole::Admin => StaffAccessProfile::admin_unlimited(),
+                UserRole::Cashier => StaffAccessProfile::cashier_default(),
+                _ => StaffAccessProfile::staff_default(),
+            })
+            .unwrap()
+        });
+
+        AuthSnapshot {
+            user_id: user_id.to_string(),
+            username: username.to_string(),
+            organization_id: "test-org-123".to_string(),
+            branch_id,
+            role,
+            credential_hash: hash,
+            access_profile_json: profile_json,
+            credential_version: 1,
+            status,
+            synced_at: "2026-01-01T00:00:00Z".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_auth_test_1_valid_credential() {
+        let state = AppState::in_memory("1.2.15");
+        let snapshot_repo = state.auth_snapshot_repo().unwrap();
+        let snapshot = make_test_snapshot(
+            "test-user-1",
+            "snapshot_user",
+            "ValidCred123!",
+            UserRole::Cashier,
+            UserStatus::Active,
+            Some("branch-1".to_string()),
+            None,
+        );
+
+        snapshot_repo.upsert(&snapshot).await.unwrap();
+
+        let session = AuthService::login_with_snapshot(&snapshot_repo, &state, "snapshot_user", "ValidCred123!")
+            .await
+            .expect("Snapshot login should succeed");
+
+        assert!(session.is_authenticated);
+        assert!(!session.is_locked);
+        assert_eq!(session.user_id, Some("test-user-1".to_string()));
+        assert_eq!(session.username, Some("snapshot_user".to_string()));
+        assert_eq!(session.role, Some(UserRole::Cashier));
+        assert!(session.active_token.is_none(), "Snapshot session must have active_token = None");
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_auth_test_2_invalid_credential() {
+        let state = AppState::in_memory("1.2.15");
+        let snapshot_repo = state.auth_snapshot_repo().unwrap();
+        let snapshot = make_test_snapshot(
+            "test-user-2",
+            "snapshot_user2",
+            "ValidCred123!",
+            UserRole::Cashier,
+            UserStatus::Active,
+            None,
+            None,
+        );
+
+        snapshot_repo.upsert(&snapshot).await.unwrap();
+
+        let res = AuthService::login_with_snapshot(&snapshot_repo, &state, "snapshot_user2", "WrongCred!")
+            .await;
+        assert!(matches!(res, Err(AppError::Unauthorized(_))));
+
+        let session = state.get_session().await;
+        assert!(!session.is_authenticated);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_auth_test_3_disabled_user() {
+        let state = AppState::in_memory("1.2.15");
+        let snapshot_repo = state.auth_snapshot_repo().unwrap();
+        let snapshot = make_test_snapshot(
+            "test-user-disabled",
+            "disabled_snap",
+            "ValidCred123!",
+            UserRole::Staff,
+            UserStatus::Disabled,
+            None,
+            None,
+        );
+
+        snapshot_repo.upsert(&snapshot).await.unwrap();
+
+        let res = AuthService::login_with_snapshot(&snapshot_repo, &state, "disabled_snap", "ValidCred123!").await;
+        assert!(matches!(res, Err(AppError::Forbidden(_))));
+        assert!(!state.get_session().await.is_authenticated);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_auth_test_4_pending_user() {
+        let state = AppState::in_memory("1.2.15");
+        let snapshot_repo = state.auth_snapshot_repo().unwrap();
+        let snapshot = make_test_snapshot(
+            "test-user-pending",
+            "pending_snap",
+            "ValidCred123!",
+            UserRole::Staff,
+            UserStatus::Pending,
+            None,
+            None,
+        );
+
+        snapshot_repo.upsert(&snapshot).await.unwrap();
+
+        let res = AuthService::login_with_snapshot(&snapshot_repo, &state, "pending_snap", "ValidCred123!").await;
+        assert!(matches!(res, Err(AppError::Forbidden(_))));
+        assert!(!state.get_session().await.is_authenticated);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_auth_test_5_rejected_user() {
+        let state = AppState::in_memory("1.2.15");
+        let snapshot_repo = state.auth_snapshot_repo().unwrap();
+        let snapshot = make_test_snapshot(
+            "test-user-rejected",
+            "rejected_snap",
+            "ValidCred123!",
+            UserRole::Staff,
+            UserStatus::Rejected,
+            None,
+            None,
+        );
+
+        snapshot_repo.upsert(&snapshot).await.unwrap();
+
+        let res = AuthService::login_with_snapshot(&snapshot_repo, &state, "rejected_snap", "ValidCred123!").await;
+        assert!(matches!(res, Err(AppError::Forbidden(_))));
+        assert!(!state.get_session().await.is_authenticated);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_auth_test_6_unknown_status_fails_closed() {
+        let state = AppState::in_memory("1.2.15");
+        let db = state.db.as_ref().unwrap();
+        let conn_arc = db.inner();
+        let guard = conn_arc.lock().await;
+
+        let hash = hash_credential("ValidCred123!").unwrap();
+        let profile = serde_json::to_string(&StaffAccessProfile::staff_default()).unwrap();
+        guard.execute(
+            "INSERT INTO local_auth_snapshot (
+                user_id, username, organization_id, branch_id, role, credential_hash,
+                access_profile_json, credential_version, status, synced_at, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            rusqlite::params![
+                "unknown-status-user", "unknown_snap", "org-1", None::<String>, "STAFF",
+                hash, profile, 1, "SUSPENDED_UNKNOWN", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"
+            ],
+        ).unwrap();
+        drop(guard);
+
+        let snapshot_repo = state.auth_snapshot_repo().unwrap();
+        let res = AuthService::login_with_snapshot(&snapshot_repo, &state, "unknown_snap", "ValidCred123!").await;
+        assert!(matches!(res, Err(AppError::Forbidden(_))));
+        assert!(!state.get_session().await.is_authenticated);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_auth_test_7_malformed_access_profile() {
+        let state = AppState::in_memory("1.2.15");
+        let snapshot_repo = state.auth_snapshot_repo().unwrap();
+        let snapshot = make_test_snapshot(
+            "test-user-malformed",
+            "malformed_snap",
+            "ValidCred123!",
+            UserRole::Cashier,
+            UserStatus::Active,
+            None,
+            Some("invalid { json content".to_string()),
+        );
+
+        snapshot_repo.upsert(&snapshot).await.unwrap();
+
+        let res = AuthService::login_with_snapshot(&snapshot_repo, &state, "malformed_snap", "ValidCred123!").await;
+        assert!(matches!(res, Err(AppError::Unauthorized(_))));
+        assert!(!state.get_session().await.is_authenticated, "Malformed access profile must fail closed without creating session");
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_auth_test_8_nullable_branch() {
+        let state = AppState::in_memory("1.2.15");
+        let snapshot_repo = state.auth_snapshot_repo().unwrap();
+        let snapshot = make_test_snapshot(
+            "test-user-null-branch",
+            "null_branch_user",
+            "ValidCred123!",
+            UserRole::Cashier,
+            UserStatus::Active,
+            None,
+            None,
+        );
+
+        snapshot_repo.upsert(&snapshot).await.unwrap();
+
+        let session = AuthService::login_with_snapshot(&snapshot_repo, &state, "null_branch_user", "ValidCred123!")
+            .await
+            .unwrap();
+
+        assert!(session.is_authenticated);
+        let branch_res = AuthService::require_branch_access(&state, None).await;
+        assert!(branch_res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_auth_test_9_existing_authorization_boundaries() {
+        let state = AppState::in_memory("1.2.15");
+        let snapshot_repo = state.auth_snapshot_repo().unwrap();
+
+        let staff_snap = make_test_snapshot(
+            "staff-1",
+            "staff_user",
+            "ValidCred123!",
+            UserRole::Cashier,
+            UserStatus::Active,
+            Some("branch-1".to_string()),
+            None,
+        );
+        snapshot_repo.upsert(&staff_snap).await.unwrap();
+
+        AuthService::login_with_snapshot(&snapshot_repo, &state, "staff_user", "ValidCred123!").await.unwrap();
+
+        assert!(AuthService::require_permission(&state, Some("pos"), Some("pos:sale")).await.is_ok());
+        assert!(matches!(AuthService::require_org_admin(&state).await, Err(AppError::Forbidden(_))));
+
+        let admin_snap = make_test_snapshot(
+            "admin-1",
+            "admin_user",
+            "ValidCred123!",
+            UserRole::Admin,
+            UserStatus::Active,
+            None,
+            None,
+        );
+        snapshot_repo.upsert(&admin_snap).await.unwrap();
+
+        AuthService::login_with_snapshot(&snapshot_repo, &state, "admin_user", "ValidCred123!").await.unwrap();
+        assert!(AuthService::require_org_admin(&state).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_auth_test_10_logout_session_reset() {
+        let state = AppState::in_memory("1.2.15");
+        let snapshot_repo = state.auth_snapshot_repo().unwrap();
+        let snapshot = make_test_snapshot(
+            "logout-user",
+            "logout_user",
+            "ValidCred123!",
+            UserRole::Staff,
+            UserStatus::Active,
+            None,
+            None,
+        );
+
+        snapshot_repo.upsert(&snapshot).await.unwrap();
+
+        AuthService::login_with_snapshot(&snapshot_repo, &state, "logout_user", "ValidCred123!").await.unwrap();
+        assert!(state.get_session().await.is_authenticated);
+
+        AuthService::logout(&state).await.unwrap();
+        let post_logout = state.get_session().await;
+        assert!(!post_logout.is_authenticated);
+        assert!(post_logout.user_id.is_none());
+        assert!(AuthService::require_permission(&state, Some("dashboard"), None).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_auth_test_11_jwt_independence() {
+        let state = AppState::in_memory("1.2.15");
+        let snapshot_repo = state.auth_snapshot_repo().unwrap();
+        let snapshot = make_test_snapshot(
+            "jwt-indep-user",
+            "jwt_indep_user",
+            "ValidCred123!",
+            UserRole::Cashier,
+            UserStatus::Active,
+            None,
+            None,
+        );
+
+        snapshot_repo.upsert(&snapshot).await.unwrap();
+
+        let session = AuthService::login_with_snapshot(&snapshot_repo, &state, "jwt_indep_user", "ValidCred123!")
+            .await
+            .unwrap();
+
+        assert!(session.active_token.is_none());
+        assert!(session.is_authenticated);
     }
 }

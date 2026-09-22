@@ -245,6 +245,36 @@ impl AppState {
         };
     }
 
+    /// Establishes native authenticated session from a verified local authentication snapshot.
+    /// CRITICAL SECURITY RULE: Snapshot native sessions have no Central JWT token (active_token = None).
+    pub async fn set_authenticated_from_snapshot(
+        &self,
+        snapshot: &crate::domain::auth_snapshot::AuthSnapshot,
+        access_profile: StaffAccessProfile,
+    ) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+
+        let mut session = self.session.write().await;
+        *session = SessionContext {
+            is_authenticated: true,
+            is_locked: false,
+            user_id: Some(snapshot.user_id.clone()),
+            username: Some(snapshot.username.clone()),
+            role: Some(snapshot.role),
+            login_time_ms: Some(now),
+            access_profile: Some(access_profile),
+            active_token: None,
+        };
+    }
+
+    /// Returns an instance of SQLiteAuthSnapshotRepository if SQLite database is available
+    pub fn auth_snapshot_repo(&self) -> Option<crate::repositories::SQLiteAuthSnapshotRepository> {
+        self.db.as_ref().map(|db| crate::repositories::SQLiteAuthSnapshotRepository::new(db.clone()))
+    }
+
 
     pub async fn lock_session(&self) -> bool {
         let mut session = self.session.write().await;
