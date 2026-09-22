@@ -141,6 +141,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/auth/me", get(me_handler))
         .route("/api/users", get(list_users_handler).post(create_user_handler))
         .route("/api/v1/users", get(list_users_handler).post(create_user_handler))
+        .route("/api/v1/users/credential-snapshots", get(credential_snapshots_handler))
         .route("/api/products", get(list_products_handler).post(create_product_handler))
         .route("/api/products/:id", get(get_product_handler))
         .route("/api/inventory", get(list_inventory_handler))
@@ -390,6 +391,62 @@ async fn list_users_handler(
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
     }
 }
+
+/// GET /api/v1/users/credential-snapshots — Return user authentication snapshots (Admin only)
+async fn credential_snapshots_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+) -> impl IntoResponse {
+    use niazi_mobile_mart_lib::domain::user::UserRole;
+
+    // Organization Admin authority required
+    if auth.0.role != UserRole::Admin {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "FORBIDDEN",
+                "message": "Access denied: Organization Admin authority required for credential snapshots"
+            })),
+        );
+    }
+
+    match state.app_state.user_repo.list_all().await {
+        Ok(users) => {
+            let now = chrono::Utc::now().to_rfc3339();
+            let snapshots: Vec<niazi_mobile_mart_lib::domain::auth_snapshot::AuthSnapshot> = users
+                .into_iter()
+                .map(|u| {
+                    let profile_json = serde_json::to_string(&u.access_profile)
+                        .unwrap_or_else(|_| "{}".to_string());
+                    niazi_mobile_mart_lib::domain::auth_snapshot::AuthSnapshot {
+                        user_id: u.id,
+                        username: u.username,
+                        organization_id: auth.0.organization_id.clone(),
+                        branch_id: None,
+                        role: u.role,
+                        credential_hash: u.login_key_hash,
+                        access_profile_json: profile_json,
+                        credential_version: 1,
+                        status: u.status,
+                        synced_at: now.clone(),
+                        created_at: u.created_at,
+                        updated_at: u.updated_at,
+                    }
+                })
+                .collect();
+
+            (StatusCode::OK, Json(json!(snapshots)))
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": "SERVER_ERROR",
+                "message": e.to_string()
+            })),
+        ),
+    }
+}
+
 
 /// GET /api/health
 /// Infrastructure-level health check.

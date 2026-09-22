@@ -68,6 +68,7 @@ impl SyncWorkerDaemon {
         info!("[SyncWorkerDaemon] Starting manual sync pipeline (push outbox + pull downstream)...");
         self.sync_outbox_push().await;
         self.sync_downstream_pull().await;
+        self.sync_auth_snapshots().await;
 
         let (pending_count, conflict_count, failed_count) = match &self.app_state.sync_queue_repo {
             Some(r) => (
@@ -400,5 +401,168 @@ impl SyncWorkerDaemon {
                 break;
             }
         }
+
+        self.sync_auth_snapshots().await;
+    }
+
+    /// Pulls central authentication snapshots and updates local SQLiteAuthSnapshotRepository
+    pub async fn sync_auth_snapshots(&self) {
+        let session = self.app_state.get_session().await;
+        let token = match &session.active_token {
+            Some(t) if session.is_authenticated && !t.trim().is_empty() => t.clone(),
+            _ => return, // Cleanly skip if no Central JWT present (e.g. snapshot native session or unauthenticated)
+        };
+
+        let db = match &self.app_state.db {
+            Some(db) => db.clone(),
+            None => return, // SQLite required for desktop snapshot persistence
+        };
+
+        let server_url = std::env::var("CENTRAL_SERVER_URL")
+            .unwrap_or_else(|_| DEFAULT_CENTRAL_SERVER_URL.to_string());
+
+        let client = match reqwest::Client::builder().timeout(Duration::from_secs(10)).build() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        let snapshot_url = format!("{}/api/v1/users/credential-snapshots", server_url.trim_end_matches('/'));
+
+        let resp = match client
+            .get(&snapshot_url)
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => r,
+            Ok(_r) => {
+                info!("[SyncWorkerDaemon] Auth snapshot sync HTTP non-success response, preserving local snapshots");
+                return;
+            }
+            Err(e) => {
+                info!("[SyncWorkerDaemon] Auth snapshot sync network error: {e}, preserving local snapshots");
+                return;
+            }
+        };
+
+        let snapshots: Vec<crate::domain::auth_snapshot::AuthSnapshot> = match resp.json().await {
+            Ok(s) => s,
+            Err(e) => {
+                info!("[SyncWorkerDaemon] Failed to parse auth snapshots JSON: {e}, preserving local snapshots");
+                return;
+            }
+        };
+
+        let snapshot_repo = crate::repositories::SQLiteAuthSnapshotRepository::new(db);
+        let now = chrono::Utc::now().to_rfc3339();
+
+        for mut snapshot in snapshots {
+            // Validate required snapshot fields before upsert
+            if snapshot.user_id.trim().is_empty()
+                || snapshot.username.trim().is_empty()
+                || snapshot.organization_id.trim().is_empty()
+                || snapshot.credential_hash.trim().is_empty()
+            {
+                tracing::warn!("[SyncWorkerDaemon] Skipping invalid snapshot for user_id '{}'", snapshot.user_id);
+                continue;
+            }
+
+            // Ensure valid access_profile_json (must parse cleanly)
+            if serde_json::from_str::<crate::domain::access_control::StaffAccessProfile>(&snapshot.access_profile_json).is_err() {
+                tracing::warn!("[SyncWorkerDaemon] Skipping snapshot with malformed access_profile_json for user '{}'", snapshot.username);
+                continue;
+            }
+
+            snapshot.synced_at = now.clone();
+
+            if let Err(e) = snapshot_repo.upsert(&snapshot).await {
+                tracing::warn!("[SyncWorkerDaemon] Failed to upsert snapshot for user '{}': {e}", snapshot.username);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::access_control::StaffAccessProfile;
+    use crate::domain::auth_snapshot::AuthSnapshot;
+    use crate::domain::user::{UserRole, UserStatus};
+
+    #[tokio::test]
+    async fn test_sync_worker_skip_when_active_token_is_none() {
+        let state = Arc::new(AppState::in_memory("1.2.15"));
+        let daemon = SyncWorkerDaemon::new(state.clone());
+
+        // Snapshot-authenticated session has active_token = None
+        let snapshot = AuthSnapshot {
+            user_id: "u1".to_string(),
+            username: "snap_user".to_string(),
+            organization_id: "org1".to_string(),
+            branch_id: None,
+            role: UserRole::Cashier,
+            credential_hash: "hash".to_string(),
+            access_profile_json: serde_json::to_string(&StaffAccessProfile::cashier_default()).unwrap(),
+            credential_version: 1,
+            status: UserStatus::Active,
+            synced_at: "2026-01-01T00:00:00Z".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        state.set_authenticated_from_snapshot(&snapshot, StaffAccessProfile::cashier_default()).await;
+        assert!(state.get_session().await.active_token.is_none());
+
+        // Calling sync_auth_snapshots must return cleanly without errors or fake token creation
+        daemon.sync_auth_snapshots().await;
+
+        let session = state.get_session().await;
+        assert!(session.is_authenticated);
+        assert!(session.active_token.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_sync_worker_skip_when_unauthenticated() {
+        let state = Arc::new(AppState::in_memory("1.2.15"));
+        let daemon = SyncWorkerDaemon::new(state.clone());
+
+        daemon.sync_auth_snapshots().await;
+        assert!(!state.get_session().await.is_authenticated);
+    }
+
+    #[tokio::test]
+    async fn test_sync_worker_disabled_status_propagation() {
+        let state = Arc::new(AppState::in_memory("1.2.15"));
+        let db = state.db.as_ref().unwrap();
+        let repo = crate::repositories::SQLiteAuthSnapshotRepository::new(db.clone());
+
+        // 1. Initial active snapshot
+        let active_snap = AuthSnapshot {
+            user_id: "u-disabled-test".to_string(),
+            username: "user_dis".to_string(),
+            organization_id: "org1".to_string(),
+            branch_id: None,
+            role: UserRole::Staff,
+            credential_hash: "hash".to_string(),
+            access_profile_json: serde_json::to_string(&StaffAccessProfile::staff_default()).unwrap(),
+            credential_version: 1,
+            status: UserStatus::Active,
+            synced_at: "2026-01-01T00:00:00Z".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        repo.upsert(&active_snap).await.unwrap();
+        assert_eq!(repo.find_by_user_id("u-disabled-test").await.unwrap().unwrap().status, UserStatus::Active);
+
+        // 2. Central returns updated snapshot with status = DISABLED
+        let mut disabled_snap = active_snap.clone();
+        disabled_snap.status = UserStatus::Disabled;
+        disabled_snap.credential_version = 2;
+
+        repo.upsert(&disabled_snap).await.unwrap();
+        let updated = repo.find_by_user_id("u-disabled-test").await.unwrap().unwrap();
+        assert_eq!(updated.status, UserStatus::Disabled);
+        assert_eq!(updated.credential_version, 2);
     }
 }
