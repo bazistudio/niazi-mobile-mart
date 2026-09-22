@@ -394,6 +394,25 @@ export const tauriClient = {
     };
   },
 
+  async authLoginSnapshot(username: string, credential: string): Promise<AuthResponse> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const session = await invoke<SessionContext>('auth_login_snapshot', {
+        username,
+        credential,
+      });
+      const user = await invoke<SanitizedUser | null>('auth_get_current_user');
+      if (!user) {
+        throw new Error('Failed to retrieve user after snapshot authentication');
+      }
+      return {
+        user,
+        session,
+      };
+    }
+    throw new Error('Native snapshot authentication requires desktop environment');
+  },
+
   async authSyncSession(token: string): Promise<SessionContext> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');

@@ -24,28 +24,30 @@ export default function AuthHydrator() {
     const hydrate = async () => {
       if (isTauriEnvironment()) {
         try {
-          // 1. Check for stored Bearer JWT auth token (from Central API login)
-          const token = getAuthToken();
-          if (token && token !== "native-tauri-session") {
-            try {
-              // Attempt to restore native Rust session from stored token
-              await tauriClient.authSyncSession(token);
-            } catch (syncErr) {
-              console.warn("[AuthHydrator] Failed to sync native Rust session from stored token:", syncErr);
-            }
-          }
-
-          // 2. Query authoritative native session state
+          // 1. Query authoritative native session state from Rust first
           const session = await tauriClient.getCurrentSession();
+          const token = getAuthToken();
+
           if (session && session.is_authenticated && session.user_id) {
+            // Native session is already active. Attach stored Central JWT token if present for background SyncWorker
+            if (token && token !== "native-tauri-session") {
+              try {
+                await tauriClient.authSyncSession(token);
+              } catch (syncErr) {
+                console.warn("[AuthHydrator] Non-fatal authSyncSession warning:", syncErr);
+              }
+            }
+
             const rawUser = await tauriClient.getCurrentUser();
             if (rawUser) {
               const user: AuthUser = {
                 id: rawUser.id,
                 name: rawUser.name,
+                username: rawUser.username,
                 email: `${rawUser.username}@local`,
-                role: rawUser.role as any,
-                status: rawUser.is_active ? "active" : "suspended",
+                role: (rawUser.role ? rawUser.role.toUpperCase() : "STAFF") as any,
+                status: (rawUser.status ? rawUser.status.toLowerCase() : (rawUser.is_active ? "active" : "suspended")) as any,
+                mustChangePassword: rawUser.must_change_password,
                 permissions: rawUser.access_profile ? rawUser.access_profile.allowed_actions : [],
                 createdAt: rawUser.created_at,
               };
@@ -63,10 +65,14 @@ export default function AuthHydrator() {
               return;
             }
           }
-          logout();
+
+          // Native session is unauthenticated on startup.
+          // Do NOT call logout() here — calling logout() wipes localStorage Central JWT & session!
+          // Mark hydration complete so ProtectedRoute redirects to Sign In / PIN screen cleanly.
+          setHydrated();
         } catch (err) {
           console.warn("[AuthHydrator] Failed to query native session:", err);
-          logout();
+          setHydrated();
         }
         return;
       }
