@@ -399,13 +399,13 @@ async fn credential_snapshots_handler(
 ) -> impl IntoResponse {
     use niazi_mobile_mart_lib::domain::user::UserRole;
 
-    // Organization Admin authority required
-    if auth.0.role != UserRole::Admin {
+    // Internal staff authority required
+    if auth.0.role.is_public() {
         return (
             StatusCode::FORBIDDEN,
             Json(json!({
                 "error": "FORBIDDEN",
-                "message": "Access denied: Organization Admin authority required for credential snapshots"
+                "message": "Access denied: Internal staff authority required for credential snapshots"
             })),
         );
     }
@@ -424,7 +424,7 @@ async fn credential_snapshots_handler(
                         organization_id: auth.0.organization_id.clone(),
                         branch_id: None,
                         role: u.role,
-                        credential_hash: u.login_key_hash,
+                        credential_hash: format!("{}|{}", u.login_key_hash, u.pin_hash.unwrap_or_default()),
                         access_profile_json: profile_json,
                         credential_version: 1,
                         status: u.status,

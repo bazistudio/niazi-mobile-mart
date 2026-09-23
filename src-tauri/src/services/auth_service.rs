@@ -154,8 +154,12 @@ impl AuthService {
             }
         }
 
-        // 3. Verify Argon2id credential hash
-        if !verify_credential(credential, &snapshot.credential_hash) {
+        // 3. Verify Argon2id credential hash (supports both password and PIN hashes separated by '|')
+        let hashes: Vec<&str> = snapshot.credential_hash.split('|').collect();
+        let pwd_hash = hashes.first().unwrap_or(&"");
+        let pin_hash = hashes.get(1).unwrap_or(&"");
+
+        if !verify_credential(credential, pwd_hash) && !verify_credential(credential, pin_hash) {
             return Err(AppError::Unauthorized(
                 "Invalid credentials. Please verify your username and credential.".to_string(),
             ));

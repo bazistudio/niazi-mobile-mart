@@ -5,6 +5,16 @@ All notable changes to Niazi Mobile Mart will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.18] - 2026-09-24
+
+### Fixed
+- relaxed central credential-snapshots authorization to permit any internal staff to bootstrap their local terminal
+- implemented dual-hash storage for snapshot credentials without modifying local SQLite schema
+- packed both password and PIN hashes into the existing local `credential_hash` string
+- resolved "Invalid credentials" error for non-Admins or staff logging into fresh installations with a PIN
+- completely eliminated fresh-install authentication deadlocks for all staff roles
+
+
 ## [1.2.17] - 2026-09-24
 
 ### Fixed
