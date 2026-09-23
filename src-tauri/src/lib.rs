@@ -274,6 +274,15 @@ pub fn run() {
             commands::storage_product::storage_product_get_by_barcode,
             commands::storage_product::storage_product_list,
             commands::storage_product::storage_product_deactivate,
+            // Typed Storage Commands (Inventory Domain Boundary)
+            commands::storage_inventory::storage_inventory_increase,
+            commands::storage_inventory::storage_inventory_decrease,
+            commands::storage_inventory::storage_inventory_adjust,
+            commands::storage_inventory::storage_inventory_transfer,
+            commands::storage_inventory::storage_inventory_get_stock,
+            commands::storage_inventory::storage_inventory_get_stock_map,
+            commands::storage_inventory::storage_inventory_get_movements,
+            commands::storage_inventory::storage_inventory_get_low_stock,
             // Inventory Commands
             commands::inventory::inventory_increase,
             commands::inventory::inventory_decrease,

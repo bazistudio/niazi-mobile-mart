@@ -1125,11 +1125,11 @@ export const tauriClient = {
     }
   },
 
-  // ── Inventory Foundation Domain (Phase 7 Domain 2) ─────────────────────────
+  // ── Inventory Foundation Domain (Phase 4A Typed Storage Bridge) ─────────────
   async inventoryIncrease(dto: IncreaseStockDto): Promise<number> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('inventory_increase', { dto });
+      return await invoke<number>('storage_inventory_increase', { dto });
     }
     const stockMap = getStoredWebStockMap();
     const current = stockMap[dto.product_id] || 0;
@@ -1142,7 +1142,7 @@ export const tauriClient = {
   async inventoryDecrease(dto: DecreaseStockDto): Promise<number> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('inventory_decrease', { dto });
+      return await invoke<number>('storage_inventory_decrease', { dto });
     }
     const stockMap = getStoredWebStockMap();
     const current = stockMap[dto.product_id] || 0;
@@ -1155,7 +1155,7 @@ export const tauriClient = {
   async inventoryAdjust(dto: AdjustStockDto): Promise<number> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('inventory_adjust', { dto });
+      return await invoke<number>('storage_inventory_adjust', { dto });
     }
     const stockMap = getStoredWebStockMap();
     const next = dto.target_quantity ?? (dto as any).new_quantity ?? 0;
@@ -1167,14 +1167,14 @@ export const tauriClient = {
   async inventoryTransfer(dto: TransferStockDto): Promise<void> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('inventory_transfer', { dto });
+      await invoke('storage_inventory_transfer', { dto });
     }
   },
 
   async inventoryGetStock(productId: string, branchId: string): Promise<number> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('inventory_get_stock', {
+      return await invoke<number>('storage_inventory_get_stock', {
         productId,
         branchId,
       });
@@ -1186,7 +1186,7 @@ export const tauriClient = {
   async inventoryGetStockMap(branchId: string): Promise<Record<string, number>> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Record<string, number>>('inventory_get_stock_map', {
+      return await invoke<Record<string, number>>('storage_inventory_get_stock_map', {
         branchId,
       });
     }
@@ -1200,7 +1200,7 @@ export const tauriClient = {
   ): Promise<StockMovement[]> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<StockMovement[]>('inventory_get_movements', {
+      return await invoke<StockMovement[]>('storage_inventory_get_movements', {
         productId,
         branchId,
         limit,
@@ -1212,7 +1212,7 @@ export const tauriClient = {
   async inventoryGetLowStock(branchId: string): Promise<LowStockItemDto[]> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<LowStockItemDto[]>('inventory_get_low_stock', {
+      return await invoke<LowStockItemDto[]>('storage_inventory_get_low_stock', {
         branchId,
       });
     }
