@@ -1472,7 +1472,7 @@ export const tauriClient = {
   async supplierCreate(dto: CreateSupplierDto): Promise<Supplier> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Supplier>('supplier_create', { dto });
+      return await invoke<Supplier>('storage_supplier_create', { dto });
     }
     const suppliers = getStoredWebSuppliers();
     const now = new Date().toISOString();
@@ -1498,7 +1498,7 @@ export const tauriClient = {
   async supplierUpdate(id: string, dto: UpdateSupplierDto): Promise<Supplier> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Supplier>('supplier_update', { id, dto });
+      return await invoke<Supplier>('storage_supplier_update', { id, dto });
     }
     const suppliers = getStoredWebSuppliers();
     const idx = suppliers.findIndex((s) => s.id === id);
@@ -1524,7 +1524,7 @@ export const tauriClient = {
   async supplierGetById(id: string): Promise<Supplier | null> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Supplier | null>('supplier_get_by_id', { id });
+      return await invoke<Supplier | null>('storage_supplier_get_by_id', { id });
     }
     const suppliers = getStoredWebSuppliers();
     return suppliers.find((s) => s.id === id) || null;
@@ -1533,7 +1533,7 @@ export const tauriClient = {
   async supplierGetDetail(id: string): Promise<SupplierDetailDto> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SupplierDetailDto>('supplier_get_detail', { id });
+      return await invoke<SupplierDetailDto>('storage_supplier_get_detail', { id });
     }
     const supplier = await this.supplierGetById(id);
     if (!supplier) throw new Error(`Supplier not found: ${id}`);
@@ -1548,7 +1548,7 @@ export const tauriClient = {
   async supplierList(filter?: SupplierFilter): Promise<SupplierSummaryDto[]> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SupplierSummaryDto[]>('supplier_list', { filter });
+      return await invoke<SupplierSummaryDto[]>('storage_supplier_list', { filter });
     }
     const suppliers = getStoredWebSuppliers();
     let filtered = suppliers.filter((s) => s.is_active);
@@ -1575,7 +1575,7 @@ export const tauriClient = {
   async supplierSearch(query: string): Promise<SupplierSummaryDto[]> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SupplierSummaryDto[]>('supplier_search', { query });
+      return await invoke<SupplierSummaryDto[]>('storage_supplier_search', { query });
     }
     const suppliers = getStoredWebSuppliers();
     const q = (query || '').toLowerCase();
@@ -1601,7 +1601,7 @@ export const tauriClient = {
   async supplierGetBalance(supplierId: string): Promise<number> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('supplier_get_balance', { supplierId });
+      return await invoke<number>('storage_supplier_get_balance', { supplierId });
     }
     return 0;
   },
@@ -1613,7 +1613,7 @@ export const tauriClient = {
   ): Promise<SupplierLedgerEntry[]> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SupplierLedgerEntry[]>('supplier_get_ledger', {
+      return await invoke<SupplierLedgerEntry[]>('storage_supplier_get_ledger', {
         supplierId,
         limit,
         offset,
@@ -1625,7 +1625,7 @@ export const tauriClient = {
   async supplierGetStatement(supplierId: string): Promise<SupplierStatementDto> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SupplierStatementDto>('supplier_get_statement', {
+      return await invoke<SupplierStatementDto>('storage_supplier_get_statement', {
         supplierId,
       });
     }
@@ -1637,7 +1637,7 @@ export const tauriClient = {
   ): Promise<SupplierPaymentResultDto> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SupplierPaymentResultDto>('supplier_record_payment', {
+      return await invoke<SupplierPaymentResultDto>('storage_supplier_record_payment', {
         dto,
       });
     }
@@ -1647,7 +1647,7 @@ export const tauriClient = {
   async supplierDeactivate(id: string): Promise<void> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('supplier_deactivate', { id });
+      await invoke('storage_supplier_deactivate', { id });
       return;
     }
     const suppliers = getStoredWebSuppliers();
