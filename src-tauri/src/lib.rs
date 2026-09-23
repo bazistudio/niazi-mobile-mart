@@ -266,6 +266,14 @@ pub fn run() {
             commands::product::product_get_by_barcode,
             commands::product::product_list,
             commands::product::product_deactivate,
+            // Typed Storage Commands (Products Pilot Boundary)
+            commands::storage_product::storage_product_create,
+            commands::storage_product::storage_product_update,
+            commands::storage_product::storage_product_get,
+            commands::storage_product::storage_product_get_by_sku,
+            commands::storage_product::storage_product_get_by_barcode,
+            commands::storage_product::storage_product_list,
+            commands::storage_product::storage_product_deactivate,
             // Inventory Commands
             commands::inventory::inventory_increase,
             commands::inventory::inventory_decrease,
