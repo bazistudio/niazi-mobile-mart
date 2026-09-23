@@ -15,6 +15,7 @@ pub mod sales_return;
 pub mod storage_customer;
 pub mod storage_inventory;
 pub mod storage_product;
+pub mod storage_purchase;
 pub mod storage_sale;
 pub mod storage_supplier;
 pub mod supplier;

@@ -314,6 +314,12 @@ pub fn run() {
             commands::storage_supplier::storage_supplier_get_balance,
             commands::storage_supplier::storage_supplier_record_payment,
             commands::storage_supplier::storage_supplier_deactivate,
+            // Typed Storage Commands (Purchasing / Procurement Domain Boundary)
+            commands::storage_purchase::storage_purchase_complete,
+            commands::storage_purchase::storage_purchase_get_by_id,
+            commands::storage_purchase::storage_purchase_get_by_number,
+            commands::storage_purchase::storage_purchase_list,
+            commands::storage_purchase::storage_purchase_get_lines,
             // Inventory Commands
             commands::inventory::inventory_increase,
             commands::inventory::inventory_decrease,

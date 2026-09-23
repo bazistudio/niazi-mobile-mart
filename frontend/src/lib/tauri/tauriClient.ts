@@ -1857,11 +1857,11 @@ export const tauriClient = {
     return found ? found.payments : [];
   },
 
-  // ── Purchasing Domain (Phase 16) ──────────────────────────────────────────
+  // ── Purchasing Domain (Phase 16 Typed Storage Bridge) ─────────────────────
   async purchaseComplete(dto: CompletePurchaseDto): Promise<PurchaseResultDto> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<PurchaseResultDto>('purchase_complete', { dto });
+      return await invoke<PurchaseResultDto>('storage_purchase_complete', { dto });
     }
     throw new Error('Tauri environment required');
   },
@@ -1869,7 +1869,7 @@ export const tauriClient = {
   async purchaseGetById(id: string): Promise<Purchase | null> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Purchase | null>('purchase_get_by_id', { id });
+      return await invoke<Purchase | null>('storage_purchase_get_by_id', { id });
     }
     return null;
   },
@@ -1877,7 +1877,7 @@ export const tauriClient = {
   async purchaseGetByNumber(purchaseNumber: string): Promise<Purchase | null> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Purchase | null>('purchase_get_by_number', {
+      return await invoke<Purchase | null>('storage_purchase_get_by_number', {
         purchaseNumber,
       });
     }
@@ -1887,7 +1887,7 @@ export const tauriClient = {
   async purchaseList(filter?: PurchaseFilterDto): Promise<Purchase[]> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Purchase[]>('purchase_list', { filter });
+      return await invoke<Purchase[]>('storage_purchase_list', { filter });
     }
     return [];
   },
@@ -1895,7 +1895,7 @@ export const tauriClient = {
   async purchaseGetLines(purchaseId: string): Promise<PurchaseLine[]> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<PurchaseLine[]>('purchase_get_lines', { purchaseId });
+      return await invoke<PurchaseLine[]>('storage_purchase_get_lines', { purchaseId });
     }
     return [];
   },
