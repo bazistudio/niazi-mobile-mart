@@ -290,6 +290,18 @@ pub fn run() {
             commands::storage_sale::storage_sale_list,
             commands::storage_sale::storage_sale_get_lines,
             commands::storage_sale::storage_sale_get_payments,
+            // Typed Storage Commands (Customer / Customer Ledger Domain Boundary)
+            commands::storage_customer::storage_customer_create,
+            commands::storage_customer::storage_customer_update,
+            commands::storage_customer::storage_customer_get_by_id,
+            commands::storage_customer::storage_customer_get_detail,
+            commands::storage_customer::storage_customer_list,
+            commands::storage_customer::storage_customer_search,
+            commands::storage_customer::storage_customer_get_ledger,
+            commands::storage_customer::storage_customer_get_statement,
+            commands::storage_customer::storage_customer_get_balance,
+            commands::storage_customer::storage_customer_record_payment,
+            commands::storage_customer::storage_customer_deactivate,
             // Inventory Commands
             commands::inventory::inventory_increase,
             commands::inventory::inventory_decrease,

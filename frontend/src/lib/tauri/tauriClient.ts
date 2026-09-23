@@ -1285,7 +1285,7 @@ export const tauriClient = {
   async customerCreate(dto: CreateCustomerDto): Promise<Customer> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Customer>('customer_create', { dto });
+      return await invoke<Customer>('storage_customer_create', { dto });
     }
     const customers = getStoredWebCustomers();
     const now = new Date().toISOString();
@@ -1311,7 +1311,7 @@ export const tauriClient = {
   async customerUpdate(id: string, dto: UpdateCustomerDto): Promise<Customer> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Customer>('customer_update', { id, dto });
+      return await invoke<Customer>('storage_customer_update', { id, dto });
     }
     const customers = getStoredWebCustomers();
     const idx = customers.findIndex((c) => c.id === id);
@@ -1337,7 +1337,7 @@ export const tauriClient = {
   async customerGetById(id: string): Promise<Customer> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Customer>('customer_get_by_id', { id });
+      return await invoke<Customer>('storage_customer_get_by_id', { id });
     }
     const customers = getStoredWebCustomers();
     const found = customers.find((c) => c.id === id);
@@ -1348,7 +1348,7 @@ export const tauriClient = {
   async customerGetDetail(id: string): Promise<CustomerDetailDto> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CustomerDetailDto>('customer_get_detail', { id });
+      return await invoke<CustomerDetailDto>('storage_customer_get_detail', { id });
     }
     const customer = await this.customerGetById(id);
     return {
@@ -1363,7 +1363,7 @@ export const tauriClient = {
   async customerList(filter?: CustomerFilter): Promise<CustomerSummaryDto[]> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CustomerSummaryDto[]>('customer_list', { filter });
+      return await invoke<CustomerSummaryDto[]>('storage_customer_list', { filter });
     }
     const customers = getStoredWebCustomers();
     let filtered = customers.filter((c) => c.is_active);
@@ -1391,7 +1391,7 @@ export const tauriClient = {
   async customerSearch(query: string): Promise<CustomerSummaryDto[]> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CustomerSummaryDto[]>('customer_search', { query });
+      return await invoke<CustomerSummaryDto[]>('storage_customer_search', { query });
     }
     const customers = getStoredWebCustomers();
     const q = (query || '').toLowerCase();
@@ -1422,7 +1422,7 @@ export const tauriClient = {
   ): Promise<CustomerLedgerEntry[]> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CustomerLedgerEntry[]>('customer_get_ledger', {
+      return await invoke<CustomerLedgerEntry[]>('storage_customer_get_ledger', {
         customerId,
         limit,
         offset,
@@ -1434,7 +1434,7 @@ export const tauriClient = {
   async customerGetStatement(customerId: string): Promise<CustomerStatementDto> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CustomerStatementDto>('customer_get_statement', {
+      return await invoke<CustomerStatementDto>('storage_customer_get_statement', {
         customerId,
       });
     }
@@ -1444,7 +1444,7 @@ export const tauriClient = {
   async customerGetBalance(customerId: string): Promise<number> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('customer_get_balance', { customerId });
+      return await invoke<number>('storage_customer_get_balance', { customerId });
     }
     return 0;
   },
@@ -1454,7 +1454,7 @@ export const tauriClient = {
   ): Promise<CustomerPaymentResultDto> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CustomerPaymentResultDto>('customer_record_payment', {
+      return await invoke<CustomerPaymentResultDto>('storage_customer_record_payment', {
         dto,
       });
     }
@@ -1464,7 +1464,7 @@ export const tauriClient = {
   async customerDeactivate(id: string): Promise<void> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('customer_deactivate', { id });
+      await invoke('storage_customer_deactivate', { id });
     }
   },
 
