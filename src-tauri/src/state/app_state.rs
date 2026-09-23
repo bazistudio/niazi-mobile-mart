@@ -173,20 +173,26 @@ impl AppState {
         Self::new_sqlite(app_version, db)
     }
 
-    /// Opens the persistent default local application database
-    pub fn open_default(app_version: impl Into<String>) -> Self {
+    /// Fallible constructor to open persistent default local application database cleanly without process panic
+    pub fn try_open_default(app_version: impl Into<String>) -> Result<Self, String> {
         let path = DatabaseConnection::default_db_path();
-        let db = match DatabaseConnection::open_file(&path) {
-            Ok(db) => db,
+        match DatabaseConnection::open_file(&path) {
+            Ok(db) => Ok(Self::new_sqlite(app_version, db)),
             Err(e) => {
                 tracing::error!("Failed to open persistent SQLite database at {}: {}", path.display(), e);
                 std::thread::sleep(std::time::Duration::from_secs(1));
-                DatabaseConnection::open_file(&path).unwrap_or_else(|err| {
-                    panic!("Critical database error at {}: {}", path.display(), err);
-                })
+                DatabaseConnection::open_file(&path)
+                    .map(|db| Self::new_sqlite(app_version, db))
+                    .map_err(|err| format!("Critical database initialization error at {}: {}", path.display(), err))
             }
-        };
-        Self::new_sqlite(app_version, db)
+        }
+    }
+
+    /// Opens the persistent default local application database
+    pub fn open_default(app_version: impl Into<String>) -> Self {
+        Self::try_open_default(app_version).unwrap_or_else(|err| {
+            panic!("{err}");
+        })
     }
 
     /// Opens an isolated in-memory database for testing and diagnostics

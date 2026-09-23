@@ -82,20 +82,63 @@ impl DatabaseConnection {
         self.conn.clone()
     }
 
+    /// Executes synchronous SQLite work safely off Tokio worker threads using spawn_blocking.
+    /// Preserves transaction atomicity, foreign key enforcement, WAL mode, and busy timeout.
+    pub async fn call_blocking<F, R>(&self, f: F) -> DbResult<R>
+    where
+        F: FnOnce(&mut Connection) -> DbResult<R> + Send + 'static,
+        R: Send + 'static,
+    {
+        let conn_arc = self.conn.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut guard = conn_arc.blocking_lock();
+            f(&mut *guard)
+        })
+        .await
+        .map_err(|e| DbError::ConnectionError(format!("Database task join error: {e}")))?
+    }
+
     /// Path to the physical database file (None if in-memory)
     pub fn path(&self) -> Option<&Path> {
         self.db_path.as_deref()
     }
 
-    /// Resolves the default persistent application database path
+    /// Resolves the default persistent application database path with backward compatibility
     pub fn default_db_path() -> PathBuf {
         if let Ok(custom_path) = std::env::var("NIAZI_DB_PATH") {
             return PathBuf::from(custom_path);
         }
 
-        // Standard OS AppData path
         if let Some(app_data) = dirs_sys_app_data() {
-            app_data.join("com.bazi.niazimobilemart").join("data").join("niazi_local.db")
+            let canonical_dir = app_data.join("com.bazi.niazimobilemart").join("data");
+            let canonical_path = canonical_dir.join("niazi_local.db");
+
+            if !canonical_path.exists() {
+                // Check legacy paths to preserve existing user databases without data loss
+                let legacy_path_1 = app_data.join("bazistudio.niazimobilemart").join("data").join("niazi_local.db");
+                let legacy_path_2 = PathBuf::from("./niazi_local.db");
+
+                let legacy_to_migrate = if legacy_path_1.exists() {
+                    Some(legacy_path_1)
+                } else if legacy_path_2.exists() {
+                    Some(legacy_path_2)
+                } else {
+                    None
+                };
+
+                if let Some(legacy_path) = legacy_to_migrate {
+                    if std::fs::create_dir_all(&canonical_dir).is_ok() {
+                        if let Err(e) = std::fs::copy(&legacy_path, &canonical_path) {
+                            info!("Failed to copy legacy database from {} to {}: {}", legacy_path.display(), canonical_path.display(), e);
+                            return legacy_path;
+                        } else {
+                            info!("Successfully migrated legacy database from {} to {}", legacy_path.display(), canonical_path.display());
+                        }
+                    }
+                }
+            }
+
+            canonical_path
         } else {
             PathBuf::from("./niazi_local.db")
         }

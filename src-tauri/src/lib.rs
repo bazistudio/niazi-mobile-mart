@@ -11,11 +11,14 @@ use state::AppState;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 
 fn get_log_dir() -> std::path::PathBuf {
+    if let Ok(custom_dir) = std::env::var("NIAZI_LOG_DIR") {
+        return std::path::PathBuf::from(custom_dir);
+    }
     #[cfg(target_os = "windows")]
     {
         if let Ok(appdata) = std::env::var("APPDATA") {
             return std::path::PathBuf::from(appdata)
-                .join("bazistudio.niazimobilemart")
+                .join("com.bazi.niazimobilemart")
                 .join("logs");
         }
     }
@@ -25,7 +28,7 @@ fn get_log_dir() -> std::path::PathBuf {
             return std::path::PathBuf::from(home)
                 .join("Library")
                 .join("Application Support")
-                .join("bazistudio.niazimobilemart")
+                .join("com.bazi.niazimobilemart")
                 .join("logs");
         }
     }
@@ -34,7 +37,7 @@ fn get_log_dir() -> std::path::PathBuf {
         if let Ok(home) = std::env::var("HOME") {
             return std::path::PathBuf::from(home)
                 .join(".config")
-                .join("bazistudio.niazimobilemart")
+                .join("com.bazi.niazimobilemart")
                 .join("logs");
         }
     }
@@ -64,7 +67,35 @@ pub fn run() {
 
     tracing::info!("[run] Persistent logging initialized at path: {:?}", log_dir.join("app.log"));
 
-    let app_state = AppState::open_default(env!("CARGO_PKG_VERSION"));
+    let app_state = match AppState::try_open_default(env!("CARGO_PKG_VERSION")) {
+        Ok(state) => state,
+        Err(err) => {
+            tracing::error!("[run] Critical database initialization failure: {err}");
+            use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+            let err_msg = err.clone();
+            let _ = tauri::Builder::default()
+                .plugin(tauri_plugin_dialog::init())
+                .setup(move |app| {
+                    let handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        handle
+                            .dialog()
+                            .message(format!(
+                                "Niazi Mobile Mart failed to initialize the local database:\n\n{}\n\nPlease check file permissions or close other running instances.",
+                                err_msg
+                            ))
+                            .title("Database Initialization Failure")
+                            .kind(MessageDialogKind::Error)
+                            .show(|_| {
+                                std::process::exit(1);
+                            });
+                    });
+                    Ok(())
+                })
+                .run(tauri::generate_context!());
+            return;
+        }
+    };
     let app_state_for_setup = app_state.clone();
 
     tauri::Builder::default()
@@ -114,16 +145,16 @@ pub fn run() {
             let menu = Menu::with_items(handle, &[&file_menu, &help_menu])?;
             app.set_menu(menu)?;
 
-            // Start Rust background SyncWorkerDaemon for offline outbox processing (single shared instance)
+            // Start Rust background SyncWorkerDaemon for offline outbox processing (single shared instance, non-blocking startup)
             let sync_worker = std::sync::Arc::new(services::SyncWorkerDaemon::new(std::sync::Arc::new(app_state_for_setup.clone())));
             {
                 let sync_worker_ref = sync_worker.clone();
                 let app_state_ref = app_state_for_setup.clone();
-                tauri::async_runtime::block_on(async move {
-                    *app_state_ref.sync_worker.write().await = Some(sync_worker_ref);
+                tauri::async_runtime::spawn(async move {
+                    *app_state_ref.sync_worker.write().await = Some(sync_worker_ref.clone());
+                    sync_worker_ref.start();
                 });
             }
-            sync_worker.start();
 
             if let Some(window) = app.get_webview_window("main") {
                 #[cfg(debug_assertions)]
