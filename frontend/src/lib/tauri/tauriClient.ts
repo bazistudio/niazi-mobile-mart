@@ -945,11 +945,11 @@ export const tauriClient = {
     throw new Error('Tauri environment required');
   },
 
-  // ── Product Domain (Phase 7 Domain 1) ──────────────────────────────────────
+  // ── Product Domain (Phase 7 Domain 1 — Typed Storage Bridge) ───────────────
   async productCreate(dto: CreateProductDto): Promise<Product> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('product_create', { dto });
+      return await invoke<Product>('storage_product_create', { dto });
     }
     const products = getStoredWebProducts();
     const now = new Date().toISOString();
@@ -989,7 +989,7 @@ export const tauriClient = {
   async productUpdate(id: string, dto: UpdateProductDto): Promise<Product> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('product_update', { id, dto });
+      return await invoke<Product>('storage_product_update', { id, dto });
     }
     const products = getStoredWebProducts();
     const idx = products.findIndex((p) => p.id === id);
@@ -1036,7 +1036,7 @@ export const tauriClient = {
   async productGet(id: string): Promise<Product> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('product_get', { id });
+      return await invoke<Product>('storage_product_get', { id });
     }
     const products = getStoredWebProducts();
     const found = products.find((p) => p.id === id);
@@ -1047,7 +1047,7 @@ export const tauriClient = {
   async productGetBySku(sku: string): Promise<Product> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('product_get_by_sku', { sku });
+      return await invoke<Product>('storage_product_get_by_sku', { sku });
     }
     const products = getStoredWebProducts();
     const found = products.find((p) => p.sku.toLowerCase() === sku.toLowerCase());
@@ -1058,7 +1058,7 @@ export const tauriClient = {
   async productGetByBarcode(barcode: string): Promise<Product> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('product_get_by_barcode', { barcode });
+      return await invoke<Product>('storage_product_get_by_barcode', { barcode });
     }
     const products = getStoredWebProducts();
     const found = products.find((p) => p.barcode && p.barcode.toLowerCase() === barcode.toLowerCase());
@@ -1069,7 +1069,7 @@ export const tauriClient = {
   async productList(filter?: ProductFilter): Promise<Product[]> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product[]>('product_list', { filter });
+      return await invoke<Product[]>('storage_product_list', { filter });
     }
     let list = getStoredWebProducts();
     if (filter) {
@@ -1113,7 +1113,7 @@ export const tauriClient = {
   async productDeactivate(id: string): Promise<void> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('product_deactivate', { id });
+      await invoke('storage_product_deactivate', { id });
       return;
     }
     const products = getStoredWebProducts();
