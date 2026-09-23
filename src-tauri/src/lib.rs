@@ -283,6 +283,13 @@ pub fn run() {
             commands::storage_inventory::storage_inventory_get_stock_map,
             commands::storage_inventory::storage_inventory_get_movements,
             commands::storage_inventory::storage_inventory_get_low_stock,
+            // Typed Storage Commands (Sales / POS Domain Boundary)
+            commands::storage_sale::storage_sale_complete,
+            commands::storage_sale::storage_sale_get_by_id,
+            commands::storage_sale::storage_sale_get_by_invoice,
+            commands::storage_sale::storage_sale_list,
+            commands::storage_sale::storage_sale_get_lines,
+            commands::storage_sale::storage_sale_get_payments,
             // Inventory Commands
             commands::inventory::inventory_increase,
             commands::inventory::inventory_decrease,

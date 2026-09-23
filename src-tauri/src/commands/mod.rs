@@ -14,6 +14,7 @@ pub mod sales;
 pub mod sales_return;
 pub mod storage_inventory;
 pub mod storage_product;
+pub mod storage_sale;
 pub mod supplier;
 pub mod sync;
 pub mod terminal;

@@ -1659,11 +1659,11 @@ export const tauriClient = {
     }
   },
 
-  // ── Sales & Checkout Domain (Phase 15) ────────────────────────────────────
+  // ── Sales & Checkout Domain (Phase 4B Typed Storage Bridge) ───────────────
   async saleComplete(dto: CompleteSaleDto): Promise<SaleResultDto> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SaleResultDto>('sale_complete', { dto });
+      return await invoke<SaleResultDto>('storage_sale_complete', { dto });
     }
     const now = new Date().toISOString();
     const invoiceNum = `INV-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -1770,7 +1770,7 @@ export const tauriClient = {
   async saleGetById(id: string): Promise<Sale | null> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Sale | null>('sale_get_by_id', { id });
+      return await invoke<Sale | null>('storage_sale_get_by_id', { id });
     }
     const stored = getStoredWebSales();
     const found = stored.find((s) => s.sale.id === id);
@@ -1780,7 +1780,7 @@ export const tauriClient = {
   async saleGetByInvoice(invoiceNumber: string): Promise<Sale | null> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Sale | null>('sale_get_by_invoice', { invoiceNumber });
+      return await invoke<Sale | null>('storage_sale_get_by_invoice', { invoiceNumber });
     }
     const stored = getStoredWebSales();
     const found = stored.find((s) => s.sale.invoice_number.toLowerCase() === invoiceNumber.toLowerCase());
@@ -1790,7 +1790,7 @@ export const tauriClient = {
   async saleList(filter?: SaleFilterDto): Promise<Sale[]> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Sale[]>('sale_list', { filter });
+      return await invoke<Sale[]>('storage_sale_list', { filter });
     }
     let list = getStoredWebSales().map((s) => s.sale);
     if (filter) {
@@ -1840,7 +1840,7 @@ export const tauriClient = {
   async saleGetLines(saleId: string): Promise<SaleLine[]> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SaleLine[]>('sale_get_lines', { saleId });
+      return await invoke<SaleLine[]>('storage_sale_get_lines', { saleId });
     }
     const stored = getStoredWebSales();
     const found = stored.find((s) => s.sale.id === saleId);
@@ -1850,7 +1850,7 @@ export const tauriClient = {
   async saleGetPayments(saleId: string): Promise<SalePayment[]> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SalePayment[]>('sale_get_payments', { saleId });
+      return await invoke<SalePayment[]>('storage_sale_get_payments', { saleId });
     }
     const stored = getStoredWebSales();
     const found = stored.find((s) => s.sale.id === saleId);
