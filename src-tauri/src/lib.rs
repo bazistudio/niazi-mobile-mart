@@ -205,6 +205,7 @@ pub fn run() {
             commands::auth::auth_check_bootstrap_status,
             commands::auth::auth_bootstrap_first_admin,
             commands::auth::auth_login,
+            commands::auth::auth_login_snapshot,
             commands::auth::auth_sync_session,
             commands::auth::auth_logout,
 

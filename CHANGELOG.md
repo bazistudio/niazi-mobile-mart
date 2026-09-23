@@ -5,6 +5,17 @@ All notable changes to Niazi Mobile Mart will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.16] - 2026-09-24
+
+### Fixed
+- **Native Login Snapshot Synchronization**:
+  - Restored registration of the existing native Tauri `auth_login_snapshot` command.
+  - Restored successful central-login → native desktop session synchronization.
+  - Preserved the existing native authentication/session architecture.
+  - No JWT secret exposure.
+  - No database schema or migration changes.
+  - No unrelated product/business-logic changes.
+
 ## [1.2.15] - 2026-09-23
 
 ### Fixed
