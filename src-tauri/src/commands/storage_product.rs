@@ -58,20 +58,11 @@ pub async fn storage_product_create_impl(
     dto: CreateProductDto,
 ) -> AppResult<Product> {
     validate_create_product_dto(&dto)?;
-
-    let db = state
-        .db
-        .as_ref()
-        .ok_or_else(|| AppError::Internal("Database connection unavailable".to_string()))?
-        .clone();
-
-    let new_id = Uuid::new_v4().to_string();
-
-    db.call_blocking(move |conn| {
-        SQLiteProductRepository::create_product_in_tx(conn, &new_id, &dto)
-    })
-    .await
-    .map_err(AppError::from)
+    let session = state.get_session().await;
+    state
+        .product_service
+        .create_product(dto, session.user_id.as_deref())
+        .await
 }
 
 /// Typed storage command: Creates a new product directly in SQLite storage (off-thread via call_blocking)
@@ -94,18 +85,7 @@ pub async fn storage_product_update_impl(
         ));
     }
     validate_update_product_dto(&dto)?;
-
-    let db = state
-        .db
-        .as_ref()
-        .ok_or_else(|| AppError::Internal("Database connection unavailable".to_string()))?
-        .clone();
-
-    db.call_blocking(move |conn| {
-        SQLiteProductRepository::update_product_in_tx(conn, &id, &dto)
-    })
-    .await
-    .map_err(AppError::from)
+    state.product_service.update_product(&id, dto).await
 }
 
 /// Typed storage command: Updates an existing product record in SQLite storage
@@ -610,5 +590,106 @@ mod tests {
             .await
             .expect("storage_product_get_impl on deactivated product must succeed");
         assert!(!deactivated_fetch.is_active);
+    }
+
+    #[tokio::test]
+    async fn test_storage_product_opening_stock_and_outbox_events() {
+        let (state, cat_id, unit_id) = setup_test_context().await;
+
+        let create_dto = CreateProductDto {
+            name: "Galaxy Ultra S26".to_string(),
+            sku: "SKU-ULTRA-S26".to_string(),
+            barcode: Some("1122334455667".to_string()),
+            category_id: cat_id.clone(),
+            brand_id: None,
+            company_id: None,
+            quality_id: None,
+            color_id: None,
+            unit_id: Some(unit_id.clone()),
+            purchase_price: 150000,
+            average_cost: None,
+            sale_price: 180000,
+            low_stock_threshold: Some(10),
+            description: Some("Flagship phone with initial stock".to_string()),
+            initial_quantity: Some(25),
+            branch_id: Some("00000000-0000-0000-0000-000000000002".to_string()),
+        };
+
+        // 1. Create product with initial stock = 25
+        let created = storage_product_create_impl(&state, create_dto)
+            .await
+            .expect("storage_product_create_impl must succeed with opening stock");
+
+        assert_eq!(created.name, "Galaxy Ultra S26");
+        assert_eq!(created.sku, "SKU-ULTRA-S26");
+
+        // 2. Verify stock record created in 'stock' table with quantity = 25
+        let db = state.db.as_ref().unwrap();
+        let conn_arc = db.inner();
+        let guard = conn_arc.lock().await;
+
+        let stock_qty: i64 = guard
+            .query_row(
+                "SELECT quantity FROM stock WHERE product_id = ?1 AND branch_id = ?2",
+                rusqlite::params![created.id, "00000000-0000-0000-0000-000000000002"],
+                |r| r.get(0),
+            )
+            .expect("Stock record must exist for newly created product");
+        assert_eq!(stock_qty, 25, "Initial stock quantity must match CreateProductDto.initial_quantity");
+
+        // 3. Verify stock movement recorded in 'stock_movements'
+        let movement_qty: i64 = guard
+            .query_row(
+                "SELECT quantity FROM stock_movements WHERE product_id = ?1 AND movement_type = 'IN'",
+                rusqlite::params![created.id],
+                |r| r.get(0),
+            )
+            .expect("Opening stock movement must be recorded");
+        assert_eq!(movement_qty, 25);
+
+        // 4. Verify PRODUCT_CREATED outbox event enqueued in 'offline_sync_queue'
+        let outbox_created_count: i64 = guard
+            .query_row(
+                "SELECT COUNT(*) FROM offline_sync_queue WHERE event_type = 'PRODUCT_CREATED' AND client_event_id = ?1",
+                rusqlite::params![created.id],
+                |r| r.get(0),
+            )
+            .expect("PRODUCT_CREATED event query must succeed");
+        assert_eq!(outbox_created_count, 1, "PRODUCT_CREATED event must be enqueued into offline_sync_queue");
+
+        drop(guard);
+
+        // 5. Update product and verify PRODUCT_UPDATED outbox event
+        let update_dto = UpdateProductDto {
+            name: Some("Galaxy Ultra S26 Plus".to_string()),
+            barcode: None,
+            category_id: None,
+            brand_id: None,
+            company_id: None,
+            quality_id: None,
+            color_id: None,
+            unit_id: None,
+            purchase_price: None,
+            average_cost: None,
+            sale_price: Some(195000),
+            low_stock_threshold: None,
+            description: None,
+            is_active: None,
+        };
+
+        let updated = storage_product_update_impl(&state, created.id.clone(), update_dto)
+            .await
+            .expect("storage_product_update_impl must succeed");
+        assert_eq!(updated.name, "Galaxy Ultra S26 Plus");
+
+        let guard = conn_arc.lock().await;
+        let outbox_updated_count: i64 = guard
+            .query_row(
+                "SELECT COUNT(*) FROM offline_sync_queue WHERE event_type = 'PRODUCT_UPDATED'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("PRODUCT_UPDATED event query must succeed");
+        assert!(outbox_updated_count >= 1, "PRODUCT_UPDATED event must be enqueued into offline_sync_queue");
     }
 }
