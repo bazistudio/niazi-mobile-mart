@@ -352,6 +352,62 @@ impl AuthService {
         Ok(app_state.get_session().await)
     }
 
+    /// Bootstraps native authentication snapshots from the Central Server
+    /// using a recently verified Central API Bearer JWT token.
+    /// This resolves the first-time login deadlock on empty/new native installations.
+    pub async fn bootstrap_snapshots_from_central(
+        app_state: &AppState,
+        token: &str,
+    ) -> AppResult<()> {
+        let clean_token = token.trim().strip_prefix("Bearer ").unwrap_or(token).trim();
+        if clean_token.is_empty() {
+            return Err(AppError::Unauthorized("Missing authorization token for snapshot bootstrap".to_string()));
+        }
+
+        let db = match &app_state.db {
+            Some(db) => db.clone(),
+            None => return Err(AppError::Internal("No SQLite database available for snapshots".to_string())),
+        };
+
+        let server_url = std::env::var("CENTRAL_SERVER_URL")
+            .unwrap_or_else(|_| crate::services::sync_worker::DEFAULT_CENTRAL_SERVER_URL.to_string());
+
+        let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).build()
+            .map_err(|e| AppError::Internal(format!("HTTP client error: {}", e)))?;
+
+        let snapshot_url = format!("{}/api/v1/users/credential-snapshots", server_url.trim_end_matches('/'));
+
+        let resp = client
+            .get(&snapshot_url)
+            .header("Authorization", format!("Bearer {}", clean_token))
+            .send()
+            .await
+            .map_err(|e| AppError::Internal(format!("Snapshot sync network error: {}", e)))?;
+
+        if !resp.status().is_success() {
+            return Err(AppError::Unauthorized("Central server rejected the token during snapshot bootstrap".to_string()));
+        }
+
+        let snapshots: Vec<crate::domain::auth_snapshot::AuthSnapshot> = resp.json().await
+            .map_err(|e| AppError::Internal(format!("Failed to parse snapshots: {}", e)))?;
+
+        let snapshot_repo = crate::repositories::SQLiteAuthSnapshotRepository::new(db);
+        let now = chrono::Utc::now().to_rfc3339();
+
+        for mut snapshot in snapshots {
+            if snapshot.user_id.trim().is_empty() || snapshot.credential_hash.trim().is_empty() {
+                continue;
+            }
+            if serde_json::from_str::<crate::domain::access_control::StaffAccessProfile>(&snapshot.access_profile_json).is_err() {
+                continue;
+            }
+            snapshot.synced_at = now.clone();
+            let _ = snapshot_repo.upsert(&snapshot).await;
+        }
+
+        Ok(())
+    }
+
     /// Synchronizes native SessionContext from a verified Central API Bearer JWT token
     pub async fn sync_session_from_token(
         app_state: &AppState,

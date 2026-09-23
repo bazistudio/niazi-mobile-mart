@@ -68,6 +68,12 @@ export class AuthService {
           let nativeSynced = false;
 
           try {
+            await tauriClient.authBootstrapCentralSnapshots(token);
+          } catch (bootstrapErr) {
+            console.warn("[AuthService] Failed to bootstrap central snapshots:", bootstrapErr);
+          }
+
+          try {
             await tauriClient.authLoginSnapshot(localUsername, password);
             nativeSynced = true;
           } catch (snapshotErr) {

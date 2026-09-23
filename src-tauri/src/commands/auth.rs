@@ -61,6 +61,17 @@ pub async fn auth_login_snapshot(
 }
 
 
+/// Bootstraps native authentication snapshots from the Central Server
+/// using a recently verified Central API Bearer JWT token.
+#[tauri::command]
+pub async fn auth_bootstrap_central_snapshots(
+    state: State<'_, AppState>,
+    token: String,
+) -> AppResult<()> {
+    AuthService::bootstrap_snapshots_from_central(&state, &token).await
+}
+
+
 /// Synchronizes native SessionContext from a verified Central API Bearer JWT token
 #[tauri::command]
 pub async fn auth_sync_session(

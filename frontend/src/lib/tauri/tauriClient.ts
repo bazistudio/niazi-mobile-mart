@@ -413,6 +413,13 @@ export const tauriClient = {
     throw new Error('Native snapshot authentication requires desktop environment');
   },
 
+  async authBootstrapCentralSnapshots(token: string): Promise<void> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke<void>('auth_bootstrap_central_snapshots', { token });
+    }
+  },
+
   async authSyncSession(token: string): Promise<SessionContext> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
