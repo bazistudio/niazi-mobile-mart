@@ -276,6 +276,14 @@ impl AppState {
         };
     }
 
+    /// Updates active_token on the current session if authenticated
+    pub async fn set_active_token(&self, token: Option<String>) {
+        let mut session = self.session.write().await;
+        if session.is_authenticated {
+            session.active_token = token;
+        }
+    }
+
     /// Returns an instance of SQLiteAuthSnapshotRepository if SQLite database is available
     pub fn auth_snapshot_repo(&self) -> Option<crate::repositories::SQLiteAuthSnapshotRepository> {
         self.db.as_ref().map(|db| crate::repositories::SQLiteAuthSnapshotRepository::new(db.clone()))

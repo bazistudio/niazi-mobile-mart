@@ -364,13 +364,23 @@ impl AuthService {
             ));
         }
 
+        let session = app_state.get_session().await;
+
         if clean_token == "native-tauri-session" {
-            let session = app_state.get_session().await;
             if session.is_authenticated {
                 return Ok(session);
             }
         }
 
+        // If active native session is ALREADY authenticated authoritatively in Rust
+        // (via authLogin or authLoginSnapshot), attach the provided token (e.g. Central API Bearer JWT)
+        // as active_token for downstream sync operations without requiring desktop to possess Central Server's secret.
+        if session.is_authenticated {
+            app_state.set_active_token(Some(clean_token.to_string())).await;
+            return Ok(app_state.get_session().await);
+        }
+
+        // If native session is unauthenticated, resolve token using local TokenManager
         let identity = app_state.token_manager.resolve_identity(clean_token).await?;
 
         app_state
@@ -823,31 +833,51 @@ mod tests {
         assert!(matches!(tampered_res, Err(AppError::Unauthorized(_))));
         assert!(!state_unauth.get_session().await.is_authenticated);
 
-        // 4. Session replacement with new valid user token replaces state without stale data
-        let staff_user = create_test_user(
+        // 4. Central JWT token synchronization on an already authenticated native session attaches active_token
+        let central_jwt = "header.payload.signature_from_cloud_run_server";
+        let sync_central_res = AuthService::sync_session_from_token(&state, central_jwt).await;
+        assert!(sync_central_res.is_ok());
+
+        let central_synced_session = state.get_session().await;
+        assert!(central_synced_session.is_authenticated);
+        assert_eq!(central_synced_session.username, Some("jwt_sync_admin".to_string()));
+        assert_eq!(central_synced_session.active_token, Some(central_jwt.to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_central_jwt_sync_on_authenticated_native_session() {
+        let state = AppState::in_memory("5.0.3");
+        let repo = &state.user_repo;
+
+        // 1. Unauthenticated native session rejects central JWT token
+        let unauth_sync = AuthService::sync_session_from_token(&state, "unverified_central_jwt").await;
+        assert!(matches!(unauth_sync, Err(AppError::Unauthorized(_))));
+        assert!(!state.get_session().await.is_authenticated);
+
+        // 2. Authenticate user natively via local login (Argon2id credential verification)
+        create_test_user(
             repo,
-            "jwt_sync_cashier",
-            "Pass123!",
+            "native_staff",
+            "ValidPass123!",
             None,
-            UserRole::Cashier,
+            UserRole::Staff,
             UserStatus::Active,
         )
         .await;
-        let staff_token = state.token_manager.create_token(staff_user.sanitize()).await;
 
-        let replace_res = AuthService::sync_session_from_token(&state, &staff_token).await;
-        assert!(replace_res.is_ok());
+        AuthService::login(repo, &state, "native_staff", "ValidPass123!").await.unwrap();
+        let session_before = state.get_session().await;
+        assert!(session_before.is_authenticated);
 
-        let new_session = state.get_session().await;
-        assert_eq!(new_session.username, Some("jwt_sync_cashier".to_string()));
-        assert_eq!(new_session.role, Some(UserRole::Cashier));
-        assert_eq!(new_session.active_token, Some(staff_token));
+        // 3. Sync central Bearer JWT token onto authenticated native session
+        let central_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.central_token_payload";
+        let sync_res = AuthService::sync_session_from_token(&state, central_token).await;
+        assert!(sync_res.is_ok());
 
-        // 5. Failed sync attempt on an already authenticated state maintains state isolation
-        let failed_sync_res = AuthService::sync_session_from_token(&state, "invalid_bearer_token").await;
-        assert!(failed_sync_res.is_err());
-        // State remains intact from previous valid session
-        assert_eq!(state.get_session().await.username, Some("jwt_sync_cashier".to_string()));
+        let session_after = state.get_session().await;
+        assert!(session_after.is_authenticated);
+        assert_eq!(session_after.username, Some("native_staff".to_string()));
+        assert_eq!(session_after.active_token, Some(central_token.to_string()));
     }
 
     #[tokio::test]
