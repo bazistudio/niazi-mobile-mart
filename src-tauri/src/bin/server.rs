@@ -1029,6 +1029,31 @@ async fn sync_push_handler(
                     }
                 };
 
+                // Auto-heal missing master data for the central database
+                let now = chrono::Utc::now().to_rfc3339();
+                sqlx::query("INSERT INTO categories (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Category', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
+                    .bind(&product.category_id).bind(&now).execute(&mut *tx).await.ok();
+                if let Some(brand_id) = &product.brand_id {
+                    sqlx::query("INSERT INTO brands (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Brand', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
+                        .bind(brand_id).bind(&now).execute(&mut *tx).await.ok();
+                }
+                if let Some(unit_id) = &product.unit_id {
+                    sqlx::query("INSERT INTO units (id, name, symbol, conversion_factor, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Unit', $1, 1, 1, $2, $2) ON CONFLICT DO NOTHING")
+                        .bind(unit_id).bind(&now).execute(&mut *tx).await.ok();
+                }
+                if let Some(company_id) = &product.company_id {
+                    sqlx::query("INSERT INTO companies (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Company', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
+                        .bind(company_id).bind(&now).execute(&mut *tx).await.ok();
+                }
+                if let Some(quality_id) = &product.quality_id {
+                    sqlx::query("INSERT INTO qualities (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Quality', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
+                        .bind(quality_id).bind(&now).execute(&mut *tx).await.ok();
+                }
+                if let Some(color_id) = &product.color_id {
+                    sqlx::query("INSERT INTO colors (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Color', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
+                        .bind(color_id).bind(&now).execute(&mut *tx).await.ok();
+                }
+
                 let projected_product = match niazi_mobile_mart_lib::repositories::PostgresProductRepository::create_product_tx(
                     &mut tx,
                     &product,
@@ -1095,6 +1120,31 @@ async fn sync_push_handler(
                         );
                     }
                 };
+
+                // Auto-heal missing master data for the central database
+                let now = chrono::Utc::now().to_rfc3339();
+                sqlx::query("INSERT INTO categories (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Category', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
+                    .bind(&product.category_id).bind(&now).execute(&mut *tx).await.ok();
+                if let Some(brand_id) = &product.brand_id {
+                    sqlx::query("INSERT INTO brands (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Brand', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
+                        .bind(brand_id).bind(&now).execute(&mut *tx).await.ok();
+                }
+                if let Some(unit_id) = &product.unit_id {
+                    sqlx::query("INSERT INTO units (id, name, symbol, conversion_factor, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Unit', $1, 1, 1, $2, $2) ON CONFLICT DO NOTHING")
+                        .bind(unit_id).bind(&now).execute(&mut *tx).await.ok();
+                }
+                if let Some(company_id) = &product.company_id {
+                    sqlx::query("INSERT INTO companies (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Company', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
+                        .bind(company_id).bind(&now).execute(&mut *tx).await.ok();
+                }
+                if let Some(quality_id) = &product.quality_id {
+                    sqlx::query("INSERT INTO qualities (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Quality', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
+                        .bind(quality_id).bind(&now).execute(&mut *tx).await.ok();
+                }
+                if let Some(color_id) = &product.color_id {
+                    sqlx::query("INSERT INTO colors (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Color', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
+                        .bind(color_id).bind(&now).execute(&mut *tx).await.ok();
+                }
 
                 let projected_product = match niazi_mobile_mart_lib::repositories::PostgresProductRepository::update_product_tx(
                     &mut tx,
