@@ -807,6 +807,63 @@ async fn sync_push_handler(
                 continue;
             }
 
+            // --- JIT TERMINAL AUTO-REGISTRATION ---
+            // Ensure terminal exists using authoritative server-side identity context.
+            // DO NOT use ON CONFLICT DO UPDATE to prevent unauthorized reassignment.
+            let now = chrono::Utc::now().to_rfc3339();
+            if let Err(e) = sqlx::query(
+                "INSERT INTO terminals (id, organization_id, branch_id, device_name, is_active, is_offline_terminal, registered_centrally, created_at, updated_at, last_seen_at) 
+                 VALUES ($1, $2, $3, 'Auto-Registered Terminal', 1, 0, 1, $4, $4, $4) 
+                 ON CONFLICT (id) DO NOTHING"
+            )
+            .bind(&event.terminal_id)
+            .bind(&auth.0.organization_id)
+            .bind(&event.branch_id)
+            .bind(&now)
+            .execute(&mut *tx)
+            .await {
+                let _ = tx.rollback().await;
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": "SERVER_ERROR",
+                        "message": format!("Failed to auto-register terminal: {e}")
+                    })),
+                );
+            }
+            
+            // Verify terminal ownership (protects against malicious reassignment if terminal already existed)
+            let terminal_org_res: Result<String, sqlx::Error> = sqlx::query_scalar("SELECT organization_id FROM terminals WHERE id = $1")
+                .bind(&event.terminal_id)
+                .fetch_one(&mut *tx)
+                .await;
+                
+            match terminal_org_res {
+                Ok(org_id) => {
+                    if org_id != auth.0.organization_id {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::FORBIDDEN,
+                            Json(json!({
+                                "error": "FORBIDDEN",
+                                "message": "Access denied: Terminal is registered to a different organization"
+                            })),
+                        );
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to verify terminal ownership: {e}")
+                        })),
+                    );
+                }
+            }
+            // --- END JIT TERMINAL AUTO-REGISTRATION ---
+
             if event.event_type == "SALE_CREATED" {
                 let dto: niazi_mobile_mart_lib::domain::sales::CompleteSaleDto = match serde_json::from_str(&event.payload) {
                     Ok(d) => d,
