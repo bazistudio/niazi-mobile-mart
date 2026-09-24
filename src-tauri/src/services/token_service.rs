@@ -28,12 +28,52 @@ pub struct Claims {
     pub exp: u64,                           // Expiration time (seconds since epoch)
 }
 
+const DEV_PRIVATE_KEY: &str = r#"-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCUohP2bbdNURIi
+2l/krEQ8W4imBPTsc9K77syT/RFb7CRFU/8wRr3TYTbXJIkUi6DXiz29+Q3KlgMe
+MdOCrkOyCGsDCa+L1EeotMbis3ePcMK++ITHlehDCiAE1ALWAaGrYYPPkeAcuHHo
+r6+WpjIIIuB60B711ujlRQvCz3TrzPTMFZKpt5jJ0VzbQlgqK1jQ3M3R0Uq7nB9e
+UXt4uNOyWPNFNzbCWHVjA/CmMo7TkAWQwzi9RFVjapgc/GYEOBPdpayNlv/AKgKv
+eCny10h6yKZIYae7eKnLw9BZEdL7kLxQy1pedZ4FTNzM5Hfog9aVvxA/P1FJcPap
+0I7o/81XAgMBAAECggEADJSgF5qCH+S4ohjqx0pqJ35glXDToan3ZdnYw2lHDV6c
+/qiVRSr6Xp3FYbYhdjWQAn6HgNYc++SbqfQctjHK4BMEqnKo7a8k9kYq6WhjD9Ht
+t0gGG8tNUqiqPM5h2RG1SJzN5oVZ5gRvUSXXDmt4ePt+wFZvsG5QMzZswECwDFSh
+PTYdO5wt1IFMsHLyPjWd41vx4zwtz0ZnqrN3KPpikEb5sil1S1D11nrDAiDb08Ym
+OCzpC/MLIN7G85+41pHxFH1+EpDsD4tWHlMY5LdEmjRnVvoReTRPYSg1mOVG3CSz
+djohztXs5tTue1KHXWDmSRrax1YFQa2vaMdAiohrlQKBgQDLLrGDyX+srKgkJdk7
+7wihXtA6bKBzXgjDjRboRnXcd/MAqIE9RGq+4tyveyazSr5f9HKWLsTozdtQkljY
+nh2q+HUJhZMwmWmYapkR64wP7+7o/aDTqCs1r0x5W1Z8W/Aq5lvw8004uHix73Kv
+i0XzmilrN62UKh2EB3aEooL7xQKBgQC7RUJo7Taxxa+dpkxJ45C7oX+rXJqXWbBr
+loFCd77cPwLrXjWYirU93EN11Hu78Flhkivju/F+sbsRf0U1cH87cOOx2bBDw/cc
+QNTC+7XjjSJ6GoQDW8pmZBA0462siO0r8ZCZeDcPcyf19zvk72am/uKueUigLWWI
+z5Ayiw1qawKBgG0G9kxwcKlY0LTs9l+5yZjGBtiC96pQeEVuzS8AuDgAyY293fPh
+ZaJem+syGzc0UWmuA1rhZ9pAtIHMtg4u8l6PCkZ8vdnjSI14DgFWswbOShYOGyHY
+aK9bDJ9GSudackqi6A0okXRxUJqykYjvJC8utzEIZIVQAByb4JYVmlG9AoGBALPf
+Xl4yGmq+GmQuKvB9p7LQ+DO8CrB88TsloJobMjOSQleYcZpHALaeLh2rLf3iabeS
+Ep33E4pBZBD2UZ92on6Re+KD2Q392AhHLRTreFVMZmUpussPC2U1j2t9lH84NbYT
+nHQMR7aLQUK7acgHOm4EO+6hh+RyNigmVbZ2YThpAoGAHun7r0a7pACmE+tZ+oPP
+5BtkNAMM+ijeniEW9Dy6Rn46uO38kPYqcA8Cme59M1hVw2xwcGf2HrMqSWEpkyXU
+HjuMu3OaImZAOCyMXKcALk6+xysvCsziRQqtd3rFVf7cFDwxrVtwCZTdlfgxyMHx
+u9lCI6ZanDpIJLfS3WUEDlY=
+-----END PRIVATE KEY-----"#;
+
+const DEV_PUBLIC_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlKIT9m23TVESItpf5KxE
+PFuIpgT07HPSu+7Mk/0RW+wkRVP/MEa902E21ySJFIug14s9vfkNypYDHjHTgq5D
+sghrAwmvi9RHqLTG4rN3j3DCvviEx5XoQwogBNQC1gGhq2GDz5HgHLhx6K+vlqYy
+CCLgetAe9dbo5UULws9068z0zBWSqbeYydFc20JYKitY0NzN0dFKu5wfXlF7eLjT
+sljzRTc2wlh1YwPwpjKO05AFkMM4vURVY2qYHPxmBDgT3aWsjZb/wCoCr3gp8tdI
+esimSGGnu3ipy8PQWRHS+5C8UMtaXnWeBUzczOR36IPWlb8QPz9RSXD2qdCO6P/N
+VwIDAQAB
+-----END PUBLIC KEY-----"#;
+
 /// Stateless JWT token manager resolving Bearer tokens to RequestIdentity.
-/// Uses HMAC-SHA256 (HS256) signature verification with JWT_SECRET.
+/// Uses RS256 signature verification.
 /// Does NOT rely on any in-memory token/session map.
 #[derive(Clone, Debug)]
 pub struct TokenManager {
-    jwt_secret: String,
+    private_key: Option<String>,
+    public_key: String,
 }
 
 impl Default for TokenManager {
@@ -43,17 +83,18 @@ impl Default for TokenManager {
 }
 
 impl TokenManager {
-    /// Creates a TokenManager resolving JWT_SECRET from environment or falling back to a dev secret.
+    /// Creates a TokenManager resolving RS256 keys from environment or falling back to dev keys.
     pub fn new() -> Self {
-        let secret = std::env::var("JWT_SECRET")
-            .unwrap_or_else(|_| "niazi_dev_jwt_secret_change_in_production_2026".to_string());
-        Self::with_secret(secret)
+        let private_key = std::env::var("JWT_PRIVATE_KEY").ok().or_else(|| Some(DEV_PRIVATE_KEY.to_string()));
+        let public_key = std::env::var("JWT_PUBLIC_KEY").unwrap_or_else(|_| DEV_PUBLIC_KEY.to_string());
+        Self { private_key, public_key }
     }
 
-    /// Creates a TokenManager with an explicit JWT secret string.
-    pub fn with_secret(secret: impl Into<String>) -> Self {
+    /// Creates a TokenManager with explicit RSA PEM string keys.
+    pub fn with_keys(private_key: Option<String>, public_key: String) -> Self {
         Self {
-            jwt_secret: secret.into(),
+            private_key,
+            public_key,
         }
     }
 
@@ -79,15 +120,15 @@ impl TokenManager {
         };
 
         encode(
-            &Header::default(),
+            &Header::new(jsonwebtoken::Algorithm::RS256),
             &claims,
-            &EncodingKey::from_secret(self.jwt_secret.as_bytes()),
+            &EncodingKey::from_rsa_pem(self.private_key.as_ref().expect("Private key missing").as_bytes()).unwrap(),
         )
         .expect("JWT encoding should not fail with valid secret and claims")
     }
 
     /// Resolves a Bearer token to a canonical RequestIdentity via stateless JWT verification.
-    /// Verifies HMAC-SHA256 signature and expiration claims.
+    /// Verifies RS256 signature and expiration claims.
     /// Returns AppError::Unauthorized if token signature is invalid, token is expired, or token is malformed.
     pub async fn resolve_identity(&self, token: &str) -> AppResult<RequestIdentity> {
         let clean_token = token.trim().strip_prefix("Bearer ").unwrap_or(token).trim();
@@ -98,8 +139,8 @@ impl TokenManager {
             ));
         }
 
-        let decoding_key = DecodingKey::from_secret(self.jwt_secret.as_bytes());
-        let validation = Validation::default();
+        let decoding_key = DecodingKey::from_rsa_pem(self.public_key.as_bytes()).map_err(|_| AppError::Unauthorized("Invalid public key configuration".to_string()))?;
+        let validation = Validation::new(jsonwebtoken::Algorithm::RS256);
 
         let token_data = decode::<Claims>(clean_token, &decoding_key, &validation).map_err(|e| {
                 use jsonwebtoken::errors::ErrorKind;

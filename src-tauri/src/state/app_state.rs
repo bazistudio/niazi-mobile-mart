@@ -327,9 +327,9 @@ impl AppState {
         self
     }
 
-    /// Configures explicit JWT_SECRET for stateless TokenManager.
-    pub fn with_jwt_secret(mut self, secret: impl Into<String>) -> Self {
-        self.token_manager = crate::services::TokenManager::with_secret(secret);
+    /// Configures explicit RSA keys for stateless TokenManager.
+    pub fn with_jwt_keys(mut self, private_key: Option<String>, public_key: String) -> Self {
+        self.token_manager = crate::services::TokenManager::with_keys(private_key, public_key);
         self
     }
 }

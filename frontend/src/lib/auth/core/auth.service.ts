@@ -64,38 +64,23 @@ export class AuthService {
 
         // Strict Desktop Session Synchronization (FAILS CLOSED ON ERROR)
         if (isTauriEnvironment()) {
-          const localUsername = rawUser?.username || identifier;
-          let nativeSynced = false;
+          // 1. Establish Native Online Session via JWT
+          try {
+            await tauriClient.authSyncSession(token);
+          } catch (syncErr: any) {
+            // FAIL CLOSED: Do not swallow native auth error!
+            throw new Error(`Central login succeeded but native desktop session synchronization failed: ${syncErr?.message || syncErr}`);
+          }
 
+          // 2. Bootstrap Offline Snapshot Post-Authentication (Non-fatal)
           try {
             await tauriClient.authBootstrapCentralSnapshots(token);
           } catch (bootstrapErr) {
             console.warn("[AuthService] Failed to bootstrap central snapshots:", bootstrapErr);
           }
 
-          try {
-            await tauriClient.authLoginSnapshot(localUsername, password);
-            nativeSynced = true;
-          } catch (snapshotErr) {
-            try {
-              await tauriClient.authLogin(localUsername, password);
-              nativeSynced = true;
-            } catch (nativeErr: any) {
-              // FAIL CLOSED: Do not swallow native auth error!
-              throw new Error(`Central login succeeded but native desktop session synchronization failed: ${nativeErr?.message || nativeErr}`);
-            }
-          }
-
-          if (nativeSynced) {
-            // Attach Central JWT as active_token on the native session
-            try {
-              await tauriClient.authSyncSession(token);
-            } catch (syncErr: any) {
-              console.warn("[AuthService] Non-fatal authSyncSession warning:", syncErr);
-            }
-
-            const nativeUser = await tauriClient.getCurrentUser();
-            if (nativeUser) {
+          const nativeUser = await tauriClient.getCurrentUser();
+          if (nativeUser) {
               user = {
                 id: nativeUser.id,
                 name: nativeUser.name,
@@ -109,7 +94,6 @@ export class AuthService {
               };
             }
           }
-        }
 
         const session: AuthSession = {
           expiresAt: Date.now() + 7 * 24 * 3600 * 1000,

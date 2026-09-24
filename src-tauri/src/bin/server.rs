@@ -76,13 +76,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let bind_addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-    // 2b. Require JWT_SECRET environment variable in server mode
-    let jwt_secret = match std::env::var("JWT_SECRET") {
-        Ok(secret) if !secret.trim().is_empty() => secret,
+    // 2b. Require JWT_PRIVATE_KEY and JWT_PUBLIC_KEY environment variables in server mode
+    let jwt_private = std::env::var("JWT_PRIVATE_KEY").ok();
+    let jwt_public = match std::env::var("JWT_PUBLIC_KEY") {
+        Ok(key) if !key.trim().is_empty() => key,
         _ => {
-            error!("FATAL: JWT_SECRET environment variable is missing or empty.");
-            error!("Stateless JWT authentication requires JWT_SECRET to be configured in server mode.");
-            return Err("JWT_SECRET environment variable is required for server mode".into());
+            error!("FATAL: JWT_PUBLIC_KEY environment variable is missing or empty.");
+            error!("Stateless JWT authentication requires RSA public key to be configured in server mode.");
+            return Err("JWT_PUBLIC_KEY environment variable is required for server mode".into());
         }
     };
 
@@ -94,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(pg_adapter) => {
                 info!("PostgreSQL connection pool ready â€” pg_mode: active");
                 let pool = pg_adapter.pool().clone();
-                Arc::new(AppState::new_postgres(env!("CARGO_PKG_VERSION"), pool).with_jwt_secret(&jwt_secret))
+                Arc::new(AppState::new_postgres(env!("CARGO_PKG_VERSION"), pool).with_jwt_keys(jwt_private, jwt_public))
             }
             Err(e) => {
                 error!("PostgreSQL initialization failed: {e}");
@@ -106,10 +107,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("DATABASE_URL not set â€” running in SQLite-only mode (local desktop / dev mode)");
         let db_path = niazi_mobile_mart_lib::db::connection::DatabaseConnection::default_db_path();
         let base_state = match niazi_mobile_mart_lib::db::connection::DatabaseConnection::open_file(db_path) {
-            Ok(db) => AppState::new_sqlite(env!("CARGO_PKG_VERSION"), db).with_jwt_secret(&jwt_secret),
+            Ok(db) => AppState::new_sqlite(env!("CARGO_PKG_VERSION"), db).with_jwt_keys(jwt_private.clone(), jwt_public.clone()),
             Err(e) => {
                 warn!("Persistent SQLite path unavailable ({e}) â€” using in-memory SQLite.");
-                AppState::in_memory(env!("CARGO_PKG_VERSION")).with_jwt_secret(&jwt_secret)
+                AppState::in_memory(env!("CARGO_PKG_VERSION")).with_jwt_keys(jwt_private, jwt_public)
             }
         };
         Arc::new(base_state)
@@ -415,6 +416,7 @@ async fn credential_snapshots_handler(
             let now = chrono::Utc::now().to_rfc3339();
             let snapshots: Vec<niazi_mobile_mart_lib::domain::auth_snapshot::AuthSnapshot> = users
                 .into_iter()
+                .filter(|u| auth.0.role == UserRole::Admin || u.id == auth.0.user_id)
                 .map(|u| {
                     let profile_json = serde_json::to_string(&u.access_profile)
                         .unwrap_or_else(|_| "{}".to_string());
