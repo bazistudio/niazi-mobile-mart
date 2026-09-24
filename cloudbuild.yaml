@@ -48,7 +48,7 @@ steps:
       - '--vpc-connector=niazi-vpc-conn'
       - '--vpc-egress=private-ranges-only'
       - '--allow-unauthenticated'
-      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest'
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_PRIVATE_KEY=JWT_PRIVATE_KEY:latest,JWT_PUBLIC_KEY=JWT_PUBLIC_KEY:latest'
 
 images:
   - 'asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:$TAG_NAME'
