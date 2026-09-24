@@ -7,7 +7,7 @@ use crate::domain::change_log::ChangeLogEntry;
 use crate::errors::AppResult;
 use crate::repositories::{
     SQLiteExpenseRepository, SQLiteInventoryRepository, SQLiteProductRepository, SQLitePurchaseRepository,
-    SQLiteSaleRepository, SQLiteSyncCursorRepository,
+    SQLiteSaleRepository, SQLiteSyncCursorRepository, SQLiteCatalogRepository,
 };
 
 /// Service responsible for applying downstream central change log deltas into local SQLite
@@ -194,6 +194,60 @@ impl ChangeApplier {
 
                 SQLiteExpenseRepository::insert_expense_in_tx(tx, &expense)?;
             }
+            "CATEGORY_CREATED" => {
+                let entity: crate::domain::catalog::Category = match serde_json::from_str(&change.payload) {
+                    Ok(e) => e,
+                    Err(e) => return Err(DbError::ValidationError(format!("Invalid CATEGORY_CREATED payload in change_log: {e}"))),
+                };
+                let exists: bool = tx.query_row("SELECT 1 FROM categories WHERE id = ?1", params![entity.id], |_| Ok(true)).unwrap_or(false);
+                if exists { return Ok(()); }
+                SQLiteCatalogRepository::insert_category_in_tx(tx, &entity)?;
+            }
+            "BRAND_CREATED" => {
+                let entity: crate::domain::catalog::Brand = match serde_json::from_str(&change.payload) {
+                    Ok(e) => e,
+                    Err(e) => return Err(DbError::ValidationError(format!("Invalid BRAND_CREATED payload in change_log: {e}"))),
+                };
+                let exists: bool = tx.query_row("SELECT 1 FROM brands WHERE id = ?1", params![entity.id], |_| Ok(true)).unwrap_or(false);
+                if exists { return Ok(()); }
+                SQLiteCatalogRepository::insert_brand_in_tx(tx, &entity)?;
+            }
+            "UNIT_CREATED" => {
+                let entity: crate::domain::catalog::Unit = match serde_json::from_str(&change.payload) {
+                    Ok(e) => e,
+                    Err(e) => return Err(DbError::ValidationError(format!("Invalid UNIT_CREATED payload in change_log: {e}"))),
+                };
+                let exists: bool = tx.query_row("SELECT 1 FROM units WHERE id = ?1", params![entity.id], |_| Ok(true)).unwrap_or(false);
+                if exists { return Ok(()); }
+                SQLiteCatalogRepository::insert_unit_in_tx(tx, &entity)?;
+            }
+            "COMPANY_CREATED" => {
+                let entity: crate::domain::catalog::Company = match serde_json::from_str(&change.payload) {
+                    Ok(e) => e,
+                    Err(e) => return Err(DbError::ValidationError(format!("Invalid COMPANY_CREATED payload in change_log: {e}"))),
+                };
+                let exists: bool = tx.query_row("SELECT 1 FROM companies WHERE id = ?1", params![entity.id], |_| Ok(true)).unwrap_or(false);
+                if exists { return Ok(()); }
+                SQLiteCatalogRepository::insert_company_in_tx(tx, &entity)?;
+            }
+            "QUALITY_CREATED" => {
+                let entity: crate::domain::catalog::Quality = match serde_json::from_str(&change.payload) {
+                    Ok(e) => e,
+                    Err(e) => return Err(DbError::ValidationError(format!("Invalid QUALITY_CREATED payload in change_log: {e}"))),
+                };
+                let exists: bool = tx.query_row("SELECT 1 FROM qualities WHERE id = ?1", params![entity.id], |_| Ok(true)).unwrap_or(false);
+                if exists { return Ok(()); }
+                SQLiteCatalogRepository::insert_quality_in_tx(tx, &entity)?;
+            }
+            "COLOR_CREATED" => {
+                let entity: crate::domain::catalog::Color = match serde_json::from_str(&change.payload) {
+                    Ok(e) => e,
+                    Err(e) => return Err(DbError::ValidationError(format!("Invalid COLOR_CREATED payload in change_log: {e}"))),
+                };
+                let exists: bool = tx.query_row("SELECT 1 FROM colors WHERE id = ?1", params![entity.id], |_| Ok(true)).unwrap_or(false);
+                if exists { return Ok(()); }
+                SQLiteCatalogRepository::insert_color_in_tx(tx, &entity)?;
+            }
             _ => {
                 // Forward-compatible ignore for future business event types
             }
@@ -322,5 +376,333 @@ mod tests {
 
         let fetched_deactivated = prod_repo.get_product_by_id(&product_id).await.unwrap();
         assert!(!fetched_deactivated.is_active);
+    }
+    #[tokio::test]
+    async fn test_downstream_category_auto_heal_creation() {
+        let db = setup_test_db().await;
+        let applier = ChangeApplier::new(db.clone());
+
+        let cat_id = "00000000-0000-0000-0000-000000000999".to_string();
+        let cat = crate::domain::catalog::Category {
+            id: cat_id.clone(),
+            name: "Auto Category".to_string(),
+            code: "AUTO".to_string(),
+            description: None,
+            is_active: true,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let change = ChangeLogEntry {
+            sequence: 1,
+            organization_id: "org1".to_string(),
+            branch_id: "br1".to_string(),
+            client_event_id: None,
+            event_type: "CATEGORY_CREATED".to_string(),
+            entity_type: "CATEGORY".to_string(),
+            entity_id: cat_id.clone(),
+            payload: serde_json::to_string(&cat).unwrap(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        applier.apply_batch("org1", &[change], 1).await.unwrap();
+
+        let repo = crate::repositories::SQLiteCatalogRepository::new(db.clone());
+        let fetched = repo.get_category_by_id(&cat_id).await.unwrap();
+        assert_eq!(fetched.name, "Auto Category");
+        assert_eq!(fetched.code, "AUTO");
+    }
+
+    #[tokio::test]
+    async fn test_downstream_brand_unit_company_quality_color_creation() {
+        let db = setup_test_db().await;
+        let applier = ChangeApplier::new(db.clone());
+
+        let id = "00000000-0000-0000-0000-000000000999".to_string();
+        let unit = crate::domain::catalog::Unit {
+            id: id.clone(),
+            name: "Auto Unit".to_string(),
+            symbol: Some("AU".to_string()),
+            conversion_factor: 1,
+            is_active: true,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let change = ChangeLogEntry {
+            sequence: 1,
+            organization_id: "org1".to_string(),
+            branch_id: "br1".to_string(),
+            client_event_id: None,
+            event_type: "UNIT_CREATED".to_string(),
+            entity_type: "UNIT".to_string(),
+            entity_id: id.clone(),
+            payload: serde_json::to_string(&unit).unwrap(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        applier.apply_batch("org1", &[change], 1).await.unwrap();
+
+        let repo = crate::repositories::SQLiteCatalogRepository::new(db.clone());
+        let fetched = repo.get_unit_by_id(&id).await.unwrap();
+        assert_eq!(fetched.name, "Auto Unit");
+        assert_eq!(fetched.symbol.as_deref(), Some("AU"));
+        assert_eq!(fetched.conversion_factor, 1);
+    }
+
+    #[tokio::test]
+    async fn test_downstream_master_data_replay_idempotency() {
+        let db = setup_test_db().await;
+        let applier = ChangeApplier::new(db.clone());
+
+        let cat_id = "00000000-0000-0000-0000-000000000999".to_string();
+        let cat = crate::domain::catalog::Category {
+            id: cat_id.clone(),
+            name: "Auto Category".to_string(),
+            code: "AUTO".to_string(),
+            description: None,
+            is_active: true,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let change = ChangeLogEntry {
+            sequence: 1,
+            organization_id: "org1".to_string(),
+            branch_id: "br1".to_string(),
+            client_event_id: None,
+            event_type: "CATEGORY_CREATED".to_string(),
+            entity_type: "CATEGORY".to_string(),
+            entity_id: cat_id.clone(),
+            payload: serde_json::to_string(&cat).unwrap(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        applier.apply_batch("org1", &[change.clone()], 1).await.unwrap();
+        applier.apply_batch("org1", &[change.clone()], 1).await.unwrap(); // Should safely no-op
+    }
+
+    #[tokio::test]
+    async fn test_downstream_complete_product_dependency_chain() {
+        let db = setup_test_db().await;
+        let applier = ChangeApplier::new(db.clone());
+
+        let cat_id = "00000000-0000-0000-0000-000000000999".to_string();
+        let cat = crate::domain::catalog::Category {
+            id: cat_id.clone(),
+            name: "Auto Category".to_string(),
+            code: "AUTO".to_string(),
+            description: None,
+            is_active: true,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let change1 = ChangeLogEntry {
+            sequence: 1,
+            organization_id: "org1".to_string(),
+            branch_id: "br1".to_string(),
+            client_event_id: None,
+            event_type: "CATEGORY_CREATED".to_string(),
+            entity_type: "CATEGORY".to_string(),
+            entity_id: cat_id.clone(),
+            payload: serde_json::to_string(&cat).unwrap(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let product_id = "00000000-0000-0000-0000-000000000888".to_string();
+        let prod = Product {
+            id: product_id.clone(),
+            name: "Test Phone".to_string(),
+            normalized_name: crate::domain::product::normalize_product_name("Test Phone"),
+            sku: "SKU-TPHONE2".to_string(),
+            barcode: Some("12345678910".to_string()),
+            category_id: cat_id.clone(),
+            brand_id: None,
+            unit_id: None,
+            company_id: None,
+            quality_id: None,
+            color_id: None,
+            purchase_price: 15000,
+            average_cost: 15000,
+            sale_price: 18000,
+            low_stock_threshold: 5,
+            is_active: true,
+            description: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let change2 = ChangeLogEntry {
+            sequence: 2,
+            organization_id: "org1".to_string(),
+            branch_id: "br1".to_string(),
+            client_event_id: None,
+            event_type: "PRODUCT_CREATED".to_string(),
+            entity_type: "PRODUCT".to_string(),
+            entity_id: product_id.clone(),
+            payload: serde_json::to_string(&prod).unwrap(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        applier.apply_batch("org1", &[change1, change2], 2).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_downstream_missing_optional_parents() {
+        let db = setup_test_db().await;
+        let applier = ChangeApplier::new(db.clone());
+        let product_id = "00000000-0000-0000-0000-000000000888".to_string();
+        let prod = Product {
+            id: product_id.clone(),
+            name: "Test Phone".to_string(),
+            normalized_name: crate::domain::product::normalize_product_name("Test Phone"),
+            sku: "SKU-TPHONE3".to_string(),
+            barcode: Some("1234567891011".to_string()),
+            category_id: "00000000-0000-0000-0000-000000000010".to_string(), // Exists from default data
+            brand_id: None,
+            unit_id: None,
+            company_id: None,
+            quality_id: None,
+            color_id: None,
+            purchase_price: 15000,
+            average_cost: 15000,
+            sale_price: 18000,
+            low_stock_threshold: 5,
+            is_active: true,
+            description: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let change = ChangeLogEntry {
+            sequence: 1,
+            organization_id: "org1".to_string(),
+            branch_id: "br1".to_string(),
+            client_event_id: None,
+            event_type: "PRODUCT_CREATED".to_string(),
+            entity_type: "PRODUCT".to_string(),
+            entity_id: product_id.clone(),
+            payload: serde_json::to_string(&prod).unwrap(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        applier.apply_batch("org1", &[change], 1).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_downstream_replay_safety() {
+        let db = setup_test_db().await;
+        let applier = ChangeApplier::new(db.clone());
+
+        let cat_id = "00000000-0000-0000-0000-000000000999".to_string();
+        let cat = crate::domain::catalog::Category {
+            id: cat_id.clone(),
+            name: "Auto Category".to_string(),
+            code: "AUTO".to_string(),
+            description: None,
+            is_active: true,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let change1 = ChangeLogEntry {
+            sequence: 1,
+            organization_id: "org1".to_string(),
+            branch_id: "br1".to_string(),
+            client_event_id: None,
+            event_type: "CATEGORY_CREATED".to_string(),
+            entity_type: "CATEGORY".to_string(),
+            entity_id: cat_id.clone(),
+            payload: serde_json::to_string(&cat).unwrap(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let product_id = "00000000-0000-0000-0000-000000000888".to_string();
+        let prod = Product {
+            id: product_id.clone(),
+            name: "Test Phone".to_string(),
+            normalized_name: crate::domain::product::normalize_product_name("Test Phone"),
+            sku: "SKU-TPHONE2".to_string(),
+            barcode: Some("12345678910".to_string()),
+            category_id: cat_id.clone(),
+            brand_id: None,
+            unit_id: None,
+            company_id: None,
+            quality_id: None,
+            color_id: None,
+            purchase_price: 15000,
+            average_cost: 15000,
+            sale_price: 18000,
+            low_stock_threshold: 5,
+            is_active: true,
+            description: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let change2 = ChangeLogEntry {
+            sequence: 2,
+            organization_id: "org1".to_string(),
+            branch_id: "br1".to_string(),
+            client_event_id: None,
+            event_type: "PRODUCT_CREATED".to_string(),
+            entity_type: "PRODUCT".to_string(),
+            entity_id: product_id.clone(),
+            payload: serde_json::to_string(&prod).unwrap(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        applier.apply_batch("org1", &[change1.clone(), change2.clone()], 2).await.unwrap();
+        // apply again
+        applier.apply_batch("org1", &[change1.clone(), change2.clone()], 2).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_downstream_atomic_rollback() {
+        let db = setup_test_db().await;
+        let applier = ChangeApplier::new(db.clone());
+
+        let cat_id = "00000000-0000-0000-0000-000000000999".to_string();
+        let cat = crate::domain::catalog::Category {
+            id: cat_id.clone(),
+            name: "Auto Category".to_string(),
+            code: "AUTO".to_string(),
+            description: None,
+            is_active: true,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let change1 = ChangeLogEntry {
+            sequence: 1,
+            organization_id: "org1".to_string(),
+            branch_id: "br1".to_string(),
+            client_event_id: None,
+            event_type: "CATEGORY_CREATED".to_string(),
+            entity_type: "CATEGORY".to_string(),
+            entity_id: cat_id.clone(),
+            payload: serde_json::to_string(&cat).unwrap(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let change2 = ChangeLogEntry {
+            sequence: 2,
+            organization_id: "org1".to_string(),
+            branch_id: "br1".to_string(),
+            client_event_id: None,
+            event_type: "PRODUCT_CREATED".to_string(),
+            entity_type: "PRODUCT".to_string(),
+            entity_id: "id2".to_string(),
+            payload: "{ INVALID JSON }".to_string(), // This will cause a validation error and rollback the transaction
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let result = applier.apply_batch("org1", &[change1, change2], 2).await;
+        assert!(result.is_err());
+
+        // Category should be rolled back
+        let repo = crate::repositories::SQLiteCatalogRepository::new(db.clone());
+        let fetched = repo.get_category_by_id(&cat_id).await;
+        assert!(fetched.is_err());
     }
 }

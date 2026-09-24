@@ -744,4 +744,107 @@ impl SQLiteCatalogRepository {
             updated_at: now,
         })
     }
+    // --- TRANSACTION AWARE HELPERS FOR SYNC DOWNSTREAM ---
+
+    pub fn insert_category_in_tx(tx: &rusqlite::Transaction, entity: &Category) -> crate::db::errors::DbResult<()> {
+        tx.execute(
+            "INSERT INTO categories (id, name, code, description, is_active, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                entity.id,
+                entity.name,
+                entity.code,
+                entity.description,
+                if entity.is_active { 1 } else { 0 },
+                entity.created_at,
+                entity.updated_at
+            ],
+        ).map_err(|e| crate::db::errors::DbError::QueryError(format!("Failed to insert category in tx: {}", e)))?;
+        Ok(())
+    }
+
+    pub fn insert_brand_in_tx(tx: &rusqlite::Transaction, entity: &Brand) -> crate::db::errors::DbResult<()> {
+        tx.execute(
+            "INSERT INTO brands (id, name, code, description, is_active, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                entity.id,
+                entity.name,
+                entity.code,
+                entity.description,
+                if entity.is_active { 1 } else { 0 },
+                entity.created_at,
+                entity.updated_at
+            ],
+        ).map_err(|e| crate::db::errors::DbError::QueryError(format!("Failed to insert brand in tx: {}", e)))?;
+        Ok(())
+    }
+
+    pub fn insert_unit_in_tx(tx: &rusqlite::Transaction, entity: &Unit) -> crate::db::errors::DbResult<()> {
+        tx.execute(
+            "INSERT INTO units (id, name, symbol, conversion_factor, is_active, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                entity.id,
+                entity.name,
+                entity.symbol,
+                entity.conversion_factor,
+                if entity.is_active { 1 } else { 0 },
+                entity.created_at,
+                entity.updated_at
+            ],
+        ).map_err(|e| crate::db::errors::DbError::QueryError(format!("Failed to insert unit in tx: {}", e)))?;
+        Ok(())
+    }
+
+    pub fn insert_company_in_tx(tx: &rusqlite::Transaction, entity: &Company) -> crate::db::errors::DbResult<()> {
+        tx.execute(
+            "INSERT INTO companies (id, name, code, description, is_active, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                entity.id,
+                entity.name,
+                entity.code,
+                entity.description,
+                if entity.is_active { 1 } else { 0 },
+                entity.created_at,
+                entity.updated_at
+            ],
+        ).map_err(|e| crate::db::errors::DbError::QueryError(format!("Failed to insert company in tx: {}", e)))?;
+        Ok(())
+    }
+
+    pub fn insert_quality_in_tx(tx: &rusqlite::Transaction, entity: &Quality) -> crate::db::errors::DbResult<()> {
+        tx.execute(
+            "INSERT INTO qualities (id, name, code, description, is_active, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                entity.id,
+                entity.name,
+                entity.code,
+                entity.description,
+                if entity.is_active { 1 } else { 0 },
+                entity.created_at,
+                entity.updated_at
+            ],
+        ).map_err(|e| crate::db::errors::DbError::QueryError(format!("Failed to insert quality in tx: {}", e)))?;
+        Ok(())
+    }
+
+    pub fn insert_color_in_tx(tx: &rusqlite::Transaction, entity: &Color) -> crate::db::errors::DbResult<()> {
+        tx.execute(
+            "INSERT INTO colors (id, name, code, description, is_active, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                entity.id,
+                entity.name,
+                entity.code,
+                entity.description,
+                if entity.is_active { 1 } else { 0 },
+                entity.created_at,
+                entity.updated_at
+            ],
+        ).map_err(|e| crate::db::errors::DbError::QueryError(format!("Failed to insert color in tx: {}", e)))?;
+        Ok(())
+    }
 }
