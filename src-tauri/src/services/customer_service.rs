@@ -93,7 +93,32 @@ impl CustomerService {
             updated_at: now,
         };
 
-        self.customer_repo.create_customer(&customer).await
+        let db_opt = self.db.as_ref();
+        if let (CustomerRepository::SQLite(_), Some(db)) = (&self.customer_repo, db_opt) {
+            let customer_clone = customer.clone();
+            let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+            let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+            let terminal_id = current_terminal.id;
+            
+            with_transaction(db, move |tx| {
+                crate::repositories::SQLiteCustomerRepository::insert_customer_in_tx(tx, &customer_clone)?;
+                
+                let payload = serde_json::to_string(&customer_clone).unwrap();
+                let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                    client_event_id: Some(customer_clone.id.clone()),
+                    terminal_id,
+                    organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
+                    branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(), // Or could use active branch
+                    event_type: "CUSTOMER_CREATED".to_string(),
+                    payload,
+                };
+                crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+                Ok(())
+            }).await?;
+            Ok(customer)
+        } else {
+            self.customer_repo.create_customer(&customer).await
+        }
     }
 
     /// Updates existing customer information
@@ -114,7 +139,32 @@ impl CustomerService {
             }
         }
 
-        self.customer_repo.update_customer(id, &dto).await
+        let db_opt = self.db.as_ref();
+        if let (CustomerRepository::SQLite(_), Some(db)) = (&self.customer_repo, db_opt) {
+            let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+            let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+            let terminal_id = current_terminal.id;
+            let id_clone = id.to_string();
+            let dto_clone = dto.clone();
+            
+            let updated = with_transaction(db, move |tx| {
+                let cust = crate::repositories::SQLiteCustomerRepository::update_customer_in_tx(tx, &id_clone, &dto_clone)?;
+                let payload = serde_json::to_string(&cust).unwrap();
+                let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                    client_event_id: Some(Uuid::new_v4().to_string()), // Must use a new UUID for the event
+                    terminal_id,
+                    organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
+                    branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                    event_type: "CUSTOMER_UPDATED".to_string(),
+                    payload,
+                };
+                crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+                Ok(cust)
+            }).await?;
+            Ok(updated)
+        } else {
+            self.customer_repo.update_customer(id, &dto).await
+        }
     }
 
     /// Fetches customer by ID

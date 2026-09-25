@@ -135,7 +135,32 @@ impl SupplierService {
             }
         }
 
-        self.supplier_repo.update(id, &dto).await
+        let db_opt = self.db.as_ref();
+        if let (SupplierRepository::SQLite(_), Some(db)) = (&self.supplier_repo, db_opt) {
+            let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+            let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+            let terminal_id = current_terminal.id;
+            let id_clone = id.to_string();
+            let dto_clone = dto.clone();
+            
+            let updated = with_transaction(db, move |tx| {
+                let supp = crate::repositories::SQLiteSupplierRepository::update_supplier_in_tx(tx, &id_clone, &dto_clone)?;
+                let payload = serde_json::to_string(&supp).unwrap();
+                let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                    client_event_id: Some(Uuid::new_v4().to_string()),
+                    terminal_id,
+                    organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
+                    branch_id: crate::domain::organization::DEFAULT_MAIN_BRANCH_ID.to_string(),
+                    event_type: "SUPPLIER_UPDATED".to_string(),
+                    payload,
+                };
+                crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+                Ok(supp)
+            }).await?;
+            Ok(updated)
+        } else {
+            self.supplier_repo.update(id, &dto).await
+        }
     }
 
     pub async fn deactivate_supplier(&self, id: &str) -> AppResult<()> {

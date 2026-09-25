@@ -139,6 +139,92 @@ impl SQLiteCustomerRepository {
         }
     }
 
+    pub fn insert_customer_in_tx(conn: &Connection, customer: &Customer) -> DbResult<()> {
+        conn.execute(
+            "INSERT INTO customers (
+                id, customer_code, name, phone, alternate_phone, email, address, notes, credit_limit, is_active, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                customer.id,
+                customer.customer_code,
+                customer.name.trim(),
+                customer.phone.trim(),
+                customer.alternate_phone.as_deref().map(str::trim),
+                customer.email.as_deref().map(str::trim),
+                customer.address.as_deref().map(str::trim),
+                customer.notes.as_deref().map(str::trim),
+                customer.credit_limit,
+                if customer.is_active { 1 } else { 0 },
+                customer.created_at,
+                customer.updated_at,
+            ],
+        )
+        .map_err(|e| DbError::QueryError(format!("Failed to insert customer: {e}")))?;
+        Ok(())
+    }
+
+    pub fn update_customer_in_tx(conn: &Connection, id: &str, dto: &UpdateCustomerDto) -> DbResult<Customer> {
+        let existing = Self::get_customer_by_id_in_tx(conn, id)?
+            .ok_or_else(|| DbError::QueryError(format!("Customer with ID '{id}' not found")))?;
+
+        let name = dto.name.as_deref().unwrap_or(&existing.name).trim();
+        let phone = dto.phone.as_deref().unwrap_or(&existing.phone).trim();
+        let alternate_phone = match &dto.alternate_phone {
+            Some(p) => Some(p.trim().to_string()),
+            None => existing.alternate_phone.clone(),
+        };
+        let email = match &dto.email {
+            Some(e) => Some(e.trim().to_string()),
+            None => existing.email.clone(),
+        };
+        let address = match &dto.address {
+            Some(a) => Some(a.trim().to_string()),
+            None => existing.address.clone(),
+        };
+        let notes = match &dto.notes {
+            Some(n) => Some(n.trim().to_string()),
+            None => existing.notes.clone(),
+        };
+        let credit_limit = dto.credit_limit.unwrap_or(existing.credit_limit);
+        let is_active = dto.is_active.unwrap_or(existing.is_active);
+        let now = chrono::Utc::now().to_rfc3339();
+
+        conn.execute(
+            "UPDATE customers SET
+                name = ?1, phone = ?2, alternate_phone = ?3, email = ?4,
+                address = ?5, notes = ?6, credit_limit = ?7, is_active = ?8, updated_at = ?9
+             WHERE id = ?10",
+            params![
+                name,
+                phone,
+                alternate_phone,
+                email,
+                address,
+                notes,
+                credit_limit,
+                if is_active { 1 } else { 0 },
+                now,
+                id,
+            ],
+        )
+        .map_err(|e| DbError::QueryError(format!("Failed to update customer: {e}")))?;
+
+        Ok(Customer {
+            id: id.to_string(),
+            customer_code: existing.customer_code,
+            name: name.to_string(),
+            phone: phone.to_string(),
+            alternate_phone,
+            email,
+            address,
+            notes,
+            credit_limit,
+            is_active,
+            created_at: existing.created_at,
+            updated_at: now,
+        })
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Async Repository APIs
     // ──────────────────────────────────────────────────────────────────────────

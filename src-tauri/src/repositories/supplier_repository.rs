@@ -119,6 +119,68 @@ impl SQLiteSupplierRepository {
         }
     }
 
+    pub fn update_supplier_in_tx(conn: &Connection, id: &str, dto: &UpdateSupplierDto) -> DbResult<Supplier> {
+        let existing = Self::get_by_id_in_tx(conn, id)?
+            .ok_or_else(|| DbError::QueryError(format!("Supplier with ID {id} not found")))?;
+
+        let name = dto.name.as_ref().unwrap_or(&existing.name);
+        let phone = dto.phone.as_ref().unwrap_or(&existing.phone);
+        let alternate_phone = match &dto.alternate_phone {
+            Some(v) => Some(v.clone()),
+            None => existing.alternate_phone.clone(),
+        };
+        let email = match &dto.email {
+            Some(v) => Some(v.clone()),
+            None => existing.email.clone(),
+        };
+        let address = match &dto.address {
+            Some(v) => Some(v.clone()),
+            None => existing.address.clone(),
+        };
+        let notes = match &dto.notes {
+            Some(v) => Some(v.clone()),
+            None => existing.notes.clone(),
+        };
+        let credit_limit = dto.credit_limit.unwrap_or(existing.credit_limit);
+        let is_active = dto.is_active.unwrap_or(existing.is_active);
+        let now = chrono::Utc::now().to_rfc3339();
+
+        conn.execute(
+            "UPDATE suppliers SET
+                name = ?1, phone = ?2, alternate_phone = ?3, email = ?4, address = ?5,
+                notes = ?6, credit_limit = ?7, is_active = ?8, updated_at = ?9
+             WHERE id = ?10",
+            params![
+                name,
+                phone,
+                alternate_phone,
+                email,
+                address,
+                notes,
+                credit_limit,
+                if is_active { 1 } else { 0 },
+                now,
+                id,
+            ],
+        )
+        .map_err(|e| DbError::QueryError(format!("Failed to update supplier: {e}")))?;
+
+        Ok(Supplier {
+            id: id.to_string(),
+            supplier_code: existing.supplier_code,
+            name: name.to_string(),
+            phone: phone.to_string(),
+            alternate_phone,
+            email,
+            address,
+            notes,
+            credit_limit,
+            is_active,
+            created_at: existing.created_at,
+            updated_at: now,
+        })
+    }
+
     /// Calculates authoritative outstanding payable balance for a supplier inside a transaction
     /// Payable = SUM(debit) - SUM(credit)
     pub fn get_outstanding_balance_in_tx(conn: &Connection, supplier_id: &str) -> DbResult<i64> {
