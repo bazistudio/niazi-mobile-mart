@@ -251,6 +251,39 @@ impl ChangeApplier {
                 if exists { return Ok(()); }
                 SQLiteCatalogRepository::insert_color_in_tx(tx, &entity)?;
             }
+            "CUSTOMER_CREATED" | "CUSTOMER_UPDATED" => {
+                let customer: crate::domain::customer::Customer = match serde_json::from_str(&change.payload) {
+                    Ok(c) => c,
+                    Err(e) => return Err(DbError::ValidationError(format!("Invalid {} payload: {e}", change.event_type))),
+                };
+                let exists: bool = tx.query_row("SELECT 1 FROM customers WHERE id = ?1", params![customer.id], |_| Ok(true)).unwrap_or(false);
+                if exists {
+                    tx.execute(
+                        "UPDATE customers SET name = ?1, phone = ?2, alternate_phone = ?3, email = ?4, address = ?5, notes = ?6, credit_limit = ?7, is_active = ?8, updated_at = ?9 WHERE id = ?10",
+                        params![customer.name, customer.phone, customer.alternate_phone, customer.email, customer.address, customer.notes, customer.credit_limit, if customer.is_active { 1 } else { 0 }, customer.updated_at, customer.id],
+                    ).map_err(|e| DbError::QueryError(format!("Failed to update customer: {e}")))?;
+                } else {
+                    tx.execute(
+                        "INSERT INTO customers (id, customer_code, name, phone, alternate_phone, email, address, notes, credit_limit, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                        params![customer.id, customer.customer_code, customer.name, customer.phone, customer.alternate_phone, customer.email, customer.address, customer.notes, customer.credit_limit, if customer.is_active { 1 } else { 0 }, customer.created_at, customer.updated_at],
+                    ).map_err(|e| DbError::QueryError(format!("Failed to insert customer: {e}")))?;
+                }
+            }
+            "SUPPLIER_CREATED" | "SUPPLIER_UPDATED" => {
+                let supplier: crate::domain::supplier::Supplier = match serde_json::from_str(&change.payload) {
+                    Ok(s) => s,
+                    Err(e) => return Err(DbError::ValidationError(format!("Invalid {} payload: {e}", change.event_type))),
+                };
+                let exists: bool = tx.query_row("SELECT 1 FROM suppliers WHERE id = ?1", params![supplier.id], |_| Ok(true)).unwrap_or(false);
+                if exists {
+                    tx.execute(
+                        "UPDATE suppliers SET name = ?1, phone = ?2, alternate_phone = ?3, email = ?4, address = ?5, notes = ?6, credit_limit = ?7, is_active = ?8, updated_at = ?9 WHERE id = ?10",
+                        params![supplier.name, supplier.phone, supplier.alternate_phone, supplier.email, supplier.address, supplier.notes, supplier.credit_limit, if supplier.is_active { 1 } else { 0 }, supplier.updated_at, supplier.id],
+                    ).map_err(|e| DbError::QueryError(format!("Failed to update supplier: {e}")))?;
+                } else {
+                    crate::repositories::SQLiteSupplierRepository::insert_supplier_in_tx(tx, &supplier)?;
+                }
+            }
             _ => {
                 // Forward-compatible ignore for future business event types
             }
