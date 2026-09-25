@@ -37,6 +37,9 @@ impl ChangeApplier {
         let changes_owned = changes.to_vec();
 
         crate::db::transaction::with_transaction(&db, move |tx| {
+            tx.execute("PRAGMA defer_foreign_keys = ON", [])
+                .map_err(|e| crate::db::errors::DbError::QueryError(format!("Failed to defer foreign keys: {e}")))?;
+
             for change in &changes_owned {
                 Self::apply_single_change_in_tx(tx, change)?;
             }
