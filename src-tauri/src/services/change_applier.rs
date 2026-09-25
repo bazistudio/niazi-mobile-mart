@@ -116,6 +116,17 @@ impl ChangeApplier {
                     return Ok(());
                 }
 
+                // Auto-heal missing references to prevent FK constraint failures
+                if let Some(ref uid) = result_dto.sale.performed_by {
+                    Self::auto_heal_user_in_tx(tx, uid)?;
+                }
+                if let Some(ref cid) = result_dto.sale.customer_id {
+                    Self::auto_heal_customer_in_tx(tx, cid)?;
+                }
+                for line in &result_dto.lines {
+                    Self::auto_heal_product_in_tx(tx, &line.product_id)?;
+                }
+
                 SQLiteSaleRepository::insert_sale_in_tx(tx, &result_dto.sale)?;
 
                 for line in &result_dto.lines {
@@ -157,6 +168,15 @@ impl ChangeApplier {
 
                 if exists {
                     return Ok(());
+                }
+
+                // Auto-heal missing references
+                if let Some(ref uid) = result_dto.purchase.performed_by {
+                    Self::auto_heal_user_in_tx(tx, uid)?;
+                }
+                Self::auto_heal_supplier_in_tx(tx, &result_dto.purchase.supplier_id)?;
+                for line in &result_dto.lines {
+                    Self::auto_heal_product_in_tx(tx, &line.product_id)?;
                 }
 
                 SQLitePurchaseRepository::insert_purchase_in_tx(tx, &result_dto.purchase)?;
@@ -287,6 +307,50 @@ impl ChangeApplier {
             _ => {
                 // Forward-compatible ignore for future business event types
             }
+        }
+        Ok(())
+    }
+
+    fn auto_heal_user_in_tx(tx: &rusqlite::Transaction, user_id: &str) -> crate::db::errors::DbResult<()> {
+        let exists: bool = tx.query_row("SELECT 1 FROM users WHERE id = ?1", params![user_id], |_| Ok(true)).unwrap_or(false);
+        if !exists {
+            tx.execute(
+                "INSERT INTO users (id, username, password_hash, role, first_name, last_name, is_active, created_at, updated_at, must_change_password) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![user_id, format!("auto_{}", &user_id[0..8]), "dummy", "STAFF", "Auto", "Healed", 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339(), 0],
+            ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal user: {e}")))?;
+        }
+        Ok(())
+    }
+
+    fn auto_heal_customer_in_tx(tx: &rusqlite::Transaction, customer_id: &str) -> crate::db::errors::DbResult<()> {
+        let exists: bool = tx.query_row("SELECT 1 FROM customers WHERE id = ?1", params![customer_id], |_| Ok(true)).unwrap_or(false);
+        if !exists {
+            tx.execute(
+                "INSERT INTO customers (id, customer_code, name, phone, credit_limit, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![customer_id, format!("CUS-AUTO-{}", &customer_id[0..8]), "Unknown Customer (Auto-Healed)", "00000000000", 0, 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+            ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal customer: {e}")))?;
+        }
+        Ok(())
+    }
+
+    fn auto_heal_supplier_in_tx(tx: &rusqlite::Transaction, supplier_id: &str) -> crate::db::errors::DbResult<()> {
+        let exists: bool = tx.query_row("SELECT 1 FROM suppliers WHERE id = ?1", params![supplier_id], |_| Ok(true)).unwrap_or(false);
+        if !exists {
+            tx.execute(
+                "INSERT INTO suppliers (id, supplier_code, name, phone, credit_limit, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![supplier_id, format!("SUP-AUTO-{}", &supplier_id[0..8]), "Unknown Supplier (Auto-Healed)", "00000000000", 0, 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+            ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal supplier: {e}")))?;
+        }
+        Ok(())
+    }
+
+    fn auto_heal_product_in_tx(tx: &rusqlite::Transaction, product_id: &str) -> crate::db::errors::DbResult<()> {
+        let exists: bool = tx.query_row("SELECT 1 FROM products WHERE id = ?1", params![product_id], |_| Ok(true)).unwrap_or(false);
+        if !exists {
+            tx.execute(
+                "INSERT INTO products (id, name, sku, purchase_price, sale_price, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![product_id, "Unknown Product (Auto-Healed)", format!("SKU-AUTO-{}", &product_id[0..8]), 0, 0, 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+            ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal product: {e}")))?;
         }
         Ok(())
     }
