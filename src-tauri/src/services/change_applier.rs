@@ -77,6 +77,13 @@ impl ChangeApplier {
                     return Ok(());
                 }
 
+                Self::auto_heal_category_in_tx(tx, &product.category_id)?;
+                if let Some(ref bid) = product.brand_id { Self::auto_heal_brand_in_tx(tx, bid)?; }
+                if let Some(ref uid) = product.unit_id { Self::auto_heal_unit_in_tx(tx, uid)?; }
+                if let Some(ref cid) = product.company_id { Self::auto_heal_company_in_tx(tx, cid)?; }
+                if let Some(ref qid) = product.quality_id { Self::auto_heal_quality_in_tx(tx, qid)?; }
+                if let Some(ref cid) = product.color_id { Self::auto_heal_color_in_tx(tx, cid)?; }
+
                 SQLiteProductRepository::insert_product_in_tx(tx, &product)?;
             }
             "PRODUCT_UPDATED" => {
@@ -84,6 +91,13 @@ impl ChangeApplier {
                     Ok(p) => p,
                     Err(e) => return Err(DbError::ValidationError(format!("Invalid PRODUCT_UPDATED payload in change_log: {e}"))),
                 };
+
+                Self::auto_heal_category_in_tx(tx, &product.category_id)?;
+                if let Some(ref bid) = product.brand_id { Self::auto_heal_brand_in_tx(tx, bid)?; }
+                if let Some(ref uid) = product.unit_id { Self::auto_heal_unit_in_tx(tx, uid)?; }
+                if let Some(ref cid) = product.company_id { Self::auto_heal_company_in_tx(tx, cid)?; }
+                if let Some(ref qid) = product.quality_id { Self::auto_heal_quality_in_tx(tx, qid)?; }
+                if let Some(ref cid) = product.color_id { Self::auto_heal_color_in_tx(tx, cid)?; }
 
                 SQLiteProductRepository::insert_product_in_tx(tx, &product)?;
             }
@@ -123,6 +137,7 @@ impl ChangeApplier {
                 if let Some(ref cid) = result_dto.sale.customer_id {
                     Self::auto_heal_customer_in_tx(tx, cid)?;
                 }
+                Self::auto_heal_branch_in_tx(tx, &result_dto.sale.branch_id)?;
                 for line in &result_dto.lines {
                     Self::auto_heal_product_in_tx(tx, &line.product_id)?;
                 }
@@ -175,6 +190,7 @@ impl ChangeApplier {
                     Self::auto_heal_user_in_tx(tx, uid)?;
                 }
                 Self::auto_heal_supplier_in_tx(tx, &result_dto.purchase.supplier_id)?;
+                Self::auto_heal_branch_in_tx(tx, &result_dto.purchase.branch_id)?;
                 for line in &result_dto.lines {
                     Self::auto_heal_product_in_tx(tx, &line.product_id)?;
                 }
@@ -214,6 +230,12 @@ impl ChangeApplier {
                 if exists {
                     return Ok(());
                 }
+
+                if let Some(ref uid) = expense.performed_by {
+                    Self::auto_heal_user_in_tx(tx, uid)?;
+                }
+                Self::auto_heal_branch_in_tx(tx, &expense.branch_id)?;
+                Self::auto_heal_expense_category_in_tx(tx, &expense.category_id)?;
 
                 SQLiteExpenseRepository::insert_expense_in_tx(tx, &expense)?;
             }
@@ -351,6 +373,94 @@ impl ChangeApplier {
                 "INSERT INTO products (id, name, sku, purchase_price, sale_price, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![product_id, "Unknown Product (Auto-Healed)", format!("SKU-AUTO-{}", &product_id[0..8]), 0, 0, 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
             ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal product: {e}")))?;
+        }
+        Ok(())
+    }
+
+    fn auto_heal_branch_in_tx(tx: &rusqlite::Transaction, branch_id: &str) -> crate::db::errors::DbResult<()> {
+        let exists: bool = tx.query_row("SELECT 1 FROM branches WHERE id = ?1", params![branch_id], |_| Ok(true)).unwrap_or(false);
+        if !exists {
+            tx.execute(
+                "INSERT INTO branches (id, name, location, is_main, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![branch_id, "Unknown Branch (Auto-Healed)", "Unknown", 0, 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+            ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal branch: {e}")))?;
+        }
+        Ok(())
+    }
+
+    fn auto_heal_expense_category_in_tx(tx: &rusqlite::Transaction, category_id: &str) -> crate::db::errors::DbResult<()> {
+        let exists: bool = tx.query_row("SELECT 1 FROM expense_categories WHERE id = ?1", params![category_id], |_| Ok(true)).unwrap_or(false);
+        if !exists {
+            tx.execute(
+                "INSERT INTO expense_categories (id, name, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![category_id, format!("EXP-AUTO-{}", &category_id[0..8]), 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+            ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal expense category: {e}")))?;
+        }
+        Ok(())
+    }
+
+    fn auto_heal_category_in_tx(tx: &rusqlite::Transaction, category_id: &str) -> crate::db::errors::DbResult<()> {
+        let exists: bool = tx.query_row("SELECT 1 FROM categories WHERE id = ?1", params![category_id], |_| Ok(true)).unwrap_or(false);
+        if !exists {
+            tx.execute(
+                "INSERT INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![category_id, "Unknown Category (Auto-Healed)", format!("CAT-{}", &category_id[0..4]), 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+            ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal category: {e}")))?;
+        }
+        Ok(())
+    }
+
+    fn auto_heal_brand_in_tx(tx: &rusqlite::Transaction, brand_id: &str) -> crate::db::errors::DbResult<()> {
+        let exists: bool = tx.query_row("SELECT 1 FROM brands WHERE id = ?1", params![brand_id], |_| Ok(true)).unwrap_or(false);
+        if !exists {
+            tx.execute(
+                "INSERT INTO brands (id, name, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![brand_id, "Unknown Brand (Auto-Healed)", 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+            ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal brand: {e}")))?;
+        }
+        Ok(())
+    }
+
+    fn auto_heal_unit_in_tx(tx: &rusqlite::Transaction, unit_id: &str) -> crate::db::errors::DbResult<()> {
+        let exists: bool = tx.query_row("SELECT 1 FROM units WHERE id = ?1", params![unit_id], |_| Ok(true)).unwrap_or(false);
+        if !exists {
+            tx.execute(
+                "INSERT INTO units (id, name, abbreviation, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![unit_id, "Unknown Unit (Auto-Healed)", "UNK", 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+            ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal unit: {e}")))?;
+        }
+        Ok(())
+    }
+
+    fn auto_heal_company_in_tx(tx: &rusqlite::Transaction, company_id: &str) -> crate::db::errors::DbResult<()> {
+        let exists: bool = tx.query_row("SELECT 1 FROM companies WHERE id = ?1", params![company_id], |_| Ok(true)).unwrap_or(false);
+        if !exists {
+            tx.execute(
+                "INSERT INTO companies (id, name, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![company_id, "Unknown Company (Auto-Healed)", 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+            ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal company: {e}")))?;
+        }
+        Ok(())
+    }
+
+    fn auto_heal_quality_in_tx(tx: &rusqlite::Transaction, quality_id: &str) -> crate::db::errors::DbResult<()> {
+        let exists: bool = tx.query_row("SELECT 1 FROM qualities WHERE id = ?1", params![quality_id], |_| Ok(true)).unwrap_or(false);
+        if !exists {
+            tx.execute(
+                "INSERT INTO qualities (id, name, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![quality_id, "Unknown Quality (Auto-Healed)", 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+            ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal quality: {e}")))?;
+        }
+        Ok(())
+    }
+
+    fn auto_heal_color_in_tx(tx: &rusqlite::Transaction, color_id: &str) -> crate::db::errors::DbResult<()> {
+        let exists: bool = tx.query_row("SELECT 1 FROM colors WHERE id = ?1", params![color_id], |_| Ok(true)).unwrap_or(false);
+        if !exists {
+            tx.execute(
+                "INSERT INTO colors (id, name, hex_code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![color_id, "Unknown Color (Auto-Healed)", "#000000", 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+            ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal color: {e}")))?;
         }
         Ok(())
     }
