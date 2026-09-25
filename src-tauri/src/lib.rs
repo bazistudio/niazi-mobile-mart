@@ -60,12 +60,19 @@ pub fn run() {
     let _ = tracing_subscriber::registry()
         .with(env_filter)
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
-        .with(tracing_subscriber::fmt::layer().with_writer(non_blocking).with_ansi(false))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(non_blocking)
+                .with_ansi(false),
+        )
         .try_init();
 
     Box::leak(Box::new(guard));
 
-    tracing::info!("[run] Persistent logging initialized at path: {:?}", log_dir.join("app.log"));
+    tracing::info!(
+        "[run] Persistent logging initialized at path: {:?}",
+        log_dir.join("app.log")
+    );
 
     let app_state = match AppState::try_open_default(env!("CARGO_PKG_VERSION")) {
         Ok(state) => state,
@@ -146,7 +153,10 @@ pub fn run() {
             app.set_menu(menu)?;
 
             // Start Rust background SyncWorkerDaemon for offline outbox processing (single shared instance, non-blocking startup)
-            let sync_worker = std::sync::Arc::new(services::SyncWorkerDaemon::new(std::sync::Arc::new(app_state_for_setup.clone())));
+            let sync_worker = std::sync::Arc::new(services::SyncWorkerDaemon::new(
+                std::sync::Arc::new(app_state_for_setup.clone()),
+                Some(handle.clone()),
+            ));
             {
                 let sync_worker_ref = sync_worker.clone();
                 let app_state_ref = app_state_for_setup.clone();
@@ -209,7 +219,6 @@ pub fn run() {
             commands::auth::auth_bootstrap_central_snapshots,
             commands::auth::auth_sync_session,
             commands::auth::auth_logout,
-
             commands::auth::auth_change_password,
             commands::auth::auth_forced_change_password,
             commands::auth::auth_register_staff,
@@ -335,6 +344,7 @@ pub fn run() {
             commands::organization::branch_list,
             commands::organization::branch_get_main,
             commands::organization::organization_get_dashboard_stats,
+            commands::organization::organization_get_dashboard_balances,
             // Customer & Ledger Commands
             commands::customer::customer_create,
             commands::customer::customer_update,

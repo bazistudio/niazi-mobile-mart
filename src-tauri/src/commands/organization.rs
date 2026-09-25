@@ -29,3 +29,13 @@ pub async fn organization_get_dashboard_stats(
     AuthService::require_permission(&state, Some("org"), None).await?;
     state.branch_repo.get_dashboard_stats().await
 }
+
+/// Returns aggregate dashboard balances directly from SQLite (Global Organization)
+#[tauri::command]
+pub async fn organization_get_dashboard_balances(
+    state: State<'_, AppState>,
+) -> AppResult<crate::domain::organization::DashboardBalancesDto> {
+    // Both shop_admin and staff can view dashboard KPIs, similar to profit_get_dashboard_summary
+    AuthService::require_permission(&state, None, None).await?;
+    state.branch_repo.get_dashboard_balances().await
+}

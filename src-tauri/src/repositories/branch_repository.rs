@@ -70,7 +70,9 @@ impl BranchRepository {
             .map(Some)
             .or_else(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                other => Err(AppError::Database(format!("Error querying main branch: {other}"))),
+                other => Err(AppError::Database(format!(
+                    "Error querying main branch: {other}"
+                ))),
             })?;
 
         Ok(branch)
@@ -81,15 +83,25 @@ impl BranchRepository {
         let guard = conn_arc.lock().await;
 
         let product_count: i64 = guard
-            .query_row("SELECT COUNT(*) FROM products WHERE is_active = 1", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM products WHERE is_active = 1",
+                [],
+                |r| r.get(0),
+            )
             .unwrap_or(0);
 
         let category_count: i64 = guard
-            .query_row("SELECT COUNT(*) FROM categories WHERE is_active = 1", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM categories WHERE is_active = 1",
+                [],
+                |r| r.get(0),
+            )
             .unwrap_or(0);
 
         let active_staff_count: i64 = guard
-            .query_row("SELECT COUNT(*) FROM users WHERE is_active = 1", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM users WHERE is_active = 1", [], |r| {
+                r.get(0)
+            })
             .unwrap_or(0);
 
         let low_stock_count: i64 = guard
@@ -103,7 +115,11 @@ impl BranchRepository {
             .unwrap_or(0);
 
         let active_branch_count: i64 = guard
-            .query_row("SELECT COUNT(*) FROM branches WHERE is_active = 1", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM branches WHERE is_active = 1",
+                [],
+                |r| r.get(0),
+            )
             .unwrap_or(0);
 
         Ok(OrganizationDashboardStats {
@@ -113,5 +129,99 @@ impl BranchRepository {
             low_stock_count,
             active_branch_count,
         })
+    }
+
+    /// Calculates global aggregate balances across all ledgers
+    pub async fn get_dashboard_balances(
+        &self,
+    ) -> AppResult<crate::domain::organization::DashboardBalancesDto> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        let customer_receivables: i64 = guard
+            .query_row(
+                "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM customer_ledger_entries",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+
+        let supplier_payables: i64 = guard
+            .query_row(
+                "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM supplier_ledger_entries",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+
+        Ok(crate::domain::organization::DashboardBalancesDto {
+            customer_receivables,
+            supplier_payables,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::connection::DatabaseConnection;
+    use crate::db::migrations::MigrationRunner;
+
+    async fn setup_db() -> DatabaseConnection {
+        let db = DatabaseConnection::open_in_memory().unwrap();
+        {
+            let conn_arc = db.inner();
+            let mut guard = conn_arc.lock().await;
+            MigrationRunner::run(&mut guard).unwrap();
+        }
+        db
+    }
+
+    #[tokio::test]
+    async fn test_get_dashboard_balances() {
+        let db = setup_db().await;
+        let repo = BranchRepository::new(db.clone());
+
+        // Test 1: Empty ledgers
+        let balances = repo.get_dashboard_balances().await.unwrap();
+        assert_eq!(balances.customer_receivables, 0);
+        assert_eq!(balances.supplier_payables, 0);
+
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+
+            // Test 2: Customer receivable (10000 debit, 3000 credit)
+            guard.execute(
+                "INSERT INTO customer_ledger_entries (id, customer_id, entry_type, debit, credit, balance_after, description, performed_by, created_at)
+                 VALUES ('c1', 'cust1', 'SALE', 10000, 3000, 7000, 'test', 'admin', '2026')", []).unwrap();
+
+            // Test 3: Supplier payable (15000 debit, 5000 credit)
+            guard.execute(
+                "INSERT INTO supplier_ledger_entries (id, supplier_id, entry_type, debit, credit, balance_after, description, performed_by, created_at)
+                 VALUES ('s1', 'supp1', 'PURCHASE', 15000, 5000, 10000, 'test', 'admin', '2026')", []).unwrap();
+        }
+
+        let balances = repo.get_dashboard_balances().await.unwrap();
+        assert_eq!(balances.customer_receivables, 7000);
+        assert_eq!(balances.supplier_payables, 10000);
+
+        // Test 4 & 5: Multiple entries & Settled account
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+
+            guard.execute(
+                "INSERT INTO customer_ledger_entries (id, customer_id, entry_type, debit, credit, balance_after, description, performed_by, created_at)
+                 VALUES ('c2', 'cust1', 'PAYMENT', 0, 7000, 0, 'test', 'admin', '2026')", []).unwrap();
+
+            guard.execute(
+                "INSERT INTO supplier_ledger_entries (id, supplier_id, entry_type, debit, credit, balance_after, description, performed_by, created_at)
+                 VALUES ('s2', 'supp1', 'PAYMENT', 0, 10000, 0, 'test', 'admin', '2026')", []).unwrap();
+        }
+
+        let balances = repo.get_dashboard_balances().await.unwrap();
+        assert_eq!(balances.customer_receivables, 0);
+        assert_eq!(balances.supplier_payables, 0);
     }
 }

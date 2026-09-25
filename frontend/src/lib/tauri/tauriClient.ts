@@ -2180,6 +2180,17 @@ export const tauriClient = {
     return null;
   },
 
+  async organizationGetDashboardBalances(): Promise<DashboardBalancesDto> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<DashboardBalancesDto>('organization_get_dashboard_balances');
+    }
+    return {
+      customer_receivables: 0,
+      supplier_payables: 0,
+    };
+  },
+
   async profitGetDashboardSummary(branchId?: string | null): Promise<DashboardProfitSummaryDto> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -3296,6 +3307,11 @@ export interface SaleProfitabilityDto {
   cogs: number;
   gross_profit: number;
   gross_margin: number;
+}
+
+export interface DashboardBalancesDto {
+  customer_receivables: number;
+  supplier_payables: number;
 }
 
 export interface DashboardProfitSummaryDto {

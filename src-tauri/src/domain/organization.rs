@@ -1,5 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+/// Authoritative global dashboard balances for the organization
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct DashboardBalancesDto {
+    pub customer_receivables: i64,
+    pub supplier_payables: i64,
+}
+
 /// Canonical permanent organization identifier for Niazi Mobile Mart.
 /// Single real retail organization - no arbitrary customer tenants or organization signups.
 pub const NIAZI_ORGANIZATION_ID: &str = "00000000-0000-0000-0000-000000000001";
@@ -34,13 +41,13 @@ pub struct InternalProductRate {
     pub product_id: String,
     pub product_name: String,
     pub category: String,
-    pub purchase_cost: i64,            // Whole PKR (STRICT INTERNAL SECRET)
-    pub supplier_id: String,           // STRICT INTERNAL SECRET
-    pub current_stock_count: i64,      // STRICT INTERNAL SECRET
-    pub profit_margin_percent: i64,    // STRICT INTERNAL SECRET
-    pub selling_rate: i64,             // Whole PKR
-    pub currency: String,              // Always "PKR"
-    pub is_public: bool,               // Admin explicit publication flag
+    pub purchase_cost: i64,         // Whole PKR (STRICT INTERNAL SECRET)
+    pub supplier_id: String,        // STRICT INTERNAL SECRET
+    pub current_stock_count: i64,   // STRICT INTERNAL SECRET
+    pub profit_margin_percent: i64, // STRICT INTERNAL SECRET
+    pub selling_rate: i64,          // Whole PKR
+    pub currency: String,           // Always "PKR"
+    pub is_public: bool,            // Admin explicit publication flag
     pub updated_at: String,
 }
 
@@ -95,7 +102,7 @@ mod tests {
             supplier_id: "sup_01".to_string(),
             current_stock_count: 50,
             profit_margin_percent: 33,
-            selling_rate: 2000,  // Rs 2,000
+            selling_rate: 2000, // Rs 2,000
             currency: "PKR".to_string(),
             is_public: true,
             updated_at: "2026-01-01T00:00:00Z".to_string(),
@@ -153,7 +160,7 @@ mod tests {
             supplier_id: "sup_secret_01".to_string(),
             current_stock_count: 15,
             profit_margin_percent: 18,
-            selling_rate: 380000,  // Rs 380,000
+            selling_rate: 380000, // Rs 380,000
             currency: "PKR".to_string(),
             is_public: false, // Unpublished
             updated_at: "2026-01-01T00:00:00Z".to_string(),
@@ -168,17 +175,19 @@ mod tests {
             product_id: "11111111-2222-3333-4444-555555555555".to_string(),
             product_name: "Samsung Galaxy S24 Ultra".to_string(),
             category: "Smartphones".to_string(),
-            purchase_cost: 320000, // Rs 320,000 (Private)
+            purchase_cost: 320000,                    // Rs 320,000 (Private)
             supplier_id: "sup_secret_01".to_string(), // Private
-            current_stock_count: 15,       // Private
-            profit_margin_percent: 18,     // Private
-            selling_rate: 380000,  // Rs 380,000 (Public)
+            current_stock_count: 15,                  // Private
+            profit_margin_percent: 18,                // Private
+            selling_rate: 380000,                     // Rs 380,000 (Public)
             currency: "PKR".to_string(),
             is_public: true, // Explicitly published
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
 
-        let public_dto = internal_rate.to_public_dto().expect("Published rate must be visible");
+        let public_dto = internal_rate
+            .to_public_dto()
+            .expect("Published rate must be visible");
         assert_eq!(public_dto.product_name, "Samsung Galaxy S24 Ultra");
         assert_eq!(public_dto.selling_rate, 380000);
         assert_eq!(public_dto.currency, "PKR");
