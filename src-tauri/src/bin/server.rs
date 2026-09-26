@@ -1520,6 +1520,55 @@ async fn sync_push_handler(
                     );
                 }
             }
+            if event.event_type == "SUPPLIER_PAYMENT_RECORDED" {
+                let payment_event: niazi_mobile_mart_lib::domain::supplier::SupplierPaymentSyncEventDto = match serde_json::from_str(&event.payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "BAD_REQUEST",
+                                "message": format!("Invalid SUPPLIER_PAYMENT_RECORDED payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresPurchaseRepository::record_supplier_payment_tx(
+                    &mut tx,
+                    &payment_event,
+                ).await {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to project SUPPLIER_PAYMENT_RECORDED centrally: {e}")
+                        })),
+                    );
+                }
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "SUPPLIER_PAYMENT_RECORDED",
+                    "SUPPLIER_PAYMENT",
+                    &payment_event.payment_id,
+                    &event.payload,
+                ).await {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append SUPPLIER_PAYMENT_RECORDED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
 
             if event.event_type == "CUSTOMER_CREATED" {
                 let customer: niazi_mobile_mart_lib::domain::customer::Customer = match serde_json::from_str(&event.payload) {

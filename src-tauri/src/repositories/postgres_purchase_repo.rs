@@ -409,6 +409,72 @@ impl PostgresPurchaseRepository {
         Ok(list)
     }
 
+    pub async fn record_supplier_payment_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        dto: &crate::domain::supplier::SupplierPaymentSyncEventDto,
+    ) -> AppResult<()> {
+        let supplier_row = sqlx::query("SELECT id FROM suppliers WHERE id = $1")
+            .bind(&dto.supplier_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        if supplier_row.is_none() {
+            return Err(AppError::NotFound(format!("Supplier '{}' not found", dto.supplier_id)));
+        }
+
+        // Apply allocations
+        for alloc in &dto.allocated_purchases {
+            sqlx::query(
+                "UPDATE purchases SET paid_amount = $1, credit_amount = total_amount - $1, payment_status = $2, updated_at = $3 WHERE id = $4"
+            )
+            .bind(alloc.new_paid)
+            .bind(alloc.payment_status.as_str())
+            .bind(&dto.created_at)
+            .bind(&alloc.purchase_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        // Insert ledger entry
+        let current_outstanding: (i64,) = sqlx::query_as(
+            "SELECT COALESCE(SUM(credit) - SUM(debit), 0) FROM supplier_ledger_entries WHERE supplier_id = $1",
+        )
+        .bind(&dto.supplier_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        let new_bal = current_outstanding.0 - dto.amount_paid;
+
+        let desc = format!(
+            "Payment to supplier ({}) Ref: {}",
+            dto.payment_method,
+            dto.reference_number.as_deref().unwrap_or(&dto.receipt_number)
+        );
+
+        sqlx::query(
+            "INSERT INTO supplier_ledger_entries (id, supplier_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at)
+             VALUES ($1, $2, $3, $4, 'PAYMENT', $5, $6, $7, $8, $9, $10)"
+        )
+        .bind(&dto.payment_id)
+        .bind(&dto.supplier_id)
+        .bind(&dto.payment_id)
+        .bind(&dto.receipt_number)
+        .bind(0)
+        .bind(dto.amount_paid)
+        .bind(new_bal)
+        .bind(desc)
+        .bind(dto.performed_by.as_deref())
+        .bind(&dto.created_at)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        Ok(())
+    }
+
     pub async fn list_purchases(
         &self,
         filter: &Option<PurchaseFilterDto>,

@@ -176,3 +176,18 @@ pub struct SupplierPaymentResultDto {
     pub new_balance: i64,
     pub allocated_purchases: Vec<AllocatedPurchaseDto>,
 }
+
+/// Payload sent to the central server when a supplier payment is recorded offline
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SupplierPaymentSyncEventDto {
+    pub payment_id: String,
+    pub receipt_number: String,
+    pub supplier_id: String,
+    pub amount_paid: i64,
+    pub payment_method: String,
+    pub reference_number: Option<String>,
+    pub notes: Option<String>,
+    pub performed_by: Option<String>,
+    pub created_at: String,
+    pub allocated_purchases: Vec<AllocatedPurchaseDto>,
+}
