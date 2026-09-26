@@ -1,6 +1,6 @@
 use sqlx::PgPool;
 
-use crate::domain::organization::Branch;
+use crate::domain::organization::{Branch, DashboardBalancesDto};
 use crate::errors::{AppError, AppResult};
 use crate::repositories::branch_repository::OrganizationDashboardStats;
 
@@ -101,6 +101,28 @@ impl PostgresBranchRepository {
             active_staff_count: active_staff_count.0,
             low_stock_count: low_stock_count.0,
             active_branch_count: active_branch_count.0,
+        })
+    }
+
+    /// Calculates global aggregate balances across all ledgers (organization-wide, no branch filter)
+    pub async fn get_dashboard_balances(&self) -> AppResult<DashboardBalancesDto> {
+        let customer_receivables: (i64,) = sqlx::query_as(
+            "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM customer_ledger_entries",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to calculate customer receivables: {e}")))?;
+
+        let supplier_payables: (i64,) = sqlx::query_as(
+            "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM supplier_ledger_entries",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to calculate supplier payables: {e}")))?;
+
+        Ok(DashboardBalancesDto {
+            customer_receivables: customer_receivables.0,
+            supplier_payables: supplier_payables.0,
         })
     }
 }

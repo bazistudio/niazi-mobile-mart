@@ -235,7 +235,7 @@ impl BranchRepository {
     pub async fn get_dashboard_balances(&self) -> AppResult<crate::domain::organization::DashboardBalancesDto> {
         match self {
             Self::SQLite(r) => r.get_dashboard_balances().await,
-            Self::Postgres(_) => unimplemented!("Postgres get_dashboard_balances not implemented"),
+            Self::Postgres(r) => r.get_dashboard_balances().await,
         }
     }
 }
