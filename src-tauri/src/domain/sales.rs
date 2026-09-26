@@ -139,6 +139,17 @@ pub struct SaleResultDto {
     pub gross_margin: i64,
 }
 
+/// Canonical payload for central sync of sales
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SaleSyncEventDto {
+    pub sale: Sale,
+    pub lines: Vec<SaleLine>,
+    pub payments: Vec<SalePayment>,
+    pub stock_movements: Vec<crate::domain::inventory::StockMovement>,
+    pub cash_movement: Option<crate::domain::cash::CashMovement>,
+    pub customer_ledger_entry: Option<crate::domain::customer::CustomerLedgerEntry>,
+}
+
 /// Filter for querying sales
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SaleFilterDto {

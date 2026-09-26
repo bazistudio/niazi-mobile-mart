@@ -183,7 +183,6 @@ impl SaleService {
         let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(self.db.as_ref().unwrap().clone());
         let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
         let terminal_id = current_terminal.id;
-        let dto_payload_json = serde_json::to_string(&dto).unwrap_or_default();
 
         // 6. Execute Atomic SQLite Checkout Transaction
         let db = self.db.as_ref().expect("SQLite database connection required");
@@ -205,6 +204,7 @@ impl SaleService {
 
             // C. Handle Customer Credit & Ledger Entry if credit_amount > 0
             let mut customer_balance_after = None;
+            let mut final_customer_ledger_entry = None;
             if credit_amount > 0 {
                 let cid = customer_id.as_ref().unwrap();
                 let current_outstanding = SQLiteCustomerRepository::calculate_outstanding_balance_in_tx(tx, cid)?;
@@ -238,9 +238,11 @@ impl SaleService {
                 };
 
                 SQLiteCustomerRepository::insert_ledger_entry_in_tx(tx, &ledger_entry)?;
+                final_customer_ledger_entry = Some(ledger_entry);
             }
 
             // D. Deduct stock and create stock movements
+            let mut final_stock_movements = Vec::with_capacity(prepared_lines.len());
             for line in &prepared_lines {
                 let prev_stock = SQLiteInventoryRepository::get_stock_in_tx(tx, &line.product_id, &branch_id)?;
                 let resulting_stock = prev_stock - line.quantity;
@@ -268,6 +270,7 @@ impl SaleService {
                 };
 
                 SQLiteInventoryRepository::insert_movement_in_tx(tx, &movement)?;
+                final_stock_movements.push(movement);
             }
 
             // E. Insert Sale Header
@@ -316,6 +319,7 @@ impl SaleService {
 
             // G. Insert Sale Payment if paid_amount > 0
             let mut sale_payments = Vec::new();
+            let mut final_cash_movement = None;
             if recorded_paid > 0 {
                 let payment = SalePayment {
                     id: Uuid::new_v4().to_string(),
@@ -349,17 +353,28 @@ impl SaleService {
                         created_at: now.clone(),
                     };
                     SQLiteCashRepository::insert_movement_in_tx(tx, &cash_movement)?;
+                    final_cash_movement = Some(cash_movement);
                 }
             }
 
             // H. Atomically enqueue SALE_CREATED event into offline_sync_queue in SQLite transaction
+            let sync_event_payload = crate::domain::sales::SaleSyncEventDto {
+                sale: sale.clone(),
+                lines: sale_lines.clone(),
+                payments: sale_payments.clone(),
+                stock_movements: final_stock_movements,
+                cash_movement: final_cash_movement,
+                customer_ledger_entry: final_customer_ledger_entry,
+            };
+            let sync_payload_json = serde_json::to_string(&sync_event_payload).unwrap_or_default();
+
             let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
                 client_event_id: Some(sale_id.clone()),
                 terminal_id,
                 organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
                 branch_id: branch_id.clone(),
                 event_type: "SALE_CREATED".to_string(),
-                payload: dto_payload_json,
+                payload: sync_payload_json,
             };
             crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
 

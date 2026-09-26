@@ -152,14 +152,36 @@ impl ChangeApplier {
                 SQLiteProductRepository::deactivate_product_in_tx(tx, &payload.id)?;
             }
             "SALE_CREATED" => {
-                let result_dto: crate::domain::sales::SaleResultDto = match serde_json::from_str(&change.payload) {
-                    Ok(d) => d,
-                    Err(e) => return Err(DbError::ValidationError(format!("Invalid SALE_CREATED payload in change_log: {e}"))),
+                let mut is_legacy = false;
+                let (sale, lines, payments, stock_movements, cash_movement, ledger_entry) = match serde_json::from_str::<crate::domain::sales::SaleSyncEventDto>(&change.payload) {
+                    Ok(sync_dto) => (
+                        sync_dto.sale,
+                        sync_dto.lines,
+                        sync_dto.payments,
+                        sync_dto.stock_movements,
+                        sync_dto.cash_movement,
+                        sync_dto.customer_ledger_entry,
+                    ),
+                    Err(_) => {
+                        let result_dto: crate::domain::sales::SaleResultDto = match serde_json::from_str(&change.payload) {
+                            Ok(d) => d,
+                            Err(e) => return Err(DbError::ValidationError(format!("Invalid SALE_CREATED payload in change_log: {e}"))),
+                        };
+                        is_legacy = true;
+                        (
+                            result_dto.sale,
+                            result_dto.lines,
+                            result_dto.payments,
+                            vec![],
+                            None,
+                            None,
+                        )
+                    }
                 };
 
                 let exists: bool = tx.query_row(
                     "SELECT 1 FROM sales WHERE id = ?1",
-                    params![result_dto.sale.id],
+                    params![sale.id],
                     |_| Ok(true),
                 ).unwrap_or(false);
 
@@ -168,42 +190,63 @@ impl ChangeApplier {
                 }
 
                 // Auto-heal missing references to prevent FK constraint failures
-                if let Some(ref uid) = result_dto.sale.performed_by {
+                if let Some(ref uid) = sale.performed_by {
                     Self::auto_heal_user_in_tx(tx, uid)?;
                 }
-                if let Some(ref cid) = result_dto.sale.customer_id {
+                if let Some(ref cid) = sale.customer_id {
                     Self::auto_heal_customer_in_tx(tx, cid)?;
                 }
-                Self::auto_heal_branch_in_tx(tx, &result_dto.sale.branch_id)?;
-                for line in &result_dto.lines {
+                Self::auto_heal_branch_in_tx(tx, &sale.branch_id)?;
+                for line in &lines {
                     Self::auto_heal_product_in_tx(tx, &line.product_id)?;
                 }
 
-                SQLiteSaleRepository::insert_sale_in_tx(tx, &result_dto.sale)?;
+                SQLiteSaleRepository::insert_sale_in_tx(tx, &sale)?;
 
-                for line in &result_dto.lines {
+                for line in &lines {
                     SQLiteSaleRepository::insert_sale_line_in_tx(tx, line)?;
                 }
 
-                for payment in &result_dto.payments {
+                for payment in &payments {
                     SQLiteSaleRepository::insert_sale_payment_in_tx(tx, payment)?;
                 }
 
-                for line in &result_dto.lines {
-                    let current_stock: i64 = tx.query_row(
-                        "SELECT quantity FROM stock WHERE product_id = ?1 AND branch_id = ?2",
-                        params![line.product_id, result_dto.sale.branch_id],
-                        |r| r.get(0),
-                    ).unwrap_or(0);
+                if is_legacy {
+                    for line in &lines {
+                        let current_stock: i64 = tx.query_row(
+                            "SELECT quantity FROM stock WHERE product_id = ?1 AND branch_id = ?2",
+                            params![line.product_id, sale.branch_id],
+                            |r| r.get(0),
+                        ).unwrap_or(0);
 
-                    let resulting_stock = current_stock - line.quantity;
-                    SQLiteInventoryRepository::set_stock_in_tx(
-                        tx,
-                        &line.product_id,
-                        &result_dto.sale.branch_id,
-                        resulting_stock,
-                        &result_dto.sale.created_at,
-                    )?;
+                        let resulting_stock = current_stock - line.quantity;
+                        SQLiteInventoryRepository::set_stock_in_tx(
+                            tx,
+                            &line.product_id,
+                            &sale.branch_id,
+                            resulting_stock,
+                            &sale.created_at,
+                        )?;
+                    }
+                } else {
+                    for m in &stock_movements {
+                        SQLiteInventoryRepository::set_stock_in_tx(
+                            tx,
+                            &m.product_id,
+                            &m.branch_id,
+                            m.resulting_stock,
+                            &m.created_at,
+                        )?;
+                        SQLiteInventoryRepository::insert_movement_in_tx(tx, m)?;
+                    }
+
+                    if let Some(m) = &cash_movement {
+                        crate::repositories::SQLiteCashRepository::insert_movement_in_tx(tx, m)?;
+                    }
+
+                    if let Some(m) = &ledger_entry {
+                        crate::repositories::SQLiteCustomerRepository::insert_ledger_entry_in_tx(tx, m)?;
+                    }
                 }
             }
             "PURCHASE_CREATED" => {

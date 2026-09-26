@@ -865,59 +865,80 @@ async fn sync_push_handler(
             // --- END JIT TERMINAL AUTO-REGISTRATION ---
 
             if event.event_type == "SALE_CREATED" {
-                let dto: niazi_mobile_mart_lib::domain::sales::CompleteSaleDto = match serde_json::from_str(&event.payload) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        let _ = tx.rollback().await;
-                        return (
-                            StatusCode::BAD_REQUEST,
-                            Json(json!({
-                                "error": "BAD_REQUEST",
-                                "message": format!("Invalid SALE_CREATED payload: {e}")
-                            })),
-                        );
+                let (sale_id, change_payload) = match serde_json::from_str::<niazi_mobile_mart_lib::domain::sales::SaleSyncEventDto>(&event.payload) {
+                    Ok(sync_dto) => {
+                        match niazi_mobile_mart_lib::repositories::PostgresSaleRepository::insert_canonical_sale_tx(
+                            &mut tx,
+                            &sync_dto,
+                        ).await {
+                            Ok(_) => {
+                                let payload_str = serde_json::to_string(&sync_dto).unwrap_or_default();
+                                (sync_dto.sale.id.clone(), payload_str)
+                            }
+                            Err(niazi_mobile_mart_lib::errors::AppError::NotFound(msg)) => {
+                                let _ = tx.rollback().await;
+                                results.push(json!({
+                                    "client_event_id": client_event_id,
+                                    "status": "DEPENDENCY_NOT_FOUND",
+                                    "error": format!("Missing prerequisite entity for SALE_CREATED: {msg}")
+                                }));
+                                continue;
+                            }
+                            Err(e) => {
+                                let _ = tx.rollback().await;
+                                return (
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    Json(json!({
+                                        "error": "SERVER_ERROR",
+                                        "message": format!("Failed to project canonical SALE_CREATED event centrally: {e}")
+                                    })),
+                                );
+                            }
+                        }
                     }
-                };
-
-                let sale_result = match niazi_mobile_mart_lib::repositories::PostgresSaleRepository::complete_sale_tx(
-                    &mut tx,
-                    &dto,
-                    Some(&auth.0.user_id),
-                    Some(&client_event_id),
-                ).await {
-                    Ok(res) => res,
-                    Err(niazi_mobile_mart_lib::errors::AppError::NotFound(msg)) => {
-                        let _ = tx.rollback().await;
-                        results.push(json!({
-                            "client_event_id": client_event_id,
-                            "status": "DEPENDENCY_NOT_FOUND",
-                            "error": format!("Missing prerequisite entity for SALE_CREATED: {msg}")
-                        }));
-                        continue;
-                    }
-                    Err(e) => {
-                        let _ = tx.rollback().await;
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({
-                                "error": "SERVER_ERROR",
-                                "message": format!("Failed to project SALE_CREATED event centrally: {e}")
-                            })),
-                        );
-                    }
-                };
-
-                let change_payload = match serde_json::to_string(&sale_result) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        let _ = tx.rollback().await;
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({
-                                "error": "SERVER_ERROR",
-                                "message": format!("Failed to serialize SALE_CREATED change_log payload: {e}")
-                            })),
-                        );
+                    Err(_) => {
+                        let dto: niazi_mobile_mart_lib::domain::sales::CompleteSaleDto = match serde_json::from_str(&event.payload) {
+                            Ok(d) => d,
+                            Err(e) => {
+                                let _ = tx.rollback().await;
+                                return (
+                                    StatusCode::BAD_REQUEST,
+                                    Json(json!({
+                                        "error": "BAD_REQUEST",
+                                        "message": format!("Invalid SALE_CREATED payload (neither canonical nor legacy): {e}")
+                                    })),
+                                );
+                            }
+                        };
+                        let sale_result = match niazi_mobile_mart_lib::repositories::PostgresSaleRepository::complete_sale_tx(
+                            &mut tx,
+                            &dto,
+                            Some(&auth.0.user_id),
+                            Some(&client_event_id),
+                        ).await {
+                            Ok(res) => res,
+                            Err(niazi_mobile_mart_lib::errors::AppError::NotFound(msg)) => {
+                                let _ = tx.rollback().await;
+                                results.push(json!({
+                                    "client_event_id": client_event_id,
+                                    "status": "DEPENDENCY_NOT_FOUND",
+                                    "error": format!("Missing prerequisite entity for SALE_CREATED: {msg}")
+                                }));
+                                continue;
+                            }
+                            Err(e) => {
+                                let _ = tx.rollback().await;
+                                return (
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    Json(json!({
+                                        "error": "SERVER_ERROR",
+                                        "message": format!("Failed to project legacy SALE_CREATED event centrally: {e}")
+                                    })),
+                                );
+                            }
+                        };
+                        let payload_str = serde_json::to_string(&sale_result).unwrap_or_default();
+                        (sale_result.sale.id.clone(), payload_str)
                     }
                 };
 
@@ -928,7 +949,7 @@ async fn sync_push_handler(
                     Some(&client_event_id),
                     "SALE_CREATED",
                     "SALE",
-                    &sale_result.sale.id,
+                    &sale_id,
                     &change_payload,
                 ).await {
                     let _ = tx.rollback().await;

@@ -466,6 +466,195 @@ impl PostgresSaleRepository {
         })
     }
 
+    pub async fn insert_canonical_sale_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        dto: &crate::domain::sales::SaleSyncEventDto,
+    ) -> AppResult<()> {
+        let exists: Option<(String,)> = sqlx::query_as("SELECT id FROM sales WHERE id = $1")
+            .bind(&dto.sale.id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        if exists.is_some() {
+            return Ok(());
+        }
+
+        let branch_exists: Option<(String,)> = sqlx::query_as("SELECT id FROM branches WHERE id = $1")
+            .bind(&dto.sale.branch_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        if branch_exists.is_none() {
+            return Err(AppError::NotFound(format!("Branch {} not found", dto.sale.branch_id)));
+        }
+
+        let sale = &dto.sale;
+        sqlx::query(
+            "INSERT INTO sales (
+                id, invoice_number, branch_id, customer_id, customer_name_snapshot,
+                subtotal, discount, tax_amount, total_amount, paid_amount, change_amount,
+                payment_status, sale_status, performed_by, notes, created_at, updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)"
+        )
+        .bind(&sale.id)
+        .bind(&sale.invoice_number)
+        .bind(&sale.branch_id)
+        .bind(sale.customer_id.as_deref())
+        .bind(sale.customer_name_snapshot.as_deref())
+        .bind(sale.subtotal)
+        .bind(sale.discount)
+        .bind(sale.tax_amount)
+        .bind(sale.total_amount)
+        .bind(sale.paid_amount)
+        .bind(sale.change_amount)
+        .bind(sale.payment_status.as_str())
+        .bind(sale.sale_status.as_str())
+        .bind(sale.performed_by.as_deref())
+        .bind(sale.notes.as_deref())
+        .bind(&sale.created_at)
+        .bind(&sale.updated_at)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        for sale_line in &dto.lines {
+            sqlx::query(
+                "INSERT INTO sale_lines (
+                    id, sale_id, product_id, product_name_snapshot, sku_snapshot,
+                    unit_price, cost_price_snapshot, quantity, discount, line_total, created_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+            )
+            .bind(&sale_line.id)
+            .bind(&sale_line.sale_id)
+            .bind(&sale_line.product_id)
+            .bind(&sale_line.product_name_snapshot)
+            .bind(&sale_line.sku_snapshot)
+            .bind(sale_line.unit_price)
+            .bind(sale_line.cost_price_snapshot)
+            .bind(sale_line.quantity)
+            .bind(sale_line.discount)
+            .bind(sale_line.line_total)
+            .bind(&sale_line.created_at)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        for sale_payment in &dto.payments {
+            sqlx::query(
+                "INSERT INTO sale_payments (id, sale_id, amount, payment_method, reference_number, notes, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)"
+            )
+            .bind(&sale_payment.id)
+            .bind(&sale_payment.sale_id)
+            .bind(sale_payment.amount)
+            .bind(&sale_payment.payment_method)
+            .bind(sale_payment.reference_number.as_deref())
+            .bind(sale_payment.notes.as_deref())
+            .bind(&sale_payment.created_at)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        for movement in &dto.stock_movements {
+            let current_stock: Option<(i64,)> = sqlx::query_as("SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2")
+                .bind(&movement.product_id)
+                .bind(&movement.branch_id)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+
+            if let Some(stk) = current_stock {
+                let new_stock = stk.0 - movement.quantity;
+                sqlx::query("UPDATE stock SET quantity = $1, updated_at = $2 WHERE product_id = $3 AND branch_id = $4")
+                    .bind(new_stock)
+                    .bind(&movement.created_at)
+                    .bind(&movement.product_id)
+                    .bind(&movement.branch_id)
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+            } else {
+                sqlx::query("INSERT INTO stock (product_id, branch_id, quantity, updated_at) VALUES ($1, $2, $3, $4)")
+                    .bind(&movement.product_id)
+                    .bind(&movement.branch_id)
+                    .bind(-movement.quantity)
+                    .bind(&movement.created_at)
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+            }
+
+            sqlx::query(
+                "INSERT INTO stock_movements (
+                    id, product_id, branch_id, movement_type, quantity, previous_stock, resulting_stock,
+                    reason, performed_by, reference_id, created_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+            )
+            .bind(&movement.id)
+            .bind(&movement.product_id)
+            .bind(&movement.branch_id)
+            .bind(movement.movement_type.as_str())
+            .bind(movement.quantity)
+            .bind(movement.previous_stock)
+            .bind(movement.resulting_stock)
+            .bind(movement.reason.as_deref())
+            .bind(movement.performed_by.as_deref())
+            .bind(movement.reference_id.as_deref())
+            .bind(&movement.created_at)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        if let Some(cash_movement) = &dto.cash_movement {
+            sqlx::query(
+                "INSERT INTO cash_movements (id, session_id, branch_id, movement_type, direction, amount, reference_id, reference_number, payment_method, description, performed_by, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
+            )
+            .bind(&cash_movement.id)
+            .bind(&cash_movement.session_id)
+            .bind(&cash_movement.branch_id)
+            .bind(cash_movement.movement_type.as_str())
+            .bind(cash_movement.direction.as_str())
+            .bind(cash_movement.amount)
+            .bind(cash_movement.reference_id.as_deref())
+            .bind(cash_movement.reference_number.as_deref())
+            .bind(&cash_movement.payment_method)
+            .bind(&cash_movement.description)
+            .bind(cash_movement.performed_by.as_deref())
+            .bind(&cash_movement.created_at)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        if let Some(ledger) = &dto.customer_ledger_entry {
+            sqlx::query(
+                "INSERT INTO customer_ledger_entries (id, customer_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+            )
+            .bind(&ledger.id)
+            .bind(&ledger.customer_id)
+            .bind(ledger.reference_id.as_deref())
+            .bind(ledger.reference_number.as_deref())
+            .bind(ledger.entry_type.as_str())
+            .bind(ledger.debit)
+            .bind(ledger.credit)
+            .bind(ledger.balance_after)
+            .bind(&ledger.description)
+            .bind(ledger.performed_by.as_deref())
+            .bind(&ledger.created_at)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        Ok(())
+    }
+
     pub async fn get_sale_by_id(&self, id: &str) -> AppResult<Option<Sale>> {
         let sql = "SELECT id, invoice_number, branch_id, customer_id, customer_name_snapshot,
                           subtotal, discount, tax_amount, total_amount, paid_amount, change_amount,
