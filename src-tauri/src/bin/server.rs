@@ -1441,6 +1441,86 @@ async fn sync_push_handler(
                 }
             }
 
+            if event.event_type == "SUPPLIER_CREATED" || event.event_type == "SUPPLIER_UPDATED" {
+                let supplier: niazi_mobile_mart_lib::domain::supplier::Supplier = match serde_json::from_str(&event.payload) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "BAD_REQUEST",
+                                "message": format!("Invalid {} payload: {e}", event.event_type)
+                            })),
+                        );
+                    }
+                };
+
+                let projected_supplier = if event.event_type == "SUPPLIER_CREATED" {
+                    match niazi_mobile_mart_lib::repositories::PostgresSupplierRepository::create_supplier_tx(&mut tx, &supplier).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({
+                                    "error": "SERVER_ERROR",
+                                    "message": format!("Failed to project SUPPLIER_CREATED event centrally: {e}")
+                                })),
+                            );
+                        }
+                    }
+                } else {
+                    match niazi_mobile_mart_lib::repositories::PostgresSupplierRepository::update_supplier_tx(&mut tx, &supplier).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({
+                                    "error": "SERVER_ERROR",
+                                    "message": format!("Failed to project SUPPLIER_UPDATED event centrally: {e}")
+                                })),
+                            );
+                        }
+                    }
+                };
+
+                let change_payload = match serde_json::to_string(&projected_supplier) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to serialize {} change_log payload: {e}", event.event_type)
+                            })),
+                        );
+                    }
+                };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    &event.event_type,
+                    "SUPPLIER",
+                    &projected_supplier.id,
+                    &change_payload,
+                ).await {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append {} to change_log: {e}", event.event_type)
+                        })),
+                    );
+                }
+            }
+
             if event.event_type == "CUSTOMER_CREATED" {
                 let customer: niazi_mobile_mart_lib::domain::customer::Customer = match serde_json::from_str(&event.payload) {
                     Ok(c) => c,

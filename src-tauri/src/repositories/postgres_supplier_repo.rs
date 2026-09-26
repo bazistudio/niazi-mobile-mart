@@ -113,6 +113,71 @@ impl PostgresSupplierRepository {
         })
     }
 
+    pub async fn create_supplier_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        supplier: &Supplier,
+    ) -> AppResult<Supplier> {
+        sqlx::query(
+            "INSERT INTO suppliers (
+                id, supplier_code, name, phone, alternate_phone, email, address, notes, credit_limit, is_active, created_at, updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+             ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                phone = EXCLUDED.phone,
+                alternate_phone = EXCLUDED.alternate_phone,
+                email = EXCLUDED.email,
+                address = EXCLUDED.address,
+                notes = EXCLUDED.notes,
+                credit_limit = EXCLUDED.credit_limit,
+                is_active = EXCLUDED.is_active,
+                updated_at = EXCLUDED.updated_at",
+        )
+        .bind(&supplier.id)
+        .bind(&supplier.supplier_code)
+        .bind(supplier.name.trim())
+        .bind(supplier.phone.trim())
+        .bind(supplier.alternate_phone.as_deref().map(str::trim))
+        .bind(supplier.email.as_deref().map(str::trim))
+        .bind(supplier.address.as_deref().map(str::trim))
+        .bind(supplier.notes.as_deref().map(str::trim))
+        .bind(supplier.credit_limit)
+        .bind(if supplier.is_active { 1 } else { 0 })
+        .bind(&supplier.created_at)
+        .bind(&supplier.updated_at)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to project supplier centrally: {e}")))?;
+
+        Ok(supplier.clone())
+    }
+
+    pub async fn update_supplier_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        supplier: &Supplier,
+    ) -> AppResult<Supplier> {
+        sqlx::query(
+            "UPDATE suppliers SET
+                name = $1, phone = $2, alternate_phone = $3, email = $4,
+                address = $5, notes = $6, credit_limit = $7, is_active = $8, updated_at = $9
+             WHERE id = $10",
+        )
+        .bind(supplier.name.trim())
+        .bind(supplier.phone.trim())
+        .bind(supplier.alternate_phone.as_deref().map(str::trim))
+        .bind(supplier.email.as_deref().map(str::trim))
+        .bind(supplier.address.as_deref().map(str::trim))
+        .bind(supplier.notes.as_deref().map(str::trim))
+        .bind(supplier.credit_limit)
+        .bind(if supplier.is_active { 1 } else { 0 })
+        .bind(&supplier.updated_at)
+        .bind(&supplier.id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to update supplier centrally: {e}")))?;
+
+        Ok(supplier.clone())
+    }
+
     pub async fn get_supplier_by_id(&self, id: &str) -> AppResult<Option<Supplier>> {
         let sql = "SELECT id, supplier_code, name, phone, alternate_phone, email, address, notes, credit_limit, is_active, created_at, updated_at FROM suppliers WHERE id = $1";
         let row_opt = sqlx::query(sql)
