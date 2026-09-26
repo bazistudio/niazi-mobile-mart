@@ -154,8 +154,7 @@ pub fn run() {
 
             // Start Rust background SyncWorkerDaemon for offline outbox processing (single shared instance, non-blocking startup)
             let sync_worker = std::sync::Arc::new(services::SyncWorkerDaemon::new(
-                std::sync::Arc::new(app_state_for_setup.clone()),
-                Some(handle.clone()),
+                std::sync::Arc::new(app_state_for_setup.clone())
             ));
             {
                 let sync_worker_ref = sync_worker.clone();
