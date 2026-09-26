@@ -207,14 +207,14 @@ impl ChangeApplier {
                 }
             }
             "PURCHASE_CREATED" => {
-                let result_dto: crate::domain::purchases::PurchaseResultDto = match serde_json::from_str(&change.payload) {
+                let event_dto: crate::domain::purchases::PurchaseSyncEventDto = match serde_json::from_str(&change.payload) {
                     Ok(d) => d,
                     Err(e) => return Err(DbError::ValidationError(format!("Invalid PURCHASE_CREATED payload in change_log: {e}"))),
                 };
 
                 let exists: bool = tx.query_row(
                     "SELECT 1 FROM purchases WHERE id = ?1",
-                    params![result_dto.purchase.id],
+                    params![event_dto.purchase.id],
                     |_| Ok(true),
                 ).unwrap_or(false);
 
@@ -223,33 +223,89 @@ impl ChangeApplier {
                 }
 
                 // Auto-heal missing references
-                if let Some(ref uid) = result_dto.purchase.performed_by {
+                if let Some(ref uid) = event_dto.purchase.performed_by {
                     Self::auto_heal_user_in_tx(tx, uid)?;
                 }
-                Self::auto_heal_supplier_in_tx(tx, &result_dto.purchase.supplier_id)?;
-                Self::auto_heal_branch_in_tx(tx, &result_dto.purchase.branch_id)?;
-                for line in &result_dto.lines {
+                Self::auto_heal_supplier_in_tx(tx, &event_dto.purchase.supplier_id)?;
+                Self::auto_heal_branch_in_tx(tx, &event_dto.purchase.branch_id)?;
+                for line in &event_dto.lines {
                     Self::auto_heal_product_in_tx(tx, &line.product_id)?;
                 }
 
-                SQLitePurchaseRepository::insert_purchase_in_tx(tx, &result_dto.purchase)?;
-                SQLitePurchaseRepository::insert_purchase_lines_in_tx(tx, &result_dto.lines)?;
+                SQLitePurchaseRepository::insert_purchase_in_tx(tx, &event_dto.purchase)?;
+                SQLitePurchaseRepository::insert_purchase_lines_in_tx(tx, &event_dto.lines)?;
 
-                for line in &result_dto.lines {
-                    let current_stock: i64 = tx.query_row(
-                        "SELECT quantity FROM stock WHERE product_id = ?1 AND branch_id = ?2",
-                        params![line.product_id, result_dto.purchase.branch_id],
-                        |r| r.get(0),
-                    ).unwrap_or(0);
-
-                    let resulting_stock = current_stock + line.quantity;
+                for m in &event_dto.stock_movements {
                     SQLiteInventoryRepository::set_stock_in_tx(
                         tx,
-                        &line.product_id,
-                        &result_dto.purchase.branch_id,
-                        resulting_stock,
-                        &result_dto.purchase.created_at,
+                        &m.product_id,
+                        &m.branch_id,
+                        m.resulting_stock,
+                        &m.created_at,
                     )?;
+                    SQLiteInventoryRepository::insert_movement_in_tx(tx, m)?;
+                }
+
+                for p_cost in &event_dto.product_cost_updates {
+                    SQLiteProductRepository::update_cost_in_tx(
+                        tx,
+                        &p_cost.product_id,
+                        p_cost.new_average_cost,
+                        p_cost.last_purchase_price,
+                        &event_dto.purchase.created_at,
+                    )?;
+                }
+
+                if let Some(c) = &event_dto.cash_movement {
+                    crate::repositories::SQLiteCashRepository::insert_movement_in_tx(tx, c)?;
+                }
+
+                if let Some(l) = &event_dto.supplier_ledger_entry {
+                    crate::repositories::SQLiteSupplierRepository::insert_ledger_entry_in_tx(tx, l)?;
+                }
+            }
+            "PURCHASE_RETURN_CREATED" => {
+                let event_dto: crate::domain::purchase_return::PurchaseReturnSyncEventDto = match serde_json::from_str(&change.payload) {
+                    Ok(d) => d,
+                    Err(e) => return Err(DbError::ValidationError(format!("Invalid PURCHASE_RETURN_CREATED payload in change_log: {e}"))),
+                };
+
+                let exists: bool = tx.query_row(
+                    "SELECT 1 FROM purchase_returns WHERE id = ?1",
+                    params![event_dto.purchase_return.id],
+                    |_| Ok(true),
+                ).unwrap_or(false);
+
+                if exists {
+                    return Ok(());
+                }
+
+                if let Some(ref uid) = event_dto.purchase_return.performed_by {
+                    Self::auto_heal_user_in_tx(tx, uid)?;
+                }
+                Self::auto_heal_supplier_in_tx(tx, &event_dto.purchase_return.supplier_id)?;
+                Self::auto_heal_branch_in_tx(tx, &event_dto.purchase_return.branch_id)?;
+
+                crate::repositories::SQLitePurchaseReturnRepository::insert_purchase_return_in_tx(tx, &event_dto.purchase_return)?;
+                crate::repositories::SQLitePurchaseReturnRepository::insert_purchase_return_lines_in_tx(tx, &event_dto.lines)?;
+
+                for m in &event_dto.stock_movements {
+                    crate::repositories::SQLiteInventoryRepository::set_stock_in_tx(
+                        tx,
+                        &m.product_id,
+                        &m.branch_id,
+                        m.resulting_stock,
+                        &m.created_at,
+                    )?;
+                    crate::repositories::SQLiteInventoryRepository::insert_movement_in_tx(tx, m)?;
+                }
+
+                if let Some(c) = &event_dto.cash_movement {
+                    crate::repositories::SQLiteCashRepository::insert_movement_in_tx(tx, c)?;
+                }
+
+                if let Some(l) = &event_dto.supplier_ledger_entry {
+                    crate::repositories::SQLiteSupplierRepository::insert_ledger_entry_in_tx(tx, l)?;
                 }
             }
             "EXPENSE_CREATED" => {

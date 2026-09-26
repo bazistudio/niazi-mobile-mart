@@ -30,7 +30,149 @@ impl PostgresPurchaseRepository {
         Ok(res)
     }
 
+    pub async fn sync_purchase_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        event: &crate::domain::purchases::PurchaseSyncEventDto,
+    ) -> AppResult<crate::domain::purchases::PurchaseSyncEventDto> {
+        let p = &event.purchase;
+        sqlx::query(
+            "INSERT INTO purchases (
+                id, purchase_number, supplier_id, branch_id, subtotal, discount, total_amount,
+                paid_amount, credit_amount, payment_status, status, notes, performed_by, created_at, updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)"
+        )
+        .bind(&p.id)
+        .bind(&p.purchase_number)
+        .bind(&p.supplier_id)
+        .bind(&p.branch_id)
+        .bind(p.subtotal)
+        .bind(p.discount)
+        .bind(p.total_amount)
+        .bind(p.paid_amount)
+        .bind(p.credit_amount)
+        .bind(p.payment_status.as_str())
+        .bind(p.status.as_str())
+        .bind(p.notes.as_deref())
+        .bind(p.performed_by.as_deref())
+        .bind(&p.created_at)
+        .bind(&p.updated_at)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        for pline in &event.lines {
+            sqlx::query(
+                "INSERT INTO purchase_lines (id, purchase_id, product_id, product_name_snapshot, sku_snapshot, quantity, unit_cost, discount, line_total, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
+            )
+            .bind(&pline.id)
+            .bind(&pline.purchase_id)
+            .bind(&pline.product_id)
+            .bind(&pline.product_name_snapshot)
+            .bind(&pline.sku_snapshot)
+            .bind(pline.quantity)
+            .bind(pline.unit_cost)
+            .bind(pline.discount)
+            .bind(pline.line_total)
+            .bind(&pline.created_at)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        for m in &event.stock_movements {
+            sqlx::query(
+                "INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (product_id, branch_id) DO UPDATE SET quantity = EXCLUDED.quantity, updated_at = EXCLUDED.updated_at"
+            )
+            .bind(&m.product_id)
+            .bind(&m.branch_id)
+            .bind(m.resulting_stock)
+            .bind(&m.created_at)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+            sqlx::query(
+                "INSERT INTO stock_movements (id, product_id, branch_id, movement_type, quantity, previous_stock, resulting_stock, reason, performed_by, reference_id, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+            )
+            .bind(&m.id)
+            .bind(&m.product_id)
+            .bind(&m.branch_id)
+            .bind(m.movement_type.as_str())
+            .bind(m.quantity)
+            .bind(m.previous_stock)
+            .bind(m.resulting_stock)
+            .bind(m.reason.as_deref())
+            .bind(m.performed_by.as_deref())
+            .bind(m.reference_id.as_deref())
+            .bind(&m.created_at)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        for p_cost in &event.product_cost_updates {
+            sqlx::query("UPDATE products SET average_cost = $1, purchase_price = $2, updated_at = $3 WHERE id = $4")
+                .bind(p_cost.new_average_cost)
+                .bind(p_cost.last_purchase_price)
+                .bind(&p.created_at)
+                .bind(&p_cost.product_id)
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        if let Some(c) = &event.cash_movement {
+            sqlx::query(
+                "INSERT INTO cash_movements (id, session_id, branch_id, movement_type, direction, amount, reference_id, reference_number, payment_method, description, performed_by, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
+            )
+            .bind(&c.id)
+            .bind(c.session_id.as_deref())
+            .bind(&c.branch_id)
+            .bind(c.movement_type.as_str())
+            .bind(c.direction.as_str())
+            .bind(c.amount)
+            .bind(c.reference_id.as_deref())
+            .bind(c.reference_number.as_deref())
+            .bind(&c.payment_method)
+            .bind(&c.description)
+            .bind(c.performed_by.as_deref())
+            .bind(&c.created_at)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        if let Some(l) = &event.supplier_ledger_entry {
+            sqlx::query(
+                "INSERT INTO supplier_ledger_entries (id, supplier_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+            )
+            .bind(&l.id)
+            .bind(&l.supplier_id)
+            .bind(l.reference_id.as_deref())
+            .bind(l.reference_number.as_deref())
+            .bind(l.entry_type.as_str())
+            .bind(l.debit)
+            .bind(l.credit)
+            .bind(l.balance_after)
+            .bind(&l.description)
+            .bind(l.performed_by.as_deref())
+            .bind(&l.created_at)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        Ok(event.clone())
+    }
+
     pub async fn complete_purchase_tx(
+
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         dto: &CompletePurchaseDto,
         user_id: Option<&str>,

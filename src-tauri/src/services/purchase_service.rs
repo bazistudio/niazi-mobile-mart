@@ -294,6 +294,8 @@ impl PurchaseService {
 
             // 7. Insert Purchase Lines & Update Stock & Snapshot
             let mut domain_lines = Vec::with_capacity(prepared_lines.len());
+            let mut stock_movements = Vec::with_capacity(prepared_lines.len());
+            let mut product_cost_updates = Vec::with_capacity(prepared_lines.len());
 
             for line in prepared_lines {
                 let line_id = Uuid::new_v4().to_string();
@@ -371,6 +373,7 @@ impl PurchaseService {
                 };
 
                 SQLiteInventoryRepository::insert_movement_in_tx(tx, &movement)?;
+                stock_movements.push(movement);
 
                 // Update catalog average_cost (weighted average) and purchase_price (latest purchase cost) atomically
                 SQLiteProductRepository::update_cost_in_tx(
@@ -382,11 +385,18 @@ impl PurchaseService {
                 )
                 .map_err(|e| DbError::QueryError(format!("Failed to update product costing: {e}")))?;
 
+                product_cost_updates.push(crate::domain::purchases::ProductCostUpdateDto {
+                    product_id: line.product_id.clone(),
+                    new_average_cost,
+                    last_purchase_price: line.unit_cost,
+                });
+
                 domain_lines.push(p_line);
             }
 
             SQLitePurchaseRepository::insert_purchase_lines_in_tx(tx, &domain_lines)?;
 
+            let mut opt_cash_movement = None;
             // 7b. If paid_amount > 0 and payment method is CASH, record Cash Movement OUT
             if paid_amount > 0 && p_method == "CASH" {
                 let open_session_id = SQLiteCashRepository::get_open_session_id_in_tx(tx, &branch_id)?;
@@ -406,8 +416,10 @@ impl PurchaseService {
                     created_at: now.clone(),
                 };
                 SQLiteCashRepository::insert_movement_in_tx(tx, &cash_movement)?;
+                opt_cash_movement = Some(cash_movement);
             }
 
+            let mut opt_ledger_entry = None;
             // 8. If credit > 0, insert Supplier Ledger DEBIT
             let supplier_balance_after = if credit_amount > 0 {
                 let new_balance = current_outstanding + credit_amount;
@@ -425,14 +437,24 @@ impl PurchaseService {
                     created_at: now,
                 };
                 SQLiteSupplierRepository::insert_ledger_entry_in_tx(tx, &ledger_entry)?;
+                opt_ledger_entry = Some(ledger_entry);
                 new_balance
             } else {
                 current_outstanding
             };
 
+            let sync_event = crate::domain::purchases::PurchaseSyncEventDto {
+                purchase: purchase.clone(),
+                lines: domain_lines.clone(),
+                stock_movements,
+                supplier_ledger_entry: opt_ledger_entry,
+                cash_movement: opt_cash_movement,
+                product_cost_updates,
+            };
+
             // Atomically enqueue PURCHASE_CREATED event into offline_sync_queue in SQLite transaction
-            let dto_payload_json = serde_json::to_string(&dto).map_err(|e| {
-                DbError::ValidationError(format!("Failed to serialize purchase DTO for sync: {e}"))
+            let dto_payload_json = serde_json::to_string(&sync_event).map_err(|e| {
+                DbError::ValidationError(format!("Failed to serialize purchase sync event: {e}"))
             })?;
 
             let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {

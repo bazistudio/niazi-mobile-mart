@@ -151,3 +151,13 @@ pub struct PurchaseReturnFilterDto {
     pub supplier_id: Option<String>,
     pub limit: Option<u32>,
 }
+
+/// Canonical payload for central sync of purchase returns
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PurchaseReturnSyncEventDto {
+    pub purchase_return: PurchaseReturn,
+    pub lines: Vec<PurchaseReturnLine>,
+    pub stock_movements: Vec<crate::domain::inventory::StockMovement>,
+    pub supplier_ledger_entry: Option<crate::domain::supplier::SupplierLedgerEntry>,
+    pub cash_movement: Option<crate::domain::cash::CashMovement>,
+}

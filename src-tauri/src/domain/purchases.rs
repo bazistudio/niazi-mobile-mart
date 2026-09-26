@@ -130,3 +130,21 @@ pub struct PurchaseFilterDto {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProductCostUpdateDto {
+    pub product_id: String,
+    pub new_average_cost: i64,
+    pub last_purchase_price: i64,
+}
+
+/// Canonical payload for central sync of purchases
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PurchaseSyncEventDto {
+    pub purchase: Purchase,
+    pub lines: Vec<PurchaseLine>,
+    pub stock_movements: Vec<crate::domain::inventory::StockMovement>,
+    pub supplier_ledger_entry: Option<crate::domain::supplier::SupplierLedgerEntry>,
+    pub cash_movement: Option<crate::domain::cash::CashMovement>,
+    pub product_cost_updates: Vec<ProductCostUpdateDto>,
+}

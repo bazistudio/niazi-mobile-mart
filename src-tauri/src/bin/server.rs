@@ -943,7 +943,7 @@ async fn sync_push_handler(
             }
 
             if event.event_type == "PURCHASE_CREATED" {
-                let dto: niazi_mobile_mart_lib::domain::purchases::CompletePurchaseDto = match serde_json::from_str(&event.payload) {
+                let sync_event: niazi_mobile_mart_lib::domain::purchases::PurchaseSyncEventDto = match serde_json::from_str(&event.payload) {
                     Ok(d) => d,
                     Err(e) => {
                         let _ = tx.rollback().await;
@@ -957,11 +957,9 @@ async fn sync_push_handler(
                     }
                 };
 
-                let purchase_result = match niazi_mobile_mart_lib::repositories::PostgresPurchaseRepository::complete_purchase_tx(
+                let purchase_result = match niazi_mobile_mart_lib::repositories::PostgresPurchaseRepository::sync_purchase_tx(
                     &mut tx,
-                    &dto,
-                    Some(&auth.0.user_id),
-                    None,
+                    &sync_event,
                 ).await {
                     Ok(res) => res,
                     Err(e) => {
@@ -1006,6 +1004,73 @@ async fn sync_push_handler(
                         Json(json!({
                             "error": "SERVER_ERROR",
                             "message": format!("Failed to append PURCHASE_CREATED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
+            if event.event_type == "PURCHASE_RETURN_CREATED" {
+                let sync_event: niazi_mobile_mart_lib::domain::purchase_return::PurchaseReturnSyncEventDto = match serde_json::from_str(&event.payload) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "BAD_REQUEST",
+                                "message": format!("Invalid PURCHASE_RETURN_CREATED payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                let return_result = match niazi_mobile_mart_lib::repositories::PostgresPurchaseReturnRepository::sync_purchase_return_tx(
+                    &mut tx,
+                    &sync_event,
+                ).await {
+                    Ok(res) => res,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to project PURCHASE_RETURN_CREATED event centrally: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                let change_payload = match serde_json::to_string(&return_result) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to serialize PURCHASE_RETURN_CREATED change_log payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "PURCHASE_RETURN_CREATED",
+                    "PURCHASE_RETURN",
+                    &return_result.purchase_return.id,
+                    &change_payload,
+                ).await {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append PURCHASE_RETURN_CREATED to change_log: {e}")
                         })),
                     );
                 }

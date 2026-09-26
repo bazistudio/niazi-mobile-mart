@@ -146,6 +146,10 @@ impl PurchaseReturnService {
         let requested_lines = dto.lines.clone();
 
         let db = self.db.as_ref().expect("SQLite database connection required");
+        let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+        let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+        let terminal_id = current_terminal.id;
+
         let detail = with_transaction(db, move |tx| {
             // 1. Validate purchase exists and is completed
             let purchase = SQLitePurchaseRepository::get_by_id_in_tx(tx, &purchase_id)?
@@ -212,6 +216,7 @@ impl PurchaseReturnService {
             let return_id = Uuid::new_v4().to_string();
 
             // 5. Stock Reversal (Inventory OUT)
+            let mut stock_movements = Vec::with_capacity(calculated_lines.len());
             for (orig, qty, _) in &calculated_lines {
                 let prev_stock = SQLiteInventoryRepository::get_stock_in_tx(tx, &orig.product_id, &purchase.branch_id)?;
                 let resulting_stock = prev_stock - *qty;
@@ -239,11 +244,14 @@ impl PurchaseReturnService {
                 };
 
                 SQLiteInventoryRepository::insert_movement_in_tx(tx, &movement)?;
+                stock_movements.push(movement);
             }
 
             // 6. Handle financial settlement
             let mut supplier_payable_after = None;
             let mut cash_settled = None;
+            let mut opt_cash_movement = None;
+            let mut opt_ledger_entry = None;
 
             match settlement_method {
                 PurchaseSettlementMethod::Cash => {
@@ -273,6 +281,7 @@ impl PurchaseReturnService {
                     };
 
                     SQLiteCashRepository::insert_movement_in_tx(tx, &cash_movement)?;
+                    opt_cash_movement = Some(cash_movement);
                     cash_settled = Some(total_return_amount);
                 }
                 PurchaseSettlementMethod::SupplierCredit => {
@@ -304,6 +313,7 @@ impl PurchaseReturnService {
                     };
 
                     SQLiteSupplierRepository::insert_ledger_entry_in_tx(tx, &ledger_entry)?;
+                    opt_ledger_entry = Some(ledger_entry);
                 }
             }
 
@@ -355,6 +365,28 @@ impl PurchaseReturnService {
             }
 
             SQLitePurchaseReturnRepository::insert_purchase_return_lines_in_tx(tx, &domain_lines)?;
+
+            let sync_event = crate::domain::purchase_return::PurchaseReturnSyncEventDto {
+                purchase_return: purchase_return.clone(),
+                lines: domain_lines.clone(),
+                stock_movements,
+                supplier_ledger_entry: opt_ledger_entry,
+                cash_movement: opt_cash_movement,
+            };
+
+            let payload_json = serde_json::to_string(&sync_event).map_err(|e| {
+                DbError::ValidationError(format!("Failed to serialize purchase return sync event: {e}"))
+            })?;
+
+            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                client_event_id: Some(return_id.clone()),
+                terminal_id,
+                organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: purchase.branch_id.clone(),
+                event_type: "PURCHASE_RETURN_CREATED".to_string(),
+                payload: payload_json,
+            };
+            crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
 
             Ok(PurchaseReturnDetailDto {
                 purchase_return,
