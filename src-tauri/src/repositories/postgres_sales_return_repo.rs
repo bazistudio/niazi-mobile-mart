@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::domain::sales_return::{
     CreateSalesReturnDto, SalesReturn, SalesReturnFilterDto, SalesReturnLine,
-    SalesReturnDetailDto, SalesRefundMethod, SalesReturnStatus,
+    SalesReturnDetailDto, SalesRefundMethod, SalesReturnStatus, SalesReturnSyncEventDto,
 };
 use crate::errors::{AppError, AppResult};
 
@@ -16,6 +16,203 @@ pub struct PostgresSalesReturnRepository {
 impl PostgresSalesReturnRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    pub async fn insert_canonical_sales_return_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        dto: &SalesReturnSyncEventDto,
+    ) -> AppResult<()> {
+        let exists: Option<(String,)> = sqlx::query_as("SELECT id FROM sales_returns WHERE id = $1")
+            .bind(&dto.sales_return.id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        if exists.is_some() {
+            return Ok(());
+        }
+
+        let sale_row: Option<(String, String)> = sqlx::query_as("SELECT id, branch_id FROM sales WHERE id = $1")
+            .bind(&dto.sales_return.sale_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        if sale_row.is_none() {
+            return Err(AppError::NotFound(format!("Sale '{}' not found for sales return", dto.sales_return.sale_id)));
+        }
+
+        let branch_exists: Option<(String,)> = sqlx::query_as("SELECT id FROM branches WHERE id = $1")
+            .bind(&dto.sales_return.branch_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        if branch_exists.is_none() {
+            return Err(AppError::NotFound(format!("Branch '{}' not found", dto.sales_return.branch_id)));
+        }
+
+        let ret = &dto.sales_return;
+        sqlx::query(
+            "INSERT INTO sales_returns (
+                id, return_number, sale_id, branch_id, customer_id, customer_name_snapshot,
+                total_amount, refund_method, status, reason, notes, performed_by, created_at, updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)"
+        )
+        .bind(&ret.id)
+        .bind(&ret.return_number)
+        .bind(&ret.sale_id)
+        .bind(&ret.branch_id)
+        .bind(ret.customer_id.as_deref())
+        .bind(ret.customer_name_snapshot.as_deref())
+        .bind(ret.total_amount)
+        .bind(ret.refund_method.as_str())
+        .bind(ret.status.as_str())
+        .bind(ret.reason.as_deref())
+        .bind(ret.notes.as_deref())
+        .bind(ret.performed_by.as_deref())
+        .bind(&ret.created_at)
+        .bind(&ret.updated_at)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        for line in &dto.lines {
+            sqlx::query(
+                "INSERT INTO sales_return_lines (
+                    id, return_id, sale_line_id, product_id, product_name_snapshot, sku_snapshot,
+                    unit_price, quantity, return_amount, created_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
+            )
+            .bind(&line.id)
+            .bind(&line.return_id)
+            .bind(&line.sale_line_id)
+            .bind(&line.product_id)
+            .bind(&line.product_name_snapshot)
+            .bind(&line.sku_snapshot)
+            .bind(line.unit_price)
+            .bind(line.quantity)
+            .bind(line.return_amount)
+            .bind(&line.created_at)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        for movement in &dto.stock_movements {
+            let current_stock: Option<(i64,)> = sqlx::query_as("SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2")
+                .bind(&movement.product_id)
+                .bind(&movement.branch_id)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+
+            if let Some(stk) = current_stock {
+                let new_stock = stk.0 + movement.quantity;
+                sqlx::query("UPDATE stock SET quantity = $1, updated_at = $2 WHERE product_id = $3 AND branch_id = $4")
+                    .bind(new_stock)
+                    .bind(&movement.created_at)
+                    .bind(&movement.product_id)
+                    .bind(&movement.branch_id)
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+            } else {
+                sqlx::query("INSERT INTO stock (product_id, branch_id, quantity, updated_at) VALUES ($1, $2, $3, $4)")
+                    .bind(&movement.product_id)
+                    .bind(&movement.branch_id)
+                    .bind(movement.quantity)
+                    .bind(&movement.created_at)
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+            }
+
+            sqlx::query(
+                "INSERT INTO stock_movements (
+                    id, product_id, branch_id, movement_type, quantity, previous_stock, resulting_stock,
+                    reason, performed_by, reference_id, created_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+            )
+            .bind(&movement.id)
+            .bind(&movement.product_id)
+            .bind(&movement.branch_id)
+            .bind(movement.movement_type.as_str())
+            .bind(movement.quantity)
+            .bind(movement.previous_stock)
+            .bind(movement.resulting_stock)
+            .bind(movement.reason.as_deref())
+            .bind(movement.performed_by.as_deref())
+            .bind(movement.reference_id.as_deref())
+            .bind(&movement.created_at)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        if let Some(cash_movement) = &dto.cash_movement {
+            let session_id_valid = if let Some(ref sid) = cash_movement.session_id {
+                let sess: Option<(String,)> = sqlx::query_as("SELECT id FROM cash_sessions WHERE id = $1")
+                    .bind(sid)
+                    .fetch_optional(&mut **tx)
+                    .await
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+                sess.map(|s| s.0)
+            } else {
+                None
+            };
+
+            sqlx::query(
+                "INSERT INTO cash_movements (id, session_id, branch_id, movement_type, direction, amount, reference_id, reference_number, payment_method, description, performed_by, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
+            )
+            .bind(&cash_movement.id)
+            .bind(session_id_valid.as_deref())
+            .bind(&cash_movement.branch_id)
+            .bind(cash_movement.movement_type.as_str())
+            .bind(cash_movement.direction.as_str())
+            .bind(cash_movement.amount)
+            .bind(cash_movement.reference_id.as_deref())
+            .bind(cash_movement.reference_number.as_deref())
+            .bind(&cash_movement.payment_method)
+            .bind(&cash_movement.description)
+            .bind(cash_movement.performed_by.as_deref())
+            .bind(&cash_movement.created_at)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        if let Some(ledger) = &dto.customer_ledger_entry {
+            sqlx::query(
+                "INSERT INTO customer_ledger_entries (id, customer_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+            )
+            .bind(&ledger.id)
+            .bind(&ledger.customer_id)
+            .bind(ledger.reference_id.as_deref())
+            .bind(ledger.reference_number.as_deref())
+            .bind(ledger.entry_type.as_str())
+            .bind(ledger.debit)
+            .bind(ledger.credit)
+            .bind(ledger.balance_after)
+            .bind(&ledger.description)
+            .bind(ledger.performed_by.as_deref())
+            .bind(&ledger.created_at)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        if dto.is_fully_refunded {
+            sqlx::query("UPDATE sales SET sale_status = 'REFUNDED', updated_at = $1 WHERE id = $2")
+                .bind(&ret.created_at)
+                .bind(&ret.sale_id)
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        Ok(())
     }
 
     pub async fn process_return(

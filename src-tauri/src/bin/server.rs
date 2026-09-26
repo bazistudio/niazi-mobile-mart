@@ -963,6 +963,82 @@ async fn sync_push_handler(
                 }
             }
 
+            if event.event_type == "SALES_RETURN_CREATED" {
+                let sync_dto: niazi_mobile_mart_lib::domain::sales_return::SalesReturnSyncEventDto = match serde_json::from_str(&event.payload) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "BAD_REQUEST",
+                                "message": format!("Invalid SALES_RETURN_CREATED payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                match niazi_mobile_mart_lib::repositories::PostgresSalesReturnRepository::insert_canonical_sales_return_tx(
+                    &mut tx,
+                    &sync_dto,
+                ).await {
+                    Ok(_) => {}
+                    Err(niazi_mobile_mart_lib::errors::AppError::NotFound(msg)) => {
+                        let _ = tx.rollback().await;
+                        results.push(json!({
+                            "client_event_id": client_event_id,
+                            "status": "DEPENDENCY_NOT_FOUND",
+                            "error": format!("Missing prerequisite entity for SALES_RETURN_CREATED: {msg}")
+                        }));
+                        continue;
+                    }
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to project canonical SALES_RETURN_CREATED event centrally: {e}")
+                            })),
+                        );
+                    }
+                }
+
+                let change_payload = match serde_json::to_string(&sync_dto) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to serialize SALES_RETURN_CREATED change_log payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "SALES_RETURN_CREATED",
+                    "SALES_RETURN",
+                    &sync_dto.sales_return.id,
+                    &change_payload,
+                ).await {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append SALES_RETURN_CREATED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
             if event.event_type == "PURCHASE_CREATED" {
                 let sync_event: niazi_mobile_mart_lib::domain::purchases::PurchaseSyncEventDto = match serde_json::from_str(&event.payload) {
                     Ok(d) => d,

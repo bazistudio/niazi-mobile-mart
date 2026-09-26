@@ -150,3 +150,14 @@ pub struct SalesReturnFilterDto {
     pub customer_id: Option<String>,
     pub limit: Option<u32>,
 }
+
+/// Canonical payload for central & downstream sync of sales returns
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SalesReturnSyncEventDto {
+    pub sales_return: SalesReturn,
+    pub lines: Vec<SalesReturnLine>,
+    pub stock_movements: Vec<crate::domain::inventory::StockMovement>,
+    pub cash_movement: Option<crate::domain::cash::CashMovement>,
+    pub customer_ledger_entry: Option<crate::domain::customer::CustomerLedgerEntry>,
+    pub is_fully_refunded: bool,
+}

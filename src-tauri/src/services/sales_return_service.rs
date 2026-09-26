@@ -136,6 +136,10 @@ impl SalesReturnService {
         let notes_cloned = dto.notes.clone();
         let requested_lines = dto.lines.clone();
 
+        let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(self.db.as_ref().unwrap().clone());
+        let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+        let terminal_id = current_terminal.id;
+
         let db = self.db.as_ref().expect("SQLite database connection required");
         let detail = with_transaction(db, move |tx| {
             // 1. Validate sale exists and is completed
@@ -190,6 +194,7 @@ impl SalesReturnService {
             let return_id = Uuid::new_v4().to_string();
 
             // 5. Stock Reversal (Inventory IN)
+            let mut final_stock_movements = Vec::with_capacity(calculated_lines.len());
             for (orig, qty, _) in &calculated_lines {
                 let prev_stock = SQLiteInventoryRepository::get_stock_in_tx(tx, &orig.product_id, &sale.branch_id)?;
                 let resulting_stock = prev_stock + *qty;
@@ -217,11 +222,14 @@ impl SalesReturnService {
                 };
 
                 SQLiteInventoryRepository::insert_movement_in_tx(tx, &movement)?;
+                final_stock_movements.push(movement);
             }
 
             // 6. Handle financial settlement
             let mut customer_balance_after = None;
             let mut cash_refunded = None;
+            let mut final_cash_movement = None;
+            let mut final_customer_ledger_entry = None;
 
             match refund_method {
                 SalesRefundMethod::Cash => {
@@ -252,6 +260,7 @@ impl SalesReturnService {
 
                     SQLiteCashRepository::insert_movement_in_tx(tx, &cash_movement)?;
                     cash_refunded = Some(total_return_amount);
+                    final_cash_movement = Some(cash_movement);
                 }
                 SalesRefundMethod::CustomerCredit => {
                     let cid = sale.customer_id.as_ref().ok_or_else(|| {
@@ -288,6 +297,7 @@ impl SalesReturnService {
                     };
 
                     SQLiteCustomerRepository::insert_ledger_entry_in_tx(tx, &ledger_entry)?;
+                    final_customer_ledger_entry = Some(ledger_entry);
                 }
             }
 
@@ -332,7 +342,28 @@ impl SalesReturnService {
             SQLiteSalesReturnRepository::insert_sales_return_lines_in_tx(tx, &domain_lines)?;
 
             // 9. Check if entire sale is 100% returned; if so, update status to REFUNDED
-            check_and_update_sale_refunded_status(tx, &sale.id, &now)?;
+            let is_fully_refunded = check_and_update_sale_refunded_status(tx, &sale.id, &now)?;
+
+            // 10. Enqueue SALES_RETURN_CREATED into offline_sync_queue in SQLite transaction
+            let sync_event_payload = crate::domain::sales_return::SalesReturnSyncEventDto {
+                sales_return: sales_return.clone(),
+                lines: domain_lines.clone(),
+                stock_movements: final_stock_movements,
+                cash_movement: final_cash_movement,
+                customer_ledger_entry: final_customer_ledger_entry,
+                is_fully_refunded,
+            };
+            let sync_payload_json = serde_json::to_string(&sync_event_payload).unwrap_or_default();
+
+            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                client_event_id: Some(return_id.clone()),
+                terminal_id,
+                organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: sale.branch_id.clone(),
+                event_type: "SALES_RETURN_CREATED".to_string(),
+                payload: sync_payload_json,
+            };
+            crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
 
             Ok(SalesReturnDetailDto {
                 sales_return,
@@ -374,7 +405,7 @@ impl SalesReturnService {
 }
 
 /// Helper inside transaction to mark sale REFUNDED if all quantities across all lines have been returned
-fn check_and_update_sale_refunded_status(conn: &Connection, sale_id: &str, now: &str) -> DbResult<()> {
+fn check_and_update_sale_refunded_status(conn: &Connection, sale_id: &str, now: &str) -> DbResult<bool> {
     let lines = SQLiteSaleRepository::get_sale_lines_in_tx(conn, sale_id)?;
     let mut all_returned = true;
 
@@ -394,7 +425,7 @@ fn check_and_update_sale_refunded_status(conn: &Connection, sale_id: &str, now: 
         .map_err(|e| DbError::QueryError(format!("Failed to update sale status to REFUNDED: {e}")))?;
     }
 
-    Ok(())
+    Ok(all_returned)
 }
 
 #[cfg(test)]
@@ -785,5 +816,88 @@ mod tests {
         assert!(no_session_err.is_err());
         let err_msg = no_session_err.unwrap_err().to_string();
         assert!(err_msg.contains("No OPEN cash session found"));
+    }
+
+    #[tokio::test]
+    async fn test_sales_return_outbox_event_creation_and_canonical_dto_integrity() {
+        let (db, sr_svc, sale_svc, cash_svc, _, prod_id) = setup_test_db().await;
+
+        cash_svc
+            .open_session(
+                Some("11111111-1111-1111-1111-111111111111"),
+                OpenCashSessionDto {
+                    branch_id: Some(DEFAULT_MAIN_BRANCH_ID.to_string()),
+                    business_date: Some("2026-01-01".to_string()),
+                    opening_cash: 50000,
+                    notes: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let sale_res = sale_svc
+            .complete_sale(
+                Some("22222222-2222-2222-2222-222222222222"),
+                CompleteSaleDto {
+                    branch_id: Some(DEFAULT_MAIN_BRANCH_ID.to_string()),
+                    customer_id: None,
+                    items: vec![SaleItemDto {
+                        product_id: prod_id.clone(),
+                        quantity: 2,
+                        discount: None,
+                    }],
+                    discount: None,
+                    paid_amount: Some(600000),
+                    payment_method: Some("CASH".to_string()),
+                    notes: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let return_res = sr_svc
+            .create_sales_return(
+                CreateSalesReturnDto {
+                    sale_id: sale_res.sale.id.clone(),
+                    lines: vec![crate::domain::sales_return::CreateSalesReturnLineDto {
+                        sale_line_id: sale_res.lines[0].id.clone(),
+                        quantity: 2,
+                    }],
+                    refund_method: "CASH".to_string(),
+                    reason: Some("Full Return".to_string()),
+                    notes: None,
+                },
+                Some("11111111-1111-1111-1111-111111111111"),
+            )
+            .await
+            .unwrap();
+
+        // Verify outbox queue item
+        let conn_arc = db.inner();
+        let guard = conn_arc.lock().await;
+
+        let (event_type, payload): (String, String) = guard.query_row(
+            "SELECT event_type, payload FROM offline_sync_queue WHERE client_event_id = ?1",
+            rusqlite::params![return_res.sales_return.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+
+        assert_eq!(event_type, "SALES_RETURN_CREATED");
+
+        let sync_dto: crate::domain::sales_return::SalesReturnSyncEventDto = serde_json::from_str(&payload).unwrap();
+        assert_eq!(sync_dto.sales_return.id, return_res.sales_return.id);
+        assert_eq!(sync_dto.lines.len(), 1);
+        assert_eq!(sync_dto.lines[0].id, return_res.lines[0].id);
+        assert_eq!(sync_dto.stock_movements.len(), 1);
+        assert!(sync_dto.cash_movement.is_some());
+        assert!(sync_dto.is_fully_refunded);
+
+        // Verify sale status updated to REFUNDED
+        let sale_status: String = guard.query_row(
+            "SELECT sale_status FROM sales WHERE id = ?1",
+            rusqlite::params![sale_res.sale.id],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(sale_status, "REFUNDED");
     }
 }

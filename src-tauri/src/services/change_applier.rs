@@ -249,6 +249,72 @@ impl ChangeApplier {
                     }
                 }
             }
+            "SALES_RETURN_CREATED" => {
+                let event_dto: crate::domain::sales_return::SalesReturnSyncEventDto = match serde_json::from_str(&change.payload) {
+                    Ok(d) => d,
+                    Err(e) => return Err(DbError::ValidationError(format!("Invalid SALES_RETURN_CREATED payload in change_log: {e}"))),
+                };
+
+                let exists: bool = tx.query_row(
+                    "SELECT 1 FROM sales_returns WHERE id = ?1",
+                    params![event_dto.sales_return.id],
+                    |_| Ok(true),
+                ).unwrap_or(false);
+
+                if exists {
+                    return Ok(());
+                }
+
+                if let Some(ref uid) = event_dto.sales_return.performed_by {
+                    Self::auto_heal_user_in_tx(tx, uid)?;
+                }
+                if let Some(ref cid) = event_dto.sales_return.customer_id {
+                    Self::auto_heal_customer_in_tx(tx, cid)?;
+                }
+                Self::auto_heal_branch_in_tx(tx, &event_dto.sales_return.branch_id)?;
+                for line in &event_dto.lines {
+                    Self::auto_heal_product_in_tx(tx, &line.product_id)?;
+                }
+
+                crate::repositories::SQLiteSalesReturnRepository::insert_sales_return_in_tx(tx, &event_dto.sales_return)?;
+                crate::repositories::SQLiteSalesReturnRepository::insert_sales_return_lines_in_tx(tx, &event_dto.lines)?;
+
+                for m in &event_dto.stock_movements {
+                    SQLiteInventoryRepository::set_stock_in_tx(
+                        tx,
+                        &m.product_id,
+                        &m.branch_id,
+                        m.resulting_stock,
+                        &m.created_at,
+                    )?;
+                    SQLiteInventoryRepository::insert_movement_in_tx(tx, m)?;
+                }
+
+                if let Some(mut m) = event_dto.cash_movement {
+                    if let Some(ref sid) = m.session_id {
+                        let sess_exists: bool = tx.query_row(
+                            "SELECT 1 FROM cash_sessions WHERE id = ?1",
+                            params![sid],
+                            |_| Ok(true),
+                        ).unwrap_or(false);
+                        if !sess_exists {
+                            m.session_id = None;
+                        }
+                    }
+                    crate::repositories::SQLiteCashRepository::insert_movement_in_tx(tx, &m)?;
+                }
+
+                if let Some(l) = &event_dto.customer_ledger_entry {
+                    crate::repositories::SQLiteCustomerRepository::insert_ledger_entry_in_tx(tx, l)?;
+                }
+
+                if event_dto.is_fully_refunded {
+                    tx.execute(
+                        "UPDATE sales SET sale_status = 'REFUNDED', updated_at = ?1 WHERE id = ?2",
+                        params![event_dto.sales_return.created_at, event_dto.sales_return.sale_id],
+                    ).map_err(|e| DbError::QueryError(format!("Failed to update sale status to REFUNDED downstream: {e}")))?;
+                }
+            }
             "PURCHASE_CREATED" => {
                 let event_dto: crate::domain::purchases::PurchaseSyncEventDto = match serde_json::from_str(&change.payload) {
                     Ok(d) => d,
