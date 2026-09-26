@@ -25,6 +25,10 @@ export interface DashboardData {
   inventory: {
     lowStockProducts: number;
   };
+  balances: {
+    customer_receivables: number;
+    supplier_payables: number;
+  };
   recentActivity: Array<{
     action: string;
     details: string;

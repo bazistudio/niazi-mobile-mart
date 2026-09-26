@@ -1,17 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
-import { tauriClient, OrganizationDashboardStats } from '@/lib/tauri/tauriClient';
+import { tauriClient, OrganizationDashboardStats, DashboardBalancesDto } from '@/lib/tauri/tauriClient';
 import { SubscriptionCard } from '@/features/organization/components/dashboard/SubscriptionCard';
 import { ShopUsageCard } from '@/features/organization/components/dashboard/ShopUsageCard';
 import { SalesSummaryCard } from '@/features/organization/components/dashboard/SalesSummaryCard';
 import { InventoryAlertCard, RecentActivity } from '@/features/organization/components/dashboard/OverviewCards';
+import { ReceivablesCard, PayablesCard } from '@/features/organization/components/dashboard/FinancialCards';
 import { Loader2 } from 'lucide-react';
 
 export function OrganizationDashboardPage() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
   const [stats, setStats] = useState<OrganizationDashboardStats | null>(null);
+  const [balances, setBalances] = useState<DashboardBalancesDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,10 +21,14 @@ export function OrganizationDashboardPage() {
     try {
       setLoading(true);
       setError(null);
-      const dashboardStats = await tauriClient.organizationGetDashboardStats();
+      const [dashboardStats, dashboardBalances] = await Promise.all([
+        tauriClient.organizationGetDashboardStats(),
+        tauriClient.organizationGetDashboardBalances()
+      ]);
       setStats(dashboardStats);
+      setBalances(dashboardBalances);
     } catch (err: any) {
-      setError(err.message || 'Failed to load dashboard metrics from SQLite');
+      setError(err.message || 'Failed to load dashboard metrics from database');
     } finally {
       setLoading(false);
     }
@@ -65,6 +71,10 @@ export function OrganizationDashboardPage() {
     inventory: {
       lowStockProducts: stats?.low_stock_count || 0,
     },
+    balances: {
+      customer_receivables: balances?.customer_receivables || 0,
+      supplier_payables: balances?.supplier_payables || 0,
+    },
     recentActivity: [],
   };
 
@@ -90,11 +100,13 @@ export function OrganizationDashboardPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <SubscriptionCard />
         <ShopUsageCard shops={data.shops} employees={data.employees} />
         <SalesSummaryCard sales={data.sales} />
         <InventoryAlertCard inventory={data.inventory} />
+        <ReceivablesCard amount={data.balances.customer_receivables} />
+        <PayablesCard amount={data.balances.supplier_payables} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
