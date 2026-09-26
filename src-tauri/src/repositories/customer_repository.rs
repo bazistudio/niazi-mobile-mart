@@ -143,7 +143,18 @@ impl SQLiteCustomerRepository {
         conn.execute(
             "INSERT INTO customers (
                 id, customer_code, name, phone, alternate_phone, email, address, notes, credit_limit, is_active, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             ON CONFLICT (id) DO UPDATE SET
+                customer_code = excluded.customer_code,
+                name = excluded.name,
+                phone = excluded.phone,
+                alternate_phone = excluded.alternate_phone,
+                email = excluded.email,
+                address = excluded.address,
+                notes = excluded.notes,
+                credit_limit = excluded.credit_limit,
+                is_active = excluded.is_active,
+                updated_at = excluded.updated_at",
             params![
                 customer.id,
                 customer.customer_code,

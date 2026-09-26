@@ -78,7 +78,8 @@ impl ProductService {
                 let terminal_id = current_terminal.id;
 
                 let product = with_transaction(db, move |tx| {
-                    let product = SQLiteProductRepository::create_product_in_tx(tx, &pid, &dto)?;
+                    let mut product = SQLiteProductRepository::create_product_in_tx(tx, &pid, &dto)?;
+                    product.initial_quantity = dto.initial_quantity;
 
                     if let Some(qty) = dto.initial_quantity {
                         if qty > 0 {

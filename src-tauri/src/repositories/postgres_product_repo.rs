@@ -82,6 +82,7 @@ impl PostgresProductRepository {
             low_stock_threshold: threshold,
             is_active: true,
             description: dto.description.clone(),
+            initial_quantity: dto.initial_quantity,
             created_at: now.clone(),
             updated_at: now,
         })
@@ -192,6 +193,7 @@ impl PostgresProductRepository {
             low_stock_threshold: threshold,
             is_active: true,
             description: dto.description.clone(),
+            initial_quantity: dto.initial_quantity,
             created_at: now.clone(),
             updated_at: now,
         })
@@ -416,6 +418,7 @@ impl PostgresProductRepository {
             low_stock_threshold: new_threshold,
             is_active: new_active,
             description: new_desc.map(|s| s.to_string()),
+            initial_quantity: None,
             created_at: current.created_at,
             updated_at: now,
         })
@@ -441,6 +444,7 @@ impl PostgresProductRepository {
     pub async fn create_product_tx(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         product: &Product,
+        branch_id_override: Option<&str>,
     ) -> AppResult<Product> {
         let now = if product.created_at.is_empty() { Utc::now().to_rfc3339() } else { product.created_at.clone() };
         let updated_at = Utc::now().to_rfc3339();
@@ -507,6 +511,50 @@ impl PostgresProductRepository {
                 AppError::Database(format!("Failed to project PRODUCT_CREATED: {e}"))
             }
         })?;
+
+        if let Some(qty) = product.initial_quantity {
+            if qty > 0 {
+                let target_branch = branch_id_override.unwrap_or(crate::domain::organization::DEFAULT_MAIN_BRANCH_ID);
+
+                let movement_exists: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM stock_movements WHERE product_id = $1 AND branch_id = $2 AND reference_id = 'OPENING_BALANCE')"
+                )
+                .bind(&product.id)
+                .bind(target_branch)
+                .fetch_one(&mut **tx)
+                .await
+                .unwrap_or(false);
+
+                if !movement_exists {
+                    sqlx::query(
+                        "INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+                         VALUES ($1, $2, $3, $4)
+                         ON CONFLICT (product_id, branch_id) DO UPDATE SET quantity = EXCLUDED.quantity, updated_at = EXCLUDED.updated_at"
+                    )
+                    .bind(&product.id)
+                    .bind(target_branch)
+                    .bind(qty)
+                    .bind(&now)
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(|e| AppError::Database(format!("Failed to project initial stock: {e}")))?;
+
+                    let movement_id = Uuid::new_v4().to_string();
+                    sqlx::query(
+                        "INSERT INTO stock_movements (id, product_id, branch_id, movement_type, quantity, previous_stock, resulting_stock, reason, reference_id, created_at)
+                         VALUES ($1, $2, $3, 'IN', $4, 0, $4, 'Opening Stock', 'OPENING_BALANCE', $5)"
+                    )
+                    .bind(movement_id)
+                    .bind(&product.id)
+                    .bind(target_branch)
+                    .bind(qty)
+                    .bind(&now)
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(|e| AppError::Database(format!("Failed to project opening stock movement: {e}")))?;
+                }
+            }
+        }
 
         let mut res = product.clone();
         res.normalized_name = norm_name;
@@ -624,6 +672,7 @@ impl PostgresProductRepository {
             low_stock_threshold: row.try_get(14).map_err(|e| AppError::Database(e.to_string()))?,
             is_active: is_active_int == 1,
             description: row.try_get(16).unwrap_or(None),
+            initial_quantity: None,
             created_at: row.try_get(17).map_err(|e| AppError::Database(e.to_string()))?,
             updated_at: row.try_get(18).map_err(|e| AppError::Database(e.to_string()))?,
         })

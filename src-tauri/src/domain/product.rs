@@ -33,6 +33,8 @@ pub struct Product {
     pub low_stock_threshold: i64,
     pub is_active: bool,
     pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_quantity: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -153,6 +155,7 @@ mod tests {
             low_stock_threshold: 5,
             is_active: true,
             description: None,
+            initial_quantity: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };

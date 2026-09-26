@@ -172,6 +172,7 @@ pub async fn storage_product_get_by_sku_impl(
                     low_stock_threshold: row.get(14)?,
                     is_active: row.get::<_, i64>(15)? == 1,
                     description: row.get(16)?,
+                    initial_quantity: None,
                     created_at: row.get(17)?,
                     updated_at: row.get(18)?,
                 })
@@ -239,6 +240,7 @@ pub async fn storage_product_get_by_barcode_impl(
                     low_stock_threshold: row.get(14)?,
                     is_active: row.get::<_, i64>(15)? == 1,
                     description: row.get(16)?,
+                    initial_quantity: None,
                     created_at: row.get(17)?,
                     updated_at: row.get(18)?,
                 })
@@ -333,6 +335,7 @@ pub async fn storage_product_list_impl(
                     low_stock_threshold: row.get(14)?,
                     is_active: row.get::<_, i64>(15)? == 1,
                     description: row.get(16)?,
+                    initial_quantity: None,
                     created_at: row.get(17)?,
                     updated_at: row.get(18)?,
                 })

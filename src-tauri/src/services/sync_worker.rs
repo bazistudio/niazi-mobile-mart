@@ -199,13 +199,40 @@ impl SyncWorkerDaemon {
                 if let Ok(ack_json) = resp.json::<serde_json::Value>().await {
                     if let Some(results) = ack_json.get("results").and_then(|r| r.as_array()) {
                         for res in results {
-                            if let (Some(client_evt), Some(server_evt)) = (
-                                res.get("client_event_id").and_then(|s| s.as_str()),
-                                res.get("server_event_id").and_then(|s| s.as_str()),
-                            ) {
-                                let _ = sync_queue_repo
-                                    .update_status(client_evt, SyncQueueStatus::Synced, None, Some(server_evt))
-                                    .await;
+                            let client_evt = match res.get("client_event_id").and_then(|s| s.as_str()) {
+                                Some(id) => id,
+                                None => continue,
+                            };
+                            let server_evt = res.get("server_event_id").and_then(|s| s.as_str());
+                            let status_str = res.get("status").and_then(|s| s.as_str()).unwrap_or("SYNCED");
+                            let err_msg = res.get("error").and_then(|s| s.as_str());
+
+                            match status_str {
+                                "SYNCED" => {
+                                    let _ = sync_queue_repo
+                                        .update_status_ext(client_evt, SyncQueueStatus::Synced, None, server_evt, false)
+                                        .await;
+                                }
+                                "DEPENDENCY_NOT_FOUND" => {
+                                    let _ = sync_queue_repo
+                                        .update_status_ext(client_evt, SyncQueueStatus::Pending, err_msg, None, false)
+                                        .await;
+                                }
+                                "FAILED_PERMANENT" => {
+                                    let _ = sync_queue_repo
+                                        .update_status_ext(client_evt, SyncQueueStatus::FailedPermanent, err_msg, None, true)
+                                        .await;
+                                }
+                                "CONFLICT" => {
+                                    let _ = sync_queue_repo
+                                        .update_status_ext(client_evt, SyncQueueStatus::Conflict, err_msg, None, false)
+                                        .await;
+                                }
+                                _ => {
+                                    let _ = sync_queue_repo
+                                        .update_status_ext(client_evt, SyncQueueStatus::Pending, err_msg, None, true)
+                                        .await;
+                                }
                             }
                         }
                     }
@@ -234,7 +261,7 @@ impl SyncWorkerDaemon {
                     401 => {
                         for item in &pending_items {
                             let _ = sync_queue_repo
-                                .update_status(&item.client_event_id, SyncQueueStatus::Pending, Some(&err_msg), None)
+                                .update_status_ext(&item.client_event_id, SyncQueueStatus::Pending, Some(&err_msg), None, false)
                                 .await;
                         }
                         let mut st = self.status.write().await;
@@ -245,7 +272,7 @@ impl SyncWorkerDaemon {
                     403 => {
                         for item in &pending_items {
                             let _ = sync_queue_repo
-                                .update_status(&item.client_event_id, SyncQueueStatus::FailedPermanent, Some(&err_msg), None)
+                                .update_status_ext(&item.client_event_id, SyncQueueStatus::FailedPermanent, Some(&err_msg), None, true)
                                 .await;
                         }
                         let mut st = self.status.write().await;
@@ -255,17 +282,27 @@ impl SyncWorkerDaemon {
                     409 => {
                         for item in &pending_items {
                             let _ = sync_queue_repo
-                                .update_status(&item.client_event_id, SyncQueueStatus::Conflict, Some(&err_msg), None)
+                                .update_status_ext(&item.client_event_id, SyncQueueStatus::Conflict, Some(&err_msg), None, false)
                                 .await;
                         }
                         let mut st = self.status.write().await;
                         st.is_online = true;
                         st.last_error = Some(format!("Sync conflict (409): {err_body}"));
                     }
+                    422 if err_body.contains("DEPENDENCY_NOT_FOUND") => {
+                        for item in &pending_items {
+                            let _ = sync_queue_repo
+                                .update_status_ext(&item.client_event_id, SyncQueueStatus::Pending, Some(&err_msg), None, false)
+                                .await;
+                        }
+                        let mut st = self.status.write().await;
+                        st.is_online = true;
+                        st.last_error = Some(format!("Sync retryable dependency error (422): {err_body}"));
+                    }
                     400 | 404 | 422 => {
                         for item in &pending_items {
                             let _ = sync_queue_repo
-                                .update_status(&item.client_event_id, SyncQueueStatus::FailedPermanent, Some(&err_msg), None)
+                                .update_status_ext(&item.client_event_id, SyncQueueStatus::FailedPermanent, Some(&err_msg), None, true)
                                 .await;
                         }
                         let mut st = self.status.write().await;
@@ -275,7 +312,7 @@ impl SyncWorkerDaemon {
                     _ => {
                         for item in &pending_items {
                             let _ = sync_queue_repo
-                                .update_status(&item.client_event_id, SyncQueueStatus::Pending, Some(&err_msg), None)
+                                .update_status_ext(&item.client_event_id, SyncQueueStatus::Pending, Some(&err_msg), None, true)
                                 .await;
                         }
                         let mut st = self.status.write().await;
@@ -297,7 +334,7 @@ impl SyncWorkerDaemon {
                 let err_msg = format!("Server unreachable: {e}");
                 for item in &pending_items {
                     let _ = sync_queue_repo
-                        .update_status(&item.client_event_id, SyncQueueStatus::Pending, Some(&err_msg), None)
+                        .update_status_ext(&item.client_event_id, SyncQueueStatus::Pending, Some(&err_msg), None, false)
                         .await;
                 }
                 let remaining_pending = sync_queue_repo.count_pending().await.unwrap_or(0);

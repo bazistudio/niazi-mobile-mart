@@ -203,13 +203,14 @@ impl SQLiteSyncQueueRepository {
         Ok(items)
     }
 
-    /// Updates the status and attempt details of a queued item, capping retries at MAX_RETRIES (10)
-    pub async fn update_status(
+    /// Updates the status and attempt details of a queued item, with explicit attempt counting
+    pub async fn update_status_ext(
         &self,
         client_event_id: &str,
         status: SyncQueueStatus,
         error: Option<&str>,
         server_event_id: Option<&str>,
+        increment_attempt: bool,
     ) -> AppResult<()> {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
@@ -224,7 +225,11 @@ impl SQLiteSyncQueueRepository {
             )
             .unwrap_or(0);
 
-        let new_attempt_count = current_attempts + 1;
+        let new_attempt_count = if increment_attempt {
+            current_attempts + 1
+        } else {
+            current_attempts
+        };
         let mut final_status = status;
 
         if final_status == SyncQueueStatus::Pending && new_attempt_count >= crate::domain::sync_queue::MAX_RETRIES {
@@ -258,6 +263,17 @@ impl SQLiteSyncQueueRepository {
             .map_err(|e| AppError::Database(format!("Failed to update sync queue item status: {e}")))?;
 
         Ok(())
+    }
+
+    /// Updates the status and attempt details of a queued item, capping retries at MAX_RETRIES (10)
+    pub async fn update_status(
+        &self,
+        client_event_id: &str,
+        status: SyncQueueStatus,
+        error: Option<&str>,
+        server_event_id: Option<&str>,
+    ) -> AppResult<()> {
+        self.update_status_ext(client_event_id, status, error, server_event_id, true).await
     }
 
     /// Returns total count of eligible pending items in queue
@@ -1035,5 +1051,134 @@ mod tests {
         let res_other_org = repo.reset_failed_permanent_for_retry(&evt_id, "other_org_uuid").await;
         assert!(res_other_org.is_err());
         assert!(res_other_org.unwrap_err().to_string().contains("Cross-organization retry prohibited"));
+    }
+
+    #[tokio::test]
+    async fn test_dependency_retry_survives_max_retries() {
+        let db = DatabaseConnection::open_in_memory().unwrap();
+        {
+            let conn_arc = db.inner();
+            let mut conn = conn_arc.lock().await;
+            crate::db::migrations::MigrationRunner::run(&mut conn).unwrap();
+        }
+        let repo = SQLiteSyncQueueRepository::new(db.clone());
+        let terminal_id = Uuid::new_v4().to_string();
+
+        {
+            let conn_arc = db.inner();
+            let conn = conn_arc.lock().await;
+            conn.execute(
+                "INSERT INTO terminals (id, organization_id, branch_id, device_name, is_active, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'Test Terminal', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                rusqlite::params![terminal_id, NIAZI_ORGANIZATION_ID, DEFAULT_MAIN_BRANCH_ID],
+            ).unwrap();
+        }
+
+        let evt_id = Uuid::new_v4().to_string();
+        let _evt = repo.enqueue(EnqueueOfflineEventDto {
+            client_event_id: Some(evt_id.clone()),
+            terminal_id: terminal_id.clone(),
+            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+            event_type: "SALE_CREATED".to_string(),
+            payload: r#"{"id":"SALE_DEP_WAIT"}"#.to_string(),
+        }).await.unwrap();
+
+        // 15 dependency failure updates with increment_attempt = false
+        for _ in 1..=15 {
+            repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some("422 DEPENDENCY_NOT_FOUND"), None, false).await.unwrap();
+            let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
+            assert_eq!(item.attempt_count, 0);
+            assert_eq!(item.status, SyncQueueStatus::Pending);
+            assert!(item.is_eligible_for_retry(chrono::Utc::now()));
+        }
+
+        assert_eq!(repo.count_pending().await.unwrap(), 1);
+        assert_eq!(repo.count_failed_permanent().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_dependency_eventually_resolves() {
+        let db = DatabaseConnection::open_in_memory().unwrap();
+        {
+            let conn_arc = db.inner();
+            let mut conn = conn_arc.lock().await;
+            crate::db::migrations::MigrationRunner::run(&mut conn).unwrap();
+        }
+        let repo = SQLiteSyncQueueRepository::new(db.clone());
+        let terminal_id = Uuid::new_v4().to_string();
+
+        {
+            let conn_arc = db.inner();
+            let conn = conn_arc.lock().await;
+            conn.execute(
+                "INSERT INTO terminals (id, organization_id, branch_id, device_name, is_active, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'Test Terminal', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                rusqlite::params![terminal_id, NIAZI_ORGANIZATION_ID, DEFAULT_MAIN_BRANCH_ID],
+            ).unwrap();
+        }
+
+        let evt_id = Uuid::new_v4().to_string();
+        let _evt = repo.enqueue(EnqueueOfflineEventDto {
+            client_event_id: Some(evt_id.clone()),
+            terminal_id: terminal_id.clone(),
+            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+            event_type: "SALE_CREATED".to_string(),
+            payload: r#"{"id":"SALE_RESOLVED"}"#.to_string(),
+        }).await.unwrap();
+
+        // 5 dependency retries
+        for _ in 1..=5 {
+            repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some("422 DEPENDENCY_NOT_FOUND"), None, false).await.unwrap();
+        }
+
+        // Product arrives, sale syncs successfully
+        repo.update_status_ext(&evt_id, SyncQueueStatus::Synced, None, Some("SRV-999"), false).await.unwrap();
+        let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
+        assert_eq!(item.status, SyncQueueStatus::Synced);
+        assert_eq!(item.attempt_count, 0);
+        assert_eq!(item.server_event_id, Some("SRV-999".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_network_error_does_not_consume_retry_budget() {
+        let db = DatabaseConnection::open_in_memory().unwrap();
+        {
+            let conn_arc = db.inner();
+            let mut conn = conn_arc.lock().await;
+            crate::db::migrations::MigrationRunner::run(&mut conn).unwrap();
+        }
+        let repo = SQLiteSyncQueueRepository::new(db.clone());
+        let terminal_id = Uuid::new_v4().to_string();
+
+        {
+            let conn_arc = db.inner();
+            let conn = conn_arc.lock().await;
+            conn.execute(
+                "INSERT INTO terminals (id, organization_id, branch_id, device_name, is_active, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'Test Terminal', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                rusqlite::params![terminal_id, NIAZI_ORGANIZATION_ID, DEFAULT_MAIN_BRANCH_ID],
+            ).unwrap();
+        }
+
+        let evt_id = Uuid::new_v4().to_string();
+        let _evt = repo.enqueue(EnqueueOfflineEventDto {
+            client_event_id: Some(evt_id.clone()),
+            terminal_id: terminal_id.clone(),
+            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+            event_type: "SALE_CREATED".to_string(),
+            payload: r#"{"id":"SALE_OFFLINE"}"#.to_string(),
+        }).await.unwrap();
+
+        // 12 network transport failure updates
+        for _ in 1..=12 {
+            repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some("Server unreachable"), None, false).await.unwrap();
+        }
+
+        let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
+        assert_eq!(item.status, SyncQueueStatus::Pending);
+        assert_eq!(item.attempt_count, 0);
     }
 }

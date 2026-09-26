@@ -85,6 +85,43 @@ impl ChangeApplier {
                 if let Some(ref cid) = product.color_id { Self::auto_heal_color_in_tx(tx, cid)?; }
 
                 SQLiteProductRepository::insert_product_in_tx(tx, &product)?;
+
+                if let Some(qty) = product.initial_quantity {
+                    if qty > 0 {
+                        let target_branch = if change.branch_id.trim().is_empty() {
+                            crate::domain::organization::DEFAULT_MAIN_BRANCH_ID.to_string()
+                        } else {
+                            change.branch_id.clone()
+                        };
+                        Self::auto_heal_branch_in_tx(tx, &target_branch)?;
+
+                        let movement_exists: bool = tx.query_row(
+                            "SELECT 1 FROM stock_movements WHERE product_id = ?1 AND branch_id = ?2 AND reference_id = 'OPENING_BALANCE'",
+                            params![product.id, target_branch],
+                            |_| Ok(true),
+                        ).unwrap_or(false);
+
+                        if !movement_exists {
+                            let now = chrono::Utc::now().to_rfc3339();
+                            SQLiteInventoryRepository::set_stock_in_tx(tx, &product.id, &target_branch, qty, &now)?;
+
+                            let movement = crate::domain::inventory::StockMovement {
+                                id: uuid::Uuid::new_v4().to_string(),
+                                product_id: product.id.clone(),
+                                branch_id: target_branch,
+                                movement_type: crate::domain::inventory::StockMovementType::In,
+                                quantity: qty,
+                                previous_stock: 0,
+                                resulting_stock: qty,
+                                reason: Some("Opening Stock".to_string()),
+                                performed_by: None,
+                                reference_id: Some("OPENING_BALANCE".to_string()),
+                                created_at: now,
+                            };
+                            SQLiteInventoryRepository::insert_movement_in_tx(tx, &movement)?;
+                        }
+                    }
+                }
             }
             "PRODUCT_UPDATED" => {
                 let product: crate::domain::product::Product = match serde_json::from_str(&change.payload) {
@@ -506,6 +543,7 @@ mod tests {
             low_stock_threshold: 5,
             is_active: true,
             description: None,
+            initial_quantity: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -739,6 +777,7 @@ mod tests {
             low_stock_threshold: 5,
             is_active: true,
             description: None,
+            initial_quantity: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -781,6 +820,7 @@ mod tests {
             low_stock_threshold: 5,
             is_active: true,
             description: None,
+            initial_quantity: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -846,6 +886,7 @@ mod tests {
             low_stock_threshold: 5,
             is_active: true,
             description: None,
+            initial_quantity: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -914,5 +955,59 @@ mod tests {
         let repo = crate::repositories::SQLiteCatalogRepository::new(db.clone());
         let fetched = repo.get_category_by_id(&cat_id).await;
         assert!(fetched.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_downstream_product_opening_stock_projection() {
+        let db = setup_test_db().await;
+        let applier = ChangeApplier::new(db.clone());
+
+        let product_id = "00000000-0000-0000-0000-000000000777".to_string();
+        let prod = Product {
+            id: product_id.clone(),
+            name: "Stock Phone".to_string(),
+            normalized_name: crate::domain::product::normalize_product_name("Stock Phone"),
+            sku: "SKU-STOCK1".to_string(),
+            barcode: Some("999999999".to_string()),
+            category_id: "00000000-0000-0000-0000-000000000010".to_string(),
+            brand_id: None,
+            unit_id: None,
+            company_id: None,
+            quality_id: None,
+            color_id: None,
+            purchase_price: 15000,
+            average_cost: 15000,
+            sale_price: 18000,
+            low_stock_threshold: 5,
+            is_active: true,
+            description: None,
+            initial_quantity: Some(10),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let change = ChangeLogEntry {
+            sequence: 1,
+            organization_id: "org1".to_string(),
+            branch_id: "00000000-0000-0000-0000-000000000002".to_string(),
+            client_event_id: None,
+            event_type: "PRODUCT_CREATED".to_string(),
+            entity_type: "PRODUCT".to_string(),
+            entity_id: product_id.clone(),
+            payload: serde_json::to_string(&prod).unwrap(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        applier.apply_batch("org1", &[change.clone()], 1).await.unwrap();
+
+        // Verify stock is 10 on target branch
+        let inv_repo = crate::repositories::SQLiteInventoryRepository::new(db.clone());
+        let stock = inv_repo.get_stock(&product_id, "00000000-0000-0000-0000-000000000002").await.unwrap();
+        assert_eq!(stock, 10);
+
+        // Replay same batch and verify stock is still 10 (not doubled)
+        applier.apply_batch("org1", &[change], 1).await.unwrap();
+        let stock_replay = inv_repo.get_stock(&product_id, "00000000-0000-0000-0000-000000000002").await.unwrap();
+        assert_eq!(stock_replay, 10);
     }
 }

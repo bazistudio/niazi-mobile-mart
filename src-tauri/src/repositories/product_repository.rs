@@ -64,6 +64,7 @@ impl SQLiteProductRepository {
                         low_stock_threshold: row.get(14)?,
                         is_active: row.get::<_, i64>(15)? == 1,
                         description: row.get(16)?,
+                        initial_quantity: None,
                         created_at: row.get(17)?,
                         updated_at: row.get(18)?,
                     })
@@ -103,6 +104,7 @@ impl SQLiteProductRepository {
                         low_stock_threshold: row.get(14)?,
                         is_active: row.get::<_, i64>(15)? == 1,
                         description: row.get(16)?,
+                        initial_quantity: None,
                         created_at: row.get(17)?,
                         updated_at: row.get(18)?,
                     })
@@ -142,6 +144,7 @@ impl SQLiteProductRepository {
                         low_stock_threshold: row.get(14)?,
                         is_active: row.get::<_, i64>(15)? == 1,
                         description: row.get(16)?,
+                        initial_quantity: None,
                         created_at: row.get(17)?,
                         updated_at: row.get(18)?,
                     })
@@ -226,6 +229,7 @@ impl SQLiteProductRepository {
                     low_stock_threshold: row.get(14)?,
                     is_active: row.get::<_, i64>(15)? == 1,
                     description: row.get(16)?,
+                    initial_quantity: None,
                     created_at: row.get(17)?,
                     updated_at: row.get(18)?,
                 })
@@ -305,6 +309,7 @@ impl SQLiteProductRepository {
                     low_stock_threshold: row.get(14)?,
                     is_active: row.get::<_, i64>(15)? == 1,
                     description: row.get(16)?,
+                    initial_quantity: None,
                     created_at: row.get(17)?,
                     updated_at: row.get(18)?,
                 })
@@ -520,6 +525,7 @@ impl SQLiteProductRepository {
             low_stock_threshold: threshold,
             is_active: true,
             description: dto.description.clone(),
+            initial_quantity: dto.initial_quantity,
             created_at: now.clone(),
             updated_at: now,
         })
@@ -756,6 +762,7 @@ impl SQLiteProductRepository {
             low_stock_threshold: new_threshold,
             is_active: new_active,
             description: new_desc.map(|s| s.to_string()),
+            initial_quantity: None,
             created_at: current.created_at,
             updated_at: now,
         })

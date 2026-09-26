@@ -51,6 +51,46 @@ impl PostgresCustomerRepository {
         Ok(customer.clone())
     }
 
+    /// Central projection: Create customer within an existing PostgreSQL transaction
+    pub async fn create_customer_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        customer: &Customer,
+    ) -> AppResult<Customer> {
+        sqlx::query(
+            "INSERT INTO customers (
+                id, customer_code, name, phone, alternate_phone, email, address, notes, credit_limit, is_active, created_at, updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+             ON CONFLICT (id) DO UPDATE SET
+                customer_code = EXCLUDED.customer_code,
+                name = EXCLUDED.name,
+                phone = EXCLUDED.phone,
+                alternate_phone = EXCLUDED.alternate_phone,
+                email = EXCLUDED.email,
+                address = EXCLUDED.address,
+                notes = EXCLUDED.notes,
+                credit_limit = EXCLUDED.credit_limit,
+                is_active = EXCLUDED.is_active,
+                updated_at = EXCLUDED.updated_at",
+        )
+        .bind(&customer.id)
+        .bind(&customer.customer_code)
+        .bind(customer.name.trim())
+        .bind(customer.phone.trim())
+        .bind(customer.alternate_phone.as_deref().map(str::trim))
+        .bind(customer.email.as_deref().map(str::trim))
+        .bind(customer.address.as_deref().map(str::trim))
+        .bind(customer.notes.as_deref().map(str::trim))
+        .bind(customer.credit_limit)
+        .bind(if customer.is_active { 1 } else { 0 })
+        .bind(&customer.created_at)
+        .bind(&customer.updated_at)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to project CUSTOMER_CREATED: {e}")))?;
+
+        Ok(customer.clone())
+    }
+
     pub async fn update_customer(&self, id: &str, dto: &UpdateCustomerDto) -> AppResult<Customer> {
         let existing = self
             .get_customer_by_id(id)
