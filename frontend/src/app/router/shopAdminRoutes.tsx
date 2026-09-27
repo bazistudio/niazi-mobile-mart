@@ -130,7 +130,7 @@ export const shopAdminCoreRoutes = (
     <Route
       path="suppliers"
       element={
-        <PermissionGuard requiredPermission={PERMISSIONS.SUPPLIERS_VIEW} fallbackPath="/dashboard/shop-admin">
+        <PermissionGuard requiredPermission={PERMISSIONS.PURCHASES_VIEW} fallbackPath="/dashboard/shop-admin">
           <SuppliersPage />
         </PermissionGuard>
       }
@@ -138,7 +138,7 @@ export const shopAdminCoreRoutes = (
     <Route
       path="suppliers/:id"
       element={
-        <PermissionGuard requiredPermission={PERMISSIONS.SUPPLIERS_VIEW} fallbackPath="/dashboard/shop-admin">
+        <PermissionGuard requiredPermission={PERMISSIONS.PURCHASES_VIEW} fallbackPath="/dashboard/shop-admin">
           <SupplierDetailPage />
         </PermissionGuard>
       }
