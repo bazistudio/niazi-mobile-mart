@@ -114,6 +114,15 @@ pub struct SaleItemDto {
     pub discount: Option<i64>,
 }
 
+/// Input line item for a payment tender on a sale
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SalePaymentInputDto {
+    pub method: String,
+    pub amount: i64,
+    pub reference_number: Option<String>,
+    pub notes: Option<String>,
+}
+
 /// Input payload for atomic checkout transaction
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompleteSaleDto {
@@ -123,7 +132,24 @@ pub struct CompleteSaleDto {
     pub discount: Option<i64>,
     pub paid_amount: Option<i64>,
     pub payment_method: Option<String>,
+    pub payments: Option<Vec<SalePaymentInputDto>>,
     pub notes: Option<String>,
+}
+
+/// Normalizes payment method strings to canonical backend variants
+pub fn normalize_payment_method(method: &str) -> String {
+    let trimmed = method.trim();
+    let upper = trimmed.to_uppercase();
+    match upper.as_str() {
+        "CASH" => "CASH".to_string(),
+        "CARD" => "CARD".to_string(),
+        "BANK" | "BANK_TRANSFER" | "BANK TRANSFER" => "BANK_TRANSFER".to_string(),
+        "EASYPAISA" => "EASYPAISA".to_string(),
+        "JAZZCASH" => "JAZZCASH".to_string(),
+        "OTHER" => "OTHER".to_string(),
+        "CREDIT" => "CREDIT".to_string(),
+        _ => upper,
+    }
 }
 
 /// Authoritative response after atomic checkout

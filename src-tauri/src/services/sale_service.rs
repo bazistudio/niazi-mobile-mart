@@ -9,8 +9,8 @@ use crate::domain::customer::{CustomerLedgerEntry, CustomerLedgerEntryType};
 use crate::domain::inventory::{StockMovement, StockMovementType};
 use crate::domain::organization::DEFAULT_MAIN_BRANCH_ID;
 use crate::domain::sales::{
-    CompleteSaleDto, PaymentStatus, Sale, SaleFilterDto, SaleLine, SalePayment, SaleResultDto,
-    SaleStatus,
+    normalize_payment_method, CompleteSaleDto, PaymentStatus, Sale, SaleFilterDto, SaleLine,
+    SalePayment, SaleResultDto, SaleStatus,
 };
 use crate::errors::{AppError, AppResult};
 use crate::repositories::{
@@ -144,24 +144,63 @@ impl SaleService {
             });
         }
 
-        // 4. Calculate Authoritative Totals
+        // 4. Calculate Authoritative Totals & Payments
         let subtotal: i64 = prepared_lines.iter().map(|l| l.line_total).sum();
         let invoice_discount = dto.discount.unwrap_or(0).max(0);
         let total_amount = subtotal.saturating_sub(invoice_discount);
 
-        let paid_input = dto.paid_amount.unwrap_or(total_amount).max(0);
+        #[derive(Clone)]
+        struct TenderInput {
+            method: String,
+            amount: i64,
+            reference_number: Option<String>,
+            notes: Option<String>,
+        }
 
-        let (recorded_paid, change_amount, credit_amount, payment_status) = if paid_input >= total_amount {
-            let change = paid_input - total_amount;
+        let mut tender_inputs = Vec::new();
+
+        if let Some(ref payments_vec) = dto.payments {
+            if !payments_vec.is_empty() {
+                for p in payments_vec {
+                    let normalized = normalize_payment_method(&p.method);
+                    if normalized != "CREDIT" && p.amount > 0 {
+                        tender_inputs.push(TenderInput {
+                            method: normalized,
+                            amount: p.amount,
+                            reference_number: p.reference_number.clone(),
+                            notes: p.notes.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if tender_inputs.is_empty() {
+            let legacy_amount = dto.paid_amount.unwrap_or(total_amount).max(0);
+            let legacy_method = normalize_payment_method(dto.payment_method.as_deref().unwrap_or("CASH"));
+            if legacy_method != "CREDIT" && legacy_amount > 0 {
+                tender_inputs.push(TenderInput {
+                    method: legacy_method,
+                    amount: legacy_amount,
+                    reference_number: None,
+                    notes: dto.notes.clone(),
+                });
+            }
+        }
+
+        let total_tendered: i64 = tender_inputs.iter().map(|t| t.amount).sum();
+
+        let (recorded_paid, change_amount, credit_amount, payment_status) = if total_tendered >= total_amount {
+            let change = total_tendered - total_amount;
             (total_amount, change, 0, PaymentStatus::Paid)
         } else {
-            let credit = total_amount - paid_input;
-            let status = if paid_input > 0 {
+            let credit = total_amount - total_tendered;
+            let status = if total_tendered > 0 {
                 PaymentStatus::PartiallyPaid
             } else {
                 PaymentStatus::Unpaid
             };
-            (paid_input, 0, credit, status)
+            (total_tendered, 0, credit, status)
         };
 
         // 5. Enforce credit sale constraint: Credit sales MUST have a registered active customer
@@ -177,7 +216,6 @@ impl SaleService {
 
         let now = Utc::now().to_rfc3339();
         let uid = user_id.map(|s| s.to_string());
-        let p_method = dto.payment_method.as_deref().unwrap_or("CASH").to_uppercase();
         let notes_cloned = dto.notes.clone();
 
         let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(self.db.as_ref().unwrap().clone());
@@ -317,44 +355,59 @@ impl SaleService {
                 sale_lines.push(sale_line);
             }
 
-            // G. Insert Sale Payment if paid_amount > 0
+            // G. Insert Sale Payments (Clamped to total_amount)
             let mut sale_payments = Vec::new();
-            let mut final_cash_movement = None;
-            if recorded_paid > 0 {
-                let payment = SalePayment {
-                    id: Uuid::new_v4().to_string(),
-                    sale_id: sale_id.clone(),
-                    amount: recorded_paid,
-                    payment_method: p_method.clone(),
-                    reference_number: None,
-                    notes: None,
-                    created_at: now.clone(),
-                };
+            let mut remaining_allocation = total_amount;
 
-                SQLiteSaleRepository::insert_sale_payment_in_tx(tx, &payment)?;
-                sale_payments.push(payment);
-
-                // If payment method is CASH, record authoritative Cash Movement IN
-                if p_method == "CASH" {
-                    let open_session_id = SQLiteCashRepository::get_open_session_id_in_tx(tx, &branch_id)?;
-                    let cash_movement = CashMovement {
+            for tender in tender_inputs {
+                if remaining_allocation == 0 {
+                    break;
+                }
+                let allocated = tender.amount.min(remaining_allocation);
+                if allocated > 0 {
+                    let payment = SalePayment {
                         id: Uuid::new_v4().to_string(),
-                        session_id: open_session_id,
-                        branch_id: branch_id.clone(),
-                        movement_type: CashMovementType::SalePayment,
-                        direction: CashMovementDirection::In,
-                        amount: recorded_paid,
-                        reference_id: Some(sale_id.clone()),
-                        reference_number: Some(invoice_number.clone()),
-                        payment_method: "CASH".to_string(),
-                        description: format!("Cash Sale {}", invoice_number),
-                        performed_by: uid.clone(),
-                        performed_by_name: None,
+                        sale_id: sale_id.clone(),
+                        amount: allocated,
+                        payment_method: tender.method,
+                        reference_number: tender.reference_number,
+                        notes: tender.notes,
                         created_at: now.clone(),
                     };
-                    SQLiteCashRepository::insert_movement_in_tx(tx, &cash_movement)?;
-                    final_cash_movement = Some(cash_movement);
+
+                    SQLiteSaleRepository::insert_sale_payment_in_tx(tx, &payment)?;
+                    sale_payments.push(payment);
+                    remaining_allocation -= allocated;
                 }
+            }
+
+            // Record authoritative Cash Movement for the allocated CASH portion
+            let allocated_cash: i64 = sale_payments
+                .iter()
+                .filter(|p| p.payment_method == "CASH")
+                .map(|p| p.amount)
+                .sum();
+
+            let mut final_cash_movement = None;
+            if allocated_cash > 0 {
+                let open_session_id = SQLiteCashRepository::get_open_session_id_in_tx(tx, &branch_id)?;
+                let cash_movement = CashMovement {
+                    id: Uuid::new_v4().to_string(),
+                    session_id: open_session_id,
+                    branch_id: branch_id.clone(),
+                    movement_type: CashMovementType::SalePayment,
+                    direction: CashMovementDirection::In,
+                    amount: allocated_cash,
+                    reference_id: Some(sale_id.clone()),
+                    reference_number: Some(invoice_number.clone()),
+                    payment_method: "CASH".to_string(),
+                    description: format!("Cash Sale {}", invoice_number),
+                    performed_by: uid.clone(),
+                    performed_by_name: None,
+                    created_at: now.clone(),
+                };
+                SQLiteCashRepository::insert_movement_in_tx(tx, &cash_movement)?;
+                final_cash_movement = Some(cash_movement);
             }
 
             // H. Atomically enqueue SALE_CREATED event into offline_sync_queue in SQLite transaction
@@ -526,6 +579,7 @@ mod tests {
                     discount: None,
                     paid_amount: Some(2000),
                     payment_method: Some("CASH".to_string()),
+                    payments: None,
                     notes: Some("Walk-in retail customer".to_string()),
                 },
             )
@@ -591,6 +645,7 @@ mod tests {
                     discount: None,
                     paid_amount: Some(1000),
                     payment_method: Some("CASH".to_string()),
+                    payments: None,
                     notes: None,
                 },
             )
@@ -648,6 +703,7 @@ mod tests {
                     discount: None,
                     paid_amount: Some(4000),
                     payment_method: Some("CASH".to_string()),
+                    payments: None,
                     notes: Some("Partial payment on credit".to_string()),
                 },
             )
@@ -688,6 +744,7 @@ mod tests {
                     discount: None,
                     paid_amount: Some(0),
                     payment_method: None,
+                    payments: None,
                     notes: None,
                 },
             )
@@ -720,6 +777,7 @@ mod tests {
                     discount: None,
                     paid_amount: Some(500), // 500 paid for 1,000 item -> 500 credit
                     payment_method: None,
+                    payments: None,
                     notes: None,
                 },
             )
@@ -741,6 +799,7 @@ mod tests {
                     discount: None,
                     paid_amount: Some(50000),
                     payment_method: Some("CASH".to_string()),
+                    payments: None,
                     notes: None,
                 },
             )
@@ -781,6 +840,7 @@ mod tests {
                     discount: None,
                     paid_amount: Some(0),
                     payment_method: None,
+                    payments: None,
                     notes: None,
                 },
             )
@@ -802,6 +862,7 @@ mod tests {
                     discount: None,
                     paid_amount: Some(0),
                     payment_method: None,
+                    payments: None,
                     notes: None,
                 },
             )
@@ -854,5 +915,260 @@ mod tests {
         // Verify remaining customer balance is exactly 2,000
         let final_bal = customer_service.get_balance(&customer.id).await.unwrap();
         assert_eq!(final_bal, 2000);
+    }
+
+    #[tokio::test]
+    async fn test_target_3_multi_payment_contract_and_accounting() {
+        let (db, sale_service, customer_service, product_service, _) = setup_test_environment().await;
+        let product_id = seed_test_catalog_and_stock(&db, &product_service).await;
+
+        let customer = customer_service
+            .create_customer(CreateCustomerDto {
+                name: "Customer Target3".to_string(),
+                phone: "03000003333".to_string(),
+                alternate_phone: None,
+                email: None,
+                address: None,
+                notes: None,
+                credit_limit: Some(500000),
+            })
+            .await
+            .unwrap();
+
+        // 1. Single cash (Total 1000, CASH 1000)
+        let s1 = sale_service
+            .complete_sale(
+                None,
+                CompleteSaleDto {
+                    branch_id: None,
+                    customer_id: None,
+                    items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 1, discount: None }],
+                    discount: None,
+                    paid_amount: None,
+                    payment_method: None,
+                    payments: Some(vec![
+                        crate::domain::sales::SalePaymentInputDto { method: "cash".to_string(), amount: 1000, reference_number: None, notes: None }
+                    ]),
+                    notes: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(s1.payments.len(), 1);
+        assert_eq!(s1.payments[0].payment_method, "CASH");
+        assert_eq!(s1.payments[0].amount, 1000);
+        assert_eq!(s1.sale.paid_amount, 1000);
+        assert_eq!(s1.sale.change_amount, 0);
+        assert_eq!(s1.credit_amount, 0);
+
+        // Verify CashMovement for s1 is 1000
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+            let cash_mv_amt: i64 = guard
+                .query_row("SELECT amount FROM cash_movements WHERE reference_id = ?1", rusqlite::params![s1.sale.id], |r| r.get(0))
+                .unwrap();
+            assert_eq!(cash_mv_amt, 1000);
+        }
+
+        // 2. Single card (Total 1000, CARD 1000)
+        let s2 = sale_service
+            .complete_sale(
+                None,
+                CompleteSaleDto {
+                    branch_id: None,
+                    customer_id: None,
+                    items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 1, discount: None }],
+                    discount: None,
+                    paid_amount: None,
+                    payment_method: None,
+                    payments: Some(vec![
+                        crate::domain::sales::SalePaymentInputDto { method: "card".to_string(), amount: 1000, reference_number: Some("REF123".to_string()), notes: None }
+                    ]),
+                    notes: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(s2.payments.len(), 1);
+        assert_eq!(s2.payments[0].payment_method, "CARD");
+        assert_eq!(s2.payments[0].amount, 1000);
+        assert_eq!(s2.payments[0].reference_number, Some("REF123".to_string()));
+
+        // Verify NO cash movement for card
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+            let count: i64 = guard
+                .query_row("SELECT count(*) FROM cash_movements WHERE reference_id = ?1", rusqlite::params![s2.sale.id], |r| r.get(0))
+                .unwrap();
+            assert_eq!(count, 0);
+        }
+
+        // 3. Normalization tests (Bank, EasyPaisa, JazzCash)
+        let s_norm = sale_service
+            .complete_sale(
+                None,
+                CompleteSaleDto {
+                    branch_id: None,
+                    customer_id: None,
+                    items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 3, discount: None }], // 3000 total
+                    discount: None,
+                    paid_amount: None,
+                    payment_method: None,
+                    payments: Some(vec![
+                        crate::domain::sales::SalePaymentInputDto { method: "bank".to_string(), amount: 1000, reference_number: None, notes: None },
+                        crate::domain::sales::SalePaymentInputDto { method: "easypaisa".to_string(), amount: 1000, reference_number: None, notes: None },
+                        crate::domain::sales::SalePaymentInputDto { method: "jazzcash".to_string(), amount: 1000, reference_number: None, notes: None },
+                    ]),
+                    notes: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(s_norm.payments.len(), 3);
+        assert_eq!(s_norm.payments[0].payment_method, "BANK_TRANSFER");
+        assert_eq!(s_norm.payments[1].payment_method, "EASYPAISA");
+        assert_eq!(s_norm.payments[2].payment_method, "JAZZCASH");
+
+        // 4. Cash + Credit (Total 2000: CASH 800, CREDIT 1200)
+        let s_cash_credit = sale_service
+            .complete_sale(
+                None,
+                CompleteSaleDto {
+                    branch_id: None,
+                    customer_id: Some(customer.id.clone()),
+                    items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 2, discount: None }], // 2000 total
+                    discount: None,
+                    paid_amount: None,
+                    payment_method: None,
+                    payments: Some(vec![
+                        crate::domain::sales::SalePaymentInputDto { method: "cash".to_string(), amount: 800, reference_number: None, notes: None }
+                    ]),
+                    notes: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(s_cash_credit.payments.len(), 1);
+        assert_eq!(s_cash_credit.payments[0].payment_method, "CASH");
+        assert_eq!(s_cash_credit.payments[0].amount, 800);
+        assert_eq!(s_cash_credit.sale.paid_amount, 800);
+        assert_eq!(s_cash_credit.credit_amount, 1200);
+        assert_eq!(s_cash_credit.sale.payment_status, PaymentStatus::PartiallyPaid);
+
+        // Customer ledger must record debit = 1200
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+            let debit: i64 = guard
+                .query_row("SELECT debit FROM customer_ledger_entries WHERE reference_id = ?1", rusqlite::params![s_cash_credit.sale.id], |r| r.get(0))
+                .unwrap();
+            assert_eq!(debit, 1200);
+        }
+
+        // 5. Cash + Bank (Total 2000: CASH 800, BANK 1200)
+        let s_cash_bank = sale_service
+            .complete_sale(
+                None,
+                CompleteSaleDto {
+                    branch_id: None,
+                    customer_id: None,
+                    items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 2, discount: None }], // 2000 total
+                    discount: None,
+                    paid_amount: None,
+                    payment_method: None,
+                    payments: Some(vec![
+                        crate::domain::sales::SalePaymentInputDto { method: "cash".to_string(), amount: 800, reference_number: None, notes: None },
+                        crate::domain::sales::SalePaymentInputDto { method: "bank".to_string(), amount: 1200, reference_number: None, notes: None },
+                    ]),
+                    notes: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(s_cash_bank.payments.len(), 2);
+        assert_eq!(s_cash_bank.payments[0].payment_method, "CASH");
+        assert_eq!(s_cash_bank.payments[0].amount, 800);
+        assert_eq!(s_cash_bank.payments[1].payment_method, "BANK_TRANSFER");
+        assert_eq!(s_cash_bank.payments[1].amount, 1200);
+
+        // CashMovement must equal CASH portion = 800
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+            let cash_mv_amt: i64 = guard
+                .query_row("SELECT amount FROM cash_movements WHERE reference_id = ?1", rusqlite::params![s_cash_bank.sale.id], |r| r.get(0))
+                .unwrap();
+            assert_eq!(cash_mv_amt, 800);
+        }
+
+        // 6. Overpayment/Change (Total 1000, Tenders CASH 1500 -> SalePayment CASH 1000, Change 500, CashMovement 1000)
+        let s_overpay = sale_service
+            .complete_sale(
+                None,
+                CompleteSaleDto {
+                    branch_id: None,
+                    customer_id: None,
+                    items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 1, discount: None }], // 1000 total
+                    discount: None,
+                    paid_amount: None,
+                    payment_method: None,
+                    payments: Some(vec![
+                        crate::domain::sales::SalePaymentInputDto { method: "cash".to_string(), amount: 1500, reference_number: None, notes: None }
+                    ]),
+                    notes: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(s_overpay.payments.len(), 1);
+        assert_eq!(s_overpay.payments[0].payment_method, "CASH");
+        assert_eq!(s_overpay.payments[0].amount, 1000); // Clamped to total_amount!
+        assert_eq!(s_overpay.sale.paid_amount, 1000);
+        assert_eq!(s_overpay.sale.change_amount, 500);
+
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+            let cash_mv_amt: i64 = guard
+                .query_row("SELECT amount FROM cash_movements WHERE reference_id = ?1", rusqlite::params![s_overpay.sale.id], |r| r.get(0))
+                .unwrap();
+            assert_eq!(cash_mv_amt, 1000); // Capped at sale allocation 1000!
+        }
+
+        // 7. Payment UUID uniqueness & persistence across offline_sync_queue
+        assert!(!s_overpay.payments[0].id.is_empty());
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+            let payload_json: String = guard
+                .query_row("SELECT payload FROM offline_sync_queue WHERE client_event_id = ?1", rusqlite::params![s_overpay.sale.id], |r| r.get(0))
+                .unwrap();
+            let sync_event: crate::domain::sales::SaleSyncEventDto = serde_json::from_str(&payload_json).unwrap();
+            assert_eq!(sync_event.payments.len(), 1);
+            assert_eq!(sync_event.payments[0].id, s_overpay.payments[0].id); // Canonical UUID preserved!
+        }
+
+        // 8. Legacy flat DTO fallback & Empty payments fallback
+        let s_legacy = sale_service
+            .complete_sale(
+                None,
+                CompleteSaleDto {
+                    branch_id: None,
+                    customer_id: None,
+                    items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 1, discount: None }], // 1000 total
+                    discount: None,
+                    paid_amount: Some(1000),
+                    payment_method: Some("card".to_string()),
+                    payments: None,
+                    notes: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(s_legacy.payments.len(), 1);
+        assert_eq!(s_legacy.payments[0].payment_method, "CARD");
+        assert_eq!(s_legacy.payments[0].amount, 1000);
     }
 }

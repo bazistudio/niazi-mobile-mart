@@ -187,6 +187,7 @@ mod tests {
             discount: None,
             paid_amount: Some(2500),
             payment_method: Some("CASH".to_string()),
+            payments: None,
             notes: None,
         };
         assert!(
@@ -206,6 +207,7 @@ mod tests {
             discount: None,
             paid_amount: Some(5000),
             payment_method: Some("CASH".to_string()),
+            payments: None,
             notes: Some("Storage sale test".to_string()),
         };
 

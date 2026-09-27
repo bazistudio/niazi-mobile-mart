@@ -10,6 +10,7 @@ export interface CreateOrderPayload {
   customerId?: string;
   paymentMethod: string;
   paidAmount?: number;
+  payments?: { method: string; amount: number; referenceNumber?: string; notes?: string }[];
   transactionType?: string;
   taxRate?: number;
   discount?: number;
@@ -83,6 +84,14 @@ export const salesApi = {
         discount: payload.discount ?? null,
         paid_amount: payload.paidAmount !== undefined ? payload.paidAmount : null,
         payment_method: payload.paymentMethod || 'cash',
+        payments: payload.payments
+          ? payload.payments.map((p) => ({
+              method: p.method,
+              amount: p.amount,
+              reference_number: p.referenceNumber || null,
+              notes: p.notes || null,
+            }))
+          : null,
         notes: payload.notes || payload.idempotencyKey || null,
       });
 

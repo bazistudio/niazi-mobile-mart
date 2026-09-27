@@ -129,23 +129,7 @@ export const MultiPaymentModal: React.FC<MultiPaymentModalProps> = ({
   };
 
   const handleFinalSubmit = async (shouldPrint: boolean = false) => {
-    if (method === 'credit' && payments.length === 0) {
-      onCreditSelect();
-      return;
-    }
-
-    // T2 Safety Guard: Prevent mixing credit with other payment methods
-    const hasCredit = payments.some(p => p.method === 'credit') || method === 'credit';
-    const hasImmediate = payments.some(p => p.method !== 'credit') || (parsedTender > 0 && method !== 'credit');
-    
-    if (hasCredit && hasImmediate && payments.length > 0) {
-      import('react-hot-toast').then(({ default: toast }) => {
-        toast.error("Credit/Udhar cannot be combined with other payment methods. Please use Credit for the full amount or remove other tenders.");
-      });
-      return;
-    }
-
-    let finalPayments = [...payments];
+    let finalPayments = payments.filter((p) => p.method !== 'credit');
     if (parsedTender > 0 && remainingDue > 0 && method !== 'credit') {
       const amountToRecord = Math.min(parsedTender, remainingDue);
       finalPayments.push({ method, amount: amountToRecord });
@@ -153,6 +137,11 @@ export const MultiPaymentModal: React.FC<MultiPaymentModalProps> = ({
 
     if (finalPayments.length === 0 && !isRefund && method !== 'credit') {
       finalPayments = [{ method: 'cash', amount: absTotal }];
+    }
+
+    if (method === 'credit' && finalPayments.length === 0) {
+      onCreditSelect();
+      return;
     }
 
     await onConfirm(finalPayments, shouldPrint);

@@ -7,8 +7,8 @@ use crate::domain::customer::{CustomerLedgerEntry, CustomerLedgerEntryType};
 use crate::domain::inventory::{StockMovement, StockMovementType};
 use crate::domain::organization::DEFAULT_MAIN_BRANCH_ID;
 use crate::domain::sales::{
-    CompleteSaleDto, PaymentStatus, Sale, SaleFilterDto, SaleLine, SalePayment, SaleResultDto,
-    SaleStatus,
+    normalize_payment_method, CompleteSaleDto, PaymentStatus, Sale, SaleFilterDto, SaleLine,
+    SalePayment, SaleResultDto, SaleStatus,
 };
 use crate::errors::{AppError, AppResult};
 
@@ -143,24 +143,62 @@ impl PostgresSaleRepository {
             });
         }
 
-        // 4. Calculate Authoritative Totals
+        // 4. Calculate Authoritative Totals & Payments
         let subtotal: i64 = prepared_lines.iter().map(|l| l.line_total).sum();
         let invoice_discount = dto.discount.unwrap_or(0).max(0);
         let total_amount = subtotal.saturating_sub(invoice_discount);
 
-        let paid_input = dto.paid_amount.unwrap_or(total_amount).max(0);
+        struct TenderInput {
+            method: String,
+            amount: i64,
+            reference_number: Option<String>,
+            notes: Option<String>,
+        }
 
-        let (recorded_paid, change_amount, credit_amount, payment_status) = if paid_input >= total_amount {
-            let change = paid_input - total_amount;
+        let mut tender_inputs = Vec::new();
+
+        if let Some(ref payments_vec) = dto.payments {
+            if !payments_vec.is_empty() {
+                for p in payments_vec {
+                    let normalized = normalize_payment_method(&p.method);
+                    if normalized != "CREDIT" && p.amount > 0 {
+                        tender_inputs.push(TenderInput {
+                            method: normalized,
+                            amount: p.amount,
+                            reference_number: p.reference_number.clone(),
+                            notes: p.notes.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if tender_inputs.is_empty() {
+            let legacy_amount = dto.paid_amount.unwrap_or(total_amount).max(0);
+            let legacy_method = normalize_payment_method(dto.payment_method.as_deref().unwrap_or("CASH"));
+            if legacy_method != "CREDIT" && legacy_amount > 0 {
+                tender_inputs.push(TenderInput {
+                    method: legacy_method,
+                    amount: legacy_amount,
+                    reference_number: None,
+                    notes: dto.notes.clone(),
+                });
+            }
+        }
+
+        let total_tendered: i64 = tender_inputs.iter().map(|t| t.amount).sum();
+
+        let (recorded_paid, change_amount, credit_amount, payment_status) = if total_tendered >= total_amount {
+            let change = total_tendered - total_amount;
             (total_amount, change, 0, PaymentStatus::Paid)
         } else {
-            let credit = total_amount - paid_input;
-            let status = if paid_input > 0 {
+            let credit = total_amount - total_tendered;
+            let status = if total_tendered > 0 {
                 PaymentStatus::PartiallyPaid
             } else {
                 PaymentStatus::Unpaid
             };
-            (paid_input, 0, credit, status)
+            (total_tendered, 0, credit, status)
         };
 
         // 5. Enforce credit sale constraint
@@ -176,7 +214,6 @@ impl PostgresSaleRepository {
 
         let now = Utc::now().to_rfc3339();
         let uid = user_id.map(|s| s.to_string());
-        let p_method = dto.payment_method.as_ref().map(|s| s.as_str()).unwrap_or("CASH").to_uppercase();
 
         // 6. Validate stock availability for all lines
         for line in &prepared_lines {
@@ -394,35 +431,54 @@ impl PostgresSaleRepository {
             inserted_lines.push(sale_line);
         }
 
-        // 11. Insert Sale Payment Record
-        let payment_id = Uuid::new_v4().to_string();
-        let sale_payment = SalePayment {
-            id: payment_id,
-            sale_id: sale_id.clone(),
-            amount: recorded_paid,
-            payment_method: p_method.clone(),
-            reference_number: None,
-            notes: dto.notes.clone(),
-            created_at: now.clone(),
-        };
+        // 11. Insert Sale Payments (Clamped to total_amount)
+        let mut sale_payments = Vec::new();
+        let mut remaining_allocation = total_amount;
 
-        sqlx::query(
-            "INSERT INTO sale_payments (id, sale_id, amount, payment_method, reference_number, notes, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)"
-        )
-        .bind(&sale_payment.id)
-        .bind(&sale_payment.sale_id)
-        .bind(sale_payment.amount)
-        .bind(&sale_payment.payment_method)
-        .bind(sale_payment.reference_number.as_deref())
-        .bind(sale_payment.notes.as_deref())
-        .bind(&sale_payment.created_at)
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| AppError::Database(e.to_string()))?;
+        for tender in tender_inputs {
+            if remaining_allocation == 0 {
+                break;
+            }
+            let allocated = tender.amount.min(remaining_allocation);
+            if allocated > 0 {
+                let sale_payment = SalePayment {
+                    id: Uuid::new_v4().to_string(),
+                    sale_id: sale_id.clone(),
+                    amount: allocated,
+                    payment_method: tender.method,
+                    reference_number: tender.reference_number,
+                    notes: tender.notes,
+                    created_at: now.clone(),
+                };
 
-        // 12. Record Cash Movement if cash payment
-        if recorded_paid > 0 && p_method == "CASH" {
+                sqlx::query(
+                    "INSERT INTO sale_payments (id, sale_id, amount, payment_method, reference_number, notes, created_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)"
+                )
+                .bind(&sale_payment.id)
+                .bind(&sale_payment.sale_id)
+                .bind(sale_payment.amount)
+                .bind(&sale_payment.payment_method)
+                .bind(sale_payment.reference_number.as_deref())
+                .bind(sale_payment.notes.as_deref())
+                .bind(&sale_payment.created_at)
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+
+                sale_payments.push(sale_payment);
+                remaining_allocation -= allocated;
+            }
+        }
+
+        // 12. Record Cash Movement for allocated CASH portion
+        let allocated_cash: i64 = sale_payments
+            .iter()
+            .filter(|p| p.payment_method == "CASH")
+            .map(|p| p.amount)
+            .sum();
+
+        if allocated_cash > 0 {
             let open_session_id: Option<String> = sqlx::query_as(
                 "SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' LIMIT 1",
             )
@@ -442,7 +498,7 @@ impl PostgresSaleRepository {
             .bind(cash_mv_id)
             .bind(open_session_id.as_deref())
             .bind(&branch_id)
-            .bind(recorded_paid)
+            .bind(allocated_cash)
             .bind(&sale_id)
             .bind(&invoice_number)
             .bind(desc)
@@ -457,7 +513,7 @@ impl PostgresSaleRepository {
         Ok(SaleResultDto {
             sale,
             lines: inserted_lines,
-            payments: vec![sale_payment],
+            payments: sale_payments,
             credit_amount,
             customer_balance_after,
             cogs: 0,

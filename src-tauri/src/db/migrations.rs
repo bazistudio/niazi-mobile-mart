@@ -819,6 +819,30 @@ pub const MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_auth_snapshot_status ON local_auth_snapshot(status);
         "#,
     },
+    Migration {
+        version: 17,
+        name: "017_multi_payment",
+        up: r#"
+        CREATE TABLE new_sale_payments (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+            amount INTEGER NOT NULL CHECK(amount > 0),
+            payment_method TEXT NOT NULL CHECK(payment_method IN ('CASH', 'CARD', 'BANK_TRANSFER', 'EASYPAISA', 'JAZZCASH', 'OTHER')),
+            reference_number TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL
+        );
+
+        INSERT INTO new_sale_payments (id, sale_id, amount, payment_method, reference_number, notes, created_at)
+        SELECT id, sale_id, amount, payment_method, reference_number, notes, created_at FROM sale_payments;
+
+        DROP TABLE sale_payments;
+
+        ALTER TABLE new_sale_payments RENAME TO sale_payments;
+
+        CREATE INDEX IF NOT EXISTS idx_sale_payments_sale_id ON sale_payments(sale_id);
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction

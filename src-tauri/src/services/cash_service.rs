@@ -717,6 +717,7 @@ pub mod tests {
                     discount: None,
                     paid_amount: Some(75000),
                     payment_method: Some("CASH".to_string()),
+                    payments: None,
                     notes: Some("Walkin cash sale".to_string()),
                 },
             )
@@ -753,6 +754,7 @@ pub mod tests {
                     discount: None,
                     paid_amount: Some(0),
                     payment_method: None,
+                    payments: None,
                     notes: None,
                 },
             )
@@ -950,6 +952,7 @@ pub mod tests {
                     discount: None,
                     paid_amount: Some(75000),
                     payment_method: Some("BANK_TRANSFER".to_string()),
+                    payments: None,
                     notes: None,
                 },
             )
@@ -984,6 +987,7 @@ pub mod tests {
                     discount: None,
                     paid_amount: Some(0),
                     payment_method: None,
+                    payments: None,
                     notes: None,
                 },
             )
@@ -1121,6 +1125,7 @@ pub mod tests {
                     discount: None,
                     paid_amount: Some(7500000),
                     payment_method: Some("CASH".to_string()),
+                    payments: None,
                     notes: None,
                 },
             )

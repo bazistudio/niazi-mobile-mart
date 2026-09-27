@@ -550,6 +550,9 @@ export const usePosStore = create<PosStore>()(
             paidAmount: paymentBreakdown && paymentBreakdown.length > 0
               ? paymentBreakdown.reduce((sum, p) => sum + p.amount, 0)
               : (effectiveCustomer?.id && effectiveCustomer.id !== 'walk-in' ? 0 : undefined),
+            payments: paymentBreakdown && paymentBreakdown.length > 0
+              ? paymentBreakdown.map((p) => ({ method: p.method, amount: p.amount }))
+              : undefined,
             transactionType: session.transactionType,
             taxRate: 0,
             // T1 Contract Adaptation: calculated monetary discount

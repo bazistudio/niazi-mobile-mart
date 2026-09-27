@@ -543,6 +543,7 @@ mod tests {
                     discount: None,
                     paid_amount: Some(1500000),
                     payment_method: Some("CASH".to_string()),
+                    payments: None,
                     notes: None,
                 },
             )
@@ -670,6 +671,7 @@ mod tests {
                     discount: None,
                     paid_amount: Some(0),
                     payment_method: Some("CASH".to_string()),
+                    payments: None,
                     notes: None,
                 },
             )
@@ -739,6 +741,7 @@ mod tests {
                     discount: None,
                     paid_amount: Some(0),
                     payment_method: Some("CASH".to_string()),
+                    payments: None,
                     notes: None,
                 },
             )
@@ -788,6 +791,7 @@ mod tests {
                     discount: None,
                     paid_amount: Some(300000),
                     payment_method: Some("CARD".to_string()),
+                    payments: None,
                     notes: None,
                 },
             )
@@ -849,6 +853,7 @@ mod tests {
                     discount: None,
                     paid_amount: Some(600000),
                     payment_method: Some("CASH".to_string()),
+                    payments: None,
                     notes: None,
                 },
             )

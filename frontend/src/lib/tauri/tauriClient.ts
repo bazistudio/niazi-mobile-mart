@@ -2686,6 +2686,13 @@ export interface SaleItemDto {
   discount?: number | null;
 }
 
+export interface SalePaymentInputDto {
+  method: string;
+  amount: number;
+  reference_number?: string | null;
+  notes?: string | null;
+}
+
 export interface CompleteSaleDto {
   branch_id?: string | null;
   customer_id?: string | null;
@@ -2693,6 +2700,7 @@ export interface CompleteSaleDto {
   discount?: number | null;
   paid_amount?: number | null;
   payment_method?: string | null;
+  payments?: SalePaymentInputDto[] | null;
   notes?: string | null;
 }
 
