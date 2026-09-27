@@ -13,6 +13,26 @@ pub struct PostgresAdapter {
     pool: PgPool,
 }
 
+/// Default per-instance pool size. Cloud SQL db-f1-micro allows 25 connections in total;
+/// with Cloud Run at up to 10 instances, 10 x 2 = 20 leaves headroom for admin sessions.
+pub const DEFAULT_PG_POOL_MAX_CONNECTIONS: u32 = 2;
+
+/// Upper bound for the `PG_POOL_MAX_CONNECTIONS` override, so a typo cannot exhaust Cloud SQL.
+pub const MAX_PG_POOL_MAX_CONNECTIONS: u32 = 10;
+
+/// Resolves the per-instance pool size from `PG_POOL_MAX_CONNECTIONS`.
+/// Missing, unparsable or zero values fall back to the default; values above the cap are clamped.
+pub fn pool_max_connections() -> u32 {
+    parse_pool_max_connections(std::env::var("PG_POOL_MAX_CONNECTIONS").ok().as_deref())
+}
+
+fn parse_pool_max_connections(raw: Option<&str>) -> u32 {
+    match raw.and_then(|v| v.trim().parse::<u32>().ok()) {
+        Some(0) | None => DEFAULT_PG_POOL_MAX_CONNECTIONS,
+        Some(n) => n.min(MAX_PG_POOL_MAX_CONNECTIONS),
+    }
+}
+
 impl PostgresAdapter {
     /// Initialize a connection pool from `DATABASE_URL` environment variable.
     /// Returns an error if the env var is absent or the pool cannot connect.
@@ -28,11 +48,15 @@ impl PostgresAdapter {
 
     /// Initialize a connection pool from an explicit connection URL.
     pub async fn from_url(database_url: &str) -> DbResult<Self> {
-        info!("Initializing PostgreSQL connection pool...");
+        let max_connections = pool_max_connections();
+        info!("Initializing PostgreSQL connection pool (max {max_connections} connections)...");
 
+        // Cloud SQL db-f1-micro allows only 25 connections in total, shared by every
+        // Cloud Run instance. Keep the per-instance pool small and hold no idle
+        // connections, so (max instances x pool size) stays under the server limit.
         let pool = PgPoolOptions::new()
-            .max_connections(20)
-            .min_connections(2)
+            .max_connections(max_connections)
+            .min_connections(0)
             .acquire_timeout(std::time::Duration::from_secs(10))
             .connect(database_url)
             .await
@@ -48,7 +72,7 @@ impl PostgresAdapter {
                 DbError::ConnectionError(format!("PostgreSQL health check failed: {e}"))
             })?;
 
-        info!("PostgreSQL connection pool initialized successfully ({} max connections)", 20);
+        info!("PostgreSQL connection pool initialized successfully ({max_connections} max connections)");
 
         Ok(Self { pool })
     }
@@ -120,6 +144,17 @@ impl PostgresAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_pool_max_connections_parsing() {
+        assert_eq!(parse_pool_max_connections(None), 2);
+        assert_eq!(parse_pool_max_connections(Some("")), 2);
+        assert_eq!(parse_pool_max_connections(Some("abc")), 2);
+        assert_eq!(parse_pool_max_connections(Some("0")), 2);
+        assert_eq!(parse_pool_max_connections(Some("-3")), 2);
+        assert_eq!(parse_pool_max_connections(Some(" 4 ")), 4);
+        assert_eq!(parse_pool_max_connections(Some("50")), MAX_PG_POOL_MAX_CONNECTIONS);
+    }
 
     /// Verifies that the PostgresAdapter correctly rejects a missing DATABASE_URL.
     /// Does NOT require a live PostgreSQL instance.
