@@ -107,14 +107,14 @@ impl PostgresBranchRepository {
     /// Calculates global aggregate balances across all ledgers (organization-wide, no branch filter)
     pub async fn get_dashboard_balances(&self) -> AppResult<DashboardBalancesDto> {
         let customer_receivables: (i64,) = sqlx::query_as(
-            "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM customer_ledger_entries",
+            "SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT FROM customer_ledger_entries",
         )
         .fetch_one(&self.pool)
         .await
         .map_err(|e| AppError::Database(format!("Failed to calculate customer receivables: {e}")))?;
 
         let supplier_payables: (i64,) = sqlx::query_as(
-            "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM supplier_ledger_entries",
+            "SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT FROM supplier_ledger_entries",
         )
         .fetch_one(&self.pool)
         .await

@@ -192,7 +192,7 @@ impl PostgresCustomerRepository {
         let balance = self.calculate_outstanding_balance(id).await?;
 
         let (sales_count, sales_amount): (i64, i64) = sqlx::query_as(
-            "SELECT COUNT(*), COALESCE(SUM(total_amount), 0) FROM sales WHERE customer_id = $1 AND sale_status = 'COMPLETED'",
+            "SELECT COUNT(*), COALESCE(SUM(total_amount), 0)::BIGINT FROM sales WHERE customer_id = $1 AND sale_status = 'COMPLETED'",
         )
         .bind(id)
         .fetch_one(&self.pool)
@@ -223,7 +223,7 @@ impl PostgresCustomerRepository {
     ) -> AppResult<Vec<CustomerSummaryDto>> {
         let mut query = String::from(
             "SELECT c.id, c.customer_code, c.name, c.phone, c.credit_limit,
-                    COALESCE(SUM(l.debit) - SUM(l.credit), 0) AS balance,
+                    COALESCE(SUM(l.debit) - SUM(l.credit), 0)::BIGINT AS balance,
                     c.is_active, c.created_at
              FROM customers c
              LEFT JOIN customer_ledger_entries l ON c.id = l.customer_id
@@ -303,7 +303,7 @@ impl PostgresCustomerRepository {
 
     pub async fn calculate_outstanding_balance(&self, customer_id: &str) -> AppResult<i64> {
         let row: (i64,) = sqlx::query_as(
-            "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM customer_ledger_entries WHERE customer_id = $1",
+            "SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT FROM customer_ledger_entries WHERE customer_id = $1",
         )
         .bind(customer_id)
         .fetch_one(&self.pool)

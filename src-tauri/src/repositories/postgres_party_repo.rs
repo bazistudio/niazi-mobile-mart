@@ -11,15 +11,14 @@ use crate::repositories::party_repository::MAX_PARTY_PAGE;
 
 type PgTx<'a> = sqlx::Transaction<'a, sqlx::Postgres>;
 
-// Supplier balance follows the existing PostgreSQL supplier repository convention
-// (SUM(credit) - SUM(debit)); see Phase 1.1 report finding on the SQLite/PostgreSQL
-// supplier ledger sign divergence.
+// Supplier payable = SUM(debit) - SUM(credit): debit = payable increased (purchase),
+// credit = payable decreased (payment, purchase return) — domain::supplier::SupplierLedgerEntry.
 const SUMMARY_SELECT: &str = "SELECT p.id, p.display_name, p.company_name, p.phone, p.alternate_phone, p.email,
         p.address, p.notes, p.is_active, p.created_at, p.updated_at,
         c.id AS customer_id, c.customer_code, c.credit_limit AS customer_credit_limit,
         s.id AS supplier_id, s.supplier_code,
         COALESCE((SELECT SUM(cl.debit) - SUM(cl.credit) FROM customer_ledger_entries cl WHERE cl.customer_id = c.id), 0)::BIGINT AS customer_receivable,
-        COALESCE((SELECT SUM(sl.credit) - SUM(sl.debit) FROM supplier_ledger_entries sl WHERE sl.supplier_id = s.id), 0)::BIGINT AS supplier_payable
+        COALESCE((SELECT SUM(sl.debit) - SUM(sl.credit) FROM supplier_ledger_entries sl WHERE sl.supplier_id = s.id), 0)::BIGINT AS supplier_payable
      FROM parties p
      LEFT JOIN customers c ON c.party_id = p.id
      LEFT JOIN suppliers s ON s.party_id = p.id";
