@@ -158,6 +158,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/suppliers", get(list_suppliers_handler).post(create_supplier_handler))
         .route("/api/v1/parties", get(list_parties_handler))
         .route("/api/v1/parties/:id", get(get_party_handler))
+        .route("/api/v1/customers/:id", get(get_customer_detail_handler))
+        .route("/api/v1/customers/:id/ledger", get(get_customer_ledger_handler))
+        .route("/api/v1/suppliers/:id", get(get_supplier_detail_handler))
+        .route("/api/v1/suppliers/:id/ledger", get(get_supplier_ledger_handler))
         .route("/api/purchases", axum::routing::post(complete_purchase_handler))
         .route("/api/expenses", get(list_expenses_handler).post(create_expense_handler))
         .route("/api/reports/profit", get(profit_report_handler))
@@ -679,6 +683,78 @@ async fn create_supplier_handler(
     }
 }
 
+
+/// GET /api/v1/customers/:id -- Single customer with financial detail
+async fn get_customer_detail_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("customers"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+    match state.app_state.customer_service.get_customer_detail(&id).await {
+        Ok(detail) => (StatusCode::OK, Json(json!(detail))),
+        Err(niazi_mobile_mart_lib::errors::AppError::NotFound(msg)) => {
+            (StatusCode::NOT_FOUND, Json(json!({"error": "NOT_FOUND", "message": msg})))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/v1/customers/:id/ledger -- Customer ledger statement
+async fn get_customer_ledger_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("customers"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+    match state.app_state.customer_service.get_statement(&id).await {
+        Ok(statement) => (StatusCode::OK, Json(json!(statement))),
+        Err(niazi_mobile_mart_lib::errors::AppError::NotFound(msg)) => {
+            (StatusCode::NOT_FOUND, Json(json!({"error": "NOT_FOUND", "message": msg})))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/v1/suppliers/:id -- Single supplier with financial detail
+async fn get_supplier_detail_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("suppliers"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+    match state.app_state.supplier_service.get_detail(&id).await {
+        Ok(detail) => (StatusCode::OK, Json(json!(detail))),
+        Err(niazi_mobile_mart_lib::errors::AppError::NotFound(msg)) => {
+            (StatusCode::NOT_FOUND, Json(json!({"error": "NOT_FOUND", "message": msg})))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/v1/suppliers/:id/ledger -- Supplier ledger statement
+async fn get_supplier_ledger_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("suppliers"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+    match state.app_state.supplier_service.get_statement(&id).await {
+        Ok(statement) => (StatusCode::OK, Json(json!(statement))),
+        Err(niazi_mobile_mart_lib::errors::AppError::NotFound(msg)) => {
+            (StatusCode::NOT_FOUND, Json(json!({"error": "NOT_FOUND", "message": msg})))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
 /// POST /api/purchases â€” Complete purchase with strict branch isolation
 async fn complete_purchase_handler(
     State(state): State<ServerState>,
