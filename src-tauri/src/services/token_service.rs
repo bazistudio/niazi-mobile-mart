@@ -28,44 +28,26 @@ pub struct Claims {
     pub exp: u64,                           // Expiration time (seconds since epoch)
 }
 
-const DEV_PRIVATE_KEY: &str = r#"-----BEGIN PRIVATE KEY-----
-MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCUohP2bbdNURIi
-2l/krEQ8W4imBPTsc9K77syT/RFb7CRFU/8wRr3TYTbXJIkUi6DXiz29+Q3KlgMe
-MdOCrkOyCGsDCa+L1EeotMbis3ePcMK++ITHlehDCiAE1ALWAaGrYYPPkeAcuHHo
-r6+WpjIIIuB60B711ujlRQvCz3TrzPTMFZKpt5jJ0VzbQlgqK1jQ3M3R0Uq7nB9e
-UXt4uNOyWPNFNzbCWHVjA/CmMo7TkAWQwzi9RFVjapgc/GYEOBPdpayNlv/AKgKv
-eCny10h6yKZIYae7eKnLw9BZEdL7kLxQy1pedZ4FTNzM5Hfog9aVvxA/P1FJcPap
-0I7o/81XAgMBAAECggEADJSgF5qCH+S4ohjqx0pqJ35glXDToan3ZdnYw2lHDV6c
-/qiVRSr6Xp3FYbYhdjWQAn6HgNYc++SbqfQctjHK4BMEqnKo7a8k9kYq6WhjD9Ht
-t0gGG8tNUqiqPM5h2RG1SJzN5oVZ5gRvUSXXDmt4ePt+wFZvsG5QMzZswECwDFSh
-PTYdO5wt1IFMsHLyPjWd41vx4zwtz0ZnqrN3KPpikEb5sil1S1D11nrDAiDb08Ym
-OCzpC/MLIN7G85+41pHxFH1+EpDsD4tWHlMY5LdEmjRnVvoReTRPYSg1mOVG3CSz
-djohztXs5tTue1KHXWDmSRrax1YFQa2vaMdAiohrlQKBgQDLLrGDyX+srKgkJdk7
-7wihXtA6bKBzXgjDjRboRnXcd/MAqIE9RGq+4tyveyazSr5f9HKWLsTozdtQkljY
-nh2q+HUJhZMwmWmYapkR64wP7+7o/aDTqCs1r0x5W1Z8W/Aq5lvw8004uHix73Kv
-i0XzmilrN62UKh2EB3aEooL7xQKBgQC7RUJo7Taxxa+dpkxJ45C7oX+rXJqXWbBr
-loFCd77cPwLrXjWYirU93EN11Hu78Flhkivju/F+sbsRf0U1cH87cOOx2bBDw/cc
-QNTC+7XjjSJ6GoQDW8pmZBA0462siO0r8ZCZeDcPcyf19zvk72am/uKueUigLWWI
-z5Ayiw1qawKBgG0G9kxwcKlY0LTs9l+5yZjGBtiC96pQeEVuzS8AuDgAyY293fPh
-ZaJem+syGzc0UWmuA1rhZ9pAtIHMtg4u8l6PCkZ8vdnjSI14DgFWswbOShYOGyHY
-aK9bDJ9GSudackqi6A0okXRxUJqykYjvJC8utzEIZIVQAByb4JYVmlG9AoGBALPf
-Xl4yGmq+GmQuKvB9p7LQ+DO8CrB88TsloJobMjOSQleYcZpHALaeLh2rLf3iabeS
-Ep33E4pBZBD2UZ92on6Re+KD2Q392AhHLRTreFVMZmUpussPC2U1j2t9lH84NbYT
-nHQMR7aLQUK7acgHOm4EO+6hh+RyNigmVbZ2YThpAoGAHun7r0a7pACmE+tZ+oPP
-5BtkNAMM+ijeniEW9Dy6Rn46uO38kPYqcA8Cme59M1hVw2xwcGf2HrMqSWEpkyXU
-HjuMu3OaImZAOCyMXKcALk6+xysvCsziRQqtd3rFVf7cFDwxrVtwCZTdlfgxyMHx
-u9lCI6ZanDpIJLfS3WUEDlY=
------END PRIVATE KEY-----"#;
+/// Production JWT **public** verification key, embedded at build time.
+///
+/// Only the public key is shipped with the desktop app. The private signing key lives
+/// exclusively in Google Secret Manager (`JWT_PRIVATE_KEY`) and is read by the Cloud Run
+/// server at startup. If this file does not contain a PEM public key, central tokens are
+/// rejected (fail closed).
+const EMBEDDED_JWT_PUBLIC_KEY: &str = include_str!("jwt_public_key.pem");
 
-const DEV_PUBLIC_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlKIT9m23TVESItpf5KxE
-PFuIpgT07HPSu+7Mk/0RW+wkRVP/MEa902E21ySJFIug14s9vfkNypYDHjHTgq5D
-sghrAwmvi9RHqLTG4rN3j3DCvviEx5XoQwogBNQC1gGhq2GDz5HgHLhx6K+vlqYy
-CCLgetAe9dbo5UULws9068z0zBWSqbeYydFc20JYKitY0NzN0dFKu5wfXlF7eLjT
-sljzRTc2wlh1YwPwpjKO05AFkMM4vURVY2qYHPxmBDgT3aWsjZb/wCoCr3gp8tdI
-esimSGGnu3ipy8PQWRHS+5C8UMtaXnWeBUzczOR36IPWlb8QPz9RSXD2qdCO6P/N
-VwIDAQAB
------END PUBLIC KEY-----"#;
+/// Returns the embedded public key if the file actually contains a PEM public key.
+fn embedded_public_key() -> Option<String> {
+    if EMBEDDED_JWT_PUBLIC_KEY.contains("-----BEGIN PUBLIC KEY-----") {
+        Some(EMBEDDED_JWT_PUBLIC_KEY.trim().to_string())
+    } else {
+        None
+    }
+}
+
+fn non_empty_env(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+}
 
 /// Stateless JWT token manager resolving Bearer tokens to RequestIdentity.
 /// Uses RS256 signature verification.
@@ -83,11 +65,35 @@ impl Default for TokenManager {
 }
 
 impl TokenManager {
-    /// Creates a TokenManager resolving RS256 keys from environment or falling back to dev keys.
+    /// Creates a TokenManager from the environment.
+    ///
+    /// - Private key: only from `JWT_PRIVATE_KEY` (server). There is **no** embedded fallback,
+    ///   so desktop builds cannot sign tokens.
+    /// - Public key: `JWT_PUBLIC_KEY` if set, otherwise the embedded production public key.
+    ///   If neither is available, verification fails closed.
     pub fn new() -> Self {
-        let private_key = std::env::var("JWT_PRIVATE_KEY").ok().or_else(|| Some(DEV_PRIVATE_KEY.to_string()));
-        let public_key = std::env::var("JWT_PUBLIC_KEY").unwrap_or_else(|_| DEV_PUBLIC_KEY.to_string());
+        let private_key = non_empty_env("JWT_PRIVATE_KEY");
+        let public_key = non_empty_env("JWT_PUBLIC_KEY")
+            .or_else(embedded_public_key)
+            .unwrap_or_default();
+
+        #[cfg(test)]
+        {
+            if private_key.is_none() && public_key.is_empty() {
+                let (test_private, test_public) = test_keys::key_pair();
+                return Self {
+                    private_key: Some(test_private),
+                    public_key: test_public,
+                };
+            }
+        }
+
         Self { private_key, public_key }
+    }
+
+    /// True when this manager holds a private key and can sign tokens (server only).
+    pub fn can_sign(&self) -> bool {
+        self.private_key.is_some()
     }
 
     /// Creates a TokenManager with explicit RSA PEM string keys.
@@ -139,6 +145,12 @@ impl TokenManager {
             ));
         }
 
+        if self.public_key.trim().is_empty() {
+            return Err(AppError::Unauthorized(
+                "JWT verification key is not configured in this build".to_string(),
+            ));
+        }
+
         let decoding_key = DecodingKey::from_rsa_pem(self.public_key.as_bytes()).map_err(|_| AppError::Unauthorized("Invalid public key configuration".to_string()))?;
         let validation = Validation::new(jsonwebtoken::Algorithm::RS256);
 
@@ -174,5 +186,87 @@ impl TokenManager {
     }
 }
 
-// Tests removed due to obsolete with_secret method.
+/// Test-only RSA key pair, generated fresh per test run. Never compiled into release builds.
+#[cfg(test)]
+pub(crate) mod test_keys {
+    use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
+    use std::sync::OnceLock;
+
+    static KEYS: OnceLock<(String, String)> = OnceLock::new();
+
+    pub fn key_pair() -> (String, String) {
+        KEYS.get_or_init(|| {
+            let mut rng = argon2::password_hash::rand_core::OsRng;
+            let private = rsa::RsaPrivateKey::new(&mut rng, 2048).expect("test RSA key generation");
+            let public = rsa::RsaPublicKey::from(&private);
+            let private_pem = private
+                .to_pkcs8_pem(LineEnding::LF)
+                .expect("test private key PEM")
+                .to_string();
+            let public_pem = public
+                .to_public_key_pem(LineEnding::LF)
+                .expect("test public key PEM");
+            (private_pem, public_pem)
+        })
+        .clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_no_private_key_material_embedded() {
+        let source = include_str!("token_service.rs");
+        let marker = ["BEGIN", "PRIVATE", "KEY"].join(" ");
+        assert!(!source.contains(&marker), "token_service.rs must not embed a private key");
+        let embedded = include_str!("jwt_public_key.pem");
+        assert!(!embedded.contains("PRIVATE"), "embedded key file must hold a public key only");
+    }
+
+    #[test]
+    fn test_manager_without_private_key_cannot_sign() {
+        let (_, public) = test_keys::key_pair();
+        let manager = TokenManager::with_keys(None, public);
+        assert!(!manager.can_sign());
+    }
+
+    #[tokio::test]
+    async fn test_empty_public_key_fails_closed() {
+        let manager = TokenManager::with_keys(None, String::new());
+        let result = manager.resolve_identity("abc.def.ghi").await;
+        assert!(matches!(result, Err(AppError::Unauthorized(_))));
+    }
+
+    #[tokio::test]
+    async fn test_token_signed_by_other_key_is_rejected() {
+        let (private_a, public_a) = test_keys::key_pair();
+        let signer = TokenManager::with_keys(Some(private_a), public_a);
+        let user = crate::domain::user::SanitizedUser {
+            id: "u-1".to_string(),
+            name: "Tester".to_string(),
+            username: "tester".to_string(),
+            role: UserRole::Cashier,
+            status: crate::domain::user::UserStatus::Active,
+            is_active: true,
+            must_change_password: false,
+            has_pin: false,
+            access_profile: StaffAccessProfile::public_user_restricted(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let token = signer.create_token(user).await;
+        assert!(signer.resolve_identity(&token).await.is_ok());
+
+        // A verifier holding a different public key must reject the token.
+        let mut rng = argon2::password_hash::rand_core::OsRng;
+        let other = rsa::RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let other_public = {
+            use rsa::pkcs8::{EncodePublicKey, LineEnding};
+            rsa::RsaPublicKey::from(&other).to_public_key_pem(LineEnding::LF).unwrap()
+        };
+        let verifier = TokenManager::with_keys(None, other_public);
+        assert!(matches!(verifier.resolve_identity(&token).await, Err(AppError::Unauthorized(_))));
+    }
+}
 

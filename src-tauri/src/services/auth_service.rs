@@ -102,10 +102,17 @@ impl AuthService {
         repo.save(user.clone()).await?;
 
         let sanitized = user.sanitize();
-        let token = app_state.token_manager.create_token(sanitized.clone()).await;
+        // Only a server holding the private signing key may mint tokens. Desktop builds carry
+        // the public verification key only, so a local login establishes a session without a
+        // central token (central tokens come from the server's /auth/login).
+        let token = if app_state.token_manager.can_sign() {
+            Some(app_state.token_manager.create_token(sanitized.clone()).await)
+        } else {
+            None
+        };
 
         // Establish active native session in AppState with active token
-        app_state.set_authenticated_with_token(&user, Some(token)).await;
+        app_state.set_authenticated_with_token(&user, token).await;
 
         Ok(sanitized)
     }

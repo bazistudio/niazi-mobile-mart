@@ -70,13 +70,23 @@ export const salesApi = {
     saleResult: SaleResultDto;
     message: string;
   }> => {
+    // F-07: a sale may only contain positive whole quantities. Returns go through the
+    // sales-return service; a non-positive quantity is rejected instead of being
+    // silently turned into a sale of 1 unit.
+    const invalidItem = payload.items.find((i) => !Number.isInteger(i.quantity) || i.quantity <= 0);
+    if (invalidItem) {
+      throw new Error(
+        'Invalid sale quantity. Returns and exchanges must be processed through the sales-return flow, not as a sale.',
+      );
+    }
+
     try {
       const saleResult = await tauriClient.saleComplete({
         branch_id: payload.branchId || null,
         customer_id: payload.customerId || null,
         items: payload.items.map((i) => ({
           product_id: i.productId,
-          quantity: Math.max(1, i.quantity),
+          quantity: i.quantity,
           unit_price: i.price,
           price: i.price,
           discount: i.discount || 0,

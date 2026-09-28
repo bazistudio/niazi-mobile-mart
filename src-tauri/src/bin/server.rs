@@ -77,7 +77,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bind_addr = SocketAddr::from(([0, 0, 0, 0], port));
 
     // 2b. Require JWT_PRIVATE_KEY and JWT_PUBLIC_KEY environment variables in server mode
-    let jwt_private = std::env::var("JWT_PRIVATE_KEY").ok();
+    let jwt_private = match std::env::var("JWT_PRIVATE_KEY") {
+        Ok(key) if !key.trim().is_empty() => Some(key),
+        _ => {
+            error!("FATAL: JWT_PRIVATE_KEY environment variable is missing or empty.");
+            error!("The server must sign login tokens with the Secret Manager private key; there is no built-in fallback.");
+            return Err("JWT_PRIVATE_KEY environment variable is required for server mode".into());
+        }
+    };
     let jwt_public = match std::env::var("JWT_PUBLIC_KEY") {
         Ok(key) if !key.trim().is_empty() => key,
         _ => {

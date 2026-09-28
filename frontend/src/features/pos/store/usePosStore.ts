@@ -10,6 +10,12 @@ import { platformAdapter } from '@/lib/platformAdapter';
 import { InvoiceDocument } from '../services/document/document.service';
 import { getQueryClient } from '@/components/providers/ReactQueryProvider';
 import { queryKeys } from '@/lib/react-query/queryKeys';
+import {
+  createCashReturnForInvoice,
+  WALK_IN_RETURN_BLOCKED_MESSAGE,
+  EXCHANGE_BLOCKED_MESSAGE,
+  INVOICE_LOADED_CHECKOUT_BLOCKED_MESSAGE,
+} from '../services/posReturn.service';
 
 // Migrate legacy POS storage key if present
 if (typeof window !== 'undefined' && !localStorage.getItem('niazi-pos')) {
@@ -520,6 +526,17 @@ export const usePosStore = create<PosStore>()(
         const session = get().getActiveSession();
         if (!session) return;
 
+        // F-07 containment: returned items must never be sent to the sale path
+        // (they were previously recorded as a sale of 1 unit each).
+        if (session.returnedItems.length > 0) {
+          toast.error(EXCHANGE_BLOCKED_MESSAGE, { duration: 6000 });
+          throw new Error(EXCHANGE_BLOCKED_MESSAGE);
+        }
+        if (session.linkedInvoiceId) {
+          toast.error(INVOICE_LOADED_CHECKOUT_BLOCKED_MESSAGE, { duration: 6000 });
+          throw new Error(INVOICE_LOADED_CHECKOUT_BLOCKED_MESSAGE);
+        }
+
         try {
           let method = 'cash';
           if (paymentBreakdown && paymentBreakdown.length > 0) {
@@ -609,54 +626,46 @@ export const usePosStore = create<PosStore>()(
         const session = get().getActiveSession();
         if (!session) return;
 
-        if (session.cart.length === 0 && !session.invoiceDiscountValue) {
-          toast.error("Cart is empty and no adjustment value set.");
+        // F-07 containment: a return is recorded through the sales-return service
+        // (restock + cash refund + SALES_RETURN_CREATED), never as a sale.
+        if (!session.linkedInvoiceId) {
+          toast.error(WALK_IN_RETURN_BLOCKED_MESSAGE, { duration: 6000 });
           return;
         }
-        
-        const isPureAdjustment = session.cart.length === 0;
+
+        if (session.cart.length === 0) {
+          toast.error("No items in cart to return.");
+          return;
+        }
 
         try {
-          const idempotencyKey = `pos_txn_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-          const payload = {
-            items: session.cart.map(item => ({
+          const result = await createCashReturnForInvoice(
+            session.linkedInvoiceId,
+            session.cart.map((item) => ({
               productId: item.productId,
-              // Send negative quantity to process as return and restock
-              quantity: -Math.abs(item.quantity),
-              price: item.unitPrice
+              productName: item.productName,
+              quantity: item.quantity,
             })),
-            customerId: session.customer?.id === 'walk-in' ? undefined : session.customer?.id,
-            paymentMethod: 'cash',
-            transactionType: isPureAdjustment ? 'refund_adjustment' : 'sale',
-            taxRate: 0,
-            // Convert positive discount input into negative for the return order
-            discount: -(session.invoiceDiscountValue || 0),
-            linkedInvoiceId: session.linkedInvoiceId || undefined,
-            idempotencyKey,
-          };
+          );
 
-          let result;
-          try {
-            result = await salesApi.createOrder(payload);
-          } catch (apiError: any) {
-            const errorMessage = apiError.response?.data?.message || apiError.message || "Unknown API error";
-            toast.error("Return failed: " + errorMessage);
-            throw apiError;
-          }
-
-          if (!result.success) throw new Error(result.message);
-
-          set(state => ({
-            transactions: [...state.transactions, result.order as any]
-          }));
           get().clearCart();
-          
           platformAdapter.emitEvent('inventory-updated');
 
-          toast.success("Walk-in Return processed successfully. Cash reduced.");
+          try {
+            const qc = getQueryClient();
+            qc.invalidateQueries({ queryKey: queryKeys.dashboard });
+            qc.invalidateQueries({ queryKey: ['sales'] });
+            qc.invalidateQueries({ queryKey: ['products'] });
+          } catch (qcErr) {
+            console.warn('Query cache invalidation failed:', qcErr);
+          }
+
+          toast.success("Return recorded. Cash refunded from the drawer.");
           return result;
         } catch (error: any) {
+          const message = error?.message || error?.toString() || "Unknown error";
           console.error("Cash Return failed", error);
+          toast.error("Return failed: " + message);
           throw error;
         }
       },

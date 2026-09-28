@@ -46,3 +46,5 @@ docs/
 private.pem
 public.pem
 *.pem
+# Public JWT verification key shipped with the desktop app (public, never private)
+!src-tauri/src/services/jwt_public_key.pem

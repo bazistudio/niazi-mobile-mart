@@ -47,6 +47,8 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'Niazi Mobile Mart ${{ github.ref_name }}'
           releaseBody: 'Production release for Niazi Mobile Mart Windows Desktop Application.'
-          releaseDraft: false
+          # HA-0.4: releases are created as drafts and published manually by the owner.
+          # The Tauri updater ignores drafts, so shop PCs update only after manual publication.
+          releaseDraft: true
           prerelease: false
           args: --target x86_64-pc-windows-msvc
