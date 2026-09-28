@@ -176,7 +176,7 @@ impl SQLiteCustomerRepository {
 
     pub fn update_customer_in_tx(conn: &Connection, id: &str, dto: &UpdateCustomerDto) -> DbResult<Customer> {
         let existing = Self::get_customer_by_id_in_tx(conn, id)?
-            .ok_or_else(|| DbError::QueryError(format!("Customer with ID '{id}' not found")))?;
+            .ok_or_else(|| DbError::NotFound(format!("Customer '{id}' not found")))?;
 
         let name = dto.name.as_deref().unwrap_or(&existing.name).trim();
         let phone = dto.phone.as_deref().unwrap_or(&existing.phone).trim();

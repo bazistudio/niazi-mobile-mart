@@ -1887,6 +1887,93 @@ async fn sync_push_handler(
                 }
             }
 
+            if event.event_type == "CUSTOMER_UPDATED" {
+                let customer: niazi_mobile_mart_lib::domain::customer::Customer = match serde_json::from_str(&event.payload) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "BAD_REQUEST",
+                                "message": format!("Invalid CUSTOMER_UPDATED payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                let projected_customer = match niazi_mobile_mart_lib::repositories::PostgresCustomerRepository::update_customer_tx(&mut tx, &customer).await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to project CUSTOMER_UPDATED event centrally: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                // Phase 1.1: link the customer role to its canonical party (payload party_id,
+                // else party.id = customer.id) and forward party_id downstream.
+                // For BOTH parties: ensure_party_for_role_tx only mirrors contact when the
+                // party has exactly one role, so the supplier role keeps the party active.
+                let requested_party_id = niazi_mobile_mart_lib::domain::party::party_id_from_payload(&event.payload, &projected_customer.id);
+                let party_id = match niazi_mobile_mart_lib::repositories::PostgresPartyRepository::ensure_party_for_role_tx(
+                    &mut tx,
+                    &niazi_mobile_mart_lib::domain::party::PartyRoleContact::from(&projected_customer),
+                    &requested_party_id,
+                ).await {
+                    Ok(p) => p.unwrap_or(requested_party_id),
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to link CUSTOMER_UPDATED to party centrally: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                let change_payload = match niazi_mobile_mart_lib::domain::party::role_payload_with_party_id(&projected_customer, &party_id) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to serialize CUSTOMER_UPDATED change_log payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "CUSTOMER_UPDATED",
+                    "CUSTOMER",
+                    &projected_customer.id,
+                    &change_payload,
+                ).await {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append CUSTOMER_UPDATED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
             if event.event_type == niazi_mobile_mart_lib::domain::party::PARTY_UPSERTED_EVENT {
                 let party: niazi_mobile_mart_lib::domain::party::Party = match serde_json::from_str(&event.payload) {
                     Ok(p) => p,

@@ -237,9 +237,30 @@ impl CustomerService {
         self.customer_repo.get_statement(customer_id).await
     }
 
-    /// Deactivates customer safely (never deletes customer if they have financial history)
+    /// Deactivates customer safely (never deletes customer if they have financial history).
+    /// For SQLite: routes through update_customer so the linked Party state and outbox
+    /// are updated in the same transaction (CUSTOMER_UPDATED event enqueued, single-role
+    /// party deactivated, BOTH party stays active when supplier role remains active).
+    /// For Postgres: delegates to the repo (server receives deactivation via sync).
     pub async fn deactivate_customer(&self, id: &str) -> AppResult<()> {
-        self.customer_repo.deactivate_customer(id).await
+        match &self.customer_repo {
+            CustomerRepository::SQLite(_) => {
+                self.update_customer(id, UpdateCustomerDto {
+                    is_active: Some(false),
+                    name: None,
+                    phone: None,
+                    alternate_phone: None,
+                    email: None,
+                    address: None,
+                    notes: None,
+                    credit_limit: None,
+                }).await?;
+                Ok(())
+            }
+            CustomerRepository::Postgres(_) => {
+                self.customer_repo.deactivate_customer(id).await
+            }
+        }
     }
 
     /// Records customer payment atomically against receivables and allocates across open sales
