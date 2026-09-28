@@ -61,6 +61,7 @@ pub const KNOWN_SERVER_EVENT_TYPES: &[&str] = &[
     "SUPPLIER_PAYMENT_RECORDED",
     "CUSTOMER_CREATED",
     "CUSTOMER_UPDATED",
+    "CUSTOMER_PAYMENT_RECORDED", // SYNC-B2
     crate::domain::party::PARTY_UPSERTED_EVENT, // "PARTY_UPSERTED"
 ];
 
@@ -212,6 +213,7 @@ mod tests {
             "SUPPLIER_PAYMENT_RECORDED",
             "CUSTOMER_CREATED",
             "CUSTOMER_UPDATED",
+            "CUSTOMER_PAYMENT_RECORDED", // SYNC-B2
             "PARTY_UPSERTED",
         ];
         for expected_type in expected_valid {
@@ -244,11 +246,10 @@ mod tests {
             "Empty event type must NOT be in KNOWN_SERVER_EVENT_TYPES"
         );
 
-        // Future types not yet implemented must not appear prematurely.
+        // CUSTOMER_PAYMENT_RECORDED is implemented (SYNC-B2) — it IS in the registry.
         assert!(
-            !KNOWN_SERVER_EVENT_TYPES.contains(&"CUSTOMER_PAYMENT_RECORDED"),
-            "CUSTOMER_PAYMENT_RECORDED is not yet implemented and must NOT be \
-             in KNOWN_SERVER_EVENT_TYPES"
+            KNOWN_SERVER_EVENT_TYPES.contains(&"CUSTOMER_PAYMENT_RECORDED"),
+            "CUSTOMER_PAYMENT_RECORDED must be in KNOWN_SERVER_EVENT_TYPES after SYNC-B2"
         );
 
         // Partial / typo variants must not slip through.
@@ -326,10 +327,126 @@ mod tests {
     fn test_sync_b1_registry_size_regression() {
         assert_eq!(
             KNOWN_SERVER_EVENT_TYPES.len(),
-            14,
-            "KNOWN_SERVER_EVENT_TYPES size changed from 14.  \
+            15,
+            "KNOWN_SERVER_EVENT_TYPES size changed from 15.  \
              If you added a new event type, update this count AND add the \
              corresponding handler in server.rs sync_push_handler."
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // SYNC-B2 — Customer payment registry tests
+    // -------------------------------------------------------------------------
+
+    /// SYNC-B2 Test 8 — CUSTOMER_PAYMENT_RECORDED is in the registry.
+    ///
+    /// After Phase 2 implementation, this event MUST be recognised by the
+    /// Phase 1 guard rather than rejected as UNKNOWN_EVENT_TYPE.
+    #[test]
+    fn test_sync_b2_customer_payment_in_registry() {
+        assert!(
+            KNOWN_SERVER_EVENT_TYPES.contains(&"CUSTOMER_PAYMENT_RECORDED"),
+            "CUSTOMER_PAYMENT_RECORDED must be in KNOWN_SERVER_EVENT_TYPES \
+             so the Phase 1 guard does not reject it as UNKNOWN_EVENT_TYPE"
+        );
+    }
+
+    /// SYNC-B2 — Structural: guard passes for CUSTOMER_PAYMENT_RECORDED.
+    #[test]
+    fn test_sync_b2_guard_passes_for_customer_payment() {
+        let guard_passes = |event_type: &str| -> bool {
+            KNOWN_SERVER_EVENT_TYPES.contains(&event_type)
+        };
+        assert!(
+            guard_passes("CUSTOMER_PAYMENT_RECORDED"),
+            "CUSTOMER_PAYMENT_RECORDED must pass the SYNC-B1 registry guard \
+             and proceed to the server handler, not fall through to FAILED_PERMANENT"
+        );
+    }
+
+    /// SYNC-B2 — Verify CustomerPaymentSyncEventDto serialises correctly.
+    ///
+    /// Confirms round-trip JSON serialisation of the sync payload struct used
+    /// both in the offline_sync_queue and in the change_log.
+    #[test]
+    fn test_sync_b2_customer_payment_payload_round_trip() {
+        use crate::domain::customer::{AllocatedSaleDto, CustomerPaymentSyncEventDto};
+
+        let dto = CustomerPaymentSyncEventDto {
+            payment_id: "pay_abc123".to_string(),
+            receipt_number: "RCP-00001".to_string(),
+            customer_id: "cus_xyz".to_string(),
+            amount_paid: 5000,
+            payment_method: "CASH".to_string(),
+            reference_number: None,
+            notes: Some("Test payment".to_string()),
+            performed_by: Some("usr_admin".to_string()),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            allocated_sales: vec![AllocatedSaleDto {
+                sale_id: "sale_1".to_string(),
+                invoice_number: "INV-0001".to_string(),
+                amount_allocated: 5000,
+                previous_paid: 0,
+                new_paid: 5000,
+                total_amount: 5000,
+                payment_status: "PAID".to_string(),
+            }],
+        };
+
+        // Must serialise to JSON without panicking.
+        let json = serde_json::to_string(&dto).expect("CustomerPaymentSyncEventDto must serialise");
+        assert!(json.contains("CUSTOMER_PAYMENT_RECORDED") || json.contains("pay_abc123"));
+
+        // Must round-trip back to the same struct.
+        let decoded: CustomerPaymentSyncEventDto =
+            serde_json::from_str(&json).expect("CustomerPaymentSyncEventDto must deserialise");
+        assert_eq!(decoded, dto);
+        assert_eq!(decoded.amount_paid, 5000);
+        assert_eq!(decoded.allocated_sales.len(), 1);
+        assert_eq!(decoded.allocated_sales[0].payment_status, "PAID");
+    }
+
+    /// SYNC-B2 Test 1 (structural) — Verify offline_sync_queue entry shape.
+    ///
+    /// This test confirms that the EnqueueOfflineEventDto for a customer
+    /// payment carries the CUSTOMER_PAYMENT_RECORDED event type and a
+    /// non-empty JSON payload. It does NOT require a database connection.
+    #[test]
+    fn test_sync_b2_enqueue_dto_shape() {
+        use crate::domain::customer::CustomerPaymentSyncEventDto;
+        use crate::domain::sync_queue::EnqueueOfflineEventDto;
+
+        let payload_dto = CustomerPaymentSyncEventDto {
+            payment_id: "pay_test".to_string(),
+            receipt_number: "RCP-00002".to_string(),
+            customer_id: "cus_test".to_string(),
+            amount_paid: 1000,
+            payment_method: "CASH".to_string(),
+            reference_number: None,
+            notes: None,
+            performed_by: None,
+            created_at: "2026-06-01T10:00:00Z".to_string(),
+            allocated_sales: vec![],
+        };
+
+        let enqueue_dto = EnqueueOfflineEventDto {
+            client_event_id: Some(uuid::Uuid::new_v4().to_string()),
+            terminal_id: "term_001".to_string(),
+            organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
+            branch_id: crate::domain::organization::DEFAULT_MAIN_BRANCH_ID.to_string(),
+            event_type: "CUSTOMER_PAYMENT_RECORDED".to_string(),
+            payload: serde_json::to_string(&payload_dto).unwrap(),
+        };
+
+        // event_type must be exactly CUSTOMER_PAYMENT_RECORDED
+        assert_eq!(enqueue_dto.event_type, "CUSTOMER_PAYMENT_RECORDED");
+        // payload must be non-empty valid JSON
+        assert!(!enqueue_dto.payload.is_empty());
+        let parsed: serde_json::Value = serde_json::from_str(&enqueue_dto.payload).unwrap();
+        assert_eq!(parsed["payment_id"], "pay_test");
+        assert_eq!(parsed["amount_paid"], 1000);
+        assert_eq!(parsed["customer_id"], "cus_test");
+        // event is in the known registry (SYNC-B1 guard will pass)
+        assert!(KNOWN_SERVER_EVENT_TYPES.contains(&enqueue_dto.event_type.as_str()));
     }
 }

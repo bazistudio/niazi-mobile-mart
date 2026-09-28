@@ -454,6 +454,105 @@ impl PostgresCustomerRepository {
         }
     }
 
+    /// SYNC-B2 — Project a `CUSTOMER_PAYMENT_RECORDED` event to PostgreSQL inside an
+    /// existing transaction.
+    ///
+    /// Mirrors `PostgresPurchaseRepository::record_supplier_payment_tx`:
+    /// - Validates the customer exists (returns `NotFound` on dependency failure).
+    /// - Updates each allocated sale's `paid_amount` / `payment_status`.
+    /// - Inserts a `customer_ledger_entries` row (`entry_type = 'PAYMENT'`).
+    /// - Is idempotent: duplicate `payment_id` is detected via a primary-key
+    ///   SELECT before insert, so retries produce a single ledger credit.
+    pub async fn record_customer_payment_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        dto: &crate::domain::customer::CustomerPaymentSyncEventDto,
+    ) -> AppResult<()> {
+        // 1. Dependency check — customer must exist.
+        let customer_row = sqlx::query("SELECT id FROM customers WHERE id = $1")
+            .bind(&dto.customer_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        if customer_row.is_none() {
+            return Err(AppError::NotFound(format!(
+                "Customer '{}' not found on central server",
+                dto.customer_id
+            )));
+        }
+
+        // 2. Idempotency guard — if this payment_id already exists as a ledger PAYMENT,
+        //    the event was already applied (retry / duplicate delivery) — skip safely.
+        let already_applied: Option<_> = sqlx::query(
+            "SELECT 1 FROM customer_ledger_entries WHERE id = $1 AND entry_type = 'PAYMENT'",
+        )
+        .bind(&dto.payment_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        if already_applied.is_some() {
+            return Ok(());
+        }
+
+        // 3. Apply FIFO sale allocations.
+        for alloc in &dto.allocated_sales {
+            sqlx::query(
+                "UPDATE sales SET paid_amount = $1, payment_status = $2, updated_at = $3 WHERE id = $4",
+            )
+            .bind(alloc.new_paid)
+            .bind(alloc.payment_status.as_str())
+            .bind(&dto.created_at)
+            .bind(&alloc.sale_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        // 4. Calculate running balance from existing ledger entries.
+        //    customer_ledger uses debit for charges (sales) and credit for payments.
+        //    Outstanding balance = SUM(debit) - SUM(credit).
+        let current_outstanding: (i64,) = sqlx::query_as(
+            "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM customer_ledger_entries WHERE customer_id = $1",
+        )
+        .bind(&dto.customer_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        let new_bal = current_outstanding.0 - dto.amount_paid;
+
+        let desc = format!(
+            "Payment from customer ({}) Ref: {}",
+            dto.payment_method,
+            dto.reference_number
+                .as_deref()
+                .unwrap_or(&dto.receipt_number)
+        );
+
+        // 5. Insert the ledger PAYMENT credit entry (debit = 0, credit = amount_paid).
+        sqlx::query(
+            "INSERT INTO customer_ledger_entries \
+             (id, customer_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at) \
+             VALUES ($1, $2, $3, $4, 'PAYMENT', $5, $6, $7, $8, $9, $10)",
+        )
+        .bind(&dto.payment_id)
+        .bind(&dto.customer_id)
+        .bind(&dto.payment_id)
+        .bind(&dto.receipt_number)
+        .bind(0_i64)       // debit = 0 (payment is a credit, not a charge)
+        .bind(dto.amount_paid)
+        .bind(new_bal)
+        .bind(desc)
+        .bind(dto.performed_by.as_deref())
+        .bind(&dto.created_at)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        Ok(())
+    }
+
     fn map_customer_row(row: &sqlx::postgres::PgRow) -> AppResult<Customer> {
         let is_active_int: i32 = row.try_get(9).unwrap_or(1);
         Ok(Customer {

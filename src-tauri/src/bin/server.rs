@@ -1875,6 +1875,67 @@ async fn sync_push_handler(
                 }
             }
 
+            // SYNC-B2 — Customer payment projection
+            if event.event_type == "CUSTOMER_PAYMENT_RECORDED" {
+                let payment_event: niazi_mobile_mart_lib::domain::customer::CustomerPaymentSyncEventDto =
+                    match serde_json::from_str(&event.payload) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            return (
+                                StatusCode::BAD_REQUEST,
+                                Json(json!({
+                                    "error": "INVALID_PAYLOAD",
+                                    "message": format!("Invalid CUSTOMER_PAYMENT_RECORDED payload: {e}")
+                                })),
+                            );
+                        }
+                    };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresCustomerRepository::record_customer_payment_tx(
+                    &mut tx,
+                    &payment_event,
+                )
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    let (status, code) = if e.to_string().contains("not found") {
+                        (StatusCode::BAD_REQUEST, "DEPENDENCY_NOT_MET")
+                    } else {
+                        (StatusCode::INTERNAL_SERVER_ERROR, "SERVER_ERROR")
+                    };
+                    return (
+                        status,
+                        Json(json!({
+                            "error": code,
+                            "message": format!("Failed to project CUSTOMER_PAYMENT_RECORDED centrally: {e}")
+                        })),
+                    );
+                }
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "CUSTOMER_PAYMENT_RECORDED",
+                    "CUSTOMER_PAYMENT",
+                    &payment_event.payment_id,
+                    &event.payload,
+                )
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append CUSTOMER_PAYMENT_RECORDED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
             if event.event_type == "CUSTOMER_CREATED" {
                 let customer: niazi_mobile_mart_lib::domain::customer::Customer = match serde_json::from_str(&event.payload) {
                     Ok(c) => c,

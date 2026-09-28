@@ -176,3 +176,33 @@ pub struct CustomerPaymentResultDto {
     pub new_balance: i64,
     pub allocated_sales: Vec<AllocatedSaleDto>,
 }
+
+/// Sync event payload for CUSTOMER_PAYMENT_RECORDED events.
+///
+/// Carried inside `offline_sync_queue.payload` (producer side) and
+/// `change_log.payload` (consumer side). Must contain every field needed
+/// for deterministic replay on another PC or the central server without
+/// any additional lookups.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CustomerPaymentSyncEventDto {
+    /// Stable identity of the payment / ledger entry (UUID v4)
+    pub payment_id: String,
+    /// Human-readable receipt number (e.g. "RCP-00042")
+    pub receipt_number: String,
+    /// Customer this payment was recorded against
+    pub customer_id: String,
+    /// Total amount paid (whole PKR)
+    pub amount_paid: i64,
+    /// Payment method (CASH / CARD / BANK_TRANSFER / EASYPAISA / JAZZCASH / OTHER)
+    pub payment_method: String,
+    /// Optional cheque/reference/transaction number supplied by the operator
+    pub reference_number: Option<String>,
+    /// Optional free-text notes
+    pub notes: Option<String>,
+    /// User who recorded the payment
+    pub performed_by: Option<String>,
+    /// RFC-3339 timestamp of the originating transaction
+    pub created_at: String,
+    /// Sales this payment was allocated against (FIFO order)
+    pub allocated_sales: Vec<AllocatedSaleDto>,
+}

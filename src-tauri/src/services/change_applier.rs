@@ -559,6 +559,95 @@ impl ChangeApplier {
                     crate::repositories::SQLitePartyRepository::copy_party_to_roles_in_tx(tx, &party)?;
                 }
             }
+            // SYNC-B2 — Apply a customer payment from another PC / central server
+            "CUSTOMER_PAYMENT_RECORDED" => {
+                let payment_event: crate::domain::customer::CustomerPaymentSyncEventDto =
+                    match serde_json::from_str(&change.payload) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            return Err(DbError::ValidationError(format!(
+                                "Invalid CUSTOMER_PAYMENT_RECORDED payload: {e}"
+                            )))
+                        }
+                    };
+
+                // Idempotency guard: skip if this payment_id already exists.
+                let already_applied: bool = tx
+                    .query_row(
+                        "SELECT 1 FROM customer_ledger_entries WHERE id = ?1 AND entry_type = 'PAYMENT'",
+                        params![payment_event.payment_id],
+                        |_| Ok(true),
+                    )
+                    .unwrap_or(false);
+
+                if !already_applied {
+                    // Dependency safety: auto-heal customer if not yet present.
+                    Self::auto_heal_customer_in_tx(tx, &payment_event.customer_id)?;
+
+                    // Apply FIFO sale allocations.
+                    for alloc in &payment_event.allocated_sales {
+                        tx.execute(
+                            "UPDATE sales SET paid_amount = ?1, payment_status = ?2, updated_at = ?3 WHERE id = ?4",
+                            params![
+                                alloc.new_paid,
+                                alloc.payment_status,
+                                payment_event.created_at,
+                                alloc.sale_id
+                            ],
+                        )
+                        .map_err(|e| {
+                            DbError::QueryError(format!(
+                                "Failed to update sale allocation for CUSTOMER_PAYMENT_RECORDED: {e}"
+                            ))
+                        })?;
+                    }
+
+                    // Compute running balance.
+                    // customer_ledger: balance = SUM(debit) - SUM(credit); a payment is a credit.
+                    let current_outstanding: i64 = tx
+                        .query_row(
+                            "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM customer_ledger_entries WHERE customer_id = ?1",
+                            params![payment_event.customer_id],
+                            |row| row.get(0),
+                        )
+                        .unwrap_or(0);
+
+                    let new_bal = current_outstanding - payment_event.amount_paid;
+
+                    let desc = format!(
+                        "Payment from customer ({}) Ref: {}",
+                        payment_event.payment_method,
+                        payment_event
+                            .reference_number
+                            .as_deref()
+                            .unwrap_or(&payment_event.receipt_number)
+                    );
+
+                    // Insert ledger PAYMENT credit entry (debit = 0, credit = amount_paid).
+                    tx.execute(
+                        "INSERT INTO customer_ledger_entries \
+                         (id, customer_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at) \
+                         VALUES (?1, ?2, ?3, ?4, 'PAYMENT', 0, ?5, ?6, ?7, ?8, ?9)",
+                        params![
+                            payment_event.payment_id,
+                            payment_event.customer_id,
+                            payment_event.payment_id,
+                            payment_event.receipt_number,
+                            payment_event.amount_paid,
+                            new_bal,
+                            desc,
+                            payment_event.performed_by,
+                            payment_event.created_at
+                        ],
+                    )
+                    .map_err(|e| {
+                        DbError::QueryError(format!(
+                            "Failed to insert customer payment ledger entry: {e}"
+                        ))
+                    })?;
+                }
+            }
+
             "SUPPLIER_PAYMENT_RECORDED" => {
                 let payment_event: crate::domain::supplier::SupplierPaymentSyncEventDto = match serde_json::from_str(&change.payload) {
                     Ok(p) => p,
