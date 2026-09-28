@@ -64,6 +64,13 @@ pub const KNOWN_SERVER_EVENT_TYPES: &[&str] = &[
     "CUSTOMER_PAYMENT_RECORDED", // SYNC-B2
     "INVENTORY_OPERATION_RECORDED", // SYNC-H1
     crate::domain::party::PARTY_UPSERTED_EVENT, // "PARTY_UPSERTED"
+    // SYNC-H2: catalog master data direct synchronization
+    "CATEGORY_CREATED",
+    "BRAND_CREATED",
+    "UNIT_CREATED",
+    "COMPANY_CREATED",
+    "QUALITY_CREATED",
+    "COLOR_CREATED",
 ];
 
 impl SyncQueueItem {
@@ -217,6 +224,13 @@ mod tests {
             "CUSTOMER_PAYMENT_RECORDED",      // SYNC-B2
             "INVENTORY_OPERATION_RECORDED",   // SYNC-H1
             "PARTY_UPSERTED",
+            // SYNC-H2: catalog master data direct synchronization
+            "CATEGORY_CREATED",
+            "BRAND_CREATED",
+            "UNIT_CREATED",
+            "COMPANY_CREATED",
+            "QUALITY_CREATED",
+            "COLOR_CREATED",
         ];
         for expected_type in expected_valid {
             assert!(
@@ -330,8 +344,8 @@ mod tests {
     fn test_sync_b1_registry_size_regression() {
         assert_eq!(
             KNOWN_SERVER_EVENT_TYPES.len(),
-            16,
-            "KNOWN_SERVER_EVENT_TYPES size changed from 16.  \
+            22,
+            "KNOWN_SERVER_EVENT_TYPES size changed from 22.  \
              If you added a new event type, update this count AND add the \
              corresponding handler in server.rs sync_push_handler."
         );
@@ -623,5 +637,106 @@ mod tests {
         assert!(parsed["target_quantity"].is_null());
         // event is in the known registry (SYNC-B1 guard will pass)
         assert!(KNOWN_SERVER_EVENT_TYPES.contains(&enqueue_dto.event_type.as_str()));
+    }
+
+    // -------------------------------------------------------------------------
+    // SYNC-H2 — Catalog master data registry tests
+    // -------------------------------------------------------------------------
+
+    /// SYNC-H2 Test 1 — All 6 catalog event types are in the registry.
+    ///
+    /// After Phase 4 implementation, these events MUST be recognised by the
+    /// Phase 1 guard rather than rejected as UNKNOWN_EVENT_TYPE.
+    #[test]
+    fn test_sync_h2_catalog_events_in_registry() {
+        let catalog_events = &[
+            "CATEGORY_CREATED",
+            "BRAND_CREATED",
+            "UNIT_CREATED",
+            "COMPANY_CREATED",
+            "QUALITY_CREATED",
+            "COLOR_CREATED",
+        ];
+        for event_type in catalog_events {
+            assert!(
+                KNOWN_SERVER_EVENT_TYPES.contains(event_type),
+                "Catalog event type '{}' must be in KNOWN_SERVER_EVENT_TYPES \
+                 so the Phase 1 guard does not reject it as UNKNOWN_EVENT_TYPE",
+                event_type
+            );
+        }
+    }
+
+    /// SYNC-H2 Test 2 — Guard passes for all 6 catalog event types.
+    #[test]
+    fn test_sync_h2_guard_passes_for_catalog_events() {
+        let guard_passes = |event_type: &str| -> bool {
+            KNOWN_SERVER_EVENT_TYPES.contains(&event_type)
+        };
+        assert!(guard_passes("CATEGORY_CREATED"), "CATEGORY_CREATED must pass the SYNC-B1 registry guard");
+        assert!(guard_passes("BRAND_CREATED"), "BRAND_CREATED must pass the SYNC-B1 registry guard");
+        assert!(guard_passes("UNIT_CREATED"), "UNIT_CREATED must pass the SYNC-B1 registry guard");
+        assert!(guard_passes("COMPANY_CREATED"), "COMPANY_CREATED must pass the SYNC-B1 registry guard");
+        assert!(guard_passes("QUALITY_CREATED"), "QUALITY_CREATED must pass the SYNC-B1 registry guard");
+        assert!(guard_passes("COLOR_CREATED"), "COLOR_CREATED must pass the SYNC-B1 registry guard");
+    }
+
+    /// SYNC-H2 Test 3 — Catalog domain structs serialise correctly.
+    ///
+    /// Confirms that Category and Brand (the two required-code entities) and
+    /// Unit (the no-code entity) round-trip through JSON, matching the payload
+    /// format consumed by change_applier.rs downstream handlers.
+    #[test]
+    fn test_sync_h2_catalog_entity_payload_round_trip() {
+        use crate::domain::catalog::{Brand, Category, Unit};
+
+        // Category round-trip
+        let cat = Category {
+            id: "cat_test_001".to_string(),
+            name: "Smartphones".to_string(),
+            code: "CAT-PHONE".to_string(),
+            description: Some("Mobile phones".to_string()),
+            is_active: true,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let cat_json = serde_json::to_string(&cat).expect("Category must serialise");
+        assert!(cat_json.contains("cat_test_001"));
+        assert!(cat_json.contains("CAT-PHONE"));
+        let cat_decoded: Category = serde_json::from_str(&cat_json).expect("Category must deserialise");
+        assert_eq!(cat_decoded.id, cat.id);
+        assert_eq!(cat_decoded.code, cat.code);
+        assert_eq!(cat_decoded.is_active, true);
+
+        // Brand round-trip
+        let brand = Brand {
+            id: "brd_test_001".to_string(),
+            name: "Apple".to_string(),
+            code: "BRD-APPLE".to_string(),
+            description: Some("Apple Inc".to_string()),
+            is_active: true,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let brand_json = serde_json::to_string(&brand).expect("Brand must serialise");
+        let brand_decoded: Brand = serde_json::from_str(&brand_json).expect("Brand must deserialise");
+        assert_eq!(brand_decoded.id, brand.id);
+        assert_eq!(brand_decoded.code, "BRD-APPLE");
+
+        // Unit round-trip (no code field — has symbol and conversion_factor)
+        let unit = Unit {
+            id: "unt_test_001".to_string(),
+            name: "Box (10 pcs)".to_string(),
+            symbol: Some("box".to_string()),
+            conversion_factor: 10,
+            is_active: true,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let unit_json = serde_json::to_string(&unit).expect("Unit must serialise");
+        let unit_decoded: Unit = serde_json::from_str(&unit_json).expect("Unit must deserialise");
+        assert_eq!(unit_decoded.id, unit.id);
+        assert_eq!(unit_decoded.conversion_factor, 10);
+        assert_eq!(unit_decoded.symbol, Some("box".to_string()));
     }
 }

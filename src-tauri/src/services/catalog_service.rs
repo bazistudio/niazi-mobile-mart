@@ -1,16 +1,22 @@
 use uuid::Uuid;
 
 use crate::db::connection::DatabaseConnection;
+use crate::db::transaction::with_transaction;
 use crate::domain::catalog::{
     Brand, Category, Color, Company, CreateBrandDto, CreateCategoryDto, CreateColorDto,
     CreateCompanyDto, CreateQualityDto, CreateUnitDto, Quality, Unit, UpdateBrandDto,
     UpdateCategoryDto, UpdateColorDto, UpdateCompanyDto, UpdateQualityDto, UpdateUnitDto,
 };
+use crate::domain::organization::{DEFAULT_MAIN_BRANCH_ID, NIAZI_ORGANIZATION_ID};
+use crate::domain::sync_queue::EnqueueOfflineEventDto;
 use crate::errors::{AppError, AppResult};
-use crate::repositories::{CatalogRepository, PostgresCatalogRepository, SQLiteCatalogRepository};
+use crate::repositories::{
+    CatalogRepository, PostgresCatalogRepository, SQLiteCatalogRepository, SQLiteSyncQueueRepository,
+};
 
 #[derive(Clone)]
 pub struct CatalogService {
+    db: Option<DatabaseConnection>,
     repo: CatalogRepository,
 }
 
@@ -21,13 +27,15 @@ impl CatalogService {
 
     pub fn new_sqlite(db: DatabaseConnection) -> Self {
         Self {
-            repo: CatalogRepository::SQLite(SQLiteCatalogRepository::new(db)),
+            repo: CatalogRepository::SQLite(SQLiteCatalogRepository::new(db.clone())),
+            db: Some(db),
         }
     }
 
     pub fn new_postgres(pool: sqlx::PgPool) -> Self {
         Self {
             repo: CatalogRepository::Postgres(PostgresCatalogRepository::new(pool)),
+            db: None,
         }
     }
 
@@ -42,7 +50,44 @@ impl CatalogService {
         }
 
         let id = Uuid::new_v4().to_string();
-        self.repo.create_category(&id, &dto).await
+
+        match &self.repo {
+            CatalogRepository::Postgres(_) => self.repo.create_category(&id, &dto).await,
+            CatalogRepository::SQLite(_) => {
+                let db = self.db.as_ref().expect("SQLite database connection required");
+                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+                let terminal_id = current_terminal.id;
+
+                let now = chrono::Utc::now().to_rfc3339();
+                let entity = Category {
+                    id: id.clone(),
+                    name: dto.name.trim().to_string(),
+                    code: dto.code.trim().to_uppercase(),
+                    description: dto.description.clone(),
+                    is_active: true,
+                    created_at: now.clone(),
+                    updated_at: now,
+                };
+
+                let result = with_transaction(db, move |tx| {
+                    SQLiteCatalogRepository::insert_category_in_tx(tx, &entity)?;
+                    let payload = serde_json::to_string(&entity)
+                        .map_err(|e| crate::db::errors::DbError::ValidationError(format!("Failed to serialize category for sync: {e}")))?;
+                    let sync_dto = EnqueueOfflineEventDto {
+                        client_event_id: Some(entity.id.clone()),
+                        terminal_id: terminal_id.clone(),
+                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                        branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                        event_type: "CATEGORY_CREATED".to_string(),
+                        payload,
+                    };
+                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+                    Ok(entity)
+                }).await?;
+                Ok(result)
+            }
+        }
     }
 
     pub async fn get_category(&self, id: &str) -> AppResult<Category> {
@@ -73,7 +118,44 @@ impl CatalogService {
         }
 
         let id = Uuid::new_v4().to_string();
-        self.repo.create_brand(&id, &dto).await
+
+        match &self.repo {
+            CatalogRepository::Postgres(_) => self.repo.create_brand(&id, &dto).await,
+            CatalogRepository::SQLite(_) => {
+                let db = self.db.as_ref().expect("SQLite database connection required");
+                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+                let terminal_id = current_terminal.id;
+
+                let now = chrono::Utc::now().to_rfc3339();
+                let entity = Brand {
+                    id: id.clone(),
+                    name: dto.name.trim().to_string(),
+                    code: dto.code.trim().to_uppercase(),
+                    description: dto.description.clone(),
+                    is_active: true,
+                    created_at: now.clone(),
+                    updated_at: now,
+                };
+
+                let result = with_transaction(db, move |tx| {
+                    SQLiteCatalogRepository::insert_brand_in_tx(tx, &entity)?;
+                    let payload = serde_json::to_string(&entity)
+                        .map_err(|e| crate::db::errors::DbError::ValidationError(format!("Failed to serialize brand for sync: {e}")))?;
+                    let sync_dto = EnqueueOfflineEventDto {
+                        client_event_id: Some(entity.id.clone()),
+                        terminal_id: terminal_id.clone(),
+                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                        branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                        event_type: "BRAND_CREATED".to_string(),
+                        payload,
+                    };
+                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+                    Ok(entity)
+                }).await?;
+                Ok(result)
+            }
+        }
     }
 
     pub async fn get_brand(&self, id: &str) -> AppResult<Brand> {
@@ -106,7 +188,45 @@ impl CatalogService {
         }
 
         let id = Uuid::new_v4().to_string();
-        self.repo.create_unit(&id, &dto).await
+
+        match &self.repo {
+            CatalogRepository::Postgres(_) => self.repo.create_unit(&id, &dto).await,
+            CatalogRepository::SQLite(_) => {
+                let db = self.db.as_ref().expect("SQLite database connection required");
+                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+                let terminal_id = current_terminal.id;
+
+                let now = chrono::Utc::now().to_rfc3339();
+                let factor = dto.conversion_factor.unwrap_or(1);
+                let entity = Unit {
+                    id: id.clone(),
+                    name: dto.name.trim().to_string(),
+                    symbol: dto.symbol.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+                    conversion_factor: factor,
+                    is_active: true,
+                    created_at: now.clone(),
+                    updated_at: now,
+                };
+
+                let result = with_transaction(db, move |tx| {
+                    SQLiteCatalogRepository::insert_unit_in_tx(tx, &entity)?;
+                    let payload = serde_json::to_string(&entity)
+                        .map_err(|e| crate::db::errors::DbError::ValidationError(format!("Failed to serialize unit for sync: {e}")))?;
+                    let sync_dto = EnqueueOfflineEventDto {
+                        client_event_id: Some(entity.id.clone()),
+                        terminal_id: terminal_id.clone(),
+                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                        branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                        event_type: "UNIT_CREATED".to_string(),
+                        payload,
+                    };
+                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+                    Ok(entity)
+                }).await?;
+                Ok(result)
+            }
+        }
     }
 
     pub async fn get_unit(&self, id: &str) -> AppResult<Unit> {
@@ -139,7 +259,48 @@ impl CatalogService {
         }
 
         let id = Uuid::new_v4().to_string();
-        self.repo.create_company(&id, &dto).await
+
+        match &self.repo {
+            CatalogRepository::Postgres(_) => self.repo.create_company(&id, &dto).await,
+            CatalogRepository::SQLite(_) => {
+                let db = self.db.as_ref().expect("SQLite database connection required");
+                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+                let terminal_id = current_terminal.id;
+
+                let now = chrono::Utc::now().to_rfc3339();
+                let code = dto.code.as_deref().unwrap_or(&dto.name)
+                    .trim()
+                    .to_uppercase()
+                    .replace(|c: char| !c.is_alphanumeric(), "_");
+                let entity = Company {
+                    id: id.clone(),
+                    name: dto.name.trim().to_string(),
+                    code,
+                    description: dto.description.clone(),
+                    is_active: true,
+                    created_at: now.clone(),
+                    updated_at: now,
+                };
+
+                let result = with_transaction(db, move |tx| {
+                    SQLiteCatalogRepository::insert_company_in_tx(tx, &entity)?;
+                    let payload = serde_json::to_string(&entity)
+                        .map_err(|e| crate::db::errors::DbError::ValidationError(format!("Failed to serialize company for sync: {e}")))?;
+                    let sync_dto = EnqueueOfflineEventDto {
+                        client_event_id: Some(entity.id.clone()),
+                        terminal_id: terminal_id.clone(),
+                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                        branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                        event_type: "COMPANY_CREATED".to_string(),
+                        payload,
+                    };
+                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+                    Ok(entity)
+                }).await?;
+                Ok(result)
+            }
+        }
     }
 
     pub async fn get_company(&self, id: &str) -> AppResult<Company> {
@@ -167,7 +328,48 @@ impl CatalogService {
         }
 
         let id = Uuid::new_v4().to_string();
-        self.repo.create_quality(&id, &dto).await
+
+        match &self.repo {
+            CatalogRepository::Postgres(_) => self.repo.create_quality(&id, &dto).await,
+            CatalogRepository::SQLite(_) => {
+                let db = self.db.as_ref().expect("SQLite database connection required");
+                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+                let terminal_id = current_terminal.id;
+
+                let now = chrono::Utc::now().to_rfc3339();
+                let code = dto.code.as_deref().unwrap_or(&dto.name)
+                    .trim()
+                    .to_uppercase()
+                    .replace(|c: char| !c.is_alphanumeric(), "_");
+                let entity = Quality {
+                    id: id.clone(),
+                    name: dto.name.trim().to_string(),
+                    code,
+                    description: dto.description.clone(),
+                    is_active: true,
+                    created_at: now.clone(),
+                    updated_at: now,
+                };
+
+                let result = with_transaction(db, move |tx| {
+                    SQLiteCatalogRepository::insert_quality_in_tx(tx, &entity)?;
+                    let payload = serde_json::to_string(&entity)
+                        .map_err(|e| crate::db::errors::DbError::ValidationError(format!("Failed to serialize quality for sync: {e}")))?;
+                    let sync_dto = EnqueueOfflineEventDto {
+                        client_event_id: Some(entity.id.clone()),
+                        terminal_id: terminal_id.clone(),
+                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                        branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                        event_type: "QUALITY_CREATED".to_string(),
+                        payload,
+                    };
+                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+                    Ok(entity)
+                }).await?;
+                Ok(result)
+            }
+        }
     }
 
     pub async fn get_quality(&self, id: &str) -> AppResult<Quality> {
@@ -195,7 +397,48 @@ impl CatalogService {
         }
 
         let id = Uuid::new_v4().to_string();
-        self.repo.create_color(&id, &dto).await
+
+        match &self.repo {
+            CatalogRepository::Postgres(_) => self.repo.create_color(&id, &dto).await,
+            CatalogRepository::SQLite(_) => {
+                let db = self.db.as_ref().expect("SQLite database connection required");
+                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+                let terminal_id = current_terminal.id;
+
+                let now = chrono::Utc::now().to_rfc3339();
+                let code = dto.code.as_deref().unwrap_or(&dto.name)
+                    .trim()
+                    .to_uppercase()
+                    .replace(|c: char| !c.is_alphanumeric(), "_");
+                let entity = Color {
+                    id: id.clone(),
+                    name: dto.name.trim().to_string(),
+                    code,
+                    description: dto.description.clone(),
+                    is_active: true,
+                    created_at: now.clone(),
+                    updated_at: now,
+                };
+
+                let result = with_transaction(db, move |tx| {
+                    SQLiteCatalogRepository::insert_color_in_tx(tx, &entity)?;
+                    let payload = serde_json::to_string(&entity)
+                        .map_err(|e| crate::db::errors::DbError::ValidationError(format!("Failed to serialize color for sync: {e}")))?;
+                    let sync_dto = EnqueueOfflineEventDto {
+                        client_event_id: Some(entity.id.clone()),
+                        terminal_id: terminal_id.clone(),
+                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                        branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                        event_type: "COLOR_CREATED".to_string(),
+                        payload,
+                    };
+                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+                    Ok(entity)
+                }).await?;
+                Ok(result)
+            }
+        }
     }
 
     pub async fn get_color(&self, id: &str) -> AppResult<Color> {
