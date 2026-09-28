@@ -704,6 +704,211 @@ impl ChangeApplier {
                     ).map_err(|e| DbError::QueryError(format!("Failed to insert supplier payment ledger entry: {e}")))?;
                 }
             }
+            // ── SYNC-H1: Manual inventory operation ──────────────────────────────────
+            "INVENTORY_OPERATION_RECORDED" => {
+                let dto: crate::domain::inventory::InventoryOperationSyncEventDto =
+                    match serde_json::from_str(&change.payload) {
+                        Ok(p) => p,
+                        Err(e) => return Err(DbError::ValidationError(format!(
+                            "Invalid INVENTORY_OPERATION_RECORDED payload: {e}"
+                        ))),
+                    };
+
+                // Idempotency: operation_id is stored as reference_id on the movement record.
+                let already_applied: bool = tx.query_row(
+                    "SELECT 1 FROM stock_movements WHERE reference_id = ?1 LIMIT 1",
+                    params![dto.operation_id],
+                    |_| Ok(true),
+                ).unwrap_or(false);
+
+                if !already_applied {
+                    // Auto-heal product and source branch so the movement can reference them.
+                    Self::auto_heal_product_in_tx(tx, &dto.product_id)?;
+                    Self::auto_heal_branch_in_tx(tx, &dto.branch_id)?;
+
+                    let now = dto.created_at.clone();
+
+                    match dto.operation_type.as_str() {
+                        "INCREASE" => {
+                            let prev =
+                                crate::repositories::SQLiteInventoryRepository::get_stock_in_tx(
+                                    tx, &dto.product_id, &dto.branch_id,
+                                )?;
+                            let new_qty = prev + dto.quantity;
+                            crate::repositories::SQLiteInventoryRepository::set_stock_in_tx(
+                                tx, &dto.product_id, &dto.branch_id, new_qty, &now,
+                            )?;
+                            crate::repositories::SQLiteInventoryRepository::insert_movement_in_tx(
+                                tx,
+                                &crate::domain::inventory::StockMovement {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    product_id: dto.product_id.clone(),
+                                    branch_id: dto.branch_id.clone(),
+                                    movement_type: crate::domain::inventory::StockMovementType::In,
+                                    quantity: dto.quantity,
+                                    previous_stock: prev,
+                                    resulting_stock: new_qty,
+                                    reason: dto.reason.clone(),
+                                    performed_by: dto.performed_by.clone(),
+                                    reference_id: Some(dto.operation_id.clone()),
+                                    created_at: now.clone(),
+                                },
+                            )?;
+                        }
+
+                        "DECREASE" => {
+                            let prev =
+                                crate::repositories::SQLiteInventoryRepository::get_stock_in_tx(
+                                    tx, &dto.product_id, &dto.branch_id,
+                                )?;
+                            if prev < dto.quantity {
+                                return Err(DbError::ConstraintViolation(format!(
+                                    "SYNC-H1 DECREASE: insufficient stock for product '{}' branch '{}': \
+                                     have {prev}, need {}",
+                                    dto.product_id, dto.branch_id, dto.quantity
+                                )));
+                            }
+                            let new_qty = prev - dto.quantity;
+                            crate::repositories::SQLiteInventoryRepository::set_stock_in_tx(
+                                tx, &dto.product_id, &dto.branch_id, new_qty, &now,
+                            )?;
+                            crate::repositories::SQLiteInventoryRepository::insert_movement_in_tx(
+                                tx,
+                                &crate::domain::inventory::StockMovement {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    product_id: dto.product_id.clone(),
+                                    branch_id: dto.branch_id.clone(),
+                                    movement_type: crate::domain::inventory::StockMovementType::Out,
+                                    quantity: dto.quantity,
+                                    previous_stock: prev,
+                                    resulting_stock: new_qty,
+                                    reason: dto.reason.clone(),
+                                    performed_by: dto.performed_by.clone(),
+                                    reference_id: Some(dto.operation_id.clone()),
+                                    created_at: now.clone(),
+                                },
+                            )?;
+                        }
+
+                        "ADJUST" => {
+                            let target = dto.target_quantity.ok_or_else(|| {
+                                DbError::ValidationError(
+                                    "SYNC-H1 ADJUST: missing target_quantity in payload".to_string(),
+                                )
+                            })?;
+                            let prev =
+                                crate::repositories::SQLiteInventoryRepository::get_stock_in_tx(
+                                    tx, &dto.product_id, &dto.branch_id,
+                                )?;
+                            // Apply authoritative target quantity directly.
+                            crate::repositories::SQLiteInventoryRepository::set_stock_in_tx(
+                                tx, &dto.product_id, &dto.branch_id, target, &now,
+                            )?;
+                            let delta = (target - prev).unsigned_abs() as i64;
+                            if delta > 0 {
+                                crate::repositories::SQLiteInventoryRepository::insert_movement_in_tx(
+                                    tx,
+                                    &crate::domain::inventory::StockMovement {
+                                        id: uuid::Uuid::new_v4().to_string(),
+                                        product_id: dto.product_id.clone(),
+                                        branch_id: dto.branch_id.clone(),
+                                        movement_type:
+                                            crate::domain::inventory::StockMovementType::Adjustment,
+                                        quantity: delta,
+                                        previous_stock: prev,
+                                        resulting_stock: target,
+                                        reason: dto.reason.clone(),
+                                        performed_by: dto.performed_by.clone(),
+                                        reference_id: Some(dto.operation_id.clone()),
+                                        created_at: now.clone(),
+                                    },
+                                )?;
+                            }
+                        }
+
+                        "TRANSFER" => {
+                            let to_branch_id = dto.to_branch_id.as_deref().ok_or_else(|| {
+                                DbError::ValidationError(
+                                    "SYNC-H1 TRANSFER: missing to_branch_id in payload".to_string(),
+                                )
+                            })?;
+                            // Auto-heal destination branch.
+                            Self::auto_heal_branch_in_tx(tx, to_branch_id)?;
+
+                            let src_prev =
+                                crate::repositories::SQLiteInventoryRepository::get_stock_in_tx(
+                                    tx, &dto.product_id, &dto.branch_id,
+                                )?;
+                            if src_prev < dto.quantity {
+                                return Err(DbError::ConstraintViolation(format!(
+                                    "SYNC-H1 TRANSFER: insufficient stock for product '{}' \
+                                     source branch '{}': have {src_prev}, need {}",
+                                    dto.product_id, dto.branch_id, dto.quantity
+                                )));
+                            }
+                            let dest_prev =
+                                crate::repositories::SQLiteInventoryRepository::get_stock_in_tx(
+                                    tx, &dto.product_id, to_branch_id,
+                                )?;
+
+                            let src_new = src_prev - dto.quantity;
+                            let dest_new = dest_prev + dto.quantity;
+
+                            crate::repositories::SQLiteInventoryRepository::set_stock_in_tx(
+                                tx, &dto.product_id, &dto.branch_id, src_new, &now,
+                            )?;
+                            crate::repositories::SQLiteInventoryRepository::set_stock_in_tx(
+                                tx, &dto.product_id, to_branch_id, dest_new, &now,
+                            )?;
+
+                            // TRANSFER_OUT from source
+                            crate::repositories::SQLiteInventoryRepository::insert_movement_in_tx(
+                                tx,
+                                &crate::domain::inventory::StockMovement {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    product_id: dto.product_id.clone(),
+                                    branch_id: dto.branch_id.clone(),
+                                    movement_type:
+                                        crate::domain::inventory::StockMovementType::TransferOut,
+                                    quantity: dto.quantity,
+                                    previous_stock: src_prev,
+                                    resulting_stock: src_new,
+                                    reason: dto.reason.clone(),
+                                    performed_by: dto.performed_by.clone(),
+                                    reference_id: Some(dto.operation_id.clone()),
+                                    created_at: now.clone(),
+                                },
+                            )?;
+
+                            // TRANSFER_IN to destination
+                            crate::repositories::SQLiteInventoryRepository::insert_movement_in_tx(
+                                tx,
+                                &crate::domain::inventory::StockMovement {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    product_id: dto.product_id.clone(),
+                                    branch_id: to_branch_id.to_string(),
+                                    movement_type:
+                                        crate::domain::inventory::StockMovementType::TransferIn,
+                                    quantity: dto.quantity,
+                                    previous_stock: dest_prev,
+                                    resulting_stock: dest_new,
+                                    reason: dto.reason.clone(),
+                                    performed_by: dto.performed_by.clone(),
+                                    reference_id: Some(dto.operation_id.clone()),
+                                    created_at: now.clone(),
+                                },
+                            )?;
+                        }
+
+                        other => {
+                            return Err(DbError::ValidationError(format!(
+                                "SYNC-H1: unknown operation_type '{other}' in \
+                                 INVENTORY_OPERATION_RECORDED payload"
+                            )));
+                        }
+                    }
+                }
+            }
             _ => {
                 // Forward-compatible ignore for future business event types
             }

@@ -1936,6 +1936,67 @@ async fn sync_push_handler(
                 }
             }
 
+            // ── SYNC-H1: Manual inventory operation ──────────────────────────────
+            if event.event_type == "INVENTORY_OPERATION_RECORDED" {
+                let inv_event: niazi_mobile_mart_lib::domain::inventory::InventoryOperationSyncEventDto =
+                    match serde_json::from_str(&event.payload) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            return (
+                                StatusCode::BAD_REQUEST,
+                                Json(json!({
+                                    "error": "INVALID_PAYLOAD",
+                                    "message": format!("Invalid INVENTORY_OPERATION_RECORDED payload: {e}")
+                                })),
+                            );
+                        }
+                    };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresInventoryRepository::record_inventory_operation_tx(
+                    &mut tx,
+                    &inv_event,
+                )
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    let (status, code) = if e.to_string().contains("not found") || e.to_string().contains("Insufficient") {
+                        (StatusCode::BAD_REQUEST, "DEPENDENCY_NOT_MET")
+                    } else {
+                        (StatusCode::INTERNAL_SERVER_ERROR, "SERVER_ERROR")
+                    };
+                    return (
+                        status,
+                        Json(json!({
+                            "error": code,
+                            "message": format!("Failed to project INVENTORY_OPERATION_RECORDED centrally: {e}")
+                        })),
+                    );
+                }
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "INVENTORY_OPERATION_RECORDED",
+                    "INVENTORY_OPERATION",
+                    &inv_event.operation_id,
+                    &event.payload,
+                )
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append INVENTORY_OPERATION_RECORDED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
             if event.event_type == "CUSTOMER_CREATED" {
                 let customer: niazi_mobile_mart_lib::domain::customer::Customer = match serde_json::from_str(&event.payload) {
                     Ok(c) => c,

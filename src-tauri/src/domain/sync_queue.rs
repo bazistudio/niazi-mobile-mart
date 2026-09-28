@@ -62,6 +62,7 @@ pub const KNOWN_SERVER_EVENT_TYPES: &[&str] = &[
     "CUSTOMER_CREATED",
     "CUSTOMER_UPDATED",
     "CUSTOMER_PAYMENT_RECORDED", // SYNC-B2
+    "INVENTORY_OPERATION_RECORDED", // SYNC-H1
     crate::domain::party::PARTY_UPSERTED_EVENT, // "PARTY_UPSERTED"
 ];
 
@@ -213,7 +214,8 @@ mod tests {
             "SUPPLIER_PAYMENT_RECORDED",
             "CUSTOMER_CREATED",
             "CUSTOMER_UPDATED",
-            "CUSTOMER_PAYMENT_RECORDED", // SYNC-B2
+            "CUSTOMER_PAYMENT_RECORDED",      // SYNC-B2
+            "INVENTORY_OPERATION_RECORDED",   // SYNC-H1
             "PARTY_UPSERTED",
         ];
         for expected_type in expected_valid {
@@ -288,8 +290,9 @@ mod tests {
 
         // Unknown types fail the guard (would hit FAILED_PERMANENT / continue).
         assert!(!guard_passes("UNKNOWN_TEST_EVENT"));
-        assert!(!guard_passes("INVENTORY_ADJUSTED")); // not yet implemented
-        assert!(!guard_passes("STOCK_TRANSFER"));     // not yet implemented
+        // Old candidate names that were never adopted — must remain absent.
+        assert!(!guard_passes("INVENTORY_ADJUSTED")); // rejected name; SYNC-H1 uses INVENTORY_OPERATION_RECORDED
+        assert!(!guard_passes("STOCK_TRANSFER"));     // rejected name; SYNC-H1 uses INVENTORY_OPERATION_RECORDED
         assert!(!guard_passes(""));
     }
 
@@ -327,8 +330,8 @@ mod tests {
     fn test_sync_b1_registry_size_regression() {
         assert_eq!(
             KNOWN_SERVER_EVENT_TYPES.len(),
-            15,
-            "KNOWN_SERVER_EVENT_TYPES size changed from 15.  \
+            16,
+            "KNOWN_SERVER_EVENT_TYPES size changed from 16.  \
              If you added a new event type, update this count AND add the \
              corresponding handler in server.rs sync_push_handler."
         );
@@ -446,6 +449,178 @@ mod tests {
         assert_eq!(parsed["payment_id"], "pay_test");
         assert_eq!(parsed["amount_paid"], 1000);
         assert_eq!(parsed["customer_id"], "cus_test");
+        // event is in the known registry (SYNC-B1 guard will pass)
+        assert!(KNOWN_SERVER_EVENT_TYPES.contains(&enqueue_dto.event_type.as_str()));
+    }
+
+    // -------------------------------------------------------------------------
+    // SYNC-H1 — Manual inventory operation registry tests
+    // -------------------------------------------------------------------------
+
+    /// SYNC-H1 Test 1 — INVENTORY_OPERATION_RECORDED is in the registry.
+    ///
+    /// After Phase 3 implementation, this event MUST be recognised by the
+    /// Phase 1 guard rather than rejected as UNKNOWN_EVENT_TYPE.
+    #[test]
+    fn test_sync_h1_inventory_operation_in_registry() {
+        assert!(
+            KNOWN_SERVER_EVENT_TYPES.contains(&"INVENTORY_OPERATION_RECORDED"),
+            "INVENTORY_OPERATION_RECORDED must be in KNOWN_SERVER_EVENT_TYPES \
+             so the Phase 1 guard does not reject it as UNKNOWN_EVENT_TYPE"
+        );
+    }
+
+    /// SYNC-H1 Test 2 — Guard passes for INVENTORY_OPERATION_RECORDED.
+    #[test]
+    fn test_sync_h1_guard_passes_for_inventory_operation() {
+        let guard_passes = |event_type: &str| -> bool {
+            KNOWN_SERVER_EVENT_TYPES.contains(&event_type)
+        };
+        assert!(
+            guard_passes("INVENTORY_OPERATION_RECORDED"),
+            "INVENTORY_OPERATION_RECORDED must pass the SYNC-B1 registry guard \
+             and proceed to the server handler, not fall through to FAILED_PERMANENT"
+        );
+    }
+
+    /// SYNC-H1 Test 3 — InventoryOperationSyncEventDto serialises correctly (INCREASE).
+    ///
+    /// Confirms round-trip JSON serialisation for the INCREASE operation type.
+    #[test]
+    fn test_sync_h1_inventory_operation_payload_round_trip_increase() {
+        use crate::domain::inventory::InventoryOperationSyncEventDto;
+
+        let dto = InventoryOperationSyncEventDto {
+            operation_id: "op_abc123".to_string(),
+            operation_type: "INCREASE".to_string(),
+            product_id: "prod_x".to_string(),
+            branch_id: "branch_main".to_string(),
+            to_branch_id: None,
+            quantity: 50,
+            target_quantity: None,
+            reason: Some("Opening stock".to_string()),
+            performed_by: Some("usr_admin".to_string()),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let json = serde_json::to_string(&dto).expect("InventoryOperationSyncEventDto must serialise");
+        assert!(json.contains("op_abc123"));
+        assert!(json.contains("INCREASE"));
+
+        let decoded: InventoryOperationSyncEventDto =
+            serde_json::from_str(&json).expect("InventoryOperationSyncEventDto must deserialise");
+        assert_eq!(decoded, dto);
+        assert_eq!(decoded.quantity, 50);
+        assert_eq!(decoded.to_branch_id, None);
+        assert_eq!(decoded.target_quantity, None);
+    }
+
+    /// SYNC-H1 Test 4 — InventoryOperationSyncEventDto serialises correctly (ADJUST).
+    ///
+    /// ADJUST carries both `quantity` (absolute delta) and `target_quantity`
+    /// (authoritative resulting stock).  Both must round-trip.
+    #[test]
+    fn test_sync_h1_inventory_operation_payload_round_trip_adjust() {
+        use crate::domain::inventory::InventoryOperationSyncEventDto;
+
+        let dto = InventoryOperationSyncEventDto {
+            operation_id: "op_adj001".to_string(),
+            operation_type: "ADJUST".to_string(),
+            product_id: "prod_y".to_string(),
+            branch_id: "branch_main".to_string(),
+            to_branch_id: None,
+            quantity: 10,            // absolute delta |target - previous|
+            target_quantity: Some(90), // authoritative resulting stock
+            reason: "Annual stocktake correction".to_string().into(),
+            performed_by: None,
+            created_at: "2026-03-15T08:00:00Z".to_string(),
+        };
+
+        let json = serde_json::to_string(&dto).expect("InventoryOperationSyncEventDto must serialise");
+        assert!(json.contains("ADJUST"));
+        assert!(json.contains("op_adj001"));
+
+        let decoded: InventoryOperationSyncEventDto =
+            serde_json::from_str(&json).expect("InventoryOperationSyncEventDto must deserialise");
+        assert_eq!(decoded, dto);
+        assert_eq!(decoded.quantity, 10);
+        assert_eq!(decoded.target_quantity, Some(90));
+    }
+
+    /// SYNC-H1 Test 5 — InventoryOperationSyncEventDto serialises correctly (TRANSFER).
+    ///
+    /// TRANSFER carries both `branch_id` (source) and `to_branch_id` (destination).
+    #[test]
+    fn test_sync_h1_inventory_operation_payload_round_trip_transfer() {
+        use crate::domain::inventory::InventoryOperationSyncEventDto;
+
+        let dto = InventoryOperationSyncEventDto {
+            operation_id: "op_trf001".to_string(),
+            operation_type: "TRANSFER".to_string(),
+            product_id: "prod_z".to_string(),
+            branch_id: "branch_main".to_string(),
+            to_branch_id: Some("branch_second".to_string()),
+            quantity: 20,
+            target_quantity: None,
+            reason: Some("Branch restock".to_string()),
+            performed_by: Some("usr_admin".to_string()),
+            created_at: "2026-06-01T10:00:00Z".to_string(),
+        };
+
+        let json = serde_json::to_string(&dto).expect("InventoryOperationSyncEventDto must serialise");
+        assert!(json.contains("TRANSFER"));
+        assert!(json.contains("branch_second"));
+
+        let decoded: InventoryOperationSyncEventDto =
+            serde_json::from_str(&json).expect("InventoryOperationSyncEventDto must deserialise");
+        assert_eq!(decoded, dto);
+        assert_eq!(decoded.to_branch_id, Some("branch_second".to_string()));
+        assert_eq!(decoded.target_quantity, None);
+    }
+
+    /// SYNC-H1 Test 6 — EnqueueOfflineEventDto shape for INVENTORY_OPERATION_RECORDED.
+    ///
+    /// Confirms that an inventory operation outbox entry carries the correct
+    /// event_type string and a non-empty JSON payload containing `operation_id`
+    /// and `operation_type`.  Does NOT require a database connection.
+    #[test]
+    fn test_sync_h1_enqueue_dto_shape() {
+        use crate::domain::inventory::InventoryOperationSyncEventDto;
+        use crate::domain::sync_queue::EnqueueOfflineEventDto;
+
+        let payload_dto = InventoryOperationSyncEventDto {
+            operation_id: "op_enq001".to_string(),
+            operation_type: "DECREASE".to_string(),
+            product_id: "prod_a".to_string(),
+            branch_id: crate::domain::organization::DEFAULT_MAIN_BRANCH_ID.to_string(),
+            to_branch_id: None,
+            quantity: 5,
+            target_quantity: None,
+            reason: Some("Damaged goods".to_string()),
+            performed_by: None,
+            created_at: "2026-07-01T12:00:00Z".to_string(),
+        };
+
+        let enqueue_dto = EnqueueOfflineEventDto {
+            client_event_id: Some(uuid::Uuid::new_v4().to_string()),
+            terminal_id: "term_001".to_string(),
+            organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
+            branch_id: crate::domain::organization::DEFAULT_MAIN_BRANCH_ID.to_string(),
+            event_type: "INVENTORY_OPERATION_RECORDED".to_string(),
+            payload: serde_json::to_string(&payload_dto).unwrap(),
+        };
+
+        // event_type must be exactly INVENTORY_OPERATION_RECORDED
+        assert_eq!(enqueue_dto.event_type, "INVENTORY_OPERATION_RECORDED");
+        // payload must be non-empty valid JSON
+        assert!(!enqueue_dto.payload.is_empty());
+        let parsed: serde_json::Value = serde_json::from_str(&enqueue_dto.payload).unwrap();
+        assert_eq!(parsed["operation_id"], "op_enq001");
+        assert_eq!(parsed["operation_type"], "DECREASE");
+        assert_eq!(parsed["quantity"], 5);
+        assert_eq!(parsed["product_id"], "prod_a");
+        assert!(parsed["to_branch_id"].is_null());
+        assert!(parsed["target_quantity"].is_null());
         // event is in the known registry (SYNC-B1 guard will pass)
         assert!(KNOWN_SERVER_EVENT_TYPES.contains(&enqueue_dto.event_type.as_str()));
     }
