@@ -1579,29 +1579,153 @@ async fn sync_push_handler(
                     }
                 };
 
-                // Auto-heal missing master data for the central database
+                // SYNC-H3: Auto-heal missing master data for the central database and emit
+                // corresponding change_log events so downstream PCs can receive the catalog entity.
+                // Each INSERT uses ON CONFLICT DO NOTHING for idempotency; rows_affected() > 0
+                // distinguishes a new insertion from a no-op, so we only emit change_log when the
+                // entity was actually created.  All operations share the outer transaction — if any
+                // step fails the entire PRODUCT_UPDATED transaction is rolled back, preventing the
+                // split-brain state (catalog row exists, change_log missing).
                 let now = chrono::Utc::now().to_rfc3339();
-                sqlx::query("INSERT INTO categories (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Category', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
-                    .bind(&product.category_id).bind(&now).execute(&mut *tx).await.ok();
+
+                // Macro mirrors the PRODUCT_CREATED auto_heal! macro: structured identically so
+                // future readers can cross-reference the two handlers.
+                macro_rules! auto_heal_updated {
+                    ($sql:expr, $id:expr, $name_val:expr, $domain_type:ident, $event_type:expr, $entity_type:expr) => {
+                        match sqlx::query($sql).bind($id).bind(&now).execute(&mut *tx).await {
+                            Ok(result) => {
+                                if result.rows_affected() > 0 {
+                                    // Catalog entity did not exist — build the canonical payload and
+                                    // append a change_log event so other PCs can pull it.
+                                    let entity = niazi_mobile_mart_lib::domain::catalog::$domain_type {
+                                        id: $id.clone(),
+                                        name: $name_val.to_string(),
+                                        code: $id.clone(),
+                                        description: None,
+                                        is_active: true,
+                                        created_at: now.clone(),
+                                        updated_at: now.clone(),
+                                    };
+                                    let payload = serde_json::to_string(&entity).unwrap();
+                                    if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                                        &mut tx,
+                                        &event.organization_id,
+                                        &event.branch_id,
+                                        None,
+                                        $event_type,
+                                        $entity_type,
+                                        $id,
+                                        &payload,
+                                    ).await {
+                                        let _ = tx.rollback().await;
+                                        return (
+                                            StatusCode::INTERNAL_SERVER_ERROR,
+                                            Json(json!({
+                                                "error": "SERVER_ERROR",
+                                                "message": format!("Failed to append {} to change_log during PRODUCT_UPDATED auto-heal: {}", $event_type, e)
+                                            })),
+                                        );
+                                    }
+                                }
+                                // rows_affected() == 0 → entity already exists; no duplicate change_log emitted.
+                            }
+                            Err(e) => {
+                                let _ = tx.rollback().await;
+                                return (
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    Json(json!({
+                                        "error": "SERVER_ERROR",
+                                        "message": format!("Failed to auto-heal master data {} during PRODUCT_UPDATED: {}", $entity_type, e)
+                                    })),
+                                );
+                            }
+                        }
+                    };
+                }
+
+                auto_heal_updated!(
+                    "INSERT INTO categories (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Category', $1, 1, $2, $2) ON CONFLICT DO NOTHING",
+                    &product.category_id, "Auto-Synced Category", Category, "CATEGORY_CREATED", "CATEGORY"
+                );
+
                 if let Some(brand_id) = &product.brand_id {
-                    sqlx::query("INSERT INTO brands (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Brand', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
-                        .bind(brand_id).bind(&now).execute(&mut *tx).await.ok();
+                    auto_heal_updated!(
+                        "INSERT INTO brands (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Brand', $1, 1, $2, $2) ON CONFLICT DO NOTHING",
+                        brand_id, "Auto-Synced Brand", Brand, "BRAND_CREATED", "BRAND"
+                    );
                 }
-                if let Some(unit_id) = &product.unit_id {
-                    sqlx::query("INSERT INTO units (id, name, symbol, conversion_factor, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Unit', $1, 1, 1, $2, $2) ON CONFLICT DO NOTHING")
-                        .bind(unit_id).bind(&now).execute(&mut *tx).await.ok();
-                }
+
                 if let Some(company_id) = &product.company_id {
-                    sqlx::query("INSERT INTO companies (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Company', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
-                        .bind(company_id).bind(&now).execute(&mut *tx).await.ok();
+                    auto_heal_updated!(
+                        "INSERT INTO companies (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Company', $1, 1, $2, $2) ON CONFLICT DO NOTHING",
+                        company_id, "Auto-Synced Company", Company, "COMPANY_CREATED", "COMPANY"
+                    );
                 }
+
                 if let Some(quality_id) = &product.quality_id {
-                    sqlx::query("INSERT INTO qualities (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Quality', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
-                        .bind(quality_id).bind(&now).execute(&mut *tx).await.ok();
+                    auto_heal_updated!(
+                        "INSERT INTO qualities (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Quality', $1, 1, $2, $2) ON CONFLICT DO NOTHING",
+                        quality_id, "Auto-Synced Quality", Quality, "QUALITY_CREATED", "QUALITY"
+                    );
                 }
+
                 if let Some(color_id) = &product.color_id {
-                    sqlx::query("INSERT INTO colors (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Color', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
-                        .bind(color_id).bind(&now).execute(&mut *tx).await.ok();
+                    auto_heal_updated!(
+                        "INSERT INTO colors (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Color', $1, 1, $2, $2) ON CONFLICT DO NOTHING",
+                        color_id, "Auto-Synced Color", Color, "COLOR_CREATED", "COLOR"
+                    );
+                }
+
+                // Unit uses a separate inline handler because its struct layout differs from
+                // the other catalog entities (no `code` field; has `symbol` + `conversion_factor`).
+                if let Some(unit_id) = &product.unit_id {
+                    match sqlx::query("INSERT INTO units (id, name, symbol, conversion_factor, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Unit', $1, 1, 1, $2, $2) ON CONFLICT DO NOTHING")
+                        .bind(unit_id).bind(&now).execute(&mut *tx).await
+                    {
+                        Ok(result) => {
+                            if result.rows_affected() > 0 {
+                                let unit = niazi_mobile_mart_lib::domain::catalog::Unit {
+                                    id: unit_id.clone(),
+                                    name: "Auto-Synced Unit".to_string(),
+                                    symbol: Some(unit_id.clone()),
+                                    conversion_factor: 1,
+                                    is_active: true,
+                                    created_at: now.clone(),
+                                    updated_at: now.clone(),
+                                };
+                                let payload = serde_json::to_string(&unit).unwrap();
+                                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                                    &mut tx,
+                                    &event.organization_id,
+                                    &event.branch_id,
+                                    None,
+                                    "UNIT_CREATED",
+                                    "UNIT",
+                                    unit_id,
+                                    &payload,
+                                ).await {
+                                    let _ = tx.rollback().await;
+                                    return (
+                                        StatusCode::INTERNAL_SERVER_ERROR,
+                                        Json(json!({
+                                            "error": "SERVER_ERROR",
+                                            "message": format!("Failed to append UNIT_CREATED to change_log during PRODUCT_UPDATED auto-heal: {e}")
+                                        })),
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({
+                                    "error": "SERVER_ERROR",
+                                    "message": format!("Failed to auto-heal master data UNIT during PRODUCT_UPDATED: {e}")
+                                })),
+                            );
+                        }
+                    }
                 }
 
                 let projected_product = match niazi_mobile_mart_lib::repositories::PostgresProductRepository::update_product_tx(
