@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { SlideOverDrawer } from '@/components/ui/SlideOverDrawer';
 import { FloatingLabelInput } from '@/components/ui/FloatingLabelInput';
 import { partyApi } from '@/services/party.api';
+import { OPENING_BALANCE_NOT_SUPPORTED_MESSAGE } from '@/features/parties/domain/party.domain';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 import { invalidateQueries } from '@/lib/react-query/invalidate';
 
@@ -27,7 +28,7 @@ export const PartyFormDrawer: React.FC<PartyFormDrawerProps> = ({ isOpen, onClos
     companyName: '',
     email: '',
     address: '',
-    type: 'BOTH',
+    type: 'CUSTOMER',
     openingBalance: 0,
     openingBalanceType: 'DR'
   });
@@ -40,12 +41,12 @@ export const PartyFormDrawer: React.FC<PartyFormDrawerProps> = ({ isOpen, onClos
         companyName: editingParty.companyName || '',
         email: editingParty.email || '',
         address: editingParty.address || '',
-        type: editingParty.type || 'BOTH',
+        type: editingParty.type || 'CUSTOMER',
         openingBalance: editingParty.openingBalance || 0,
         openingBalanceType: editingParty.openingBalanceType || 'DR'
       });
     } else if (isOpen) {
-      setFormData({ contactPerson: '', phone: '', companyName: '', email: '', address: '', type: 'BOTH', openingBalance: 0, openingBalanceType: 'DR' });
+      setFormData({ contactPerson: '', phone: '', companyName: '', email: '', address: '', type: 'CUSTOMER', openingBalance: 0, openingBalanceType: 'DR' });
     }
   }, [editingParty, isOpen]);
 
@@ -76,11 +77,12 @@ export const PartyFormDrawer: React.FC<PartyFormDrawerProps> = ({ isOpen, onClos
     onSuccess: () => {
       // invalidateQueries.parties does not exist yet so we invalidate directly
       queryClient.invalidateQueries({ queryKey: ['parties'] });
+      queryClient.invalidateQueries({ queryKey: ['partyLedger'] });
       toast.success(`Party ${editingParty ? 'updated' : 'added'} successfully!`);
       onClose();
     },
     onError: (error: any) => {
-      toast.error(error?.response?.data?.message || `Failed to ${editingParty ? 'update' : 'add'} party`);
+      toast.error(error?.message || error?.response?.data?.message || `Failed to ${editingParty ? 'update' : 'add'} party`);
     }
   });
 
@@ -95,14 +97,9 @@ export const PartyFormDrawer: React.FC<PartyFormDrawerProps> = ({ isOpen, onClos
       return;
     }
     
-    saveMutation.mutate({
-      ...formData,
-      // Pass opening balance only when creating
-      ...(editingParty ? {} : {
-        openingBalance: Number(formData.openingBalance),
-        openingBalanceType: formData.openingBalanceType
-      })
-    });
+    // Opening balances are not supported yet (payments & ledger phase), so they are not sent.
+    const { openingBalance: _openingBalance, openingBalanceType: _openingBalanceType, ...partyInput } = formData;
+    saveMutation.mutate(partyInput);
   };
 
   return (
@@ -156,6 +153,23 @@ export const PartyFormDrawer: React.FC<PartyFormDrawerProps> = ({ isOpen, onClos
         <section>
           <h4 className="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wider mb-4 border-b border-gray-200 dark:border-gray-800 pb-2">Business Details</h4>
           <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Party Type</label>
+              <select
+                className="block w-full px-4 py-2.5 h-[52px] border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-1 focus:ring-[#006970] disabled:opacity-60"
+                value={formData.type}
+                onChange={(e) => setFormData({...formData, type: e.target.value})}
+                disabled={!!editingParty}
+              >
+                <option value="CUSTOMER">Customer</option>
+                <option value="SUPPLIER">Supplier</option>
+                <option value="BOTH">Both (Customer &amp; Supplier)</option>
+              </select>
+              {editingParty && (
+                <p className="text-xs text-gray-500 mt-1">Party type cannot be changed yet.</p>
+              )}
+            </div>
+
             <FloatingLabelInput 
               label="Company Name" 
               value={formData.companyName}
@@ -170,7 +184,8 @@ export const PartyFormDrawer: React.FC<PartyFormDrawerProps> = ({ isOpen, onClos
 
             {!editingParty && (
               <div className="mt-6 p-4 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-800/50">
-                <h5 className="text-sm font-semibold mb-3">Opening Balance</h5>
+                <h5 className="text-sm font-semibold mb-1">Opening Balance</h5>
+                <p className="text-xs text-gray-500 mb-3">{OPENING_BALANCE_NOT_SUPPORTED_MESSAGE}</p>
                 <div className="flex gap-4">
                   <div className="flex-1">
                     <FloatingLabelInput 
@@ -178,6 +193,7 @@ export const PartyFormDrawer: React.FC<PartyFormDrawerProps> = ({ isOpen, onClos
                       type="number"
                       value={formData.openingBalance}
                       onChange={e => setFormData({...formData, openingBalance: Number(e.target.value)})}
+                      disabled
                     />
                   </div>
                   <div className="w-1/3">
@@ -185,6 +201,7 @@ export const PartyFormDrawer: React.FC<PartyFormDrawerProps> = ({ isOpen, onClos
                       className="block w-full px-4 py-2.5 h-[52px] border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-1 focus:ring-[#006970]"
                       value={formData.openingBalanceType}
                       onChange={(e) => setFormData({...formData, openingBalanceType: e.target.value})}
+                      disabled
                     >
                       <option value="DR">Debit (They owe us)</option>
                       <option value="CR">Credit (We owe them)</option>

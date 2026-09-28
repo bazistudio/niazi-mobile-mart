@@ -843,6 +843,85 @@ pub const MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_sale_payments_sale_id ON sale_payments(sale_id);
         "#,
     },
+    // ── Phase 1.1: canonical Party identity ──────────────────────────────────
+    // Additive only. Each ALTER TABLE lives in its own migration because the
+    // runner tolerates "duplicate column name" by skipping the REST of a batch;
+    // one statement per migration keeps that tolerance safe.
+    Migration {
+        version: 18,
+        name: "018_parties_table",
+        up: r#"
+        CREATE TABLE IF NOT EXISTS parties (
+            id TEXT PRIMARY KEY CHECK(length(id) = 36),
+            display_name TEXT NOT NULL CHECK(length(trim(display_name)) > 0),
+            company_name TEXT,
+            phone TEXT NOT NULL DEFAULT '',
+            alternate_phone TEXT,
+            email TEXT,
+            address TEXT,
+            notes TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_parties_phone ON parties(phone);
+        CREATE INDEX IF NOT EXISTS idx_parties_display_name ON parties(display_name COLLATE NOCASE);
+        CREATE INDEX IF NOT EXISTS idx_parties_is_active ON parties(is_active);
+        "#,
+    },
+    Migration {
+        version: 19,
+        name: "019_customers_party_id",
+        up: r#"
+        ALTER TABLE customers ADD COLUMN party_id TEXT REFERENCES parties(id) ON DELETE RESTRICT;
+        "#,
+    },
+    Migration {
+        version: 20,
+        name: "020_suppliers_party_id",
+        up: r#"
+        ALTER TABLE suppliers ADD COLUMN party_id TEXT REFERENCES parties(id) ON DELETE RESTRICT;
+        "#,
+    },
+    Migration {
+        version: 21,
+        name: "021_parties_backfill",
+        up: r#"
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_party_id ON customers(party_id) WHERE party_id IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_suppliers_party_id ON suppliers(party_id) WHERE party_id IS NOT NULL;
+
+        -- Deterministic backfill (identical rule to PostgreSQL 007): party.id = role.id.
+        -- Backfilled parties use the sentinel updated_at '1970-01-01T00:00:00+00:00'
+        -- so any real later edit wins the updated_at guard.
+        INSERT OR IGNORE INTO parties (id, display_name, company_name, phone, alternate_phone, email, address, notes, is_active, created_at, updated_at)
+        SELECT c.id, COALESCE(NULLIF(trim(c.name), ''), c.customer_code), NULL, c.phone, c.alternate_phone, c.email, c.address, c.notes, c.is_active,
+               c.created_at, '1970-01-01T00:00:00+00:00'
+        FROM customers c
+        WHERE c.party_id IS NULL;
+
+        UPDATE customers
+        SET party_id = id
+        WHERE party_id IS NULL
+          AND EXISTS (SELECT 1 FROM parties p WHERE p.id = customers.id)
+          AND NOT EXISTS (SELECT 1 FROM customers o WHERE o.party_id = customers.id);
+
+        -- A supplier whose UUID equals a customer UUID is left unlinked (never merged silently).
+        INSERT OR IGNORE INTO parties (id, display_name, company_name, phone, alternate_phone, email, address, notes, is_active, created_at, updated_at)
+        SELECT s.id, COALESCE(NULLIF(trim(s.name), ''), s.supplier_code), NULL, s.phone, s.alternate_phone, s.email, s.address, s.notes, s.is_active,
+               s.created_at, '1970-01-01T00:00:00+00:00'
+        FROM suppliers s
+        WHERE s.party_id IS NULL
+          AND NOT EXISTS (SELECT 1 FROM customers c WHERE c.id = s.id);
+
+        UPDATE suppliers
+        SET party_id = id
+        WHERE party_id IS NULL
+          AND EXISTS (SELECT 1 FROM parties p WHERE p.id = suppliers.id)
+          AND NOT EXISTS (SELECT 1 FROM customers c WHERE c.id = suppliers.id)
+          AND NOT EXISTS (SELECT 1 FROM suppliers o WHERE o.party_id = suppliers.id);
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction
@@ -1657,5 +1736,90 @@ mod tests {
         // 5. Verify idempotency
         let second_run = MigrationRunner::run(&mut conn).unwrap();
         assert_eq!(second_run, 0);
+    }
+
+    #[test]
+    fn test_migrations_018_021_parties_foundation_backfill() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+        // Apply 001-017 exactly as an existing v1.2.34 terminal has them.
+        for m in &MIGRATIONS[0..17] {
+            conn.execute_batch(m.up).unwrap();
+            conn.execute(
+                "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, ?3)",
+                params![m.version, m.name, "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        }
+        assert_eq!(MIGRATIONS[16].version, 17);
+
+        let ts = "2026-02-01T00:00:00+00:00";
+        conn.execute(
+            "INSERT INTO customers (id, customer_code, name, phone, email, credit_limit, is_active, created_at, updated_at)
+             VALUES ('11111111-1111-4111-8111-111111111111', 'CUS-000001', 'Ali', '0300', 'a@x.pk', 5000, 1, ?1, ?1),
+                    ('22222222-2222-4222-8222-222222222222', 'CUS-000002', '  ', '0301', NULL, 0, 0, ?1, ?1)",
+            params![ts],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO suppliers (id, supplier_code, name, phone, credit_limit, is_active, created_at, updated_at)
+             VALUES ('33333333-3333-4333-8333-333333333333', 'SUP-000001', 'Hall Road Parts', '0302', 0, 1, ?1, ?1),
+                    ('11111111-1111-4111-8111-111111111111', 'SUP-000002', 'Colliding', '0303', 0, 1, ?1, ?1)",
+            params![ts],
+        )
+        .unwrap();
+
+        let applied = MigrationRunner::run(&mut conn).unwrap();
+        assert_eq!(applied, 4, "018-021 must apply on an existing 017 database");
+
+        let parties: i64 = conn.query_row("SELECT COUNT(*) FROM parties", [], |r| r.get(0)).unwrap();
+        assert_eq!(parties, 3, "2 customers + 1 non-colliding supplier");
+        let unlinked_customers: i64 = conn
+            .query_row("SELECT COUNT(*) FROM customers WHERE party_id IS NULL OR party_id <> id", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(unlinked_customers, 0);
+        let linked_supplier: Option<String> = conn
+            .query_row("SELECT party_id FROM suppliers WHERE supplier_code = 'SUP-000001'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(linked_supplier.as_deref(), Some("33333333-3333-4333-8333-333333333333"));
+        let colliding: Option<String> = conn
+            .query_row("SELECT party_id FROM suppliers WHERE supplier_code = 'SUP-000002'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(colliding, None, "a supplier sharing a customer UUID is never merged silently");
+
+        let blank_name: String = conn
+            .query_row("SELECT display_name FROM parties WHERE id = '22222222-2222-4222-8222-222222222222'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(blank_name, "CUS-000002");
+        let (name, credit, email): (String, i64, Option<String>) = conn
+            .query_row(
+                "SELECT name, credit_limit, email FROM customers WHERE id = '11111111-1111-4111-8111-111111111111'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((name.as_str(), credit, email.as_deref()), ("Ali", 5000, Some("a@x.pk")), "role data untouched");
+        let sentinel: i64 = conn
+            .query_row("SELECT COUNT(*) FROM parties WHERE updated_at = '1970-01-01T00:00:00+00:00'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(sentinel, 3);
+
+        // Constraints
+        assert!(conn
+            .execute("UPDATE customers SET party_id = '11111111-1111-4111-8111-111111111111' WHERE customer_code = 'CUS-000002'", [])
+            .is_err(), "one customer role per party");
+        assert!(conn
+            .execute("UPDATE customers SET party_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' WHERE customer_code = 'CUS-000002'", [])
+            .is_err(), "party_id must reference parties");
+
+        assert_eq!(MigrationRunner::run(&mut conn).unwrap(), 0, "idempotent");
     }
 }

@@ -7,6 +7,7 @@ pub mod expense;
 pub mod identity;
 pub mod inventory;
 pub mod organization;
+pub mod party;
 pub mod product;
 pub mod profit;
 pub mod purchase_return;

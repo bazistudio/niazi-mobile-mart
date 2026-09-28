@@ -312,6 +312,11 @@ pub fn run() {
             commands::storage_customer::storage_customer_get_balance,
             commands::storage_customer::storage_customer_record_payment,
             commands::storage_customer::storage_customer_deactivate,
+            // Typed Storage Commands (Party Domain Boundary, Phase 1.1)
+            commands::storage_party::storage_party_list,
+            commands::storage_party::storage_party_get,
+            commands::storage_party::storage_party_create,
+            commands::storage_party::storage_party_update,
             // Typed Storage Commands (Supplier / Supplier Ledger Domain Boundary)
             commands::storage_supplier::storage_supplier_create,
             commands::storage_supplier::storage_supplier_update,

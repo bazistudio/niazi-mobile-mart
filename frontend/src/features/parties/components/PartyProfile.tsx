@@ -21,7 +21,8 @@ export const PartyProfile: React.FC<PartyProfileProps> = ({ partyId }) => {
 
   const party = response?.data?.party;
   const ledger = response?.data?.ledger || [];
-  const currentBalance = response?.data?.currentBalance || 0;
+  const receivable = response?.data?.receivable || 0;
+  const payable = response?.data?.payable || 0;
 
   if (isLoading) {
     return <div className="p-8 text-center text-gray-500">Loading party profile...</div>;
@@ -90,15 +91,16 @@ export const PartyProfile: React.FC<PartyProfileProps> = ({ partyId }) => {
               )}
             </div>
 
-            <div className="mt-8 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
-              <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Current Balance</p>
-              <div className="flex items-end gap-2">
-                <span className={`text-3xl font-black ${currentBalance > 0 ? 'text-blue-600 dark:text-blue-400' : currentBalance < 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-900 dark:text-white'}`}>
-                  Rs {Math.abs(currentBalance).toLocaleString()}
-                </span>
-                <span className="text-sm font-bold text-gray-500 mb-1">
-                  {currentBalance > 0 ? 'Receivable (They owe us)' : currentBalance < 0 ? 'Payable (We owe them)' : 'Settled'}
-                </span>
+            <div className="mt-8 grid grid-cols-2 gap-3">
+              <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Receivable</p>
+                <span className="text-2xl font-black text-blue-600 dark:text-blue-400">Rs {receivable.toLocaleString()}</span>
+                <p className="text-xs text-gray-500 mt-1">{party.customerCode ? 'They owe us (customer ledger)' : 'Not a customer'}</p>
+              </div>
+              <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Payable</p>
+                <span className="text-2xl font-black text-orange-600 dark:text-orange-400">Rs {payable.toLocaleString()}</span>
+                <p className="text-xs text-gray-500 mt-1">{party.supplierCode ? 'We owe them (supplier ledger)' : 'Not a supplier'}</p>
               </div>
             </div>
           </div>
@@ -161,7 +163,7 @@ export const PartyProfile: React.FC<PartyProfileProps> = ({ partyId }) => {
                   {ledger.length === 0 && (
                     <tr>
                       <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
-                        No transactions found.
+                        The unified party ledger is coming with the payments &amp; ledger update. Use the customer or supplier ledger for transactions.
                       </td>
                     </tr>
                   )}

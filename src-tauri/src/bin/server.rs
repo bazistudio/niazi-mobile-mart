@@ -156,6 +156,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/sales", axum::routing::post(complete_sale_handler))
         .route("/api/customers", get(list_customers_handler).post(create_customer_handler))
         .route("/api/suppliers", get(list_suppliers_handler).post(create_supplier_handler))
+        .route("/api/v1/parties", get(list_parties_handler))
+        .route("/api/v1/parties/:id", get(get_party_handler))
         .route("/api/purchases", axum::routing::post(complete_purchase_handler))
         .route("/api/expenses", get(list_expenses_handler).post(create_expense_handler))
         .route("/api/reports/profit", get(profit_report_handler))
@@ -181,6 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("  POST /api/customers â†’ {bind_addr}/api/customers");
     info!("  GET  /api/suppliers â†’ {bind_addr}/api/suppliers");
     info!("  POST /api/suppliers â†’ {bind_addr}/api/suppliers");
+    info!("  GET  /api/v1/parties â†’ {bind_addr}/api/v1/parties");
     info!("  POST /api/purchases â†’ {bind_addr}/api/purchases");
     info!("  GET  /api/expenses â†’ {bind_addr}/api/expenses");
     info!("  POST /api/expenses â†’ {bind_addr}/api/expenses");
@@ -605,6 +608,42 @@ async fn create_customer_handler(
     match state.app_state.customer_service.create_customer(payload).await {
         Ok(customer) => (StatusCode::CREATED, Json(json!(customer))),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/v1/parties — List canonical parties (Phase 1.1, read-only).
+/// RBAC: page "parties" (aliases "customers"/"suppliers" in access_control), enforced server-side.
+async fn list_parties_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Query(filter): axum::extract::Query<niazi_mobile_mart_lib::domain::party::PartyFilter>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("parties"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.party_service.list_parties(filter).await {
+        Ok(parties) => (StatusCode::OK, Json(json!(parties))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/v1/parties/:id — One canonical party with linked roles and balances (read-only).
+async fn get_party_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("parties"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.party_service.get_party(&id).await {
+        Ok(party) => (StatusCode::OK, Json(json!(party))),
+        Err(niazi_mobile_mart_lib::errors::AppError::NotFound(msg)) => {
+            (StatusCode::NOT_FOUND, Json(json!({"error": "NOT_FOUND", "message": msg})))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
     }
 }
 
@@ -1655,7 +1694,28 @@ async fn sync_push_handler(
                     }
                 };
 
-                let change_payload = match serde_json::to_string(&projected_supplier) {
+                // Phase 1.1: link the supplier role to its canonical party (payload party_id,
+                // else party.id = supplier.id) and forward party_id downstream.
+                let requested_party_id = niazi_mobile_mart_lib::domain::party::party_id_from_payload(&event.payload, &projected_supplier.id);
+                let party_id = match niazi_mobile_mart_lib::repositories::PostgresPartyRepository::ensure_party_for_role_tx(
+                    &mut tx,
+                    &niazi_mobile_mart_lib::domain::party::PartyRoleContact::from(&projected_supplier),
+                    &requested_party_id,
+                ).await {
+                    Ok(p) => p.unwrap_or(requested_party_id),
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to link {} to party centrally: {e}", event.event_type)
+                            })),
+                        );
+                    }
+                };
+
+                let change_payload = match niazi_mobile_mart_lib::domain::party::role_payload_with_party_id(&projected_supplier, &party_id) {
                     Ok(p) => p,
                     Err(e) => {
                         let _ = tx.rollback().await;
@@ -1771,7 +1831,28 @@ async fn sync_push_handler(
                     }
                 };
 
-                let change_payload = match serde_json::to_string(&projected_customer) {
+                // Phase 1.1: link the customer role to its canonical party (payload party_id,
+                // else party.id = customer.id) and forward party_id downstream.
+                let requested_party_id = niazi_mobile_mart_lib::domain::party::party_id_from_payload(&event.payload, &projected_customer.id);
+                let party_id = match niazi_mobile_mart_lib::repositories::PostgresPartyRepository::ensure_party_for_role_tx(
+                    &mut tx,
+                    &niazi_mobile_mart_lib::domain::party::PartyRoleContact::from(&projected_customer),
+                    &requested_party_id,
+                ).await {
+                    Ok(p) => p.unwrap_or(requested_party_id),
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to link CUSTOMER_CREATED to party centrally: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                let change_payload = match niazi_mobile_mart_lib::domain::party::role_payload_with_party_id(&projected_customer, &party_id) {
                     Ok(p) => p,
                     Err(e) => {
                         let _ = tx.rollback().await;
@@ -1801,6 +1882,90 @@ async fn sync_push_handler(
                         Json(json!({
                             "error": "SERVER_ERROR",
                             "message": format!("Failed to append CUSTOMER_CREATED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
+            if event.event_type == niazi_mobile_mart_lib::domain::party::PARTY_UPSERTED_EVENT {
+                let party: niazi_mobile_mart_lib::domain::party::Party = match serde_json::from_str(&event.payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "BAD_REQUEST",
+                                "message": format!("Invalid PARTY_UPSERTED payload: {e}")
+                            })),
+                        );
+                    }
+                };
+                if party.id.len() != 36 || party.display_name.trim().is_empty() {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({
+                            "error": "BAD_REQUEST",
+                            "message": "Invalid PARTY_UPSERTED payload: id must be a UUID and display_name non-empty"
+                        })),
+                    );
+                }
+
+                // Same rule as the desktop change applier: guarded upsert; roles receive the
+                // contact fields only when the party is new or strictly newer.
+                let stored = match niazi_mobile_mart_lib::repositories::PostgresPartyRepository::get_party_tx(&mut tx, &party.id).await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "SERVER_ERROR", "message": format!("Failed to read party centrally: {e}")})),
+                        );
+                    }
+                };
+                let strictly_newer = stored
+                    .as_ref()
+                    .map(|p| party.updated_at.as_str() > p.updated_at.as_str())
+                    .unwrap_or(true);
+                let written = match niazi_mobile_mart_lib::repositories::PostgresPartyRepository::upsert_party_guarded_tx(&mut tx, &party).await {
+                    Ok(w) => w,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "SERVER_ERROR", "message": format!("Failed to project PARTY_UPSERTED centrally: {e}")})),
+                        );
+                    }
+                };
+                if written && strictly_newer {
+                    if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresPartyRepository::copy_party_to_roles_tx(&mut tx, &party).await {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "SERVER_ERROR", "message": format!("Failed to copy party contact to roles centrally: {e}")})),
+                        );
+                    }
+                }
+
+                // Forward the event as received: downstream terminals apply the same guard,
+                // so a stale event is a no-op everywhere.
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    niazi_mobile_mart_lib::domain::party::PARTY_UPSERTED_EVENT,
+                    niazi_mobile_mart_lib::domain::party::PARTY_ENTITY_TYPE,
+                    &party.id,
+                    &event.payload,
+                ).await {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append PARTY_UPSERTED to change_log: {e}")
                         })),
                     );
                 }

@@ -512,6 +512,13 @@ impl ChangeApplier {
                         params![customer.id, customer.customer_code, customer.name, customer.phone, customer.alternate_phone, customer.email, customer.address, customer.notes, customer.credit_limit, if customer.is_active { 1 } else { 0 }, customer.created_at, customer.updated_at],
                     ).map_err(|e| DbError::QueryError(format!("Failed to insert customer: {e}")))?;
                 }
+                // Phase 1.1: link to the canonical party (payload party_id, else party.id = customer.id).
+                let party_id = crate::domain::party::party_id_from_payload(&change.payload, &customer.id);
+                crate::repositories::SQLitePartyRepository::ensure_party_for_role_in_tx(
+                    tx,
+                    &crate::domain::party::PartyRoleContact::from(&customer),
+                    &party_id,
+                )?;
             }
             "SUPPLIER_CREATED" | "SUPPLIER_UPDATED" => {
                 let supplier: crate::domain::supplier::Supplier = match serde_json::from_str(&change.payload) {
@@ -526,6 +533,30 @@ impl ChangeApplier {
                     ).map_err(|e| DbError::QueryError(format!("Failed to update supplier: {e}")))?;
                 } else {
                     crate::repositories::SQLiteSupplierRepository::insert_supplier_in_tx(tx, &supplier)?;
+                }
+                // Phase 1.1: link to the canonical party (payload party_id, else party.id = supplier.id).
+                let party_id = crate::domain::party::party_id_from_payload(&change.payload, &supplier.id);
+                crate::repositories::SQLitePartyRepository::ensure_party_for_role_in_tx(
+                    tx,
+                    &crate::domain::party::PartyRoleContact::from(&supplier),
+                    &party_id,
+                )?;
+            }
+            "PARTY_UPSERTED" => {
+                let party: crate::domain::party::Party = match serde_json::from_str(&change.payload) {
+                    Ok(p) => p,
+                    Err(e) => return Err(DbError::ValidationError(format!("Invalid PARTY_UPSERTED payload: {e}"))),
+                };
+                // Last-writer guard on updated_at (stale events are a no-op). Contact fields are
+                // copied down to the roles only when the party is new or strictly newer, so an
+                // echoed/duplicate event never overwrites a later role edit.
+                let stored = crate::repositories::SQLitePartyRepository::get_party_in_tx(tx, &party.id)?;
+                let strictly_newer = stored
+                    .as_ref()
+                    .map(|p| party.updated_at.as_str() > p.updated_at.as_str())
+                    .unwrap_or(true);
+                if crate::repositories::SQLitePartyRepository::upsert_party_guarded_in_tx(tx, &party)? && strictly_newer {
+                    crate::repositories::SQLitePartyRepository::copy_party_to_roles_in_tx(tx, &party)?;
                 }
             }
             "SUPPLIER_PAYMENT_RECORDED" => {
@@ -1230,5 +1261,120 @@ mod tests {
         applier.apply_batch("org1", &[change], 1).await.unwrap();
         let stock_replay = inv_repo.get_stock(&product_id, "00000000-0000-0000-0000-000000000002").await.unwrap();
         assert_eq!(stock_replay, 10);
+    }
+
+    #[tokio::test]
+    async fn test_downstream_parties_both_roles_and_guarded_party_upsert() {
+        let db = setup_test_db().await;
+        let applier = ChangeApplier::new(db.clone());
+        let org = "00000000-0000-0000-0000-000000000001";
+        let party_id = "11111111-1111-4111-8111-111111111111";
+        let supplier_id = "33333333-3333-4333-8333-333333333333";
+        let t0 = "2026-09-28T10:00:00+00:00";
+        let entry = |seq: i64, event_type: &str, entity: &str, id: &str, payload: String| ChangeLogEntry {
+            sequence: seq,
+            organization_id: org.to_string(),
+            branch_id: "00000000-0000-0000-0000-000000000002".to_string(),
+            client_event_id: Some(format!("evt_{seq}")),
+            event_type: event_type.to_string(),
+            entity_type: entity.to_string(),
+            entity_id: id.to_string(),
+            payload,
+            created_at: t0.to_string(),
+        };
+        let party = crate::domain::party::Party {
+            id: party_id.into(),
+            display_name: "Ali Traders".into(),
+            company_name: Some("Ali & Sons".into()),
+            phone: "0300111222".into(),
+            alternate_phone: None,
+            email: None,
+            address: None,
+            notes: None,
+            is_active: true,
+            created_at: t0.into(),
+            updated_at: t0.into(),
+        };
+        let customer = crate::domain::customer::Customer {
+            id: party_id.into(),
+            customer_code: "CUS-000009".into(),
+            name: "Ali Traders".into(),
+            phone: "0300111222".into(),
+            alternate_phone: None,
+            email: None,
+            address: None,
+            notes: None,
+            credit_limit: 0,
+            is_active: true,
+            created_at: t0.into(),
+            updated_at: t0.into(),
+        };
+        let supplier = crate::domain::supplier::Supplier {
+            id: supplier_id.into(),
+            supplier_code: "SUP-000009".into(),
+            name: "Ali Traders".into(),
+            phone: "0300111222".into(),
+            alternate_phone: None,
+            email: None,
+            address: None,
+            notes: None,
+            credit_limit: 0,
+            is_active: true,
+            created_at: t0.into(),
+            updated_at: t0.into(),
+        };
+        // Roles arrive BEFORE the party event (order independence).
+        let c_payload = crate::domain::party::role_payload_with_party_id(&customer, party_id).unwrap();
+        let s_payload = crate::domain::party::role_payload_with_party_id(&supplier, party_id).unwrap();
+        let batch = vec![
+            entry(1, "CUSTOMER_CREATED", "CUSTOMER", party_id, c_payload),
+            entry(2, "SUPPLIER_CREATED", "SUPPLIER", supplier_id, s_payload),
+            entry(3, "PARTY_UPSERTED", "PARTY", party_id, serde_json::to_string(&party).unwrap()),
+        ];
+        applier.apply_batch(org, &batch, 3).await.unwrap();
+        applier.apply_batch(org, &batch, 3).await.unwrap(); // replay is safe
+
+        let repo = crate::repositories::SQLitePartyRepository::new(db.clone());
+        let s = repo.get_party_summary(party_id).await.unwrap().unwrap();
+        assert_eq!(s.party_type, Some(crate::domain::party::PartyType::Both));
+        assert_eq!(s.supplier_id.as_deref(), Some(supplier_id));
+        assert_eq!(s.party.company_name.as_deref(), Some("Ali & Sons"));
+
+        // Newer party edit is applied and copied to both roles.
+        let mut newer = party.clone();
+        newer.display_name = "Ali Traders Hall Road".into();
+        newer.updated_at = "2026-09-28T11:00:00+00:00".into();
+        applier
+            .apply_batch(org, &[entry(4, "PARTY_UPSERTED", "PARTY", party_id, serde_json::to_string(&newer).unwrap())], 4)
+            .await
+            .unwrap();
+        // A stale party edit is ignored.
+        let mut stale = party.clone();
+        stale.display_name = "Stale".into();
+        stale.updated_at = "2026-09-28T10:30:00+00:00".into();
+        applier
+            .apply_batch(org, &[entry(5, "PARTY_UPSERTED", "PARTY", party_id, serde_json::to_string(&stale).unwrap())], 5)
+            .await
+            .unwrap();
+        let s = repo.get_party_summary(party_id).await.unwrap().unwrap();
+        assert_eq!(s.party.display_name, "Ali Traders Hall Road");
+        let cust = crate::repositories::SQLiteCustomerRepository::new(db.clone())
+            .get_customer_by_id(party_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cust.name, "Ali Traders Hall Road");
+
+        // Legacy change_log entry without party_id follows party.id = role.id.
+        let legacy_id = "44444444-4444-4444-8444-444444444444";
+        let mut legacy = customer.clone();
+        legacy.id = legacy_id.into();
+        legacy.customer_code = "CUS-000010".into();
+        applier
+            .apply_batch(org, &[entry(6, "CUSTOMER_CREATED", "CUSTOMER", legacy_id, serde_json::to_string(&legacy).unwrap())], 6)
+            .await
+            .unwrap();
+        let s = repo.get_party_summary(legacy_id).await.unwrap().unwrap();
+        assert_eq!(s.customer_id.as_deref(), Some(legacy_id));
     }
 }
