@@ -365,6 +365,192 @@ mod tests {
         assert_eq!(types, vec!["CUSTOMER_CREATED", "CUSTOMER_UPDATED", "PARTY_UPSERTED"]);
     }
 
+    /// Verifies that PartySummaryDto.customer_receivable and supplier_payable
+    /// both use debit - credit convention and reflect actual ledger entries.
+    /// CUSTOMER: debit=sale, credit=payment → receivable = sale - payment.
+    /// SUPPLIER: debit=purchase, credit=payment → payable = purchase - payment.
+    #[tokio::test]
+    async fn test_party_financial_summary_reflects_ledger_balances() {
+        use crate::domain::customer::{CustomerLedgerEntry, CustomerLedgerEntryType};
+        use crate::domain::party::PartyType;
+        use crate::domain::supplier::{SupplierLedgerEntry, SupplierLedgerEntryType};
+        use crate::repositories::{SQLiteCustomerRepository, SQLiteSupplierRepository};
+        use uuid::Uuid;
+
+        let (svc, db) = service().await;
+
+        // Create a BOTH party (customer + supplier roles)
+        let s = svc.create_party(dto(PartyType::Both)).await.unwrap();
+        assert_eq!(s.customer_receivable, 0);
+        assert_eq!(s.supplier_payable, 0);
+        let cust_id = s.customer_id.unwrap();
+        let sup_id = s.supplier_id.unwrap();
+
+        // Customer: credit sale Rs 15,000 (debit) then payment Rs 5,000 (credit)
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+            SQLiteCustomerRepository::insert_ledger_entry_in_tx(
+                &guard,
+                &CustomerLedgerEntry {
+                    id: Uuid::new_v4().to_string(),
+                    customer_id: cust_id.clone(),
+                    reference_id: None,
+                    reference_number: Some("INV-001".to_string()),
+                    entry_type: CustomerLedgerEntryType::Sale,
+                    debit: 15000,
+                    credit: 0,
+                    balance_after: 15000,
+                    description: "Credit sale".to_string(),
+                    performed_by: None,
+                    created_at: "2026-01-01T00:00:00+00:00".to_string(),
+                },
+            )
+            .unwrap();
+            SQLiteCustomerRepository::insert_ledger_entry_in_tx(
+                &guard,
+                &CustomerLedgerEntry {
+                    id: Uuid::new_v4().to_string(),
+                    customer_id: cust_id.clone(),
+                    reference_id: None,
+                    reference_number: Some("REC-001".to_string()),
+                    entry_type: CustomerLedgerEntryType::Payment,
+                    debit: 0,
+                    credit: 5000,
+                    balance_after: 10000,
+                    description: "Customer payment".to_string(),
+                    performed_by: None,
+                    created_at: "2026-01-02T00:00:00+00:00".to_string(),
+                },
+            )
+            .unwrap();
+        }
+
+        // Supplier: credit purchase Rs 8,000 (debit) then payment Rs 3,000 (credit)
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+            SQLiteSupplierRepository::insert_ledger_entry_in_tx(
+                &guard,
+                &SupplierLedgerEntry {
+                    id: Uuid::new_v4().to_string(),
+                    supplier_id: sup_id.clone(),
+                    reference_id: None,
+                    reference_number: Some("PUR-001".to_string()),
+                    entry_type: SupplierLedgerEntryType::Purchase,
+                    debit: 8000,
+                    credit: 0,
+                    balance_after: 8000,
+                    description: "Credit purchase".to_string(),
+                    performed_by: None,
+                    created_at: "2026-01-01T00:00:00+00:00".to_string(),
+                },
+            )
+            .unwrap();
+            SQLiteSupplierRepository::insert_ledger_entry_in_tx(
+                &guard,
+                &SupplierLedgerEntry {
+                    id: Uuid::new_v4().to_string(),
+                    supplier_id: sup_id.clone(),
+                    reference_id: None,
+                    reference_number: Some("PAY-001".to_string()),
+                    entry_type: SupplierLedgerEntryType::Payment,
+                    debit: 0,
+                    credit: 3000,
+                    balance_after: 5000,
+                    description: "Supplier payment".to_string(),
+                    performed_by: None,
+                    created_at: "2026-01-02T00:00:00+00:00".to_string(),
+                },
+            )
+            .unwrap();
+        }
+
+        let updated = svc.get_party(&s.party.id).await.unwrap();
+        // Customer: 15,000 sale - 5,000 payment = 10,000 receivable
+        assert_eq!(updated.customer_receivable, 10000, "customer_receivable = sale - payment");
+        // Supplier: 8,000 purchase - 3,000 payment = 5,000 payable
+        assert_eq!(updated.supplier_payable, 5000, "supplier_payable = purchase - payment");
+    }
+
+    /// Verifies PartySummaryDto for a CUSTOMER-only party (no supplier payable).
+    #[tokio::test]
+    async fn test_party_customer_only_has_receivable_no_payable() {
+        use crate::domain::customer::{CustomerLedgerEntry, CustomerLedgerEntryType};
+        use crate::repositories::SQLiteCustomerRepository;
+        use uuid::Uuid;
+
+        let (svc, db) = service().await;
+        let s = svc.create_party(dto(PartyType::Customer)).await.unwrap();
+        assert!(s.supplier_id.is_none());
+        assert_eq!(s.supplier_payable, 0);
+
+        let cust_id = s.customer_id.unwrap();
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+            SQLiteCustomerRepository::insert_ledger_entry_in_tx(
+                &guard,
+                &CustomerLedgerEntry {
+                    id: Uuid::new_v4().to_string(),
+                    customer_id: cust_id.clone(),
+                    reference_id: None,
+                    reference_number: None,
+                    entry_type: CustomerLedgerEntryType::Sale,
+                    debit: 7000,
+                    credit: 0,
+                    balance_after: 7000,
+                    description: "Credit sale".to_string(),
+                    performed_by: None,
+                    created_at: "2026-01-01T00:00:00+00:00".to_string(),
+                },
+            )
+            .unwrap();
+        }
+        let p = svc.get_party(&s.party.id).await.unwrap();
+        assert_eq!(p.customer_receivable, 7000);
+        assert_eq!(p.supplier_payable, 0);
+    }
+
+    /// Verifies PartySummaryDto for a SUPPLIER-only party (no customer receivable).
+    #[tokio::test]
+    async fn test_party_supplier_only_has_payable_no_receivable() {
+        use crate::domain::supplier::{SupplierLedgerEntry, SupplierLedgerEntryType};
+        use crate::repositories::SQLiteSupplierRepository;
+        use uuid::Uuid;
+
+        let (svc, db) = service().await;
+        let s = svc.create_party(dto(PartyType::Supplier)).await.unwrap();
+        assert!(s.customer_id.is_none());
+        assert_eq!(s.customer_receivable, 0);
+
+        let sup_id = s.supplier_id.unwrap();
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+            SQLiteSupplierRepository::insert_ledger_entry_in_tx(
+                &guard,
+                &SupplierLedgerEntry {
+                    id: Uuid::new_v4().to_string(),
+                    supplier_id: sup_id.clone(),
+                    reference_id: None,
+                    reference_number: None,
+                    entry_type: SupplierLedgerEntryType::Purchase,
+                    debit: 12000,
+                    credit: 0,
+                    balance_after: 12000,
+                    description: "Credit purchase".to_string(),
+                    performed_by: None,
+                    created_at: "2026-01-01T00:00:00+00:00".to_string(),
+                },
+            )
+            .unwrap();
+        }
+        let p = svc.get_party(&s.party.id).await.unwrap();
+        assert_eq!(p.supplier_payable, 12000);
+        assert_eq!(p.customer_receivable, 0);
+    }
+
     #[tokio::test]
     async fn postgres_backend_refuses_writes() {
         // Construct without a live pool: only the backend guard is exercised.

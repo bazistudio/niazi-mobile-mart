@@ -302,6 +302,96 @@ pub mod tests {
         (db, service)
     }
 
+    /// Confirms the canonical sign convention for the supplier ledger:
+    /// purchase = debit (payable increases), payment = credit (payable decreases).
+    /// Balance = SUM(debit) - SUM(credit) = purchase - payment = remaining payable.
+    #[tokio::test]
+    async fn test_supplier_ledger_purchase_payment_remaining_payable() {
+        use crate::domain::supplier::{SupplierLedgerEntry, SupplierLedgerEntryType};
+        use crate::repositories::SQLiteSupplierRepository;
+        use uuid::Uuid;
+
+        let (db, service) = setup_test_db().await;
+
+        let sup = service
+            .create_supplier(CreateSupplierDto {
+                name: "Test Supplier".to_string(),
+                phone: "03009998877".to_string(),
+                alternate_phone: None,
+                email: None,
+                address: None,
+                notes: None,
+                credit_limit: Some(100000),
+            })
+            .await
+            .unwrap();
+
+        // 0. Balance starts at zero
+        assert_eq!(service.get_outstanding_balance(&sup.id).await.unwrap(), 0);
+
+        // 1. Credit purchase: Rs 10,000 → debit increases payable
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+            SQLiteSupplierRepository::insert_ledger_entry_in_tx(
+                &guard,
+                &SupplierLedgerEntry {
+                    id: Uuid::new_v4().to_string(),
+                    supplier_id: sup.id.clone(),
+                    reference_id: Some("PUR-TEST-001".to_string()),
+                    reference_number: Some("PUR-TEST-001".to_string()),
+                    entry_type: SupplierLedgerEntryType::Purchase,
+                    debit: 10000,
+                    credit: 0,
+                    balance_after: 10000,
+                    description: "Credit purchase".to_string(),
+                    performed_by: None,
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            service.get_outstanding_balance(&sup.id).await.unwrap(),
+            10000,
+            "After purchase: payable = 10,000"
+        );
+
+        // 2. Partial payment: Rs 4,000 → credit decreases payable
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+            SQLiteSupplierRepository::insert_ledger_entry_in_tx(
+                &guard,
+                &SupplierLedgerEntry {
+                    id: Uuid::new_v4().to_string(),
+                    supplier_id: sup.id.clone(),
+                    reference_id: Some("PAY-TEST-001".to_string()),
+                    reference_number: Some("PAY-TEST-001".to_string()),
+                    entry_type: SupplierLedgerEntryType::Payment,
+                    debit: 0,
+                    credit: 4000,
+                    balance_after: 6000,
+                    description: "Partial payment to supplier".to_string(),
+                    performed_by: None,
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                },
+            )
+            .unwrap();
+        }
+        let remaining = service.get_outstanding_balance(&sup.id).await.unwrap();
+        assert_eq!(remaining, 6000, "Remaining payable = purchase 10,000 - payment 4,000 = 6,000");
+
+        // 3. Statement reflects both entries with correct running balance
+        let stmt = service.get_statement(&sup.id).await.unwrap();
+        assert_eq!(stmt.entries.len(), 2);
+        assert_eq!(stmt.current_balance, 6000);
+        assert_eq!(stmt.entries[0].debit, 10000);
+        assert_eq!(stmt.entries[0].credit, 0);
+        assert_eq!(stmt.entries[1].debit, 0);
+        assert_eq!(stmt.entries[1].credit, 4000);
+    }
+
     #[tokio::test]
     async fn test_supplier_creation_and_sequential_codes() {
         let (_db, service) = setup_test_db().await;
