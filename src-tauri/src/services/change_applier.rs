@@ -137,6 +137,25 @@ impl ChangeApplier {
                 if let Some(ref cid) = product.color_id { Self::auto_heal_color_in_tx(tx, cid)?; }
 
                 SQLiteProductRepository::insert_product_in_tx(tx, &product)?;
+
+                // SYNC-H4: Ensure a stock row exists for this product on the branch.
+                // This covers Case B (product exists but stock row was never created) and
+                // Case C (product just created via PRODUCT_UPDATED upsert above).
+                //
+                // IMPORTANT: We use INSERT OR IGNORE, NOT set_stock_in_tx (which is an
+                // upsert that overwrites quantity). Preserving existing stock quantities
+                // is mandatory — PRODUCT_UPDATED is not an inventory synchronization event.
+                let stock_branch = if change.branch_id.trim().is_empty() {
+                    crate::domain::organization::DEFAULT_MAIN_BRANCH_ID.to_string()
+                } else {
+                    change.branch_id.clone()
+                };
+                Self::auto_heal_branch_in_tx(tx, &stock_branch)?;
+                let now = chrono::Utc::now().to_rfc3339();
+                tx.execute(
+                    "INSERT OR IGNORE INTO stock (product_id, branch_id, quantity, updated_at) VALUES (?1, ?2, 0, ?3)",
+                    params![product.id, stock_branch, now],
+                ).map_err(|e| DbError::QueryError(format!("SYNC-H4: Failed to ensure stock row for product {}: {e}", product.id)))?;
             }
             "PRODUCT_DEACTIVATED" => {
                 #[derive(serde::Deserialize)]
@@ -1670,5 +1689,305 @@ mod tests {
             .unwrap();
         let s = repo.get_party_summary(legacy_id).await.unwrap().unwrap();
         assert_eq!(s.customer_id.as_deref(), Some(legacy_id));
+    }
+
+    // -------------------------------------------------------------------------
+    // SYNC-H4 tests: PRODUCT_UPDATED product-stock projection repair
+    // -------------------------------------------------------------------------
+
+    fn make_product(product_id: &str) -> Product {
+        Product {
+            id: product_id.to_string(),
+            name: "H4 Test Product".to_string(),
+            normalized_name: crate::domain::product::normalize_product_name("H4 Test Product"),
+            sku: "H4-SKU-001".to_string(),
+            barcode: None,
+            category_id: "00000000-0000-0000-0000-000000000010".to_string(),
+            brand_id: None,
+            unit_id: None,
+            company_id: None,
+            quality_id: None,
+            color_id: None,
+            purchase_price: 10000,
+            average_cost: 10000,
+            sale_price: 12000,
+            low_stock_threshold: 2,
+            is_active: true,
+            description: None,
+            initial_quantity: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    fn make_updated_entry(seq: i64, product_id: &str, branch_id: &str, product: &Product) -> ChangeLogEntry {
+        ChangeLogEntry {
+            sequence: seq,
+            organization_id: "00000000-0000-0000-0000-000000000001".to_string(),
+            branch_id: branch_id.to_string(),
+            client_event_id: Some(format!("evt_h4_{seq}")),
+            event_type: "PRODUCT_UPDATED".to_string(),
+            entity_type: "PRODUCT".to_string(),
+            entity_id: product_id.to_string(),
+            payload: serde_json::to_string(product).unwrap(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    async fn get_raw_stock(db: &DatabaseConnection, product_id: &str, branch_id: &str) -> Option<i64> {
+        let conn_arc = db.inner();
+        let guard = conn_arc.lock().await;
+        guard.query_row(
+            "SELECT quantity FROM stock WHERE product_id = ?1 AND branch_id = ?2",
+            rusqlite::params![product_id, branch_id],
+            |row| row.get(0),
+        ).ok()
+    }
+
+    /// Test 1 — Product exists, stock missing: PRODUCT_UPDATED must create stock row.
+    #[tokio::test]
+    async fn test_h4_product_exists_stock_missing_creates_stock() {
+        let db = setup_test_db().await;
+        let applier = ChangeApplier::new(db.clone());
+
+        let product_id = "h4000000-0000-4000-8000-000000000001";
+        let branch_id = "00000000-0000-0000-0000-000000000002";
+        let prod = make_product(product_id);
+
+        // Insert product directly without stock row.
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+            // Ensure branch exists first.
+            guard.execute(
+                "INSERT OR IGNORE INTO branches (id, name, location, is_main, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![branch_id, "Main Branch", "Main", 1, 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+            ).unwrap();
+            // Ensure category exists.
+            guard.execute(
+                "INSERT OR IGNORE INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params!["00000000-0000-0000-0000-000000000010", "Test Cat", "TCAT", 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+            ).unwrap();
+            // Insert product row directly (no stock row).
+            guard.execute(
+                "INSERT OR IGNORE INTO products (id, name, normalized_name, sku, category_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                rusqlite::params![
+                    product_id, "H4 Test Product", "h4 test product", "H4-SKU-001",
+                    "00000000-0000-0000-0000-000000000010", 10000i64, 10000i64, 12000i64, 2i64, 1,
+                    "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"
+                ],
+            ).unwrap();
+        }
+
+        // Verify stock row does NOT exist yet.
+        assert!(get_raw_stock(&db, product_id, branch_id).await.is_none(), "Pre-condition: stock row must be absent");
+
+        // Apply PRODUCT_UPDATED.
+        let change = make_updated_entry(1, product_id, branch_id, &prod);
+        applier.apply_batch("00000000-0000-0000-0000-000000000001", &[change], 1).await.unwrap();
+
+        // Stock row must now exist with quantity 0.
+        let stock = get_raw_stock(&db, product_id, branch_id).await;
+        assert!(stock.is_some(), "SYNC-H4: stock row must be created when missing");
+        assert_eq!(stock.unwrap(), 0, "SYNC-H4: initial quantity must be 0");
+    }
+
+    /// Test 2 — Product and stock already exist: PRODUCT_UPDATED must not create duplicate row.
+    #[tokio::test]
+    async fn test_h4_product_and_stock_exist_no_duplicate() {
+        let db = setup_test_db().await;
+        let applier = ChangeApplier::new(db.clone());
+
+        let product_id = "h4000000-0000-4000-8000-000000000002";
+        let branch_id = "00000000-0000-0000-0000-000000000002";
+        let prod = make_product(product_id);
+
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+            guard.execute(
+                "INSERT OR IGNORE INTO branches (id, name, location, is_main, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![branch_id, "Main Branch", "Main", 1, 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+            ).unwrap();
+            guard.execute(
+                "INSERT OR IGNORE INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params!["00000000-0000-0000-0000-000000000010", "Test Cat", "TCAT", 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+            ).unwrap();
+            guard.execute(
+                "INSERT OR IGNORE INTO products (id, name, normalized_name, sku, category_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                rusqlite::params![
+                    product_id, "H4 Test Product", "h4 test product", "H4-SKU-001",
+                    "00000000-0000-0000-0000-000000000010", 10000i64, 10000i64, 12000i64, 2i64, 1,
+                    "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"
+                ],
+            ).unwrap();
+            // Stock row already exists with quantity 0.
+            guard.execute(
+                "INSERT INTO stock (product_id, branch_id, quantity, updated_at) VALUES (?1, ?2, 0, ?3)",
+                rusqlite::params![product_id, branch_id, "2026-01-01T00:00:00Z"],
+            ).unwrap();
+        }
+
+        let change = make_updated_entry(1, product_id, branch_id, &prod);
+        applier.apply_batch("00000000-0000-0000-0000-000000000001", &[change], 1).await.unwrap();
+
+        // Exactly one stock row must exist.
+        let conn_arc = db.inner();
+        let guard = conn_arc.lock().await;
+        let count: i64 = guard.query_row(
+            "SELECT COUNT(*) FROM stock WHERE product_id = ?1 AND branch_id = ?2",
+            rusqlite::params![product_id, branch_id],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "SYNC-H4: must not create duplicate stock rows");
+    }
+
+    /// Test 3 — Product created through PRODUCT_UPDATED path (product absent before event).
+    #[tokio::test]
+    async fn test_h4_product_created_via_updated_event_gets_stock() {
+        let db = setup_test_db().await;
+        let applier = ChangeApplier::new(db.clone());
+
+        let product_id = "h4000000-0000-4000-8000-000000000003";
+        let branch_id = "00000000-0000-0000-0000-000000000002";
+        let prod = make_product(product_id);
+
+        // No product, no stock inserted — PRODUCT_UPDATED arrives first.
+        let change = make_updated_entry(1, product_id, branch_id, &prod);
+        applier.apply_batch("00000000-0000-0000-0000-000000000001", &[change], 1).await.unwrap();
+
+        let prod_repo = crate::repositories::SQLiteProductRepository::new(db.clone());
+        let fetched = prod_repo.get_product_by_id(product_id).await.unwrap();
+        assert_eq!(fetched.id, product_id, "SYNC-H4: product must exist after PRODUCT_UPDATED");
+
+        let stock = get_raw_stock(&db, product_id, branch_id).await;
+        assert!(stock.is_some(), "SYNC-H4: stock row must exist after PRODUCT_UPDATED creates product");
+        assert_eq!(stock.unwrap(), 0, "SYNC-H4: stock quantity must be 0 for newly applied product");
+    }
+
+    /// Test 4 — Replay/idempotency: exactly one product and one stock row after double apply.
+    #[tokio::test]
+    async fn test_h4_replay_idempotency() {
+        let db = setup_test_db().await;
+        let applier = ChangeApplier::new(db.clone());
+
+        let product_id = "h4000000-0000-4000-8000-000000000004";
+        let branch_id = "00000000-0000-0000-0000-000000000002";
+        let prod = make_product(product_id);
+
+        let change = make_updated_entry(1, product_id, branch_id, &prod);
+        applier.apply_batch("00000000-0000-0000-0000-000000000001", &[change.clone()], 1).await.unwrap();
+        applier.apply_batch("00000000-0000-0000-0000-000000000001", &[change], 1).await.unwrap();
+
+        let conn_arc = db.inner();
+        let guard = conn_arc.lock().await;
+        let prod_count: i64 = guard.query_row(
+            "SELECT COUNT(*) FROM products WHERE id = ?1",
+            rusqlite::params![product_id],
+            |row| row.get(0),
+        ).unwrap();
+        let stock_count: i64 = guard.query_row(
+            "SELECT COUNT(*) FROM stock WHERE product_id = ?1 AND branch_id = ?2",
+            rusqlite::params![product_id, branch_id],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(prod_count, 1, "SYNC-H4: exactly one product after replay");
+        assert_eq!(stock_count, 1, "SYNC-H4: exactly one stock row after replay");
+    }
+
+    /// Test 5 — Existing stock quantity preserved: PRODUCT_UPDATED must not reset it.
+    #[tokio::test]
+    async fn test_h4_existing_stock_quantity_preserved() {
+        let db = setup_test_db().await;
+        let applier = ChangeApplier::new(db.clone());
+
+        let product_id = "h4000000-0000-4000-8000-000000000005";
+        let branch_id = "00000000-0000-0000-0000-000000000002";
+        let prod = make_product(product_id);
+
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+            guard.execute(
+                "INSERT OR IGNORE INTO branches (id, name, location, is_main, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![branch_id, "Main Branch", "Main", 1, 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+            ).unwrap();
+            guard.execute(
+                "INSERT OR IGNORE INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params!["00000000-0000-0000-0000-000000000010", "Test Cat", "TCAT", 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+            ).unwrap();
+            guard.execute(
+                "INSERT OR IGNORE INTO products (id, name, normalized_name, sku, category_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                rusqlite::params![
+                    product_id, "H4 Test Product", "h4 test product", "H4-SKU-001",
+                    "00000000-0000-0000-0000-000000000010", 10000i64, 10000i64, 12000i64, 2i64, 1,
+                    "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"
+                ],
+            ).unwrap();
+            // Pre-existing stock with real inventory quantity.
+            guard.execute(
+                "INSERT INTO stock (product_id, branch_id, quantity, updated_at) VALUES (?1, ?2, 25, ?3)",
+                rusqlite::params![product_id, branch_id, "2026-01-01T00:00:00Z"],
+            ).unwrap();
+        }
+
+        // Apply PRODUCT_UPDATED.
+        let change = make_updated_entry(1, product_id, branch_id, &prod);
+        applier.apply_batch("00000000-0000-0000-0000-000000000001", &[change], 1).await.unwrap();
+
+        // Quantity must remain 25 — PRODUCT_UPDATED must not overwrite it.
+        let stock = get_raw_stock(&db, product_id, branch_id).await;
+        assert!(stock.is_some(), "Stock row must still exist");
+        assert_eq!(stock.unwrap(), 25, "SYNC-H4: existing quantity must be preserved after PRODUCT_UPDATED");
+    }
+
+    /// Test 6 — Branch correctness: stock row created for the branch in change.branch_id.
+    #[tokio::test]
+    async fn test_h4_stock_created_for_correct_branch() {
+        let db = setup_test_db().await;
+        let applier = ChangeApplier::new(db.clone());
+
+        let product_id = "h4000000-0000-4000-8000-000000000006";
+        let branch_id = "00000000-0000-0000-0000-000000000002";
+        let other_branch = "00000000-0000-0000-0000-000000000099";
+        let prod = make_product(product_id);
+
+        let change = make_updated_entry(1, product_id, branch_id, &prod);
+        applier.apply_batch("00000000-0000-0000-0000-000000000001", &[change], 1).await.unwrap();
+
+        // Stock must exist for the correct branch.
+        let correct = get_raw_stock(&db, product_id, branch_id).await;
+        assert!(correct.is_some(), "SYNC-H4: stock must be created for the event branch");
+
+        // Stock must NOT exist for an unrelated branch.
+        let wrong = get_raw_stock(&db, product_id, other_branch).await;
+        assert!(wrong.is_none(), "SYNC-H4: stock must not be created for an unrelated branch");
+    }
+
+    /// Test 7 — Empty branch_id falls back to DEFAULT_MAIN_BRANCH_ID.
+    #[tokio::test]
+    async fn test_h4_empty_branch_id_falls_back_to_default() {
+        let db = setup_test_db().await;
+        let applier = ChangeApplier::new(db.clone());
+
+        let product_id = "h4000000-0000-4000-8000-000000000007";
+        let prod = make_product(product_id);
+
+        let change = ChangeLogEntry {
+            sequence: 1,
+            organization_id: "00000000-0000-0000-0000-000000000001".to_string(),
+            branch_id: "".to_string(), // Empty — should fall back to DEFAULT_MAIN_BRANCH_ID
+            client_event_id: Some("evt_h4_7".to_string()),
+            event_type: "PRODUCT_UPDATED".to_string(),
+            entity_type: "PRODUCT".to_string(),
+            entity_id: product_id.to_string(),
+            payload: serde_json::to_string(&prod).unwrap(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        applier.apply_batch("00000000-0000-0000-0000-000000000001", &[change], 1).await.unwrap();
+
+        let default_branch = crate::domain::organization::DEFAULT_MAIN_BRANCH_ID;
+        let stock = get_raw_stock(&db, product_id, default_branch).await;
+        assert!(stock.is_some(), "SYNC-H4: stock must be created under DEFAULT_MAIN_BRANCH_ID when branch_id is empty");
     }
 }
