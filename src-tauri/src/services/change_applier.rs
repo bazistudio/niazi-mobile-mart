@@ -631,10 +631,18 @@ impl ChangeApplier {
                 // Last-writer guard on updated_at (stale events are a no-op). Contact fields are
                 // copied down to the roles only when the party is new or strictly newer, so an
                 // echoed/duplicate event never overwrites a later role edit.
+                //
+                // M3: Use is_strictly_newer() for instant-based comparison instead of raw string
+                // comparison.  The raw string guard was broken: "2026-09-29T17:00:00+05:00" sorts
+                // after "2026-09-29T12:00:00Z" lexicographically even though they represent the
+                // same UTC instant, causing a same-instant re-delivery to overwrite good data.
                 let stored = crate::repositories::SQLitePartyRepository::get_party_in_tx(tx, &party.id)?;
                 let strictly_newer = stored
                     .as_ref()
-                    .map(|p| party.updated_at.as_str() > p.updated_at.as_str())
+                    .map(|p| crate::utils::timestamp::is_strictly_newer(
+                        &party.updated_at,
+                        &p.updated_at,
+                    ))
                     .unwrap_or(true);
                 if crate::repositories::SQLitePartyRepository::upsert_party_guarded_in_tx(tx, &party)? && strictly_newer {
                     crate::repositories::SQLitePartyRepository::copy_party_to_roles_in_tx(tx, &party)?;

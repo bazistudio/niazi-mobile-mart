@@ -6,6 +6,7 @@ pub mod events;
 pub mod repositories;
 pub mod services;
 pub mod state;
+pub mod utils;
 
 use state::AppState;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, SubmenuBuilder};
