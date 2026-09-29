@@ -237,16 +237,19 @@ impl CustomerService {
         self.customer_repo.get_statement(customer_id).await
     }
 
-    /// Deactivates customer safely (never deletes customer if they have financial history).
-    /// For SQLite: routes through update_customer so the linked Party state and outbox
-    /// are updated in the same transaction (CUSTOMER_UPDATED event enqueued, single-role
-    /// party deactivated, BOTH party stays active when supplier role remains active).
-    /// For Postgres: delegates to the repo (server receives deactivation via sync).
+    /// Deactivates customer safely (never deletes customer if they have financial history)
+    ///
+    /// Desktop (SQLite): goes through the same path as `update_customer` (is_active = false),
+    /// exactly like `SupplierService::deactivate_supplier`: one local transaction that updates the
+    /// customer, keeps the canonical party linked (a single-role party mirrors the inactive flag),
+    /// and enqueues CUSTOMER_UPDATED (+ PARTY_UPSERTED for a single-role party).
     pub async fn deactivate_customer(&self, id: &str) -> AppResult<()> {
-        match &self.customer_repo {
-            CustomerRepository::SQLite(_) => {
-                self.update_customer(id, UpdateCustomerDto {
-                    is_active: Some(false),
+        if let (CustomerRepository::SQLite(_), Some(_)) = (&self.customer_repo, self.db.as_ref()) {
+            // Preserve the existing NotFound contract for unknown ids.
+            self.get_customer_by_id(id).await?;
+            self.update_customer(
+                id,
+                UpdateCustomerDto {
                     name: None,
                     phone: None,
                     alternate_phone: None,
@@ -254,12 +257,13 @@ impl CustomerService {
                     address: None,
                     notes: None,
                     credit_limit: None,
-                }).await?;
-                Ok(())
-            }
-            CustomerRepository::Postgres(_) => {
-                self.customer_repo.deactivate_customer(id).await
-            }
+                    is_active: Some(false),
+                },
+            )
+            .await?;
+            Ok(())
+        } else {
+            self.customer_repo.deactivate_customer(id).await
         }
     }
 
