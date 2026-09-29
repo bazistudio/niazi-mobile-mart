@@ -81,8 +81,9 @@ pub struct Party {
 }
 
 /// Party with its linked roles and read-only balances (whole PKR).
-/// `customer_receivable` = customer ledger SUM(debit) - SUM(credit).
-/// `supplier_payable` follows each backend's existing supplier balance convention.
+/// Canonical convention: balance = SUM(debit) - SUM(credit) for both ledgers.
+/// `customer_receivable` = customer ledger: debit=sale, credit=payment.
+/// `supplier_payable`    = supplier ledger: debit=purchase, credit=payment-to-supplier.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PartySummaryDto {
     pub party: Party,

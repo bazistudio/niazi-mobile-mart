@@ -237,9 +237,30 @@ impl CustomerService {
         self.customer_repo.get_statement(customer_id).await
     }
 
-    /// Deactivates customer safely (never deletes customer if they have financial history)
+    /// Deactivates customer safely (never deletes customer if they have financial history).
+    /// For SQLite: routes through update_customer so the linked Party state and outbox
+    /// are updated in the same transaction (CUSTOMER_UPDATED event enqueued, single-role
+    /// party deactivated, BOTH party stays active when supplier role remains active).
+    /// For Postgres: delegates to the repo (server receives deactivation via sync).
     pub async fn deactivate_customer(&self, id: &str) -> AppResult<()> {
-        self.customer_repo.deactivate_customer(id).await
+        match &self.customer_repo {
+            CustomerRepository::SQLite(_) => {
+                self.update_customer(id, UpdateCustomerDto {
+                    is_active: Some(false),
+                    name: None,
+                    phone: None,
+                    alternate_phone: None,
+                    email: None,
+                    address: None,
+                    notes: None,
+                    credit_limit: None,
+                }).await?;
+                Ok(())
+            }
+            CustomerRepository::Postgres(_) => {
+                self.customer_repo.deactivate_customer(id).await
+            }
+        }
     }
 
     /// Records customer payment atomically against receivables and allocates across open sales
@@ -661,5 +682,107 @@ mod tests {
         let stmt = service.get_statement(&customer.id).await.unwrap();
         assert_eq!(stmt.entries.len(), 3);
         assert_eq!(stmt.current_balance, 0);
+    }
+
+    /// Verifies get_customer_detail returns the rich profile (balance, sales stats)
+    /// and that an unknown ID returns NotFound — maps directly to GET /api/v1/customers/:id.
+    #[tokio::test]
+    async fn test_customer_detail_rich_profile_and_not_found() {
+        let (db, _) = setup_test_db().await;
+        let service = CustomerService::new(db);
+
+        let customer = service
+            .create_customer(CreateCustomerDto {
+                name: "Ledger Test Customer".to_string(),
+                phone: "03001112222".to_string(),
+                alternate_phone: None,
+                email: None,
+                address: None,
+                notes: None,
+                credit_limit: Some(10000),
+            })
+            .await
+            .expect("create customer");
+
+        // Detail on a fresh customer: zero balance, zero sales
+        let detail = service
+            .get_customer_detail(&customer.id)
+            .await
+            .expect("get customer detail");
+        assert_eq!(detail.customer.id, customer.id);
+        assert_eq!(detail.customer.name, "Ledger Test Customer");
+        assert_eq!(detail.outstanding_balance, 0);
+        assert_eq!(detail.total_sales_count, 0);
+        assert_eq!(detail.total_sales_amount, 0);
+        assert!(detail.last_transaction_date.is_none());
+
+        // NotFound contract for unknown ID
+        let err = service
+            .get_customer_detail("00000000-0000-0000-0000-000000000000")
+            .await;
+        assert!(
+            matches!(err, Err(AppError::NotFound(_))),
+            "unknown customer ID must return NotFound"
+        );
+    }
+
+    /// Verifies get_statement returns correct entries after direct ledger insertions
+    /// (same pattern as Phase 2 supplier tests) — maps to GET /api/v1/customers/:id/ledger.
+    #[tokio::test]
+    async fn test_customer_statement_sale_payment_balance() {
+        let (db, _) = setup_test_db().await;
+        let service = CustomerService::new(db.clone());
+
+        let customer = service
+            .create_customer(CreateCustomerDto {
+                name: "Statement Test Customer".to_string(),
+                phone: "03002223333".to_string(),
+                alternate_phone: None,
+                email: None,
+                address: None,
+                notes: None,
+                credit_limit: Some(50000),
+            })
+            .await
+            .expect("create customer");
+
+        // Insert ledger entries directly to test the statement query independently of sale logic.
+        // Distinct timestamps ensure deterministic ASC ordering (same-timestamp rows sort by id).
+        {
+            let conn_arc = db.inner();
+            let guard = conn_arc.lock().await;
+            let e1_id = uuid::Uuid::new_v4().to_string();
+            let e2_id = uuid::Uuid::new_v4().to_string();
+            guard.execute(
+                "INSERT INTO customer_ledger_entries
+                 (id, customer_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at)
+                 VALUES (?1, ?2, NULL, 'SALE-001', 'SALE', 20000, 0, 20000, 'Credit sale', NULL, '2026-01-10T10:00:00Z')",
+                rusqlite::params![e1_id, customer.id],
+            ).unwrap();
+            guard.execute(
+                "INSERT INTO customer_ledger_entries
+                 (id, customer_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at)
+                 VALUES (?1, ?2, NULL, 'PAY-001', 'PAYMENT', 0, 8000, 12000, 'Partial payment', NULL, '2026-01-10T11:00:00Z')",
+                rusqlite::params![e2_id, customer.id],
+            ).unwrap();
+        }
+
+        // Balance = SUM(debit) - SUM(credit) = 20000 - 8000 = 12000
+        let balance = service.get_balance(&customer.id).await.unwrap();
+        assert_eq!(balance, 12000);
+
+        // Statement must contain both entries with correct current_balance
+        let stmt = service.get_statement(&customer.id).await.unwrap();
+        assert_eq!(stmt.customer_id, customer.id);
+        assert_eq!(stmt.current_balance, 12000);
+        assert_eq!(stmt.entries.len(), 2);
+
+        let sale_row = stmt.entries.iter().find(|e| e.entry_type == "SALE").expect("sale entry");
+        assert_eq!(sale_row.debit, 20000);
+        assert_eq!(sale_row.credit, 0);
+
+        let pay_row = stmt.entries.iter().find(|e| e.entry_type == "PAYMENT").expect("payment entry");
+        assert_eq!(pay_row.debit, 0);
+        assert_eq!(pay_row.credit, 8000);
     }
 }

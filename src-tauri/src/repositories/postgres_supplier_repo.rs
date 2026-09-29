@@ -232,7 +232,7 @@ impl PostgresSupplierRepository {
     ) -> AppResult<Vec<SupplierSummaryDto>> {
         let mut query = String::from(
             "SELECT s.id, s.supplier_code, s.name, s.phone, s.credit_limit,
-                    COALESCE(SUM(l.credit) - SUM(l.debit), 0) AS balance,
+                    COALESCE(SUM(l.debit) - SUM(l.credit), 0) AS balance,
                     s.is_active, s.created_at
              FROM suppliers s
              LEFT JOIN supplier_ledger_entries l ON s.id = l.supplier_id
@@ -312,7 +312,7 @@ impl PostgresSupplierRepository {
 
     pub async fn calculate_outstanding_balance(&self, supplier_id: &str) -> AppResult<i64> {
         let row: (i64,) = sqlx::query_as(
-            "SELECT COALESCE(SUM(credit) - SUM(debit), 0) FROM supplier_ledger_entries WHERE supplier_id = $1",
+            "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM supplier_ledger_entries WHERE supplier_id = $1",
         )
         .bind(supplier_id)
         .fetch_one(&self.pool)

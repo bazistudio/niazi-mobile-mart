@@ -91,6 +91,35 @@ impl PostgresCustomerRepository {
         Ok(customer.clone())
     }
 
+    /// Central projection: Update customer within an existing PostgreSQL transaction.
+    /// Called by the CUSTOMER_UPDATED sync handler in server.rs.
+    pub async fn update_customer_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        customer: &Customer,
+    ) -> AppResult<Customer> {
+        sqlx::query(
+            "UPDATE customers SET
+                name = $1, phone = $2, alternate_phone = $3, email = $4,
+                address = $5, notes = $6, credit_limit = $7, is_active = $8, updated_at = $9
+             WHERE id = $10",
+        )
+        .bind(customer.name.trim())
+        .bind(customer.phone.trim())
+        .bind(customer.alternate_phone.as_deref().map(str::trim))
+        .bind(customer.email.as_deref().map(str::trim))
+        .bind(customer.address.as_deref().map(str::trim))
+        .bind(customer.notes.as_deref().map(str::trim))
+        .bind(customer.credit_limit)
+        .bind(if customer.is_active { 1 } else { 0 })
+        .bind(&customer.updated_at)
+        .bind(&customer.id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to update customer centrally: {e}")))?;
+
+        Ok(customer.clone())
+    }
+
     pub async fn update_customer(&self, id: &str, dto: &UpdateCustomerDto) -> AppResult<Customer> {
         let existing = self
             .get_customer_by_id(id)

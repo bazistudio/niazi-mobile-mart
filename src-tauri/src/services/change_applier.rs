@@ -636,10 +636,29 @@ impl ChangeApplier {
     fn auto_heal_customer_in_tx(tx: &rusqlite::Transaction, customer_id: &str) -> crate::db::errors::DbResult<()> {
         let exists: bool = tx.query_row("SELECT 1 FROM customers WHERE id = ?1", params![customer_id], |_| Ok(true)).unwrap_or(false);
         if !exists {
+            let now = chrono::Utc::now().to_rfc3339();
+            let code = format!("CUS-AUTO-{}", &customer_id[0..8]);
             tx.execute(
                 "INSERT INTO customers (id, customer_code, name, phone, credit_limit, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![customer_id, format!("CUS-AUTO-{}", &customer_id[0..8]), "Unknown Customer (Auto-Healed)", "00000000000", 0, 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+                params![customer_id, &code, "Unknown Customer (Auto-Healed)", "00000000000", 0, 1, &now, &now],
             ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal customer: {e}")))?;
+            // Phase 7: ensure the party/customer relationship is preserved even for placeholder rows.
+            // party_id = customer_id (convention: role id as party id when no canonical party exists yet).
+            let contact = crate::domain::party::PartyRoleContact {
+                kind: crate::domain::party::PartyRoleKind::Customer,
+                role_id: customer_id.to_string(),
+                role_code: code,
+                name: "Unknown Customer (Auto-Healed)".to_string(),
+                phone: "00000000000".to_string(),
+                alternate_phone: None,
+                email: None,
+                address: None,
+                notes: None,
+                is_active: true,
+                created_at: now.clone(),
+                updated_at: now,
+            };
+            crate::repositories::SQLitePartyRepository::ensure_party_for_role_in_tx(tx, &contact, customer_id)?;
         }
         Ok(())
     }
@@ -647,10 +666,29 @@ impl ChangeApplier {
     fn auto_heal_supplier_in_tx(tx: &rusqlite::Transaction, supplier_id: &str) -> crate::db::errors::DbResult<()> {
         let exists: bool = tx.query_row("SELECT 1 FROM suppliers WHERE id = ?1", params![supplier_id], |_| Ok(true)).unwrap_or(false);
         if !exists {
+            let now = chrono::Utc::now().to_rfc3339();
+            let code = format!("SUP-AUTO-{}", &supplier_id[0..8]);
             tx.execute(
                 "INSERT INTO suppliers (id, supplier_code, name, phone, credit_limit, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![supplier_id, format!("SUP-AUTO-{}", &supplier_id[0..8]), "Unknown Supplier (Auto-Healed)", "00000000000", 0, 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+                params![supplier_id, &code, "Unknown Supplier (Auto-Healed)", "00000000000", 0, 1, &now, &now],
             ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal supplier: {e}")))?;
+            // Phase 7: ensure the party/supplier relationship is preserved even for placeholder rows.
+            // party_id = supplier_id (convention: role id as party id when no canonical party exists yet).
+            let contact = crate::domain::party::PartyRoleContact {
+                kind: crate::domain::party::PartyRoleKind::Supplier,
+                role_id: supplier_id.to_string(),
+                role_code: code,
+                name: "Unknown Supplier (Auto-Healed)".to_string(),
+                phone: "00000000000".to_string(),
+                alternate_phone: None,
+                email: None,
+                address: None,
+                notes: None,
+                is_active: true,
+                created_at: now.clone(),
+                updated_at: now,
+            };
+            crate::repositories::SQLitePartyRepository::ensure_party_for_role_in_tx(tx, &contact, supplier_id)?;
         }
         Ok(())
     }

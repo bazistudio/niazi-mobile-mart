@@ -158,6 +158,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/suppliers", get(list_suppliers_handler).post(create_supplier_handler))
         .route("/api/v1/parties", get(list_parties_handler))
         .route("/api/v1/parties/:id", get(get_party_handler))
+        .route("/api/v1/customers/:id", get(get_customer_detail_handler))
+        .route("/api/v1/customers/:id/ledger", get(get_customer_ledger_handler))
+        .route("/api/v1/suppliers/:id", get(get_supplier_detail_handler))
+        .route("/api/v1/suppliers/:id/ledger", get(get_supplier_ledger_handler))
         .route("/api/purchases", axum::routing::post(complete_purchase_handler))
         .route("/api/expenses", get(list_expenses_handler).post(create_expense_handler))
         .route("/api/reports/profit", get(profit_report_handler))
@@ -679,6 +683,78 @@ async fn create_supplier_handler(
     }
 }
 
+
+/// GET /api/v1/customers/:id -- Single customer with financial detail
+async fn get_customer_detail_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("customers"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+    match state.app_state.customer_service.get_customer_detail(&id).await {
+        Ok(detail) => (StatusCode::OK, Json(json!(detail))),
+        Err(niazi_mobile_mart_lib::errors::AppError::NotFound(msg)) => {
+            (StatusCode::NOT_FOUND, Json(json!({"error": "NOT_FOUND", "message": msg})))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/v1/customers/:id/ledger -- Customer ledger statement
+async fn get_customer_ledger_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("customers"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+    match state.app_state.customer_service.get_statement(&id).await {
+        Ok(statement) => (StatusCode::OK, Json(json!(statement))),
+        Err(niazi_mobile_mart_lib::errors::AppError::NotFound(msg)) => {
+            (StatusCode::NOT_FOUND, Json(json!({"error": "NOT_FOUND", "message": msg})))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/v1/suppliers/:id -- Single supplier with financial detail
+async fn get_supplier_detail_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("suppliers"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+    match state.app_state.supplier_service.get_detail(&id).await {
+        Ok(detail) => (StatusCode::OK, Json(json!(detail))),
+        Err(niazi_mobile_mart_lib::errors::AppError::NotFound(msg)) => {
+            (StatusCode::NOT_FOUND, Json(json!({"error": "NOT_FOUND", "message": msg})))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/v1/suppliers/:id/ledger -- Supplier ledger statement
+async fn get_supplier_ledger_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("suppliers"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+    match state.app_state.supplier_service.get_statement(&id).await {
+        Ok(statement) => (StatusCode::OK, Json(json!(statement))),
+        Err(niazi_mobile_mart_lib::errors::AppError::NotFound(msg)) => {
+            (StatusCode::NOT_FOUND, Json(json!({"error": "NOT_FOUND", "message": msg})))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
 /// POST /api/purchases â€” Complete purchase with strict branch isolation
 async fn complete_purchase_handler(
     State(state): State<ServerState>,
@@ -1887,6 +1963,93 @@ async fn sync_push_handler(
                 }
             }
 
+            if event.event_type == "CUSTOMER_UPDATED" {
+                let customer: niazi_mobile_mart_lib::domain::customer::Customer = match serde_json::from_str(&event.payload) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "BAD_REQUEST",
+                                "message": format!("Invalid CUSTOMER_UPDATED payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                let projected_customer = match niazi_mobile_mart_lib::repositories::PostgresCustomerRepository::update_customer_tx(&mut tx, &customer).await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to project CUSTOMER_UPDATED event centrally: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                // Phase 1.1: link the customer role to its canonical party (payload party_id,
+                // else party.id = customer.id) and forward party_id downstream.
+                // For BOTH parties: ensure_party_for_role_tx only mirrors contact when the
+                // party has exactly one role, so the supplier role keeps the party active.
+                let requested_party_id = niazi_mobile_mart_lib::domain::party::party_id_from_payload(&event.payload, &projected_customer.id);
+                let party_id = match niazi_mobile_mart_lib::repositories::PostgresPartyRepository::ensure_party_for_role_tx(
+                    &mut tx,
+                    &niazi_mobile_mart_lib::domain::party::PartyRoleContact::from(&projected_customer),
+                    &requested_party_id,
+                ).await {
+                    Ok(p) => p.unwrap_or(requested_party_id),
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to link CUSTOMER_UPDATED to party centrally: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                let change_payload = match niazi_mobile_mart_lib::domain::party::role_payload_with_party_id(&projected_customer, &party_id) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "SERVER_ERROR",
+                                "message": format!("Failed to serialize CUSTOMER_UPDATED change_log payload: {e}")
+                            })),
+                        );
+                    }
+                };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "CUSTOMER_UPDATED",
+                    "CUSTOMER",
+                    &projected_customer.id,
+                    &change_payload,
+                ).await {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append CUSTOMER_UPDATED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
             if event.event_type == niazi_mobile_mart_lib::domain::party::PARTY_UPSERTED_EVENT {
                 let party: niazi_mobile_mart_lib::domain::party::Party = match serde_json::from_str(&event.payload) {
                     Ok(p) => p,
@@ -1971,6 +2134,33 @@ async fn sync_push_handler(
                 }
             }
 
+            // SYNC-B1: Unknown event type guard.
+            //
+            // Every recognised event type is handled by one of the independent `if`
+            // blocks above.  An event type that is not in the registry falls through
+            // ALL of them, which would previously cause the empty transaction to be
+            // committed and a spurious `SYNCED` response to be returned — resulting
+            // in silent permanent data loss on the originating terminal.
+            //
+            // This guard MUST remain immediately before the audit record and commit
+            // so that it catches every event type not handled above.
+            if !niazi_mobile_mart_lib::domain::sync_queue::KNOWN_SERVER_EVENT_TYPES
+                .contains(&event.event_type.as_str())
+            {
+                let _ = tx.rollback().await;
+                results.push(json!({
+                    "client_event_id": client_event_id,
+                    "status": "FAILED_PERMANENT",
+                    "error": "UNKNOWN_EVENT_TYPE",
+                    "message": format!(
+                        "Unrecognised sync event type '{}': the server has no handler \
+                         for this event and cannot project or audit it.",
+                        event.event_type
+                    )
+                }));
+                continue;
+            }
+
             if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresSyncAuditRepository::record_audit_tx(
                 &mut tx,
                 &server_event_id,
@@ -2038,10 +2228,15 @@ async fn sync_pull_handler(
     let limit = query.limit.unwrap_or(100).clamp(1, 500);
 
     let repo = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::new(pg_pool);
-    match repo.get_changes(&auth.0.organization_id, after_seq, limit).await {
-        Ok(changes) => {
+    // M1: query limit+1 rows so we can distinguish "exactly limit rows exist" from "more rows follow".
+    match repo.get_changes(&auth.0.organization_id, after_seq, limit + 1).await {
+        Ok(mut changes) => {
+            // has_more is true only when a (limit+1)-th row was actually returned.
+            let has_more = changes.len() as i64 > limit;
+            if has_more {
+                changes.truncate(limit as usize);
+            }
             let next_seq = changes.last().map(|c| c.sequence).unwrap_or(after_seq);
-            let has_more = changes.len() as i64 == limit;
             (
                 StatusCode::OK,
                 Json(json!({

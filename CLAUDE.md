@@ -125,14 +125,32 @@ SQLite (Local)  Windows FS       Thermal Printer    Sync Queue
 ### Local Database (SQLite)
 - **Path**: Managed by Tauri AppData directory (`niazi_mobile_mart.db`).
 - **Pragmas**: `journal_mode = WAL`, `foreign_keys = ON`, `synchronous = NORMAL`.
-- **Active Migrations**: 17 Migrations (`001_initial_schema` to `017_multi_payment`).
+- **Active Migrations**: 21 Migrations (`001_initial_schema` to `021_parties_backfill`).
 - **Migration 017 (`017_multi_payment`)**: Rebuilds `sale_payments` table to support payment method CHECK constraint: `('CASH', 'CARD', 'BANK_TRANSFER', 'EASYPAISA', 'JAZZCASH', 'OTHER')`.
+- **Migrations 018–021 (`018_parties_table` to `021_parties_backfill`)**: Canonical party identity model with deterministic backfill.
 
 ### Central Database (PostgreSQL)
 - **Engine**: GCP Cloud SQL PostgreSQL.
 - **Migration Runner**: Enforced in code via `PostgresAdapter::run_migrations()` in `src-tauri/src/db/postgres.rs`.
-- **Active Migrations**: 6 Migrations (`001_initial_schema.sql` to `006_multi_payment.sql`).
-- **Migration 006 (`006_multi_payment.sql`)**: Updates `sale_payments.payment_method` CHECK constraint to match SQLite schema.
+- **Active Migrations**: 8 Migrations (`001_initial_schema.sql` to `008_search_index_parity.sql`).
+- **Migration 007 (`007_parties_foundation.sql`)**: Canonical party identity model with deterministic backfill (mirrors SQLite 018–021).
+- **Migration 008 (`008_search_index_parity.sql`)**: Adds `lower()` functional indexes on `parties.display_name`, `customers.name`, `suppliers.name` for case-insensitive search parity.
+
+### Intentional Schema Differences (SQLite vs PostgreSQL)
+
+These are by-design differences, not gaps:
+
+| Difference | Explanation |
+|-----------|-------------|
+| SQLite `sync_cursors` table | Client-side pull cursor tracking `last_applied_sequence` per stream. Each desktop terminal tracks its own sync position. No server equivalent needed. |
+| PostgreSQL `sync_audit` table | Central audit log for sync events received from terminals. No client-side equivalent needed. |
+| PostgreSQL `change_log` table | Central event broadcast stream (`BIGSERIAL` sequence). Desktop clients consume it via `sync_cursors`; they do not replicate it locally. |
+| SQLite `local_auth_snapshot` table | Offline authentication cache per terminal. Stores hashed credentials for offline login. Central server authenticates live and does not need this. |
+| SQLite `offline_sync_queue` (client outbox) vs PostgreSQL `sync_audit` (server ingest) | Opposite ends of the same sync pipeline. Different schemas are intentional. |
+| Products composite UNIQUE constraint | PostgreSQL enforces `products_composite_identity_key` (`UNIQUE NULLS NOT DISTINCT`). SQLite lacks this syntax; uniqueness is enforced at application layer via collision preflight in migration 015 runner code. |
+| SQLite `sale_payments` table-rebuild migration | SQLite cannot `ALTER CHECK` constraints; migration 017 uses `DROP` + `CREATE` + `INSERT`. PostgreSQL migration 006 uses `ALTER TABLE ... DROP/ADD CONSTRAINT`. End state is identical. |
+| Money columns: `INTEGER` (SQLite) vs `BIGINT` (PostgreSQL) | Both represent whole PKR rupees. SQLite `INTEGER` is 64-bit for large values. PostgreSQL `BIGINT` is explicitly 64-bit. No overflow risk at shop scale. |
+| Search indexes: `COLLATE NOCASE` (SQLite) vs `lower()` functional (PostgreSQL) | SQLite uses `COLLATE NOCASE` on B-tree indexes. PostgreSQL uses `lower(column)` functional indexes (migration 008). Both support case-insensitive ordering. |
 
 ---
 
