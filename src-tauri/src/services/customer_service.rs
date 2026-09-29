@@ -303,6 +303,12 @@ impl CustomerService {
         };
 
         let db = self.db.as_ref().expect("SQLite database connection required");
+
+        // Fetch terminal_id BEFORE the sync closure (async; cannot call inside sync tx).
+        let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
+        let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+        let terminal_id = current_terminal.id;
+
         let result = with_transaction(db, move |tx| {
             // 1. Authoritative current outstanding balance
             let current_balance = SQLiteCustomerRepository::calculate_outstanding_balance_in_tx(tx, &cid)?;
@@ -330,7 +336,7 @@ impl CustomerService {
                 id: Uuid::new_v4().to_string(),
                 customer_id: cid.clone(),
                 reference_id: Some(payment_id.clone()),
-                reference_number: ref_num_input.or_else(|| Some(receipt_number.clone())),
+                reference_number: ref_num_input.clone().or_else(|| Some(receipt_number.clone())),
                 entry_type: CustomerLedgerEntryType::Payment,
                 debit: 0,
                 credit: amount,
@@ -387,6 +393,7 @@ impl CustomerService {
             }
 
             // 6. If payment method is CASH, record authoritative Cash Movement IN
+            //    (cash movements are intentionally terminal-local — not synced globally)
             if p_method == "CASH" {
                 let open_session_id = SQLiteCashRepository::get_open_session_id_in_tx(tx, &branch_id)?;
                 let cash_movement = CashMovement {
@@ -400,12 +407,38 @@ impl CustomerService {
                     reference_number: Some(receipt_number.clone()),
                     payment_method: "CASH".to_string(),
                     description: format!("Customer Payment Receipt {}", receipt_number),
-                    performed_by: uid,
+                    performed_by: uid.clone(),
                     performed_by_name: None,
                     created_at: now.clone(),
                 };
                 SQLiteCashRepository::insert_movement_in_tx(tx, &cash_movement)?;
             }
+
+            // 7. SYNC-B2: Enqueue CUSTOMER_PAYMENT_RECORDED inside the same SQLite
+            //    transaction so atomicity is guaranteed — if the transaction rolls
+            //    back, the sync event is never inserted; if it commits, both exist.
+            let sync_payload = crate::domain::customer::CustomerPaymentSyncEventDto {
+                payment_id: payment_id.clone(),
+                receipt_number: receipt_number.clone(),
+                customer_id: cid.clone(),
+                amount_paid: amount,
+                payment_method: p_method.clone(),
+                reference_number: ref_num_input.clone(),
+                notes: notes.clone(),
+                performed_by: uid.clone(),
+                created_at: now.clone(),
+                allocated_sales: allocated_sales.clone(),
+            };
+            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                client_event_id: Some(Uuid::new_v4().to_string()),
+                terminal_id,
+                organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: crate::domain::organization::DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "CUSTOMER_PAYMENT_RECORDED".to_string(),
+                payload: serde_json::to_string(&sync_payload)
+                    .map_err(|e| DbError::QueryError(format!("Failed to serialise sync payload: {e}")))?,
+            };
+            crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
 
             Ok(CustomerPaymentResultDto {
                 payment_id,

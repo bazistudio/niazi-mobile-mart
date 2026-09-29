@@ -1579,29 +1579,153 @@ async fn sync_push_handler(
                     }
                 };
 
-                // Auto-heal missing master data for the central database
+                // SYNC-H3: Auto-heal missing master data for the central database and emit
+                // corresponding change_log events so downstream PCs can receive the catalog entity.
+                // Each INSERT uses ON CONFLICT DO NOTHING for idempotency; rows_affected() > 0
+                // distinguishes a new insertion from a no-op, so we only emit change_log when the
+                // entity was actually created.  All operations share the outer transaction — if any
+                // step fails the entire PRODUCT_UPDATED transaction is rolled back, preventing the
+                // split-brain state (catalog row exists, change_log missing).
                 let now = chrono::Utc::now().to_rfc3339();
-                sqlx::query("INSERT INTO categories (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Category', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
-                    .bind(&product.category_id).bind(&now).execute(&mut *tx).await.ok();
+
+                // Macro mirrors the PRODUCT_CREATED auto_heal! macro: structured identically so
+                // future readers can cross-reference the two handlers.
+                macro_rules! auto_heal_updated {
+                    ($sql:expr, $id:expr, $name_val:expr, $domain_type:ident, $event_type:expr, $entity_type:expr) => {
+                        match sqlx::query($sql).bind($id).bind(&now).execute(&mut *tx).await {
+                            Ok(result) => {
+                                if result.rows_affected() > 0 {
+                                    // Catalog entity did not exist — build the canonical payload and
+                                    // append a change_log event so other PCs can pull it.
+                                    let entity = niazi_mobile_mart_lib::domain::catalog::$domain_type {
+                                        id: $id.clone(),
+                                        name: $name_val.to_string(),
+                                        code: $id.clone(),
+                                        description: None,
+                                        is_active: true,
+                                        created_at: now.clone(),
+                                        updated_at: now.clone(),
+                                    };
+                                    let payload = serde_json::to_string(&entity).unwrap();
+                                    if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                                        &mut tx,
+                                        &event.organization_id,
+                                        &event.branch_id,
+                                        None,
+                                        $event_type,
+                                        $entity_type,
+                                        $id,
+                                        &payload,
+                                    ).await {
+                                        let _ = tx.rollback().await;
+                                        return (
+                                            StatusCode::INTERNAL_SERVER_ERROR,
+                                            Json(json!({
+                                                "error": "SERVER_ERROR",
+                                                "message": format!("Failed to append {} to change_log during PRODUCT_UPDATED auto-heal: {}", $event_type, e)
+                                            })),
+                                        );
+                                    }
+                                }
+                                // rows_affected() == 0 → entity already exists; no duplicate change_log emitted.
+                            }
+                            Err(e) => {
+                                let _ = tx.rollback().await;
+                                return (
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    Json(json!({
+                                        "error": "SERVER_ERROR",
+                                        "message": format!("Failed to auto-heal master data {} during PRODUCT_UPDATED: {}", $entity_type, e)
+                                    })),
+                                );
+                            }
+                        }
+                    };
+                }
+
+                auto_heal_updated!(
+                    "INSERT INTO categories (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Category', $1, 1, $2, $2) ON CONFLICT DO NOTHING",
+                    &product.category_id, "Auto-Synced Category", Category, "CATEGORY_CREATED", "CATEGORY"
+                );
+
                 if let Some(brand_id) = &product.brand_id {
-                    sqlx::query("INSERT INTO brands (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Brand', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
-                        .bind(brand_id).bind(&now).execute(&mut *tx).await.ok();
+                    auto_heal_updated!(
+                        "INSERT INTO brands (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Brand', $1, 1, $2, $2) ON CONFLICT DO NOTHING",
+                        brand_id, "Auto-Synced Brand", Brand, "BRAND_CREATED", "BRAND"
+                    );
                 }
-                if let Some(unit_id) = &product.unit_id {
-                    sqlx::query("INSERT INTO units (id, name, symbol, conversion_factor, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Unit', $1, 1, 1, $2, $2) ON CONFLICT DO NOTHING")
-                        .bind(unit_id).bind(&now).execute(&mut *tx).await.ok();
-                }
+
                 if let Some(company_id) = &product.company_id {
-                    sqlx::query("INSERT INTO companies (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Company', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
-                        .bind(company_id).bind(&now).execute(&mut *tx).await.ok();
+                    auto_heal_updated!(
+                        "INSERT INTO companies (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Company', $1, 1, $2, $2) ON CONFLICT DO NOTHING",
+                        company_id, "Auto-Synced Company", Company, "COMPANY_CREATED", "COMPANY"
+                    );
                 }
+
                 if let Some(quality_id) = &product.quality_id {
-                    sqlx::query("INSERT INTO qualities (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Quality', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
-                        .bind(quality_id).bind(&now).execute(&mut *tx).await.ok();
+                    auto_heal_updated!(
+                        "INSERT INTO qualities (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Quality', $1, 1, $2, $2) ON CONFLICT DO NOTHING",
+                        quality_id, "Auto-Synced Quality", Quality, "QUALITY_CREATED", "QUALITY"
+                    );
                 }
+
                 if let Some(color_id) = &product.color_id {
-                    sqlx::query("INSERT INTO colors (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Color', $1, 1, $2, $2) ON CONFLICT DO NOTHING")
-                        .bind(color_id).bind(&now).execute(&mut *tx).await.ok();
+                    auto_heal_updated!(
+                        "INSERT INTO colors (id, name, code, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Color', $1, 1, $2, $2) ON CONFLICT DO NOTHING",
+                        color_id, "Auto-Synced Color", Color, "COLOR_CREATED", "COLOR"
+                    );
+                }
+
+                // Unit uses a separate inline handler because its struct layout differs from
+                // the other catalog entities (no `code` field; has `symbol` + `conversion_factor`).
+                if let Some(unit_id) = &product.unit_id {
+                    match sqlx::query("INSERT INTO units (id, name, symbol, conversion_factor, is_active, created_at, updated_at) VALUES ($1, 'Auto-Synced Unit', $1, 1, 1, $2, $2) ON CONFLICT DO NOTHING")
+                        .bind(unit_id).bind(&now).execute(&mut *tx).await
+                    {
+                        Ok(result) => {
+                            if result.rows_affected() > 0 {
+                                let unit = niazi_mobile_mart_lib::domain::catalog::Unit {
+                                    id: unit_id.clone(),
+                                    name: "Auto-Synced Unit".to_string(),
+                                    symbol: Some(unit_id.clone()),
+                                    conversion_factor: 1,
+                                    is_active: true,
+                                    created_at: now.clone(),
+                                    updated_at: now.clone(),
+                                };
+                                let payload = serde_json::to_string(&unit).unwrap();
+                                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                                    &mut tx,
+                                    &event.organization_id,
+                                    &event.branch_id,
+                                    None,
+                                    "UNIT_CREATED",
+                                    "UNIT",
+                                    unit_id,
+                                    &payload,
+                                ).await {
+                                    let _ = tx.rollback().await;
+                                    return (
+                                        StatusCode::INTERNAL_SERVER_ERROR,
+                                        Json(json!({
+                                            "error": "SERVER_ERROR",
+                                            "message": format!("Failed to append UNIT_CREATED to change_log during PRODUCT_UPDATED auto-heal: {e}")
+                                        })),
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({
+                                    "error": "SERVER_ERROR",
+                                    "message": format!("Failed to auto-heal master data UNIT during PRODUCT_UPDATED: {e}")
+                                })),
+                            );
+                        }
+                    }
                 }
 
                 let projected_product = match niazi_mobile_mart_lib::repositories::PostgresProductRepository::update_product_tx(
@@ -1875,6 +1999,128 @@ async fn sync_push_handler(
                 }
             }
 
+            // SYNC-B2 — Customer payment projection
+            if event.event_type == "CUSTOMER_PAYMENT_RECORDED" {
+                let payment_event: niazi_mobile_mart_lib::domain::customer::CustomerPaymentSyncEventDto =
+                    match serde_json::from_str(&event.payload) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            return (
+                                StatusCode::BAD_REQUEST,
+                                Json(json!({
+                                    "error": "INVALID_PAYLOAD",
+                                    "message": format!("Invalid CUSTOMER_PAYMENT_RECORDED payload: {e}")
+                                })),
+                            );
+                        }
+                    };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresCustomerRepository::record_customer_payment_tx(
+                    &mut tx,
+                    &payment_event,
+                )
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    let (status, code) = if e.to_string().contains("not found") {
+                        (StatusCode::BAD_REQUEST, "DEPENDENCY_NOT_MET")
+                    } else {
+                        (StatusCode::INTERNAL_SERVER_ERROR, "SERVER_ERROR")
+                    };
+                    return (
+                        status,
+                        Json(json!({
+                            "error": code,
+                            "message": format!("Failed to project CUSTOMER_PAYMENT_RECORDED centrally: {e}")
+                        })),
+                    );
+                }
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "CUSTOMER_PAYMENT_RECORDED",
+                    "CUSTOMER_PAYMENT",
+                    &payment_event.payment_id,
+                    &event.payload,
+                )
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append CUSTOMER_PAYMENT_RECORDED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
+            // ── SYNC-H1: Manual inventory operation ──────────────────────────────
+            if event.event_type == "INVENTORY_OPERATION_RECORDED" {
+                let inv_event: niazi_mobile_mart_lib::domain::inventory::InventoryOperationSyncEventDto =
+                    match serde_json::from_str(&event.payload) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            return (
+                                StatusCode::BAD_REQUEST,
+                                Json(json!({
+                                    "error": "INVALID_PAYLOAD",
+                                    "message": format!("Invalid INVENTORY_OPERATION_RECORDED payload: {e}")
+                                })),
+                            );
+                        }
+                    };
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresInventoryRepository::record_inventory_operation_tx(
+                    &mut tx,
+                    &inv_event,
+                )
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    let (status, code) = if e.to_string().contains("not found") || e.to_string().contains("Insufficient") {
+                        (StatusCode::BAD_REQUEST, "DEPENDENCY_NOT_MET")
+                    } else {
+                        (StatusCode::INTERNAL_SERVER_ERROR, "SERVER_ERROR")
+                    };
+                    return (
+                        status,
+                        Json(json!({
+                            "error": code,
+                            "message": format!("Failed to project INVENTORY_OPERATION_RECORDED centrally: {e}")
+                        })),
+                    );
+                }
+
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "INVENTORY_OPERATION_RECORDED",
+                    "INVENTORY_OPERATION",
+                    &inv_event.operation_id,
+                    &event.payload,
+                )
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append INVENTORY_OPERATION_RECORDED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
             if event.event_type == "CUSTOMER_CREATED" {
                 let customer: niazi_mobile_mart_lib::domain::customer::Customer = match serde_json::from_str(&event.payload) {
                     Ok(c) => c,
@@ -2129,6 +2375,396 @@ async fn sync_push_handler(
                         Json(json!({
                             "error": "SERVER_ERROR",
                             "message": format!("Failed to append PARTY_UPSERTED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
+            // SYNC-H2: CATEGORY_CREATED
+            if event.event_type == "CATEGORY_CREATED" {
+                let entity: niazi_mobile_mart_lib::domain::catalog::Category =
+                    match serde_json::from_str(&event.payload) {
+                        Ok(e) => e,
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            results.push(json!({
+                                "client_event_id": client_event_id,
+                                "status": "FAILED_PERMANENT",
+                                "error": "INVALID_PAYLOAD",
+                                "message": format!("Invalid CATEGORY_CREATED payload: {e}")
+                            }));
+                            continue;
+                        }
+                    };
+                let now = chrono::Utc::now().to_rfc3339();
+                let is_active_int: i64 = if entity.is_active { 1 } else { 0 };
+                if let Err(e) = sqlx::query(
+                    "INSERT INTO categories (id, name, code, description, is_active, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)
+                     ON CONFLICT (id) DO NOTHING",
+                )
+                .bind(&entity.id)
+                .bind(&entity.name)
+                .bind(&entity.code)
+                .bind(&entity.description)
+                .bind(is_active_int)
+                .bind(&now)
+                .bind(&now)
+                .execute(&mut *tx)
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to project CATEGORY_CREATED centrally: {e}")
+                        })),
+                    );
+                }
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "CATEGORY_CREATED",
+                    "CATEGORY",
+                    &entity.id,
+                    &event.payload,
+                )
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append CATEGORY_CREATED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
+            // SYNC-H2: BRAND_CREATED
+            if event.event_type == "BRAND_CREATED" {
+                let entity: niazi_mobile_mart_lib::domain::catalog::Brand =
+                    match serde_json::from_str(&event.payload) {
+                        Ok(e) => e,
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            results.push(json!({
+                                "client_event_id": client_event_id,
+                                "status": "FAILED_PERMANENT",
+                                "error": "INVALID_PAYLOAD",
+                                "message": format!("Invalid BRAND_CREATED payload: {e}")
+                            }));
+                            continue;
+                        }
+                    };
+                let now = chrono::Utc::now().to_rfc3339();
+                let is_active_int: i64 = if entity.is_active { 1 } else { 0 };
+                if let Err(e) = sqlx::query(
+                    "INSERT INTO brands (id, name, code, description, is_active, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)
+                     ON CONFLICT (id) DO NOTHING",
+                )
+                .bind(&entity.id)
+                .bind(&entity.name)
+                .bind(&entity.code)
+                .bind(&entity.description)
+                .bind(is_active_int)
+                .bind(&now)
+                .bind(&now)
+                .execute(&mut *tx)
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to project BRAND_CREATED centrally: {e}")
+                        })),
+                    );
+                }
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "BRAND_CREATED",
+                    "BRAND",
+                    &entity.id,
+                    &event.payload,
+                )
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append BRAND_CREATED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
+            // SYNC-H2: UNIT_CREATED
+            if event.event_type == "UNIT_CREATED" {
+                let entity: niazi_mobile_mart_lib::domain::catalog::Unit =
+                    match serde_json::from_str(&event.payload) {
+                        Ok(e) => e,
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            results.push(json!({
+                                "client_event_id": client_event_id,
+                                "status": "FAILED_PERMANENT",
+                                "error": "INVALID_PAYLOAD",
+                                "message": format!("Invalid UNIT_CREATED payload: {e}")
+                            }));
+                            continue;
+                        }
+                    };
+                let now = chrono::Utc::now().to_rfc3339();
+                let is_active_int: i64 = if entity.is_active { 1 } else { 0 };
+                if let Err(e) = sqlx::query(
+                    "INSERT INTO units (id, name, symbol, conversion_factor, is_active, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)
+                     ON CONFLICT (id) DO NOTHING",
+                )
+                .bind(&entity.id)
+                .bind(&entity.name)
+                .bind(&entity.symbol)
+                .bind(entity.conversion_factor)
+                .bind(is_active_int)
+                .bind(&now)
+                .bind(&now)
+                .execute(&mut *tx)
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to project UNIT_CREATED centrally: {e}")
+                        })),
+                    );
+                }
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "UNIT_CREATED",
+                    "UNIT",
+                    &entity.id,
+                    &event.payload,
+                )
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append UNIT_CREATED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
+            // SYNC-H2: COMPANY_CREATED
+            if event.event_type == "COMPANY_CREATED" {
+                let entity: niazi_mobile_mart_lib::domain::catalog::Company =
+                    match serde_json::from_str(&event.payload) {
+                        Ok(e) => e,
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            results.push(json!({
+                                "client_event_id": client_event_id,
+                                "status": "FAILED_PERMANENT",
+                                "error": "INVALID_PAYLOAD",
+                                "message": format!("Invalid COMPANY_CREATED payload: {e}")
+                            }));
+                            continue;
+                        }
+                    };
+                let now = chrono::Utc::now().to_rfc3339();
+                let is_active_int: i64 = if entity.is_active { 1 } else { 0 };
+                if let Err(e) = sqlx::query(
+                    "INSERT INTO companies (id, name, code, description, is_active, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)
+                     ON CONFLICT (id) DO NOTHING",
+                )
+                .bind(&entity.id)
+                .bind(&entity.name)
+                .bind(&entity.code)
+                .bind(&entity.description)
+                .bind(is_active_int)
+                .bind(&now)
+                .bind(&now)
+                .execute(&mut *tx)
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to project COMPANY_CREATED centrally: {e}")
+                        })),
+                    );
+                }
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "COMPANY_CREATED",
+                    "COMPANY",
+                    &entity.id,
+                    &event.payload,
+                )
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append COMPANY_CREATED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
+            // SYNC-H2: QUALITY_CREATED
+            if event.event_type == "QUALITY_CREATED" {
+                let entity: niazi_mobile_mart_lib::domain::catalog::Quality =
+                    match serde_json::from_str(&event.payload) {
+                        Ok(e) => e,
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            results.push(json!({
+                                "client_event_id": client_event_id,
+                                "status": "FAILED_PERMANENT",
+                                "error": "INVALID_PAYLOAD",
+                                "message": format!("Invalid QUALITY_CREATED payload: {e}")
+                            }));
+                            continue;
+                        }
+                    };
+                let now = chrono::Utc::now().to_rfc3339();
+                let is_active_int: i64 = if entity.is_active { 1 } else { 0 };
+                if let Err(e) = sqlx::query(
+                    "INSERT INTO qualities (id, name, code, description, is_active, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)
+                     ON CONFLICT (id) DO NOTHING",
+                )
+                .bind(&entity.id)
+                .bind(&entity.name)
+                .bind(&entity.code)
+                .bind(&entity.description)
+                .bind(is_active_int)
+                .bind(&now)
+                .bind(&now)
+                .execute(&mut *tx)
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to project QUALITY_CREATED centrally: {e}")
+                        })),
+                    );
+                }
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "QUALITY_CREATED",
+                    "QUALITY",
+                    &entity.id,
+                    &event.payload,
+                )
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append QUALITY_CREATED to change_log: {e}")
+                        })),
+                    );
+                }
+            }
+
+            // SYNC-H2: COLOR_CREATED
+            if event.event_type == "COLOR_CREATED" {
+                let entity: niazi_mobile_mart_lib::domain::catalog::Color =
+                    match serde_json::from_str(&event.payload) {
+                        Ok(e) => e,
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            results.push(json!({
+                                "client_event_id": client_event_id,
+                                "status": "FAILED_PERMANENT",
+                                "error": "INVALID_PAYLOAD",
+                                "message": format!("Invalid COLOR_CREATED payload: {e}")
+                            }));
+                            continue;
+                        }
+                    };
+                let now = chrono::Utc::now().to_rfc3339();
+                let is_active_int: i64 = if entity.is_active { 1 } else { 0 };
+                if let Err(e) = sqlx::query(
+                    "INSERT INTO colors (id, name, code, description, is_active, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)
+                     ON CONFLICT (id) DO NOTHING",
+                )
+                .bind(&entity.id)
+                .bind(&entity.name)
+                .bind(&entity.code)
+                .bind(&entity.description)
+                .bind(is_active_int)
+                .bind(&now)
+                .bind(&now)
+                .execute(&mut *tx)
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to project COLOR_CREATED centrally: {e}")
+                        })),
+                    );
+                }
+                if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::append_change_log_tx(
+                    &mut tx,
+                    &event.organization_id,
+                    &event.branch_id,
+                    Some(&client_event_id),
+                    "COLOR_CREATED",
+                    "COLOR",
+                    &entity.id,
+                    &event.payload,
+                )
+                .await
+                {
+                    let _ = tx.rollback().await;
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "SERVER_ERROR",
+                            "message": format!("Failed to append COLOR_CREATED to change_log: {e}")
                         })),
                     );
                 }

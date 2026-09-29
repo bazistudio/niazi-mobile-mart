@@ -110,3 +110,35 @@ pub struct TransferStockDto {
     pub reason: Option<String>,
     pub reference_id: Option<String>,
 }
+
+/// SYNC-H1 — Sync payload for a single manual inventory operation.
+///
+/// Represents one of: INCREASE, DECREASE, ADJUST, TRANSFER.
+/// `operation_id` is the stable business identity used for idempotency
+/// (stable across queue retries; separate from `stock_movements.id`).
+/// For ADJUST, `target_quantity` holds the authoritative resulting quantity
+/// and `quantity` holds the absolute delta (|target - prev|).
+/// For TRANSFER, `from_branch_id` and `to_branch_id` are both set.
+/// For non-transfer operations, `from_branch_id == branch_id` and
+/// `to_branch_id` is None.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct InventoryOperationSyncEventDto {
+    /// Stable operation identity (UUID, generated once at the producer site).
+    pub operation_id: String,
+    /// One of: "INCREASE", "DECREASE", "ADJUST", "TRANSFER"
+    pub operation_type: String,
+    pub product_id: String,
+    /// For INCREASE / DECREASE / ADJUST: the affected branch.
+    /// For TRANSFER: the source branch.
+    pub branch_id: String,
+    /// TRANSFER only: the destination branch.
+    pub to_branch_id: Option<String>,
+    /// Movement quantity (always positive).
+    /// For ADJUST: absolute delta |target - previous|.
+    pub quantity: i64,
+    /// ADJUST only: the authoritative resulting quantity after adjustment.
+    pub target_quantity: Option<i64>,
+    pub reason: Option<String>,
+    pub performed_by: Option<String>,
+    pub created_at: String,
+}

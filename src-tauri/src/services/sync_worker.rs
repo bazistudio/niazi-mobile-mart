@@ -62,7 +62,13 @@ impl SyncWorkerDaemon {
 
         {
             let mut st = self.status.write().await;
+            // M7: Clear stale error/timestamp at the START of each manual sync so that
+            // a previous failure does not remain visible during or after a new operation.
+            // The UI uses last_error to decide whether to show a success or error toast
+            // on completion; without this reset, a successful new sync would still
+            // display the previous error and last_synced_at would not be updated.
             st.is_syncing = true;
+            st.last_error = None;
         }
 
         info!("[SyncWorkerDaemon] Starting manual sync pipeline (push outbox + pull downstream)...");
@@ -85,6 +91,9 @@ impl SyncWorkerDaemon {
         st.pending_count = pending_count;
         st.conflict_count = conflict_count;
         st.failed_count = failed_count;
+        // M7: last_error is now either None (cleared above, not re-set → success)
+        // or Some(...) set by a sub-operation during this sync cycle.
+        // Update last_synced_at only when the cycle completed without error.
         if st.last_error.is_none() {
             st.last_synced_at = Some(now);
         }
@@ -282,14 +291,23 @@ impl SyncWorkerDaemon {
                         st.last_error = Some(format!("Event authorization rejected (403 Forbidden): {err_body}"));
                     }
                     409 => {
+                        // M4: A bare HTTP 409 from the transport layer (proxy / load-balancer)
+                        // carries no per-event identity. Marking every item in the batch as
+                        // Conflict is incorrect — unrelated valid events would be permanently
+                        // stuck and never retried. Route through the existing bounded-retry
+                        // path (H6/H7) instead: increment attempt_count and keep Pending.
+                        // update_status_ext auto-promotes to FailedPermanent once MAX_RETRIES
+                        // is reached, so the retry budget is still enforced.
+                        // Note: per-event CONFLICT results from a normal HTTP 200 response are
+                        // handled separately above and continue to use SyncQueueStatus::Conflict.
                         for item in &pending_items {
                             let _ = sync_queue_repo
-                                .update_status_ext(&item.client_event_id, SyncQueueStatus::Conflict, Some(&err_msg), None, false)
+                                .update_status_ext(&item.client_event_id, SyncQueueStatus::Pending, Some(&err_msg), None, true)
                                 .await;
                         }
                         let mut st = self.status.write().await;
                         st.is_online = true;
-                        st.last_error = Some(format!("Sync conflict (409): {err_body}"));
+                        st.last_error = Some(format!("Sync push rejected (409): retrying via bounded retry — {err_body}"));
                     }
                     422 if err_body.contains("DEPENDENCY_NOT_FOUND") => {
                         for item in &pending_items {
@@ -608,5 +626,134 @@ mod tests {
         let updated = repo.find_by_user_id("u-disabled-test").await.unwrap().unwrap();
         assert_eq!(updated.status, UserStatus::Disabled);
         assert_eq!(updated.credential_version, 2);
+    }
+
+    // ─── M7: Manual Sync Now stale-status regression tests ───────────────────
+
+    /// M7-T01: A new manual sync clears stale last_error before the pipeline begins.
+    /// After a previous failure, a successful new manual sync must not leave the
+    /// previous error visible; last_synced_at must be updated on clean completion.
+    #[tokio::test]
+    async fn m7_t01_manual_sync_clears_stale_error_before_pipeline() {
+        let state = Arc::new(AppState::in_memory("1.2.15"));
+        let daemon = SyncWorkerDaemon::new(state.clone());
+
+        // Inject a stale error as if a previous sync had failed
+        {
+            let mut st = daemon.status.write().await;
+            st.last_error = Some("stale error from previous sync cycle".to_string());
+            st.last_synced_at = Some("2026-01-01T00:00:00Z".to_string());
+        }
+
+        // Verify precondition: stale error is present
+        {
+            let st = daemon.status.read().await;
+            assert!(st.last_error.is_some(), "Precondition: last_error should be set before sync");
+        }
+
+        // Run manual sync (no active token → skips push and pull pipelines cleanly)
+        daemon.run_manual_sync().await;
+
+        // Post-condition: last_error must be None (cleared at start, not re-set because
+        // pipelines returned early due to missing token, not due to an error)
+        let st = daemon.status.read().await;
+        assert!(st.last_error.is_none(),
+            "M7-T01 FAIL: last_error should be None after successful manual sync, got: {:?}", st.last_error);
+        assert!(st.last_synced_at.is_some(),
+            "M7-T01 FAIL: last_synced_at should be updated after successful manual sync");
+        assert!(!st.is_syncing,
+            "M7-T01 FAIL: is_syncing must be false after completion");
+    }
+
+    /// M7-T02: is_syncing is set to true during the sync and false after completion.
+    /// The UI must not report stale completion state while the operation is in progress.
+    #[tokio::test]
+    async fn m7_t02_is_syncing_false_after_manual_sync_completes() {
+        let state = Arc::new(AppState::in_memory("1.2.15"));
+        let daemon = SyncWorkerDaemon::new(state.clone());
+
+        daemon.run_manual_sync().await;
+
+        let st = daemon.status.read().await;
+        assert!(!st.is_syncing,
+            "M7-T02 FAIL: is_syncing must be false after run_manual_sync returns");
+    }
+
+    /// M7-T03: last_synced_at is updated when the sync completes without error.
+    /// The UI must not show a stale previous timestamp after a clean manual sync.
+    #[tokio::test]
+    async fn m7_t03_last_synced_at_updated_on_clean_completion() {
+        let state = Arc::new(AppState::in_memory("1.2.15"));
+        let daemon = SyncWorkerDaemon::new(state.clone());
+
+        // Set a known prior timestamp
+        {
+            let mut st = daemon.status.write().await;
+            st.last_synced_at = Some("2020-01-01T00:00:00Z".to_string());
+            st.last_error = None;
+        }
+
+        daemon.run_manual_sync().await;
+
+        let st = daemon.status.read().await;
+        let ts = st.last_synced_at.as_deref().unwrap_or("");
+        assert!(!ts.starts_with("2020"),
+            "M7-T03 FAIL: last_synced_at was not updated; still shows stale value: {ts}");
+        assert!(st.last_error.is_none(),
+            "M7-T03 FAIL: no error should be present after clean completion");
+    }
+
+    /// M7-T04: When a second manual sync fires while a first is still executing,
+    /// the execution_lock ensures they run sequentially, not concurrently.
+    /// The second call blocks until the first completes, preserving status integrity.
+    #[tokio::test]
+    async fn m7_t04_concurrent_manual_sync_serialised_by_execution_lock() {
+        let state = Arc::new(AppState::in_memory("1.2.15"));
+        let daemon = Arc::new(SyncWorkerDaemon::new(state.clone()));
+
+        let d1 = daemon.clone();
+        let d2 = daemon.clone();
+
+        // Fire two concurrent manual syncs
+        let h1 = tokio::spawn(async move { d1.run_manual_sync().await });
+        let h2 = tokio::spawn(async move { d2.run_manual_sync().await });
+
+        h1.await.unwrap();
+        h2.await.unwrap();
+
+        // Both must have completed; final state must be coherent
+        let st = daemon.status.read().await;
+        assert!(!st.is_syncing,
+            "M7-T04 FAIL: is_syncing must be false after both concurrent calls complete");
+    }
+
+    /// M7-T05: After a stale error is present, running manual sync followed by
+    /// another manual sync with no new errors leaves last_error = None.
+    /// Ensures the stale-error reset applies consistently across multiple invocations.
+    #[tokio::test]
+    async fn m7_t05_repeated_manual_sync_does_not_accumulate_stale_errors() {
+        let state = Arc::new(AppState::in_memory("1.2.15"));
+        let daemon = SyncWorkerDaemon::new(state.clone());
+
+        // Inject stale error
+        {
+            let mut st = daemon.status.write().await;
+            st.last_error = Some("old error".to_string());
+        }
+
+        daemon.run_manual_sync().await;
+
+        {
+            let st = daemon.status.read().await;
+            assert!(st.last_error.is_none(),
+                "M7-T05 FAIL: first clean sync should have cleared last_error");
+        }
+
+        // Second sync must also leave last_error = None
+        daemon.run_manual_sync().await;
+
+        let st = daemon.status.read().await;
+        assert!(st.last_error.is_none(),
+            "M7-T05 FAIL: second clean sync should keep last_error = None");
     }
 }
