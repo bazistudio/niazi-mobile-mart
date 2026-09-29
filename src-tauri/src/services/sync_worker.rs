@@ -280,14 +280,23 @@ impl SyncWorkerDaemon {
                         st.last_error = Some(format!("Event authorization rejected (403 Forbidden): {err_body}"));
                     }
                     409 => {
+                        // M4: A bare HTTP 409 from the transport layer (proxy / load-balancer)
+                        // carries no per-event identity. Marking every item in the batch as
+                        // Conflict is incorrect — unrelated valid events would be permanently
+                        // stuck and never retried. Route through the existing bounded-retry
+                        // path (H6/H7) instead: increment attempt_count and keep Pending.
+                        // update_status_ext auto-promotes to FailedPermanent once MAX_RETRIES
+                        // is reached, so the retry budget is still enforced.
+                        // Note: per-event CONFLICT results from a normal HTTP 200 response are
+                        // handled separately above and continue to use SyncQueueStatus::Conflict.
                         for item in &pending_items {
                             let _ = sync_queue_repo
-                                .update_status_ext(&item.client_event_id, SyncQueueStatus::Conflict, Some(&err_msg), None, false)
+                                .update_status_ext(&item.client_event_id, SyncQueueStatus::Pending, Some(&err_msg), None, true)
                                 .await;
                         }
                         let mut st = self.status.write().await;
                         st.is_online = true;
-                        st.last_error = Some(format!("Sync conflict (409): {err_body}"));
+                        st.last_error = Some(format!("Sync push rejected (409): retrying via bounded retry — {err_body}"));
                     }
                     422 if err_body.contains("DEPENDENCY_NOT_FOUND") => {
                         for item in &pending_items {

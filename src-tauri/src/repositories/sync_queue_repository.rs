@@ -1181,4 +1181,154 @@ mod tests {
         assert_eq!(item.status, SyncQueueStatus::Pending);
         assert_eq!(item.attempt_count, 0);
     }
+
+    // ── M4 Regression Tests ─────────────────────────────────────────────────
+    // These tests verify that a bare HTTP 409 response does NOT permanently
+    // mark events as Conflict. Instead, events must remain eligible for
+    // bounded retry (H6/H7). The M4 fix routes 409 through Pending +
+    // increment_attempt rather than directly to Conflict.
+
+    async fn setup_repo_with_terminal() -> (SQLiteSyncQueueRepository, String) {
+        let db = DatabaseConnection::open_in_memory().unwrap();
+        {
+            let conn_arc = db.inner();
+            let mut conn = conn_arc.lock().await;
+            crate::db::migrations::MigrationRunner::run(&mut conn).unwrap();
+        }
+        let repo = SQLiteSyncQueueRepository::new(db.clone());
+        let terminal_id = Uuid::new_v4().to_string();
+        {
+            let conn_arc = db.inner();
+            let conn = conn_arc.lock().await;
+            conn.execute(
+                "INSERT INTO terminals (id, organization_id, branch_id, device_name, is_active, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'Test Terminal', 1, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
+                rusqlite::params![terminal_id, NIAZI_ORGANIZATION_ID, DEFAULT_MAIN_BRANCH_ID],
+            ).unwrap();
+        }
+        (repo, terminal_id)
+    }
+
+    async fn enqueue_event(repo: &SQLiteSyncQueueRepository, terminal_id: &str, event_type: &str) -> String {
+        let id = Uuid::new_v4().to_string();
+        repo.enqueue(EnqueueOfflineEventDto {
+            client_event_id: Some(id.clone()),
+            terminal_id: terminal_id.to_string(),
+            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+            event_type: event_type.to_string(),
+            payload: r#"{"test":true}"#.to_string(),
+        }).await.unwrap();
+        id
+    }
+
+    /// M4-T01: Single event receives HTTP 409 via the M4 fix path.
+    /// Expected: event stays Pending (not Conflict), attempt_count incremented.
+    #[tokio::test]
+    async fn m4_t01_single_event_http_409_stays_pending() {
+        let (repo, terminal_id) = setup_repo_with_terminal().await;
+        let evt_id = enqueue_event(&repo, &terminal_id, "SALE_CREATED").await;
+
+        // Simulate M4 fix: HTTP 409 → Pending + increment attempt
+        let err_msg = "Sync push rejected (409): retrying via bounded retry";
+        repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some(err_msg), None, true)
+            .await
+            .unwrap();
+
+        let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
+        assert_eq!(item.status, SyncQueueStatus::Pending,
+            "M4-T01: HTTP 409 must NOT mark event as Conflict — must remain Pending");
+        assert_eq!(item.attempt_count, 1,
+            "M4-T01: attempt_count must be incremented for retry tracking");
+        assert!(item.last_error.as_deref().unwrap_or("").contains("409"),
+            "M4-T01: error note must reference 409");
+    }
+
+    /// M4-T02: Multiple events in one batch receive HTTP 409.
+    /// Expected: ALL events remain Pending (not Conflict), each with incremented attempt_count.
+    #[tokio::test]
+    async fn m4_t02_batch_http_409_none_marked_conflict() {
+        let (repo, terminal_id) = setup_repo_with_terminal().await;
+        let evt_a = enqueue_event(&repo, &terminal_id, "SALE_CREATED").await;
+        let evt_b = enqueue_event(&repo, &terminal_id, "PRODUCT_CREATED").await;
+        let evt_c = enqueue_event(&repo, &terminal_id, "CUSTOMER_CREATED").await;
+
+        let err_msg = "Sync push rejected (409): retrying via bounded retry";
+        for id in &[&evt_a, &evt_b, &evt_c] {
+            repo.update_status_ext(id, SyncQueueStatus::Pending, Some(err_msg), None, true)
+                .await
+                .unwrap();
+        }
+
+        for (label, id) in &[("A", &evt_a), ("B", &evt_b), ("C", &evt_c)] {
+            let item = repo.get_by_client_event_id(id).await.unwrap().unwrap();
+            assert_eq!(item.status, SyncQueueStatus::Pending,
+                "M4-T02: event {} must NOT be Conflict after batch HTTP 409", label);
+            assert_eq!(item.attempt_count, 1,
+                "M4-T02: event {} attempt_count must be 1", label);
+        }
+
+        // All three must still be fetchable as pending (eligible for retry)
+        let pending = repo.get_pending(50).await.unwrap();
+        assert_eq!(pending.len(), 3,
+            "M4-T02: all 3 events must remain in the pending retry queue");
+    }
+
+    /// M4-T03: Repeated HTTP 409 exhausts bounded retry budget.
+    /// Expected: after MAX_RETRIES attempts, event auto-promotes to FailedPermanent.
+    #[tokio::test]
+    async fn m4_t03_repeated_409_exhausts_retry_budget() {
+        let (repo, terminal_id) = setup_repo_with_terminal().await;
+        let evt_id = enqueue_event(&repo, &terminal_id, "SALE_CREATED").await;
+
+        let err_msg = "Sync push rejected (409): retrying via bounded retry";
+
+        // Apply MAX_RETRIES - 1 increments: must remain Pending
+        for i in 1..crate::domain::sync_queue::MAX_RETRIES {
+            repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some(err_msg), None, true)
+                .await
+                .unwrap();
+            let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
+            assert_eq!(item.status, SyncQueueStatus::Pending,
+                "M4-T03: event must remain Pending after {} attempts", i);
+        }
+
+        // The MAX_RETRIES-th increment must promote to FailedPermanent
+        repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some(err_msg), None, true)
+            .await
+            .unwrap();
+        let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
+        assert_eq!(item.status, SyncQueueStatus::FailedPermanent,
+            "M4-T03: event must be FailedPermanent after MAX_RETRIES 409 responses");
+
+        // Must no longer appear in the pending queue
+        let pending = repo.get_pending(50).await.unwrap();
+        assert!(pending.is_empty(),
+            "M4-T03: exhausted event must not appear in pending queue");
+    }
+
+    /// M4-T04: Per-event CONFLICT from a normal HTTP 200 results array must
+    /// still use SyncQueueStatus::Conflict. The M4 fix must not collapse the
+    /// distinction between HTTP 409 and per-event result.status == "CONFLICT".
+    #[tokio::test]
+    async fn m4_t04_per_event_200_conflict_still_uses_conflict_status() {
+        let (repo, terminal_id) = setup_repo_with_terminal().await;
+        let evt_id = enqueue_event(&repo, &terminal_id, "PRODUCT_CREATED").await;
+
+        // Simulate the HTTP 200 per-event CONFLICT path (unchanged by M4 fix)
+        repo.update_status_ext(&evt_id, SyncQueueStatus::Conflict, Some("CONFLICT: newer version exists"), None, false)
+            .await
+            .unwrap();
+
+        let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
+        assert_eq!(item.status, SyncQueueStatus::Conflict,
+            "M4-T04: per-event CONFLICT from HTTP 200 results must remain SyncQueueStatus::Conflict");
+        assert_eq!(item.attempt_count, 0,
+            "M4-T04: per-event CONFLICT must not increment attempt_count (increment_attempt=false)");
+
+        // Must NOT appear in pending queue (Conflict is not Pending)
+        let pending = repo.get_pending(50).await.unwrap();
+        assert!(pending.is_empty(),
+            "M4-T04: Conflict status event must not be in pending retry queue");
+    }
 }
