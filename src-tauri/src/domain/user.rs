@@ -97,6 +97,9 @@ pub struct User {
     pub pin_locked_until_ms: Option<u128>,
     pub failed_login_attempts: u32,
     pub login_locked_until_ms: Option<u128>,
+    /// Branch this user is assigned to. NULL = organization-wide (Admin).
+    /// Defaults to Main Branch behaviour via identity resolve_branch().
+    pub branch_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -114,6 +117,7 @@ impl User {
             must_change_password: self.must_change_password,
             has_pin: self.pin_hash.is_some(),
             access_profile: self.access_profile.clone(),
+            branch_id: self.branch_id.clone(),
             created_at: self.created_at.clone(),
         }
     }
@@ -131,6 +135,8 @@ pub struct SanitizedUser {
     pub must_change_password: bool,
     pub has_pin: bool,
     pub access_profile: StaffAccessProfile,
+    /// Branch assignment exposed across the IPC boundary (safe to transmit).
+    pub branch_id: Option<String>,
     pub created_at: String,
 }
 
@@ -156,6 +162,7 @@ mod tests {
             pin_locked_until_ms: None,
             failed_login_attempts: 0,
             login_locked_until_ms: None,
+            branch_id: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };

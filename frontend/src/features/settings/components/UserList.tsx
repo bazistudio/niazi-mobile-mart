@@ -141,6 +141,9 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider">
                   Role
                 </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider">
+                  Branch
+                </th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-text-secondary uppercase tracking-wider">
                   PIN
                 </th>
@@ -167,6 +170,15 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
                     <Badge variant="info" size="sm" dot>
                       {user.roleName || 'Unknown'}
                     </Badge>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    {user.branchId ? (
+                      <span className="text-sm text-text-primary">
+                        {user.branchName || user.branchId}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-text-muted italic">Main Branch</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap text-center">
                     <Badge variant={getPinBadgeVariant(user.hasPin)} size="sm">

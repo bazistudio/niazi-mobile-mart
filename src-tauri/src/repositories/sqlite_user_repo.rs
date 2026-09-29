@@ -174,8 +174,8 @@ impl SQLiteUserRepository {
             "INSERT INTO users (
                 id, name, username, login_key_hash, pin_hash, role, is_active,
                 failed_pin_attempts, pin_locked_until_ms, failed_login_attempts, login_locked_until_ms,
-                created_at, updated_at, recovery_key_hash, must_change_password
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                created_at, updated_at, recovery_key_hash, must_change_password, branch_id
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             rusqlite::params![
                 &admin_user.id,
                 &admin_user.name,
@@ -192,6 +192,7 @@ impl SQLiteUserRepository {
                 &admin_user.updated_at,
                 &admin_user.recovery_key_hash,
                 must_change_pwd_int,
+                &admin_user.branch_id,
             ],
         )
         .map_err(|e| AppError::Database(format!("Failed to save initial admin user: {e}")))?;
@@ -251,10 +252,11 @@ impl SQLiteUserRepository {
         let guard = conn_arc.lock().await;
 
         let sql = "
-            SELECT 
+            SELECT
                 u.id, u.name, u.username, u.login_key_hash, u.pin_hash, u.role, u.is_active,
                 u.failed_pin_attempts, u.pin_locked_until_ms, u.failed_login_attempts, u.login_locked_until_ms,
                 u.created_at, u.updated_at, u.recovery_key_hash, u.must_change_password,
+                u.branch_id,
                 p.allowed_pages, p.allowed_actions, p.max_discount_percent, p.can_price_override,
                 p.can_refund, p.can_void_sale, p.can_view_profit
             FROM users u
@@ -280,10 +282,11 @@ impl SQLiteUserRepository {
         let guard = conn_arc.lock().await;
 
         let sql = "
-            SELECT 
+            SELECT
                 u.id, u.name, u.username, u.login_key_hash, u.pin_hash, u.role, u.is_active,
                 u.failed_pin_attempts, u.pin_locked_until_ms, u.failed_login_attempts, u.login_locked_until_ms,
                 u.created_at, u.updated_at, u.recovery_key_hash, u.must_change_password,
+                u.branch_id,
                 p.allowed_pages, p.allowed_actions, p.max_discount_percent, p.can_price_override,
                 p.can_refund, p.can_void_sale, p.can_view_profit
             FROM users u
@@ -320,8 +323,8 @@ impl SQLiteUserRepository {
             "INSERT INTO users (
                 id, name, username, login_key_hash, pin_hash, role, is_active,
                 failed_pin_attempts, pin_locked_until_ms, failed_login_attempts, login_locked_until_ms,
-                created_at, updated_at, recovery_key_hash, must_change_password
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                created_at, updated_at, recovery_key_hash, must_change_password, branch_id
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 username = excluded.username,
@@ -335,7 +338,8 @@ impl SQLiteUserRepository {
                 login_locked_until_ms = excluded.login_locked_until_ms,
                 updated_at = excluded.updated_at,
                 recovery_key_hash = excluded.recovery_key_hash,
-                must_change_password = excluded.must_change_password;",
+                must_change_password = excluded.must_change_password,
+                branch_id = excluded.branch_id;",
             params![
                 user.id,
                 user.name,
@@ -352,6 +356,7 @@ impl SQLiteUserRepository {
                 user.updated_at,
                 user.recovery_key_hash,
                 must_change_pwd_int,
+                user.branch_id,
             ],
         )
         .map_err(|e| AppError::Database(format!("Failed to save user: {e}")))?;
@@ -448,10 +453,11 @@ impl SQLiteUserRepository {
         let guard = conn_arc.lock().await;
 
         let sql = "
-            SELECT 
+            SELECT
                 u.id, u.name, u.username, u.login_key_hash, u.pin_hash, u.role, u.is_active,
                 u.failed_pin_attempts, u.pin_locked_until_ms, u.failed_login_attempts, u.login_locked_until_ms,
                 u.created_at, u.updated_at, u.recovery_key_hash, u.must_change_password,
+                u.branch_id,
                 p.allowed_pages, p.allowed_actions, p.max_discount_percent, p.can_price_override,
                 p.can_refund, p.can_void_sale, p.can_view_profit
             FROM users u
@@ -510,14 +516,15 @@ impl SQLiteUserRepository {
         let recovery_key_hash: Option<String> = row.get(13)?;
         let must_change_pwd_int: i32 = row.get(14)?;
         let must_change_password = must_change_pwd_int == 1;
+        let branch_id: Option<String> = row.get(15)?;
 
-        let pages_json: Option<String> = row.get(15)?;
-        let actions_json: Option<String> = row.get(16)?;
-        let max_discount: Option<f64> = row.get(17)?;
-        let can_override: Option<i32> = row.get(18)?;
-        let can_refund: Option<i32> = row.get(19)?;
-        let can_void: Option<i32> = row.get(20)?;
-        let can_profit: Option<i32> = row.get(21)?;
+        let pages_json: Option<String> = row.get(16)?;
+        let actions_json: Option<String> = row.get(17)?;
+        let max_discount: Option<f64> = row.get(18)?;
+        let can_override: Option<i32> = row.get(19)?;
+        let can_refund: Option<i32> = row.get(20)?;
+        let can_void: Option<i32> = row.get(21)?;
+        let can_profit: Option<i32> = row.get(22)?;
 
         let access_profile = if let (Some(pages), Some(actions)) = (pages_json, actions_json) {
             let allowed_pages: Vec<String> = serde_json::from_str(&pages).unwrap_or_default();
@@ -563,6 +570,7 @@ impl SQLiteUserRepository {
             pin_locked_until_ms: pin_locked_ms.map(|v| v as u128),
             failed_login_attempts: row.get(9)?,
             login_locked_until_ms: login_locked_ms.map(|v| v as u128),
+            branch_id,
             created_at: row.get(11)?,
             updated_at: row.get(12)?,
         })
@@ -605,6 +613,7 @@ mod tests {
             pin_locked_until_ms: None,
             failed_login_attempts: 0,
             login_locked_until_ms: None,
+            branch_id: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };

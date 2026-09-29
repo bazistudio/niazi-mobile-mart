@@ -51,6 +51,7 @@ export interface SanitizedUser {
   must_change_password: boolean;
   has_pin: boolean;
   access_profile: StaffAccessProfile;
+  branch_id?: string | null;
   created_at: string;
 }
 
@@ -670,6 +671,7 @@ export const tauriClient = {
     login_key?: string;
     pin?: string;
     role: StaffRole;
+    branch_id?: string | null;
     access_profile?: StaffAccessProfile;
   }): Promise<SanitizedUser> {
     if (getApiBaseUrl()) {
@@ -691,6 +693,7 @@ export const tauriClient = {
     role?: StaffRole;
     status?: 'ACTIVE' | 'DISABLED' | 'PENDING' | 'REJECTED';
     is_active?: boolean;
+    branch_id?: string | null;
     access_profile?: StaffAccessProfile;
   }): Promise<SanitizedUser> {
     if (isTauriEnvironment()) {

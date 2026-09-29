@@ -12,6 +12,8 @@ export interface StaffUser {
   hasPin: boolean;
   status: 'active' | 'suspended' | 'inactive' | 'pending' | 'rejected';
   mustChangePassword?: boolean;
+  branchId?: string;
+  branchName?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -24,6 +26,7 @@ export interface CreateStaffDto {
   email?: string;
   pin?: string;
   roleId: string;
+  branchId?: string;
 }
 
 export interface UpdateStaffDto {
@@ -33,4 +36,5 @@ export interface UpdateStaffDto {
   email?: string;
   roleId?: string;
   status?: 'active' | 'suspended' | 'inactive';
+  branchId?: string;
 }

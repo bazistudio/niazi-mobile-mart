@@ -55,6 +55,8 @@ pub struct CreateUserPayload {
     pub pin: Option<String>,
     pub role: UserRole,
     pub access_profile: Option<StaffAccessProfile>,
+    /// Branch this user is assigned to. None = organization-wide (Admin only).
+    pub branch_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,6 +74,8 @@ pub struct UpdateUserPayload {
     pub status: Option<UserStatus>,
     pub is_active: Option<bool>,
     pub access_profile: Option<StaffAccessProfile>,
+    /// Branch assignment update. None = no change. Some(None) is not exposed; pass Some(id) to assign.
+    pub branch_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -185,6 +189,7 @@ impl AdminService {
             pin_locked_until_ms: None,
             failed_login_attempts: 0,
             login_locked_until_ms: None,
+            branch_id: None, // Admin is organization-wide, not branch-scoped
             created_at: now.clone(),
             updated_at: now,
         };
@@ -295,6 +300,7 @@ impl AdminService {
             pin_locked_until_ms: None,
             failed_login_attempts: 0,
             login_locked_until_ms: None,
+            branch_id: None, // Assigned to a branch by admin after approval
             created_at: now.clone(),
             updated_at: now,
         };
@@ -485,6 +491,7 @@ impl AdminService {
             pin_locked_until_ms: None,
             failed_login_attempts: 0,
             login_locked_until_ms: None,
+            branch_id: payload.branch_id,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -544,6 +551,10 @@ impl AdminService {
 
         if let Some(profile) = payload.access_profile {
             user.access_profile = profile;
+        }
+
+        if let Some(branch_id) = payload.branch_id {
+            user.branch_id = Some(branch_id);
         }
 
         user.updated_at = Utc::now().to_rfc3339();
@@ -783,6 +794,7 @@ mod tests {
                 pin: Some("2256".to_string()),
                 role: UserRole::ShopAdmin,
                 access_profile: None,
+                branch_id: None,
             },
         )
         .await

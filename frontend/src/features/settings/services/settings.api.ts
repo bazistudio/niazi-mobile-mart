@@ -428,6 +428,7 @@ export const settingsApi = {
           hasPin: u.has_pin,
           status: (u.status ? u.status.toLowerCase() : (u.is_active ? 'active' : 'inactive')) as any,
           mustChangePassword: u.must_change_password,
+          branchId: u.branch_id ?? undefined,
           createdAt: u.created_at,
         };
       });
@@ -500,6 +501,7 @@ export const settingsApi = {
         login_key: effectivePin ? `Niazi@${effectivePin}` : 'Niazi@123',
         pin: effectivePin,
         role: targetStaffRole,
+        branch_id: data.branchId ?? null,
       });
       const resDisplay = mapStaffRoleToDisplay(res.role);
       return {
@@ -514,6 +516,7 @@ export const settingsApi = {
         hasPin: res.has_pin,
         status: (res.status ? res.status.toLowerCase() : (res.is_active ? 'active' : 'inactive')) as any,
         mustChangePassword: res.must_change_password,
+        branchId: res.branch_id ?? undefined,
         createdAt: res.created_at,
       };
     }
@@ -548,6 +551,7 @@ export const settingsApi = {
         name: data.name,
         role: targetRole,
         status: data.status ? (data.status.toUpperCase() as any) : undefined,
+        branch_id: data.branchId !== undefined ? (data.branchId ?? null) : undefined,
       });
       const display = mapStaffRoleToDisplay(u.role);
       return {
@@ -562,6 +566,7 @@ export const settingsApi = {
         hasPin: u.has_pin,
         status: (u.status ? u.status.toLowerCase() : (u.is_active ? 'active' : 'inactive')) as any,
         mustChangePassword: u.must_change_password,
+        branchId: u.branch_id ?? undefined,
         createdAt: u.created_at,
       };
     }

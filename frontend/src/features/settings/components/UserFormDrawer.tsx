@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { PinInput } from './PinInput';
 import { RoleSelect } from './RoleSelect';
+import { BranchSelect } from './BranchSelect';
 import { StaffUser, CreateStaffDto, UpdateStaffDto } from '../types/staff.types';
 import { useCreateStaff, useUpdateStaff } from '../hooks/useStaff';
 import toast from 'react-hot-toast';
@@ -27,6 +28,7 @@ export const UserFormDrawer: React.FC<UserFormDrawerProps> = ({
   const [email, setEmail] = useState('');
   const [pin, setPin] = useState('');
   const [roleId, setRoleId] = useState('');
+  const [branchId, setBranchId] = useState<string | undefined>(undefined);
   const [nameError, setNameError] = useState('');
   const [roleError, setRoleError] = useState('');
 
@@ -45,6 +47,7 @@ export const UserFormDrawer: React.FC<UserFormDrawerProps> = ({
         setEmail(editingStaff.email || '');
         setPin('');
         setRoleId(editingStaff.roleId);
+        setBranchId(editingStaff.branchId ?? undefined);
       } else {
         setName('');
         setPhone('');
@@ -52,6 +55,7 @@ export const UserFormDrawer: React.FC<UserFormDrawerProps> = ({
         setEmail('');
         setPin('');
         setRoleId('');
+        setBranchId(undefined);
       }
       setNameError('');
       setRoleError('');
@@ -87,6 +91,7 @@ export const UserFormDrawer: React.FC<UserFormDrawerProps> = ({
           username: username.trim() || undefined,
           email: email.trim() || undefined,
           roleId,
+          branchId,
         };
         await updateStaff.mutateAsync({ id: editingStaff._id, data });
         toast.success('User updated successfully');
@@ -98,6 +103,7 @@ export const UserFormDrawer: React.FC<UserFormDrawerProps> = ({
           email: email.trim() || undefined,
           pin: pin || undefined,
           roleId,
+          branchId,
         };
         await createStaff.mutateAsync(data);
         toast.success('User created successfully');
@@ -168,6 +174,12 @@ export const UserFormDrawer: React.FC<UserFormDrawerProps> = ({
               if (val) setRoleError('');
             }}
             error={roleError}
+            disabled={isPending}
+          />
+
+          <BranchSelect
+            value={branchId}
+            onChange={setBranchId}
             disabled={isPending}
           />
 
