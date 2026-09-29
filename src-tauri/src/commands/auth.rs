@@ -250,3 +250,23 @@ pub async fn admin_recover_access(
     AdminService::recover_admin_access(&state.user_repo, &state, &recovery_token, &new_login_key).await
 }
 
+/// Verifies the current session administrator's own login password (admin only).
+/// Used as the authorization gate before a destructive action such as permanent user deletion.
+#[tauri::command]
+pub async fn admin_verify_password(
+    state: State<'_, AppState>,
+    password: String,
+) -> AppResult<()> {
+    AdminService::verify_admin_password(&state.user_repo, &state, &password).await
+}
+
+/// Permanently deletes a user account (admin only).
+/// The administrator cannot delete their own account.
+#[tauri::command]
+pub async fn admin_delete_user(
+    state: State<'_, AppState>,
+    user_id: String,
+) -> AppResult<()> {
+    AdminService::delete_user(&state.user_repo, &state, &user_id).await
+}
+

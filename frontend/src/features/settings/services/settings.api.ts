@@ -428,6 +428,7 @@ export const settingsApi = {
           hasPin: u.has_pin,
           status: (u.status ? u.status.toLowerCase() : (u.is_active ? 'active' : 'inactive')) as any,
           mustChangePassword: u.must_change_password,
+          branchId: u.branch_id ?? undefined,
           createdAt: u.created_at,
         };
       });
@@ -500,6 +501,7 @@ export const settingsApi = {
         login_key: effectivePin ? `Niazi@${effectivePin}` : 'Niazi@123',
         pin: effectivePin,
         role: targetStaffRole,
+        branch_id: data.branchId ?? null,
       });
       const resDisplay = mapStaffRoleToDisplay(res.role);
       return {
@@ -514,6 +516,7 @@ export const settingsApi = {
         hasPin: res.has_pin,
         status: (res.status ? res.status.toLowerCase() : (res.is_active ? 'active' : 'inactive')) as any,
         mustChangePassword: res.must_change_password,
+        branchId: res.branch_id ?? undefined,
         createdAt: res.created_at,
       };
     }
@@ -548,6 +551,7 @@ export const settingsApi = {
         name: data.name,
         role: targetRole,
         status: data.status ? (data.status.toUpperCase() as any) : undefined,
+        branch_id: data.branchId !== undefined ? (data.branchId ?? null) : undefined,
       });
       const display = mapStaffRoleToDisplay(u.role);
       return {
@@ -562,6 +566,7 @@ export const settingsApi = {
         hasPin: u.has_pin,
         status: (u.status ? u.status.toLowerCase() : (u.is_active ? 'active' : 'inactive')) as any,
         mustChangePassword: u.must_change_password,
+        branchId: u.branch_id ?? undefined,
         createdAt: u.created_at,
       };
     }
@@ -622,14 +627,13 @@ export const settingsApi = {
     throw new Error(`User with ID ${id} not found`);
   },
 
-  resetStaffPin: async (id: string): Promise<{ pin: string }> => {
-    const generatedPin = Math.floor(1000 + Math.random() * 9000).toString();
+  changeStaffPin: async (id: string, pin: string): Promise<void> => {
     if (isTauriEnvironment()) {
       await tauriClient.adminResetCredentials({
         user_id: id,
-        new_pin: generatedPin,
+        new_pin: pin,
       });
-      return { pin: generatedPin };
+      return;
     }
 
     const staff = getBrowserStaff();
@@ -638,7 +642,25 @@ export const settingsApi = {
       staff[idx].hasPin = true;
       saveBrowserStaff(staff);
     }
-    return { pin: generatedPin };
+  },
+
+  verifyAdminPassword: async (password: string): Promise<void> => {
+    if (isTauriEnvironment()) {
+      await tauriClient.adminVerifyPassword(password);
+      return;
+    }
+    // Browser stub — always succeeds in development
+  },
+
+  deleteStaff: async (id: string): Promise<void> => {
+    if (isTauriEnvironment()) {
+      await tauriClient.adminDeleteUser(id);
+      return;
+    }
+
+    const staff = getBrowserStaff();
+    const filtered = staff.filter((u) => u.id !== id && u._id !== id);
+    saveBrowserStaff(filtered);
   },
 
   changeStaffRole: async (id: string, roleId: string): Promise<StaffUser> => {

@@ -236,6 +236,8 @@ pub fn run() {
             commands::auth::admin_reject_staff,
             commands::auth::admin_reset_staff_password,
             commands::auth::admin_recover_access,
+            commands::auth::admin_verify_password,
+            commands::auth::admin_delete_user,
             // Terminal Commands
             commands::terminal::terminal_get_current,
             commands::terminal::terminal_register,

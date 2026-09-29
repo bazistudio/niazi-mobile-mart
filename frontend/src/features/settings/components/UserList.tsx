@@ -5,13 +5,14 @@ import { Badge } from '@/components/ui/Badge';
 import { Button, IconButton } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { StaffUser } from '../types/staff.types';
-import { useUpdateStaffStatus, useResetStaffPin, useChangeStaffRole } from '../hooks/useStaff';
+import { useUpdateStaffStatus, useChangeStaffRole } from '../hooks/useStaff';
 import { UserFormDrawer } from './UserFormDrawer';
+import { ChangePinModal } from './ChangePinModal';
+import { DeleteUserModal } from './DeleteUserModal';
 import {
   Users,
   Plus,
   Edit3,
-  Shield,
   MoreHorizontal,
   Loader2,
   KeyRound,
@@ -30,10 +31,10 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffUser | null>(null);
   const [openActionsId, setOpenActionsId] = useState<string | null>(null);
-  const [resetPinResult, setResetPinResult] = useState<{ pin: string; name: string } | null>(null);
+  const [changePinStaff, setChangePinStaff] = useState<StaffUser | null>(null);
+  const [deleteTargetStaff, setDeleteTargetStaff] = useState<StaffUser | null>(null);
 
   const updateStatus = useUpdateStaffStatus();
-  const resetPin = useResetStaffPin();
   const changeRole = useChangeStaffRole();
 
   const handleCreate = () => {
@@ -48,24 +49,28 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
   };
 
   const handleStatusToggle = async (user: StaffUser) => {
-    const newStatus = user.status === 'active' ? 'suspended' : 'active';
+    const isSuspended = user.status === 'suspended';
+    const newStatus = isSuspended ? 'active' : 'suspended';
     try {
-      await updateStatus.mutateAsync({ id: user._id, status: newStatus });
-      toast.success(`User ${newStatus === 'active' ? 'activated' : 'suspended'} successfully`);
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to update status');
+      await updateStatus.mutateAsync({ id: user.id ?? user._id, status: newStatus });
+      toast.success(
+        isSuspended ? `${user.name} has been unsuspended.` : `${user.name} has been suspended.`
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to update status';
+      toast.error(msg);
     }
     setOpenActionsId(null);
   };
 
-  const handleResetPin = async (user: StaffUser) => {
-    try {
-      const result = await resetPin.mutateAsync(user._id);
-      setResetPinResult({ pin: result.pin, name: user.name });
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to reset PIN');
-    }
+  const handleOpenChangePin = (user: StaffUser) => {
     setOpenActionsId(null);
+    setChangePinStaff(user);
+  };
+
+  const handleOpenDeleteUser = (user: StaffUser) => {
+    setOpenActionsId(null);
+    setDeleteTargetStaff(user);
   };
 
   const getStatusBadgeVariant = (status: string) => {
@@ -141,6 +146,9 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider">
                   Role
                 </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wider">
+                  Branch
+                </th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-text-secondary uppercase tracking-wider">
                   PIN
                 </th>
@@ -168,6 +176,15 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
                       {user.roleName || 'Unknown'}
                     </Badge>
                   </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    {user.branchId ? (
+                      <span className="text-sm text-text-primary">
+                        {user.branchName || user.branchId}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-text-muted italic">Main Branch</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 whitespace-nowrap text-center">
                     <Badge variant={getPinBadgeVariant(user.hasPin)} size="sm">
                       {user.hasPin ? 'Set' : 'Not Set'}
@@ -193,7 +210,9 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
                           variant="ghost"
                           size="sm"
                           aria-label="More actions"
-                          onClick={() => setOpenActionsId(openActionsId === user._id ? null : user._id)}
+                          onClick={() =>
+                            setOpenActionsId(openActionsId === user._id ? null : user._id)
+                          }
                         />
                         {openActionsId === user._id && (
                           <>
@@ -201,26 +220,46 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
                               className="fixed inset-0 z-10"
                               onClick={() => setOpenActionsId(null)}
                             />
-                            <div className="absolute right-0 top-full mt-1 z-20 w-48 bg-surface rounded-lg shadow-dropdown border border-border p-1">
+                            <div className="absolute right-0 top-full mt-1 z-20 w-52 bg-surface rounded-lg shadow-dropdown border border-border p-1">
+                              {/* Suspend / Unsuspend */}
                               <button
                                 type="button"
                                 onClick={() => handleStatusToggle(user)}
                                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-primary hover:bg-surface-hover rounded-md transition-colors"
                               >
                                 {user.status === 'active' ? (
-                                  <ToggleRight className="w-4 h-4 text-warning" />
+                                  <>
+                                    <ToggleRight className="w-4 h-4 text-warning" />
+                                    Suspend User
+                                  </>
                                 ) : (
-                                  <ToggleLeft className="w-4 h-4 text-success" />
+                                  <>
+                                    <ToggleLeft className="w-4 h-4 text-success" />
+                                    Unsuspend User
+                                  </>
                                 )}
-                                {user.status === 'active' ? 'Suspend' : 'Activate'}
                               </button>
+
+                              {/* Change PIN */}
                               <button
                                 type="button"
-                                onClick={() => handleResetPin(user)}
+                                onClick={() => handleOpenChangePin(user)}
                                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-primary hover:bg-surface-hover rounded-md transition-colors"
                               >
                                 <KeyRound className="w-4 h-4" />
-                                Reset PIN
+                                Change PIN
+                              </button>
+
+                              <div className="my-1 border-t border-border" />
+
+                              {/* Delete User */}
+                              <button
+                                type="button"
+                                onClick={() => handleOpenDeleteUser(user)}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-danger hover:bg-danger/10 rounded-md transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                Delete User
                               </button>
                             </div>
                           </>
@@ -241,54 +280,17 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
         editingStaff={editingStaff}
       />
 
-      {resetPinResult && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <Card className="w-full max-w-sm" padding="lg">
-            <div className="text-center">
-              <div className="mx-auto flex items-center justify-center w-12 h-12 rounded-full bg-warning/10 mb-4">
-                <KeyRound className="w-6 h-6 text-warning" />
-              </div>
-              <h3 className="text-lg font-bold text-text-primary mb-1">
-                PIN Reset Successful
-              </h3>
-              <p className="text-sm text-text-secondary mb-6">
-                New PIN for <strong>{resetPinResult.name}</strong>
-              </p>
-              
-              <div className="bg-surface-hover border border-border rounded-lg p-4 mb-6 flex items-center justify-between">
-                <span className="text-2xl font-mono tracking-widest font-bold text-text-primary">
-                  {resetPinResult.pin}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    navigator.clipboard.writeText(resetPinResult.pin);
-                    toast.success('Copied to clipboard');
-                  }}
-                >
-                  Copy
-                </Button>
-              </div>
+      <ChangePinModal
+        isOpen={changePinStaff !== null}
+        onClose={() => setChangePinStaff(null)}
+        staff={changePinStaff}
+      />
 
-              <div className="bg-warning/10 border border-warning/20 rounded-md p-3 mb-6 text-left">
-                <p className="text-xs text-warning flex gap-2">
-                  <Shield className="w-4 h-4 flex-shrink-0" />
-                  <span>This PIN will only be shown once. Please provide it to the user securely.</span>
-                </p>
-              </div>
-
-              <Button
-                variant="primary"
-                className="w-full"
-                onClick={() => setResetPinResult(null)}
-              >
-                I have saved this PIN
-              </Button>
-            </div>
-          </Card>
-        </div>
-      )}
+      <DeleteUserModal
+        isOpen={deleteTargetStaff !== null}
+        onClose={() => setDeleteTargetStaff(null)}
+        staff={deleteTargetStaff}
+      />
     </>
   );
 };

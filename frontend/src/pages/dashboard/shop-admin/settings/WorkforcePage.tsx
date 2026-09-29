@@ -8,12 +8,12 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { SlideOverDrawer } from '@/components/ui/SlideOverDrawer';
 import { UserFormDrawer } from '@/features/settings/components/UserFormDrawer';
+import { ChangePinModal } from '@/features/settings/components/ChangePinModal';
 import { usePermissions } from '@/lib/auth/usePermissions';
 import { PERMISSIONS } from '@/constants/permissions';
 import {
   useStaff,
   useUpdateStaffStatus,
-  useResetStaffPin,
   useApproveStaff,
   useRejectStaff,
   useResetStaffPassword,
@@ -28,7 +28,6 @@ export const WorkforcePage: React.FC = () => {
 
   const { data: staffList = [], isLoading, isError, error } = useStaff();
   const updateStatus = useUpdateStaffStatus();
-  const resetPin = useResetStaffPin();
   const approveStaff = useApproveStaff();
   const rejectStaff = useRejectStaff();
   const resetStaffPassword = useResetStaffPassword();
@@ -41,6 +40,9 @@ export const WorkforcePage: React.FC = () => {
   // Add / Edit user form drawer state
   const [isUserFormOpen, setIsUserFormOpen] = useState(false);
   const [editingStaffUser, setEditingStaffUser] = useState<StaffUser | null>(null);
+
+  // Change PIN modal state
+  const [changePinStaff, setChangePinStaff] = useState<StaffUser | null>(null);
 
   // Admin password reset modal state
   const [resetModalStaff, setResetModalStaff] = useState<StaffUser | null>(null);
@@ -100,12 +102,7 @@ export const WorkforcePage: React.FC = () => {
       setResetModalStaff(staff);
       setTempPassword('');
     } else if (mode === 'pin') {
-      try {
-        const res = await resetPin.mutateAsync(staff._id);
-        toast.success(`New PIN generated: ${res.pin || 'Updated'}`);
-      } catch (err: any) {
-        toast.error(err.message || 'Failed to reset PIN');
-      }
+      setChangePinStaff(staff);
     } else if (mode === 'disable') {
       try {
         const nextStatus = staff.status === 'active' ? 'suspended' : 'active';
@@ -397,6 +394,13 @@ export const WorkforcePage: React.FC = () => {
           setEditingStaffUser(null);
         }}
         editingStaff={editingStaffUser}
+      />
+
+      {/* Change PIN Modal */}
+      <ChangePinModal
+        isOpen={changePinStaff !== null}
+        onClose={() => setChangePinStaff(null)}
+        staff={changePinStaff}
       />
     </div>
   );

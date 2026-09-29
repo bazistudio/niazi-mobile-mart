@@ -27,7 +27,7 @@ impl RequestIdentity {
             role: user.role,
             // Canonical organization ID for Niazi Mobile Mart
             organization_id: "00000000-0000-0000-0000-000000000001".to_string(),
-            branch_id: None,
+            branch_id: user.branch_id.clone(),
             access_profile: user.access_profile.clone(),
             authenticated_at_ms,
         }
@@ -153,6 +153,7 @@ mod tests {
             must_change_password: false,
             has_pin: false,
             access_profile: StaffAccessProfile::admin_unlimited(),
+            branch_id: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
         };
 
@@ -182,6 +183,7 @@ mod tests {
             must_change_password: false,
             has_pin: false,
             access_profile: profile,
+            branch_id: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
         };
 
@@ -208,6 +210,7 @@ mod tests {
             must_change_password: false,
             has_pin: false,
             access_profile: StaffAccessProfile::cashier_default(),
+            branch_id: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
         };
 
@@ -240,6 +243,7 @@ mod tests {
             must_change_password: false,
             has_pin: false,
             access_profile: StaffAccessProfile::cashier_default(),
+            branch_id: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
         };
 
@@ -270,6 +274,7 @@ mod tests {
             must_change_password: false,
             has_pin: false,
             access_profile: StaffAccessProfile::admin_unlimited(),
+            branch_id: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
         };
         let mut admin_identity = RequestIdentity::from_user(&admin_user, 1000);

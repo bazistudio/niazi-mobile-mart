@@ -124,8 +124,8 @@ impl PostgresUserRepository {
             "INSERT INTO users (
                 id, name, username, login_key_hash, pin_hash, role, is_active,
                 failed_pin_attempts, pin_locked_until_ms, failed_login_attempts, login_locked_until_ms,
-                created_at, updated_at, recovery_key_hash, must_change_password
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15);",
+                created_at, updated_at, recovery_key_hash, must_change_password, branch_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16);",
         )
         .bind(&admin_user.id)
         .bind(&admin_user.name)
@@ -142,6 +142,7 @@ impl PostgresUserRepository {
         .bind(&admin_user.updated_at)
         .bind(&admin_user.recovery_key_hash)
         .bind(must_change_pwd_int)
+        .bind(&admin_user.branch_id)
         .execute(&mut *tx)
         .await
         .map_err(|e| AppError::Database(format!("Failed to save initial admin user: {e}")))?;
@@ -198,10 +199,11 @@ impl PostgresUserRepository {
 
     pub async fn find_by_id(&self, id: &str) -> AppResult<Option<User>> {
         let sql = "
-            SELECT 
+            SELECT
                 u.id, u.name, u.username, u.login_key_hash, u.pin_hash, u.role, u.is_active,
                 u.failed_pin_attempts, u.pin_locked_until_ms, u.failed_login_attempts, u.login_locked_until_ms,
                 u.created_at, u.updated_at, u.recovery_key_hash, u.must_change_password,
+                u.branch_id,
                 p.allowed_pages, p.allowed_actions, p.max_discount_percent, p.can_price_override,
                 p.can_refund, p.can_void_sale, p.can_view_profit
             FROM users u
@@ -224,10 +226,11 @@ impl PostgresUserRepository {
     pub async fn find_by_username(&self, username: &str) -> AppResult<Option<User>> {
         let clean = username.trim();
         let sql = "
-            SELECT 
+            SELECT
                 u.id, u.name, u.username, u.login_key_hash, u.pin_hash, u.role, u.is_active,
                 u.failed_pin_attempts, u.pin_locked_until_ms, u.failed_login_attempts, u.login_locked_until_ms,
                 u.created_at, u.updated_at, u.recovery_key_hash, u.must_change_password,
+                u.branch_id,
                 p.allowed_pages, p.allowed_actions, p.max_discount_percent, p.can_price_override,
                 p.can_refund, p.can_void_sale, p.can_view_profit
             FROM users u
@@ -262,8 +265,8 @@ impl PostgresUserRepository {
             "INSERT INTO users (
                 id, name, username, login_key_hash, pin_hash, role, is_active,
                 failed_pin_attempts, pin_locked_until_ms, failed_login_attempts, login_locked_until_ms,
-                created_at, updated_at, recovery_key_hash, must_change_password
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                created_at, updated_at, recovery_key_hash, must_change_password, branch_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             ON CONFLICT(id) DO UPDATE SET
                 name = EXCLUDED.name,
                 username = EXCLUDED.username,
@@ -277,7 +280,8 @@ impl PostgresUserRepository {
                 login_locked_until_ms = EXCLUDED.login_locked_until_ms,
                 updated_at = EXCLUDED.updated_at,
                 recovery_key_hash = EXCLUDED.recovery_key_hash,
-                must_change_password = EXCLUDED.must_change_password;",
+                must_change_password = EXCLUDED.must_change_password,
+                branch_id = EXCLUDED.branch_id;",
         )
         .bind(&user.id)
         .bind(&user.name)
@@ -294,6 +298,7 @@ impl PostgresUserRepository {
         .bind(&user.updated_at)
         .bind(&user.recovery_key_hash)
         .bind(must_change_pwd_int)
+        .bind(&user.branch_id)
         .execute(&mut *tx)
         .await
         .map_err(|e| AppError::Database(format!("Failed to save user: {e}")))?;
@@ -378,10 +383,11 @@ impl PostgresUserRepository {
 
     pub async fn list_all(&self) -> AppResult<Vec<User>> {
         let sql = "
-            SELECT 
+            SELECT
                 u.id, u.name, u.username, u.login_key_hash, u.pin_hash, u.role, u.is_active,
                 u.failed_pin_attempts, u.pin_locked_until_ms, u.failed_login_attempts, u.login_locked_until_ms,
                 u.created_at, u.updated_at, u.recovery_key_hash, u.must_change_password,
+                u.branch_id,
                 p.allowed_pages, p.allowed_actions, p.max_discount_percent, p.can_price_override,
                 p.can_refund, p.can_void_sale, p.can_view_profit
             FROM users u
@@ -439,14 +445,15 @@ impl PostgresUserRepository {
         let recovery_key_hash: Option<String> = row.try_get(13).unwrap_or(None);
         let must_change_pwd_int: i32 = row.try_get(14).unwrap_or(0);
         let must_change_password = must_change_pwd_int == 1;
+        let branch_id: Option<String> = row.try_get(15).unwrap_or(None);
 
-        let pages_json: Option<String> = row.try_get(15).unwrap_or(None);
-        let actions_json: Option<String> = row.try_get(16).unwrap_or(None);
-        let max_discount: Option<f64> = row.try_get(17).unwrap_or(None);
-        let can_override: Option<i32> = row.try_get(18).unwrap_or(None);
-        let can_refund: Option<i32> = row.try_get(19).unwrap_or(None);
-        let can_void: Option<i32> = row.try_get(20).unwrap_or(None);
-        let can_profit: Option<i32> = row.try_get(21).unwrap_or(None);
+        let pages_json: Option<String> = row.try_get(16).unwrap_or(None);
+        let actions_json: Option<String> = row.try_get(17).unwrap_or(None);
+        let max_discount: Option<f64> = row.try_get(18).unwrap_or(None);
+        let can_override: Option<i32> = row.try_get(19).unwrap_or(None);
+        let can_refund: Option<i32> = row.try_get(20).unwrap_or(None);
+        let can_void: Option<i32> = row.try_get(21).unwrap_or(None);
+        let can_profit: Option<i32> = row.try_get(22).unwrap_or(None);
 
         let access_profile = if let (Some(pages), Some(actions)) = (pages_json, actions_json) {
             let allowed_pages: Vec<String> = serde_json::from_str(&pages).unwrap_or_default();
@@ -492,6 +499,7 @@ impl PostgresUserRepository {
             pin_locked_until_ms: pin_locked_ms.map(|v| v as u128),
             failed_login_attempts: row.try_get::<i32, _>(9).unwrap_or(0) as u32,
             login_locked_until_ms: login_locked_ms.map(|v| v as u128),
+            branch_id,
             created_at: row.try_get(11).map_err(|e| AppError::Database(e.to_string()))?,
             updated_at: row.try_get(12).map_err(|e| AppError::Database(e.to_string()))?,
         })

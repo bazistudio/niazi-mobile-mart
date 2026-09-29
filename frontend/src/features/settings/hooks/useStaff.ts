@@ -48,11 +48,23 @@ export function useUpdateStaffStatus() {
   });
 }
 
-export function useResetStaffPin() {
+export function useChangeStaffPin() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (id: string) => settingsApi.resetStaffPin(id),
+    mutationFn: ({ id, pin }: { id: string; pin: string }) =>
+      settingsApi.changeStaffPin(id, pin),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: STAFF_QUERY_KEY });
+    },
+  });
+}
+
+export function useDeleteStaff() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => settingsApi.deleteStaff(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: STAFF_QUERY_KEY });
     },

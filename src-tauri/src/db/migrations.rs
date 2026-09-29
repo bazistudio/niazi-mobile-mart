@@ -922,6 +922,29 @@ pub const MIGRATIONS: &[Migration] = &[
           AND NOT EXISTS (SELECT 1 FROM suppliers o WHERE o.party_id = suppliers.id);
         "#,
     },
+    Migration {
+        version: 22,
+        name: "022_fix_public_rates_fk",
+        up: r#"
+        -- SQLite cannot ALTER a foreign key constraint directly.
+        -- Recreate public_rates with ON DELETE SET NULL on published_by.
+        -- Preserves all columns, data, indexes, and constraints.
+        CREATE TABLE public_rates_new (
+            product_id TEXT PRIMARY KEY CHECK(length(product_id) = 36),
+            product_name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            selling_rate INTEGER NOT NULL CHECK(selling_rate >= 0),
+            currency TEXT NOT NULL DEFAULT 'PKR',
+            is_public INTEGER NOT NULL DEFAULT 1,
+            published_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO public_rates_new SELECT product_id, product_name, category, selling_rate, currency, is_public, published_by, updated_at FROM public_rates;
+        DROP TABLE public_rates;
+        ALTER TABLE public_rates_new RENAME TO public_rates;
+        CREATE INDEX IF NOT EXISTS idx_public_rates_is_public ON public_rates(is_public);
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction

@@ -51,6 +51,7 @@ export interface SanitizedUser {
   must_change_password: boolean;
   has_pin: boolean;
   access_profile: StaffAccessProfile;
+  branch_id?: string | null;
   created_at: string;
 }
 
@@ -670,6 +671,7 @@ export const tauriClient = {
     login_key?: string;
     pin?: string;
     role: StaffRole;
+    branch_id?: string | null;
     access_profile?: StaffAccessProfile;
   }): Promise<SanitizedUser> {
     if (getApiBaseUrl()) {
@@ -691,6 +693,7 @@ export const tauriClient = {
     role?: StaffRole;
     status?: 'ACTIVE' | 'DISABLED' | 'PENDING' | 'REJECTED';
     is_active?: boolean;
+    branch_id?: string | null;
     access_profile?: StaffAccessProfile;
   }): Promise<SanitizedUser> {
     if (isTauriEnvironment()) {
@@ -708,6 +711,20 @@ export const tauriClient = {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('admin_reset_credentials', { payload });
+    }
+  },
+
+  async adminVerifyPassword(password: string): Promise<void> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('admin_verify_password', { password });
+    }
+  },
+
+  async adminDeleteUser(userId: string): Promise<void> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('admin_delete_user', { userId });
     }
   },
 
