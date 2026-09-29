@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::domain::access_control::StaffAccessProfile;
 use crate::domain::user::{SanitizedUser, User, UserRole, UserStatus};
 use crate::errors::{AppError, AppResult};
-use crate::repositories::{SQLiteUserRepository, UserRepository};
+use crate::repositories::UserRepository;
 use crate::services::hasher::{hash_credential, verify_credential};
 use crate::state::AppState;
 
@@ -607,6 +607,64 @@ impl AdminService {
         user.updated_at = Utc::now().to_rfc3339();
         repo.save(user).await?;
         Ok(())
+    }
+
+    /// Verifies the current session administrator's own login password.
+    /// Returns Ok(()) on success, Forbidden on wrong password.
+    pub async fn verify_admin_password(
+        repo: &UserRepository,
+        app_state: &AppState,
+        password: &str,
+    ) -> AppResult<()> {
+        Self::ensure_admin(app_state).await?;
+
+        let session = app_state.get_session().await;
+        let admin_id = session.user_id.as_deref().ok_or_else(|| {
+            AppError::Unauthorized("No active session user".to_string())
+        })?;
+
+        let user = match repo.find_by_id(admin_id).await? {
+            Some(u) => u,
+            None => {
+                return Err(AppError::Unauthorized(
+                    "Active session user not found".to_string(),
+                ))
+            }
+        };
+
+        let clean = password.trim();
+        if clean.is_empty() {
+            return Err(AppError::Forbidden(
+                "Administrator password verification failed".to_string(),
+            ));
+        }
+
+        if verify_credential(clean, &user.login_key_hash) {
+            Ok(())
+        } else {
+            Err(AppError::Forbidden(
+                "Administrator password verification failed".to_string(),
+            ))
+        }
+    }
+
+    /// Permanently deletes a user account.
+    /// Prevents the currently logged-in administrator from deleting themselves.
+    pub async fn delete_user(
+        repo: &UserRepository,
+        app_state: &AppState,
+        user_id: &str,
+    ) -> AppResult<()> {
+        Self::ensure_admin(app_state).await?;
+
+        let session = app_state.get_session().await;
+        if session.user_id.as_deref() == Some(user_id) {
+            return Err(AppError::Forbidden(
+                "Administrators cannot delete their own account".to_string(),
+            ));
+        }
+
+        repo.delete(user_id).await
     }
 }
 

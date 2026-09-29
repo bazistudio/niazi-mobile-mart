@@ -714,6 +714,20 @@ export const tauriClient = {
     }
   },
 
+  async adminVerifyPassword(password: string): Promise<void> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('admin_verify_password', { password });
+    }
+  },
+
+  async adminDeleteUser(userId: string): Promise<void> {
+    if (isTauriEnvironment()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('admin_delete_user', { userId });
+    }
+  },
+
   // ── Catalog Domain (Phase 7 Domain 1) ─────────────────────────────────────
   async categoryCreate(dto: CreateCategoryDto): Promise<Category> {
     if (isTauriEnvironment()) {
