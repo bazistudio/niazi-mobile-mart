@@ -38,7 +38,7 @@ const EMBEDDED_JWT_PUBLIC_KEY: &str = include_str!("jwt_public_key.pem");
 
 /// Returns the embedded public key if the file actually contains a PEM public key.
 fn embedded_public_key() -> Option<String> {
-    if EMBEDDED_JWT_PUBLIC_KEY.contains("-----BEGIN PUBLIC KEY-----") {
+    if EMBEDDED_JWT_PUBLIC_KEY.trim().starts_with("-----BEGIN PUBLIC KEY-----") {
         Some(EMBEDDED_JWT_PUBLIC_KEY.trim().to_string())
     } else {
         None
