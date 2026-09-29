@@ -425,7 +425,7 @@ impl PostgresPurchaseRepository {
         let mut supplier_balance_after = None;
         if credit_amount > 0 {
             let current_outstanding: (i64,) = sqlx::query_as(
-                "SELECT COALESCE(SUM(credit) - SUM(debit), 0) FROM supplier_ledger_entries WHERE supplier_id = $1",
+                "SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT FROM supplier_ledger_entries WHERE supplier_id = $1",
             )
             .bind(&supplier_id)
             .fetch_one(&mut **tx)
@@ -440,7 +440,7 @@ impl PostgresPurchaseRepository {
 
             sqlx::query(
                 "INSERT INTO supplier_ledger_entries (id, supplier_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at)
-                 VALUES ($1, $2, $3, $4, 'PURCHASE', 0, $5, $6, $7, $8, $9)"
+                 VALUES ($1, $2, $3, $4, 'PURCHASE', $5, 0, $6, $7, $8, $9)"
             )
             .bind(l_id)
             .bind(&supplier_id)
@@ -581,7 +581,7 @@ impl PostgresPurchaseRepository {
 
         // Insert ledger entry
         let current_outstanding: (i64,) = sqlx::query_as(
-            "SELECT COALESCE(SUM(credit) - SUM(debit), 0) FROM supplier_ledger_entries WHERE supplier_id = $1",
+            "SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT FROM supplier_ledger_entries WHERE supplier_id = $1",
         )
         .bind(&dto.supplier_id)
         .fetch_one(&mut **tx)

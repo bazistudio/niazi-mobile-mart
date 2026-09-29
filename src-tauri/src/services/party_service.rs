@@ -552,6 +552,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn legacy_customer_deactivate_syncs_and_mirrors_party() {
+        let db = DatabaseConnection::open_in_memory().unwrap();
+        {
+            let conn_arc = db.inner();
+            let mut guard = conn_arc.lock().await;
+            MigrationRunner::run(&mut guard).unwrap();
+        }
+        let customers = crate::services::CustomerService::new_sqlite(db.clone());
+        let c = customers
+            .create_customer(crate::domain::customer::CreateCustomerDto {
+                name: "Deactivate Me".into(),
+                phone: "0312".into(),
+                alternate_phone: None,
+                email: None,
+                address: None,
+                notes: None,
+                credit_limit: None,
+            })
+            .await
+            .unwrap();
+
+        customers.deactivate_customer(&c.id).await.unwrap();
+
+        // Customer role and its single-role party are both inactive.
+        assert!(!customers.get_customer_by_id(&c.id).await.unwrap().is_active);
+        let parties = PartyService::new_sqlite(db.clone());
+        assert!(!parties.get_party(&c.id).await.unwrap().party.is_active);
+
+        // Same sync path as update_customer / deactivate_supplier.
+        let events = queue(&db).await;
+        let types: Vec<&str> = events.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(types, vec!["CUSTOMER_CREATED", "CUSTOMER_UPDATED", "PARTY_UPSERTED"]);
+        let updated: Customer = serde_json::from_str(&events[1].1).unwrap();
+        assert!(!updated.is_active);
+        let party: Party = serde_json::from_str(&events[2].1).unwrap();
+        assert!(!party.is_active);
+
+        // Existing NotFound contract is preserved.
+        assert!(matches!(
+            customers.deactivate_customer("00000000-0000-4000-8000-000000000000").await,
+            Err(AppError::NotFound(_))
+        ));
+    }
+
+    #[tokio::test]
     async fn postgres_backend_refuses_writes() {
         // Construct without a live pool: only the backend guard is exercised.
         let pool = sqlx::postgres::PgPoolOptions::new()

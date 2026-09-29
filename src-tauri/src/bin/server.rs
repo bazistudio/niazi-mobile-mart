@@ -2134,6 +2134,33 @@ async fn sync_push_handler(
                 }
             }
 
+            // SYNC-B1: Unknown event type guard.
+            //
+            // Every recognised event type is handled by one of the independent `if`
+            // blocks above.  An event type that is not in the registry falls through
+            // ALL of them, which would previously cause the empty transaction to be
+            // committed and a spurious `SYNCED` response to be returned — resulting
+            // in silent permanent data loss on the originating terminal.
+            //
+            // This guard MUST remain immediately before the audit record and commit
+            // so that it catches every event type not handled above.
+            if !niazi_mobile_mart_lib::domain::sync_queue::KNOWN_SERVER_EVENT_TYPES
+                .contains(&event.event_type.as_str())
+            {
+                let _ = tx.rollback().await;
+                results.push(json!({
+                    "client_event_id": client_event_id,
+                    "status": "FAILED_PERMANENT",
+                    "error": "UNKNOWN_EVENT_TYPE",
+                    "message": format!(
+                        "Unrecognised sync event type '{}': the server has no handler \
+                         for this event and cannot project or audit it.",
+                        event.event_type
+                    )
+                }));
+                continue;
+            }
+
             if let Err(e) = niazi_mobile_mart_lib::repositories::PostgresSyncAuditRepository::record_audit_tx(
                 &mut tx,
                 &server_event_id,
@@ -2201,10 +2228,15 @@ async fn sync_pull_handler(
     let limit = query.limit.unwrap_or(100).clamp(1, 500);
 
     let repo = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::new(pg_pool);
-    match repo.get_changes(&auth.0.organization_id, after_seq, limit).await {
-        Ok(changes) => {
+    // M1: query limit+1 rows so we can distinguish "exactly limit rows exist" from "more rows follow".
+    match repo.get_changes(&auth.0.organization_id, after_seq, limit + 1).await {
+        Ok(mut changes) => {
+            // has_more is true only when a (limit+1)-th row was actually returned.
+            let has_more = changes.len() as i64 > limit;
+            if has_more {
+                changes.truncate(limit as usize);
+            }
             let next_seq = changes.last().map(|c| c.sequence).unwrap_or(after_seq);
-            let has_more = changes.len() as i64 == limit;
             (
                 StatusCode::OK,
                 Json(json!({

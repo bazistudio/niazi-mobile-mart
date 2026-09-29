@@ -259,7 +259,7 @@ impl PostgresSaleRepository {
         if credit_amount > 0 {
             let cid = customer_id.as_ref().unwrap();
             let current_outstanding: (i64,) = sqlx::query_as(
-                "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM customer_ledger_entries WHERE customer_id = $1",
+                "SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT FROM customer_ledger_entries WHERE customer_id = $1",
             )
             .bind(cid)
             .fetch_one(&mut **tx)

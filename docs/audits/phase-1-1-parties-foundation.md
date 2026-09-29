@@ -103,6 +103,8 @@ New Rust tests for AG AI to run:
 
 ## 4. Findings recorded (not fixed; out of scope)
 
+> **Update:** the P1 supplier ledger sign, P2 `SUM(bigint)` and P2 `deactivate_customer` findings are resolved on `feature/phase-1-1-targeted-fixes`. See `phase-1-1-targeted-fixes.md`.
+
 | Sev | Finding | Evidence |
 |---|---|---|
 | P1 | Supplier ledger sign differs between SQLite and PostgreSQL. SQLite writes PURCHASE as **debit** and computes payable as debit − credit. PostgreSQL writes PURCHASE as **credit** and PAYMENT also as **credit**, then computes credit − debit, so central payable **increases** on payment. The party read model follows each backend's existing convention. | `supplier_repository.rs:185-189`; `postgres_purchase_repo.rs:440-455, 598-615`; `postgres_supplier_repo.rs:313-316` |

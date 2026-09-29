@@ -281,7 +281,7 @@ impl PostgresSalesReturnRepository {
 
             let orig_qty: i64 = line.try_get(5).unwrap();
             let prev_returned: (i64,) = sqlx::query_as(
-                "SELECT COALESCE(SUM(quantity), 0) FROM sales_return_lines WHERE sale_line_id = $1",
+                "SELECT COALESCE(SUM(quantity), 0)::BIGINT FROM sales_return_lines WHERE sale_line_id = $1",
             )
             .bind(&item.sale_line_id)
             .fetch_one(&mut *tx)
@@ -489,7 +489,7 @@ impl PostgresSalesReturnRepository {
         } else if refund_method == SalesRefundMethod::CustomerCredit {
             let cid = customer_id.as_ref().unwrap();
             let current_outstanding: (i64,) = sqlx::query_as(
-                "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM customer_ledger_entries WHERE customer_id = $1",
+                "SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT FROM customer_ledger_entries WHERE customer_id = $1",
             )
             .bind(cid)
             .fetch_one(&mut *tx)

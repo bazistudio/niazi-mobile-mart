@@ -222,7 +222,7 @@ impl PostgresPurchaseReturnRepository {
 
             let orig_qty: i64 = line.try_get(5).unwrap();
             let prev_returned: (i64,) = sqlx::query_as(
-                "SELECT COALESCE(SUM(quantity), 0) FROM purchase_return_lines WHERE purchase_line_id = $1",
+                "SELECT COALESCE(SUM(quantity), 0)::BIGINT FROM purchase_return_lines WHERE purchase_line_id = $1",
             )
             .bind(&item.purchase_line_id)
             .fetch_one(&mut *tx)
@@ -428,7 +428,7 @@ impl PostgresPurchaseReturnRepository {
             .map_err(|e| AppError::Database(e.to_string()))?;
         } else if settlement_method == PurchaseSettlementMethod::SupplierCredit {
             let current_outstanding: (i64,) = sqlx::query_as(
-                "SELECT COALESCE(SUM(credit) - SUM(debit), 0) FROM supplier_ledger_entries WHERE supplier_id = $1",
+                "SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT FROM supplier_ledger_entries WHERE supplier_id = $1",
             )
             .bind(&supplier_id)
             .fetch_one(&mut *tx)
@@ -443,7 +443,7 @@ impl PostgresPurchaseReturnRepository {
 
             sqlx::query(
                 "INSERT INTO supplier_ledger_entries (id, supplier_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at)
-                 VALUES ($1, $2, $3, $4, 'ADJUSTMENT', $5, 0, $6, $7, $8, $9)"
+                 VALUES ($1, $2, $3, $4, 'ADJUSTMENT', 0, $5, $6, $7, $8, $9)"
             )
             .bind(l_id)
             .bind(&supplier_id)

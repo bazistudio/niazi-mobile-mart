@@ -91,7 +91,7 @@ impl PostgresCashRepository {
 
         // Calculate expected closing cash: opening_cash + IN movements - OUT movements
         let in_total: (i64,) = sqlx::query_as(
-            "SELECT COALESCE(SUM(amount), 0) FROM cash_movements WHERE session_id = $1 AND direction = 'IN'",
+            "SELECT COALESCE(SUM(amount), 0)::BIGINT FROM cash_movements WHERE session_id = $1 AND direction = 'IN'",
         )
         .bind(&dto.session_id)
         .fetch_one(&mut *tx)
@@ -99,7 +99,7 @@ impl PostgresCashRepository {
         .map_err(|e| AppError::Database(e.to_string()))?;
 
         let out_total: (i64,) = sqlx::query_as(
-            "SELECT COALESCE(SUM(amount), 0) FROM cash_movements WHERE session_id = $1 AND direction = 'OUT'",
+            "SELECT COALESCE(SUM(amount), 0)::BIGINT FROM cash_movements WHERE session_id = $1 AND direction = 'OUT'",
         )
         .bind(&dto.session_id)
         .fetch_one(&mut *tx)
@@ -274,7 +274,7 @@ impl PostgresCashRepository {
 
     pub async fn calculate_branch_balance(&self, branch_id: &str) -> AppResult<i64> {
         let in_amount: (i64,) = sqlx::query_as(
-            "SELECT COALESCE(SUM(amount), 0) FROM cash_movements WHERE branch_id = $1 AND direction = 'IN'",
+            "SELECT COALESCE(SUM(amount), 0)::BIGINT FROM cash_movements WHERE branch_id = $1 AND direction = 'IN'",
         )
         .bind(branch_id)
         .fetch_one(&self.pool)
@@ -282,7 +282,7 @@ impl PostgresCashRepository {
         .map_err(|e| AppError::Database(e.to_string()))?;
 
         let out_amount: (i64,) = sqlx::query_as(
-            "SELECT COALESCE(SUM(amount), 0) FROM cash_movements WHERE branch_id = $1 AND direction = 'OUT'",
+            "SELECT COALESCE(SUM(amount), 0)::BIGINT FROM cash_movements WHERE branch_id = $1 AND direction = 'OUT'",
         )
         .bind(branch_id)
         .fetch_one(&self.pool)

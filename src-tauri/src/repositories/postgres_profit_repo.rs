@@ -46,7 +46,7 @@ impl PostgresProfitRepository {
         }
 
         // Gross Revenue
-        let rev_row: (i64,) = sqlx::query_as(&format!("SELECT COALESCE(SUM(total_amount), 0) FROM sales {sale_where}"))
+        let rev_row: (i64,) = sqlx::query_as(&format!("SELECT COALESCE(SUM(total_amount), 0)::BIGINT FROM sales {sale_where}"))
             .fetch_one(&self.pool)
             .await
             .unwrap_or((0,));
@@ -54,7 +54,7 @@ impl PostgresProfitRepository {
 
         // COGS
         let cogs_sql = format!(
-            "SELECT COALESCE(SUM(l.cost_price_snapshot * l.quantity), 0)
+            "SELECT COALESCE(SUM(l.cost_price_snapshot * l.quantity), 0)::BIGINT
              FROM sale_lines l
              JOIN sales s ON l.sale_id = s.id
              {sale_where}"
@@ -66,7 +66,7 @@ impl PostgresProfitRepository {
         let cogs = cogs_row.0;
 
         // Sales Returns amount
-        let sret_row: (i64,) = sqlx::query_as(&format!("SELECT COALESCE(SUM(total_amount), 0) FROM sales_returns {sret_where}"))
+        let sret_row: (i64,) = sqlx::query_as(&format!("SELECT COALESCE(SUM(total_amount), 0)::BIGINT FROM sales_returns {sret_where}"))
             .fetch_one(&self.pool)
             .await
             .unwrap_or((0,));
@@ -76,7 +76,7 @@ impl PostgresProfitRepository {
         let gross_profit = net_revenue.saturating_sub(cogs);
 
         // Operating Expenses
-        let exp_row: (i64,) = sqlx::query_as(&format!("SELECT COALESCE(SUM(amount), 0) FROM expenses {exp_where}"))
+        let exp_row: (i64,) = sqlx::query_as(&format!("SELECT COALESCE(SUM(amount), 0)::BIGINT FROM expenses {exp_where}"))
             .fetch_one(&self.pool)
             .await
             .unwrap_or((0,));
@@ -91,7 +91,7 @@ impl PostgresProfitRepository {
         };
 
         // Purchases Amount
-        let pur_row: (i64,) = sqlx::query_as(&format!("SELECT COALESCE(SUM(total_amount), 0) FROM purchases {pur_where}"))
+        let pur_row: (i64,) = sqlx::query_as(&format!("SELECT COALESCE(SUM(total_amount), 0)::BIGINT FROM purchases {pur_where}"))
             .fetch_one(&self.pool)
             .await
             .unwrap_or((0,));
