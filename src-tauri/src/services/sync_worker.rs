@@ -223,8 +223,10 @@ impl SyncWorkerDaemon {
                                         .await;
                                 }
                                 "DEPENDENCY_NOT_FOUND" => {
+                                    // SYNC-H6: increment attempt_count so the bounded retry
+                                    // policy (MAX_RETRIES) applies; prevents infinite loop.
                                     let _ = sync_queue_repo
-                                        .update_status_ext(client_evt, SyncQueueStatus::Pending, err_msg, None, false)
+                                        .update_status_ext(client_evt, SyncQueueStatus::Pending, err_msg, None, true)
                                         .await;
                                 }
                                 "FAILED_PERMANENT" => {
@@ -309,8 +311,10 @@ impl SyncWorkerDaemon {
                     }
                     422 if err_body.contains("DEPENDENCY_NOT_FOUND") => {
                         for item in &pending_items {
+                            // SYNC-H6: increment attempt_count so the bounded retry
+                            // policy (MAX_RETRIES) applies; prevents infinite loop.
                             let _ = sync_queue_repo
-                                .update_status_ext(&item.client_event_id, SyncQueueStatus::Pending, Some(&err_msg), None, false)
+                                .update_status_ext(&item.client_event_id, SyncQueueStatus::Pending, Some(&err_msg), None, true)
                                 .await;
                         }
                         let mut st = self.status.write().await;
@@ -351,8 +355,11 @@ impl SyncWorkerDaemon {
             Err(e) => {
                 let err_msg = format!("Server unreachable: {e}");
                 for item in &pending_items {
+                    // SYNC-H7: increment attempt_count so the bounded retry
+                    // policy (MAX_RETRIES) applies; prevents infinite loop on
+                    // persistent transport/network failures.
                     let _ = sync_queue_repo
-                        .update_status_ext(&item.client_event_id, SyncQueueStatus::Pending, Some(&err_msg), None, false)
+                        .update_status_ext(&item.client_event_id, SyncQueueStatus::Pending, Some(&err_msg), None, true)
                         .await;
                 }
                 let remaining_pending = sync_queue_repo.count_pending().await.unwrap_or(0);

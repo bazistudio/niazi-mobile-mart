@@ -1053,6 +1053,10 @@ mod tests {
         assert!(res_other_org.unwrap_err().to_string().contains("Cross-organization retry prohibited"));
     }
 
+    /// SYNC-H6 regression: dependency failures must consume the retry budget.
+    /// Before the fix, increment_attempt=false meant attempt_count never changed
+    /// and the item retried forever.  After the fix, increment_attempt=true means
+    /// each failure counts toward MAX_RETRIES and eventually becomes FailedPermanent.
     #[tokio::test]
     async fn test_dependency_retry_survives_max_retries() {
         let db = DatabaseConnection::open_in_memory().unwrap();
@@ -1084,17 +1088,22 @@ mod tests {
             payload: r#"{"id":"SALE_DEP_WAIT"}"#.to_string(),
         }).await.unwrap();
 
-        // 15 dependency failure updates with increment_attempt = false
-        for _ in 1..=15 {
-            repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some("422 DEPENDENCY_NOT_FOUND"), None, false).await.unwrap();
+        // SYNC-H6 fix: dependency failures now pass increment_attempt=true.
+        // Each call increments attempt_count; at MAX_RETRIES the item becomes
+        // FailedPermanent automatically inside update_status_ext.
+        for attempt in 1..=MAX_RETRIES {
+            repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some("422 DEPENDENCY_NOT_FOUND"), None, true).await.unwrap();
             let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
-            assert_eq!(item.attempt_count, 0);
-            assert_eq!(item.status, SyncQueueStatus::Pending);
-            assert!(item.is_eligible_for_retry(chrono::Utc::now()));
+            assert_eq!(item.attempt_count, attempt, "attempt_count should be {attempt} after {attempt} dependency failures");
+            if attempt < MAX_RETRIES {
+                assert_eq!(item.status, SyncQueueStatus::Pending, "should remain Pending before limit");
+            } else {
+                assert_eq!(item.status, SyncQueueStatus::FailedPermanent, "should become FailedPermanent at limit");
+            }
         }
 
-        assert_eq!(repo.count_pending().await.unwrap(), 1);
-        assert_eq!(repo.count_failed_permanent().await.unwrap(), 0);
+        assert_eq!(repo.count_pending().await.unwrap(), 0);
+        assert_eq!(repo.count_failed_permanent().await.unwrap(), 1);
     }
 
     #[tokio::test]
@@ -1128,21 +1137,31 @@ mod tests {
             payload: r#"{"id":"SALE_RESOLVED"}"#.to_string(),
         }).await.unwrap();
 
-        // 5 dependency retries
-        for _ in 1..=5 {
-            repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some("422 DEPENDENCY_NOT_FOUND"), None, false).await.unwrap();
+        // SYNC-H6 fix: dependency failures now increment attempt_count.
+        // 5 dependency retries (well below MAX_RETRIES=10) all remain Pending.
+        for attempt in 1..=5 {
+            repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some("422 DEPENDENCY_NOT_FOUND"), None, true).await.unwrap();
+            let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
+            assert_eq!(item.attempt_count, attempt);
+            assert_eq!(item.status, SyncQueueStatus::Pending);
         }
 
-        // Product arrives, sale syncs successfully
+        // Dependency resolves before limit — sale syncs successfully.
+        // Synced writes increment_attempt=false; attempt_count stays at 5.
         repo.update_status_ext(&evt_id, SyncQueueStatus::Synced, None, Some("SRV-999"), false).await.unwrap();
         let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
         assert_eq!(item.status, SyncQueueStatus::Synced);
-        assert_eq!(item.attempt_count, 0);
+        assert_eq!(item.attempt_count, 5, "attempt_count reflects dependency retries consumed");
         assert_eq!(item.server_event_id, Some("SRV-999".to_string()));
     }
 
+    /// SYNC-H7 regression: network/transport failures must consume the retry budget.
+    /// Before the fix, increment_attempt=false meant attempt_count never changed
+    /// and the item retried indefinitely on persistent network outages.
+    /// After the fix, increment_attempt=true means each failure counts toward
+    /// MAX_RETRIES and eventually becomes FailedPermanent.
     #[tokio::test]
-    async fn test_network_error_does_not_consume_retry_budget() {
+    async fn test_network_error_bounded_by_retry_limit() {
         let db = DatabaseConnection::open_in_memory().unwrap();
         {
             let conn_arc = db.inner();
@@ -1172,14 +1191,23 @@ mod tests {
             payload: r#"{"id":"SALE_OFFLINE"}"#.to_string(),
         }).await.unwrap();
 
-        // 12 network transport failure updates
-        for _ in 1..=12 {
-            repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some("Server unreachable"), None, false).await.unwrap();
+        // SYNC-H7 fix: network failures now pass increment_attempt=true.
+        // First MAX_RETRIES-1 failures stay Pending; the MAX_RETRIES-th becomes FailedPermanent.
+        for attempt in 1..=MAX_RETRIES {
+            repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some("Server unreachable: connection refused"), None, true).await.unwrap();
+            let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
+            assert_eq!(item.attempt_count, attempt, "attempt_count should be {attempt} after {attempt} network failures");
+            if attempt < MAX_RETRIES {
+                assert_eq!(item.status, SyncQueueStatus::Pending, "should remain Pending before limit");
+            } else {
+                assert_eq!(item.status, SyncQueueStatus::FailedPermanent, "should become FailedPermanent at limit");
+                assert!(item.last_error.as_deref().unwrap_or("").contains("Server unreachable"),
+                    "error text must identify this as a network failure");
+            }
         }
 
-        let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
-        assert_eq!(item.status, SyncQueueStatus::Pending);
-        assert_eq!(item.attempt_count, 0);
+        assert_eq!(repo.count_pending().await.unwrap(), 0);
+        assert_eq!(repo.count_failed_permanent().await.unwrap(), 1);
     }
 
     // ── M4 Regression Tests ─────────────────────────────────────────────────

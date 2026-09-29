@@ -1025,9 +1025,10 @@ impl ChangeApplier {
                 "INSERT INTO customers (id, customer_code, name, phone, credit_limit, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![customer_id, &customer_code, "Unknown Customer (Auto-Healed)", "00000000000", 0, 1, &now, &now],
             ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal customer: {e}")))?;
-            // SYNC-H5: ensure the auto-healed customer row also has a party record and role linkage.
+            // SYNC-H5 / Phase 7: ensure the auto-healed customer row also has a party record and role linkage.
             // The stub row party_id defaults to NULL; ensure_party_for_role_in_tx creates the party
             // and writes party_id = customer_id into the customers row (same convention as CUSTOMER_CREATED).
+            // party_id = customer_id (convention: role id as party id when no canonical party exists yet).
             let contact = crate::domain::party::PartyRoleContact {
                 kind: crate::domain::party::PartyRoleKind::Customer,
                 role_id: customer_id.to_string(),
@@ -1056,7 +1057,8 @@ impl ChangeApplier {
                 "INSERT INTO suppliers (id, supplier_code, name, phone, credit_limit, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![supplier_id, &supplier_code, "Unknown Supplier (Auto-Healed)", "00000000000", 0, 1, &now, &now],
             ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal supplier: {e}")))?;
-            // SYNC-H5: ensure the auto-healed supplier row also has a party record and role linkage.
+            // SYNC-H5 / Phase 7: ensure the auto-healed supplier row also has a party record and role linkage.
+            // party_id = supplier_id (convention: role id as party id when no canonical party exists yet).
             let contact = crate::domain::party::PartyRoleContact {
                 kind: crate::domain::party::PartyRoleKind::Supplier,
                 role_id: supplier_id.to_string(),
