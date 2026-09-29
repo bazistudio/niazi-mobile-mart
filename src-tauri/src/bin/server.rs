@@ -2228,10 +2228,15 @@ async fn sync_pull_handler(
     let limit = query.limit.unwrap_or(100).clamp(1, 500);
 
     let repo = niazi_mobile_mart_lib::repositories::PostgresChangeLogRepository::new(pg_pool);
-    match repo.get_changes(&auth.0.organization_id, after_seq, limit).await {
-        Ok(changes) => {
+    // M1: query limit+1 rows so we can distinguish "exactly limit rows exist" from "more rows follow".
+    match repo.get_changes(&auth.0.organization_id, after_seq, limit + 1).await {
+        Ok(mut changes) => {
+            // has_more is true only when a (limit+1)-th row was actually returned.
+            let has_more = changes.len() as i64 > limit;
+            if has_more {
+                changes.truncate(limit as usize);
+            }
             let next_seq = changes.last().map(|c| c.sequence).unwrap_or(after_seq);
-            let has_more = changes.len() as i64 == limit;
             (
                 StatusCode::OK,
                 Json(json!({
