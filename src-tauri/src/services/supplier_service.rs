@@ -516,8 +516,8 @@ pub mod tests {
         let mut rows = stmt.query([]).unwrap();
 
         assert_eq!(rows.next().unwrap().unwrap().get::<_, String>(0).unwrap(), "SUPPLIER_CREATED");
-        assert_eq!(rows.next().unwrap().unwrap().get::<_, String>(0).unwrap(), "SUPPLIER_UPDATED");
-        assert_eq!(rows.next().unwrap().unwrap().get::<_, String>(0).unwrap(), "SUPPLIER_UPDATED");
+        assert_eq!(rows.next().unwrap().unwrap().get::<_, String>(0).unwrap(), "PARTY_UPSERTED");
+        assert_eq!(rows.next().unwrap().unwrap().get::<_, String>(0).unwrap(), "PARTY_UPSERTED");
         assert!(rows.next().unwrap().is_none());
     }
 }

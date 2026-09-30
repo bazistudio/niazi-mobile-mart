@@ -1081,9 +1081,19 @@ impl ChangeApplier {
     fn auto_heal_product_in_tx(tx: &rusqlite::Transaction, product_id: &str) -> crate::db::errors::DbResult<()> {
         let exists: bool = tx.query_row("SELECT 1 FROM products WHERE id = ?1", params![product_id], |_| Ok(true)).unwrap_or(false);
         if !exists {
+            let name = "Unknown Product (Auto-Healed)";
+            let norm_name = crate::domain::product::normalize_product_name(name);
+            let cat_id = "00000000-0000-0000-0000-000000000010";
+            let cat_exists: bool = tx.query_row("SELECT 1 FROM categories WHERE id = ?1", params![cat_id], |_| Ok(true)).unwrap_or(false);
+            if !cat_exists {
+                tx.execute(
+                    "INSERT INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![cat_id, "Auto-Healed Category", "AUTO", 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+                ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal category: {e}")))?;
+            }
             tx.execute(
-                "INSERT INTO products (id, name, sku, purchase_price, sale_price, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![product_id, "Unknown Product (Auto-Healed)", format!("SKU-AUTO-{}", &product_id[0..8]), 0, 0, 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+                "INSERT INTO products (id, name, normalized_name, sku, category_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![product_id, name, norm_name, format!("SKU-AUTO-{}", &product_id[0..8]), cat_id, 0, 0, 0, 5, 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
             ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal product: {e}")))?;
         }
         Ok(())
@@ -1092,9 +1102,10 @@ impl ChangeApplier {
     fn auto_heal_branch_in_tx(tx: &rusqlite::Transaction, branch_id: &str) -> crate::db::errors::DbResult<()> {
         let exists: bool = tx.query_row("SELECT 1 FROM branches WHERE id = ?1", params![branch_id], |_| Ok(true)).unwrap_or(false);
         if !exists {
+            let code = format!("UNK-{}", if branch_id.len() >= 4 { &branch_id[0..4] } else { "AUTO" });
             tx.execute(
-                "INSERT INTO branches (id, name, location, is_main, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![branch_id, "Unknown Branch (Auto-Healed)", "Unknown", 0, 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+                "INSERT INTO branches (id, organization_id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![branch_id, crate::domain::organization::NIAZI_ORGANIZATION_ID, "Unknown Branch (Auto-Healed)", code, 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
             ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal branch: {e}")))?;
         }
         Ok(())
@@ -1115,7 +1126,7 @@ impl ChangeApplier {
         let exists: bool = tx.query_row("SELECT 1 FROM categories WHERE id = ?1", params![category_id], |_| Ok(true)).unwrap_or(false);
         if !exists {
             tx.execute(
-                "INSERT INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![category_id, "Unknown Category (Auto-Healed)", format!("CAT-{}", &category_id[0..4]), 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
             ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal category: {e}")))?;
         }
@@ -1137,7 +1148,7 @@ impl ChangeApplier {
         let exists: bool = tx.query_row("SELECT 1 FROM units WHERE id = ?1", params![unit_id], |_| Ok(true)).unwrap_or(false);
         if !exists {
             tx.execute(
-                "INSERT INTO units (id, name, abbreviation, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO units (id, name, abbreviation, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![unit_id, "Unknown Unit (Auto-Healed)", "UNK", 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
             ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal unit: {e}")))?;
         }
@@ -1170,7 +1181,7 @@ impl ChangeApplier {
         let exists: bool = tx.query_row("SELECT 1 FROM colors WHERE id = ?1", params![color_id], |_| Ok(true)).unwrap_or(false);
         if !exists {
             tx.execute(
-                "INSERT INTO colors (id, name, hex_code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO colors (id, name, hex_code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![color_id, "Unknown Color (Auto-Healed)", "#000000", 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
             ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal color: {e}")))?;
         }
@@ -1584,7 +1595,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_downstream_atomic_rollback() {
+    async fn test_downstream_malformed_event_resilience() {
         let db = setup_test_db().await;
         let applier = ChangeApplier::new(db.clone());
 
@@ -1619,17 +1630,19 @@ mod tests {
             event_type: "PRODUCT_CREATED".to_string(),
             entity_type: "PRODUCT".to_string(),
             entity_id: "id2".to_string(),
-            payload: "{ INVALID JSON }".to_string(), // This will cause a validation error and rollback the transaction
+            payload: "{ INVALID JSON }".to_string(), // This will cause a validation error
             created_at: "2026-01-01T00:00:00Z".to_string(),
         };
 
+        // In M2 architecture, apply_batch processes events individually.
+        // It returns Ok(()) and skips the malformed change2, but successfully applies change1.
         let result = applier.apply_batch("org1", &[change1, change2], 2).await;
-        assert!(result.is_err());
+        assert!(result.is_ok());
 
-        // Category should be rolled back
+        // Category should be successfully inserted, not rolled back
         let repo = crate::repositories::SQLiteCatalogRepository::new(db.clone());
         let fetched = repo.get_category_by_id(&cat_id).await;
-        assert!(fetched.is_err());
+        assert!(fetched.is_ok());
     }
 
     #[tokio::test]
@@ -1870,12 +1883,12 @@ mod tests {
             let guard = conn_arc.lock().await;
             // Ensure branch exists first.
             guard.execute(
-                "INSERT OR IGNORE INTO branches (id, name, location, is_main, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                rusqlite::params![branch_id, "Main Branch", "Main", 1, 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+                "INSERT OR IGNORE INTO branches (id, name, organization_id, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![branch_id, "00000000-0000-0000-0000-000000000001", "Main Branch", "MAIN", 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
             ).unwrap();
             // Ensure category exists.
             guard.execute(
-                "INSERT OR IGNORE INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT OR IGNORE INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 rusqlite::params!["00000000-0000-0000-0000-000000000010", "Test Cat", "TCAT", 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
             ).unwrap();
             // Insert product row directly (no stock row).
@@ -1916,11 +1929,11 @@ mod tests {
             let conn_arc = db.inner();
             let guard = conn_arc.lock().await;
             guard.execute(
-                "INSERT OR IGNORE INTO branches (id, name, location, is_main, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                rusqlite::params![branch_id, "Main Branch", "Main", 1, 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+                "INSERT OR IGNORE INTO branches (id, name, organization_id, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![branch_id, "00000000-0000-0000-0000-000000000001", "Main Branch", "MAIN", 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
             ).unwrap();
             guard.execute(
-                "INSERT OR IGNORE INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT OR IGNORE INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 rusqlite::params!["00000000-0000-0000-0000-000000000010", "Test Cat", "TCAT", 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
             ).unwrap();
             guard.execute(
@@ -2019,11 +2032,11 @@ mod tests {
             let conn_arc = db.inner();
             let guard = conn_arc.lock().await;
             guard.execute(
-                "INSERT OR IGNORE INTO branches (id, name, location, is_main, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                rusqlite::params![branch_id, "Main Branch", "Main", 1, 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+                "INSERT OR IGNORE INTO branches (id, name, organization_id, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![branch_id, "00000000-0000-0000-0000-000000000001", "Main Branch", "MAIN", 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
             ).unwrap();
             guard.execute(
-                "INSERT OR IGNORE INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT OR IGNORE INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 rusqlite::params!["00000000-0000-0000-0000-000000000010", "Test Cat", "TCAT", 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
             ).unwrap();
             guard.execute(
@@ -2106,7 +2119,7 @@ mod tests {
     // -------------------------------------------------------------------------
 
     /// Helper: read the party_id column directly from the customers table.
-    async fn get_customer_party_id(db: &Arc<crate::db::Database>, customer_id: &str) -> Option<String> {
+    async fn get_customer_party_id(db: &crate::db::DatabaseConnection, customer_id: &str) -> Option<String> {
         let db = db.clone();
         let id = customer_id.to_string();
         tokio::task::spawn_blocking(move || {
@@ -2120,14 +2133,13 @@ mod tests {
                     |row| row.get::<_, Option<String>>(0),
                 )
                 .unwrap_or(None)
-                .flatten()
         })
         .await
         .unwrap()
     }
 
     /// Helper: read the party_id column directly from the suppliers table.
-    async fn get_supplier_party_id(db: &Arc<crate::db::Database>, supplier_id: &str) -> Option<String> {
+    async fn get_supplier_party_id(db: &crate::db::DatabaseConnection, supplier_id: &str) -> Option<String> {
         let db = db.clone();
         let id = supplier_id.to_string();
         tokio::task::spawn_blocking(move || {
@@ -2141,14 +2153,13 @@ mod tests {
                     |row| row.get::<_, Option<String>>(0),
                 )
                 .unwrap_or(None)
-                .flatten()
         })
         .await
         .unwrap()
     }
 
     /// Helper: check whether a party row exists.
-    async fn party_exists(db: &Arc<crate::db::Database>, party_id: &str) -> bool {
+    async fn party_exists(db: &crate::db::DatabaseConnection, party_id: &str) -> bool {
         let db = db.clone();
         let id = party_id.to_string();
         tokio::task::spawn_blocking(move || {
@@ -2734,8 +2745,8 @@ mod tests {
         let db = setup_test_db().await;
         let applier = ChangeApplier::new(db.clone());
         let org = "m2-org";
-        let pid1 = "m2-prod-0001-0000-0000-000000000001";
-        let pid2 = "m2-prod-0001-0000-0000-000000000002";
+        let pid1 = "m2000000-0001-0000-0000-000000000001";
+        let pid2 = "m2000000-0001-0000-0000-000000000002";
 
         let batch = vec![
             m2_valid_product_entry(1, pid1),
@@ -2755,8 +2766,8 @@ mod tests {
         let db = setup_test_db().await;
         let applier = ChangeApplier::new(db.clone());
         let org = "m2-org";
-        let pid1 = "m2-prod-0002-0000-0000-000000000001";
-        let pid_bad = "m2-prod-0002-0000-0000-000000000002"; // id in bad event
+        let pid1 = "m2000000-0002-0000-0000-000000000001";
+        let pid_bad = "m2000000-0002-0000-0000-000000000002"; // id in bad event
 
         let batch = vec![
             m2_valid_product_entry(1, pid1),
@@ -2777,8 +2788,8 @@ mod tests {
         let db = setup_test_db().await;
         let applier = ChangeApplier::new(db.clone());
         let org = "m2-org";
-        let pid_bad = "m2-prod-0003-0000-0000-000000000001";
-        let pid2 = "m2-prod-0003-0000-0000-000000000002";
+        let pid_bad = "m2000000-0003-0000-0000-000000000001";
+        let pid2 = "m2000000-0003-0000-0000-000000000002";
 
         let batch = vec![
             m2_malformed_product_entry(1, pid_bad),
@@ -2798,10 +2809,10 @@ mod tests {
         let db = setup_test_db().await;
         let applier = ChangeApplier::new(db.clone());
         let org = "m2-org";
-        let pid1 = "m2-prod-0004-0000-0000-000000000001";
-        let pid_bad = "m2-prod-0004-0000-0000-000000000002";
-        let pid3 = "m2-prod-0004-0000-0000-000000000003";
-        let pid4 = "m2-prod-0004-0000-0000-000000000004";
+        let pid1 = "m2000000-0004-0000-0000-000000000001";
+        let pid_bad = "m2000000-0004-0000-0000-000000000002";
+        let pid3 = "m2000000-0004-0000-0000-000000000003";
+        let pid4 = "m2000000-0004-0000-0000-000000000004";
 
         let batch = vec![
             m2_valid_product_entry(101, pid1),
@@ -2825,7 +2836,7 @@ mod tests {
         let db = setup_test_db().await;
         let applier = ChangeApplier::new(db.clone());
         let org = "m2-org";
-        let pid_after = "m2-prod-0005-0000-0000-000000000002";
+        let pid_after = "m2000000-0005-0000-0000-000000000002";
 
         let batch = vec![
             m2_unknown_event_entry(1),
@@ -2843,7 +2854,7 @@ mod tests {
         let db = setup_test_db().await;
         let applier = ChangeApplier::new(db.clone());
         let org = "m2-org";
-        let pid1 = "m2-prod-0006-0000-0000-000000000001";
+        let pid1 = "m2000000-0006-0000-0000-000000000001";
 
         let batch = vec![m2_valid_product_entry(1, pid1)];
         applier.apply_batch(org, &batch, 1).await.unwrap();
@@ -2863,12 +2874,12 @@ mod tests {
         let org = "m2-org";
 
         // Establish cursor at 10
-        let pid_pre = "m2-prod-0007-0000-0000-000000000001";
+        let pid_pre = "m2000000-0007-0000-0000-000000000001";
         applier.apply_batch(org, &[m2_valid_product_entry(10, pid_pre)], 10).await.unwrap();
         assert_eq!(get_cursor(&db, org).await, 10);
 
         // Single malformed event at seq 11
-        let pid_bad = "m2-prod-0007-0000-0000-000000000002";
+        let pid_bad = "m2000000-0007-0000-0000-000000000002";
         applier.apply_batch(org, &[m2_malformed_product_entry(11, pid_bad)], 11).await.unwrap();
 
         // Cursor must advance to 11, not remain at 10
@@ -2884,8 +2895,8 @@ mod tests {
         let db = setup_test_db().await;
         let applier = ChangeApplier::new(db.clone());
         let org = "m2-org";
-        let pid1 = "m2-prod-0008-0000-0000-000000000001";
-        let pid2 = "m2-prod-0008-0000-0000-000000000002";
+        let pid1 = "m2000000-0008-0000-0000-000000000001";
+        let pid2 = "m2000000-0008-0000-0000-000000000002";
 
         // Bring cursor to 5
         applier.apply_batch(org, &[m2_valid_product_entry(5, pid1)], 5).await.unwrap();
@@ -2960,14 +2971,28 @@ mod tests {
         // before the PRODUCT_CREATED event.
         let conn = db.inner();
         let guard = conn.lock().await;
+        let name = "Unknown Product (Auto-Healed)";
+        let norm_name = crate::domain::product::normalize_product_name(name);
+        
+        let cat_id = "00000000-0000-0000-0000-000000000010";
+        let cat_exists: bool = guard.query_row("SELECT 1 FROM categories WHERE id = ?1", rusqlite::params![cat_id], |_| Ok(true)).unwrap_or(false);
+        if !cat_exists {
+            guard.execute(
+                "INSERT INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![cat_id, "Auto-Healed Category", "AUTO", 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
+            ).unwrap();
+        }
+        
         guard.execute(
-            "INSERT INTO products (id, name, sku, purchase_price, sale_price, is_active, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO products (id, name, normalized_name, sku, category_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 5, 1, ?9, ?10)",
             rusqlite::params![
                 id,
-                "Unknown Product (Auto-Healed)",
+                name,
+                norm_name,
                 format!("SKU-AUTO-{}", &id[0..8]),
-                0, 0, 1,
+                cat_id,
+                0, 0, 0,
                 "2026-01-01T00:00:00+00:00",
                 "2026-01-01T00:00:00+00:00",
             ],
@@ -2979,7 +3004,7 @@ mod tests {
     #[tokio::test]
     async fn m5_t01_placeholder_created_for_missing_product() {
         let db = setup_test_db().await;
-        let pid = "m5-prod-0001-0000-0000-000000000001";
+        let pid = "m5000000-0001-0000-0000-000000000001";
         insert_placeholder_product(&db, pid).await;
 
         let name = get_product_name(&db, pid).await;
@@ -2995,7 +3020,7 @@ mod tests {
     async fn m5_t02_authoritative_product_created_reconciles_placeholder() {
         let db = setup_test_db().await;
         let applier = ChangeApplier::new(db.clone());
-        let pid = "m5-prod-0002-0000-0000-000000000002";
+        let pid = "m5000000-0002-0000-0000-000000000002";
 
         // Step 1: placeholder inserted by auto-heal (simulates a sale sync arriving first)
         insert_placeholder_product(&db, pid).await;
@@ -3020,7 +3045,7 @@ mod tests {
     async fn m5_t03_placeholder_cannot_overwrite_authoritative_product() {
         let db = setup_test_db().await;
         let applier = ChangeApplier::new(db.clone());
-        let pid = "m5-prod-0003-0000-0000-000000000003";
+        let pid = "m5000000-0003-0000-0000-000000000003";
 
         // Step 1: authoritative product arrives first
         let auth_product = m5_product(pid, "iPhone 15 Pro", "APPL-IP15P-256", 340000);
@@ -3063,7 +3088,7 @@ mod tests {
     async fn m5_t04_stock_references_remain_valid_after_reconciliation() {
         let db = setup_test_db().await;
         let applier = ChangeApplier::new(db.clone());
-        let pid = "m5-prod-0004-0000-0000-000000000004";
+        let pid = "m5000000-0004-0000-0000-000000000004";
         let branch_id = "00000000-0000-0000-0000-000000000002";
 
         // Step 1: placeholder inserted
@@ -3105,7 +3130,7 @@ mod tests {
     async fn m5_t05_no_duplicate_product_created() {
         let db = setup_test_db().await;
         let applier = ChangeApplier::new(db.clone());
-        let pid = "m5-prod-0005-0000-0000-000000000005";
+        let pid = "m5000000-0005-0000-0000-000000000005";
 
         insert_placeholder_product(&db, pid).await;
 
@@ -3126,7 +3151,7 @@ mod tests {
     async fn m5_t06_repeated_product_created_is_idempotent() {
         let db = setup_test_db().await;
         let applier = ChangeApplier::new(db.clone());
-        let pid = "m5-prod-0006-0000-0000-000000000006";
+        let pid = "m5000000-0006-0000-0000-000000000006";
         let org = "00000000-0000-0000-0000-000000000001";
 
         let auth_product = m5_product(pid, "Google Pixel 9", "GPIX-9-128", 110000);
@@ -3154,7 +3179,7 @@ mod tests {
     async fn m5_t07_reconciliation_does_not_enqueue_new_sync_events() {
         let db = setup_test_db().await;
         let applier = ChangeApplier::new(db.clone());
-        let pid = "m5-prod-0007-0000-0000-000000000007";
+        let pid = "m5000000-0007-0000-0000-000000000007";
         let org = "00000000-0000-0000-0000-000000000001";
 
         insert_placeholder_product(&db, pid).await;

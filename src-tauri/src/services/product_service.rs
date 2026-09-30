@@ -490,11 +490,12 @@ mod tests {
 
         let queue_repo = crate::repositories::SQLiteSyncQueueRepository::new(db.clone());
         let pending = queue_repo.get_pending(10).await.unwrap();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].event_type, "PRODUCT_CREATED");
-        assert_eq!(pending[0].client_event_id, prod.id);
+        // setup_test_context creates a Category and a Unit, so there will be 3 pending events.
+        assert_eq!(pending.len(), 3);
+        assert_eq!(pending[2].event_type, "PRODUCT_CREATED");
+        assert_eq!(pending[2].client_event_id, prod.id);
 
-        let created_payload: Product = serde_json::from_str(&pending[0].payload).unwrap();
+        let created_payload: Product = serde_json::from_str(&pending[2].payload).unwrap();
         assert_eq!(created_payload.id, prod.id);
         assert_eq!(created_payload.name, "Sync Phone");
 
@@ -523,10 +524,10 @@ mod tests {
             .unwrap();
 
         let pending_after_update = queue_repo.get_pending(10).await.unwrap();
-        assert_eq!(pending_after_update.len(), 2);
-        assert_eq!(pending_after_update[1].event_type, "PRODUCT_UPDATED");
+        assert_eq!(pending_after_update.len(), 4);
+        assert_eq!(pending_after_update[3].event_type, "PRODUCT_UPDATED");
 
-        let updated_payload: Product = serde_json::from_str(&pending_after_update[1].payload).unwrap();
+        let updated_payload: Product = serde_json::from_str(&pending_after_update[3].payload).unwrap();
         assert_eq!(updated_payload.id, updated.id);
         assert_eq!(updated_payload.name, "Sync Phone Pro");
 
@@ -534,14 +535,14 @@ mod tests {
         service.deactivate_product(&prod.id).await.unwrap();
 
         let pending_after_deactivate = queue_repo.get_pending(10).await.unwrap();
-        assert_eq!(pending_after_deactivate.len(), 3);
-        assert_eq!(pending_after_deactivate[2].event_type, "PRODUCT_DEACTIVATED");
+        assert_eq!(pending_after_deactivate.len(), 5);
+        assert_eq!(pending_after_deactivate[4].event_type, "PRODUCT_DEACTIVATED");
 
         #[derive(serde::Deserialize)]
         struct DeactivatePayload {
             id: String,
         }
-        let deactivate_payload: DeactivatePayload = serde_json::from_str(&pending_after_deactivate[2].payload).unwrap();
+        let deactivate_payload: DeactivatePayload = serde_json::from_str(&pending_after_deactivate[4].payload).unwrap();
         assert_eq!(deactivate_payload.id, prod.id);
     }
 

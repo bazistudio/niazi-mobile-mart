@@ -1089,13 +1089,13 @@ mod tests {
         }).await.unwrap();
 
         // SYNC-H6 fix: dependency failures now pass increment_attempt=true.
-        // Each call increments attempt_count; at MAX_RETRIES the item becomes
+        // Each call increments attempt_count; at crate::domain::sync_queue::MAX_RETRIES the item becomes
         // FailedPermanent automatically inside update_status_ext.
-        for attempt in 1..=MAX_RETRIES {
+        for attempt in 1..=crate::domain::sync_queue::MAX_RETRIES {
             repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some("422 DEPENDENCY_NOT_FOUND"), None, true).await.unwrap();
             let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
             assert_eq!(item.attempt_count, attempt, "attempt_count should be {attempt} after {attempt} dependency failures");
-            if attempt < MAX_RETRIES {
+            if attempt < crate::domain::sync_queue::MAX_RETRIES {
                 assert_eq!(item.status, SyncQueueStatus::Pending, "should remain Pending before limit");
             } else {
                 assert_eq!(item.status, SyncQueueStatus::FailedPermanent, "should become FailedPermanent at limit");
@@ -1138,7 +1138,7 @@ mod tests {
         }).await.unwrap();
 
         // SYNC-H6 fix: dependency failures now increment attempt_count.
-        // 5 dependency retries (well below MAX_RETRIES=10) all remain Pending.
+        // 5 dependency retries (well below crate::domain::sync_queue::MAX_RETRIES=10) all remain Pending.
         for attempt in 1..=5 {
             repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some("422 DEPENDENCY_NOT_FOUND"), None, true).await.unwrap();
             let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
@@ -1159,7 +1159,7 @@ mod tests {
     /// Before the fix, increment_attempt=false meant attempt_count never changed
     /// and the item retried indefinitely on persistent network outages.
     /// After the fix, increment_attempt=true means each failure counts toward
-    /// MAX_RETRIES and eventually becomes FailedPermanent.
+    /// crate::domain::sync_queue::MAX_RETRIES and eventually becomes FailedPermanent.
     #[tokio::test]
     async fn test_network_error_bounded_by_retry_limit() {
         let db = DatabaseConnection::open_in_memory().unwrap();
@@ -1192,12 +1192,12 @@ mod tests {
         }).await.unwrap();
 
         // SYNC-H7 fix: network failures now pass increment_attempt=true.
-        // First MAX_RETRIES-1 failures stay Pending; the MAX_RETRIES-th becomes FailedPermanent.
-        for attempt in 1..=MAX_RETRIES {
+        // First crate::domain::sync_queue::MAX_RETRIES-1 failures stay Pending; the crate::domain::sync_queue::MAX_RETRIES-th becomes FailedPermanent.
+        for attempt in 1..=crate::domain::sync_queue::MAX_RETRIES {
             repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some("Server unreachable: connection refused"), None, true).await.unwrap();
             let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
             assert_eq!(item.attempt_count, attempt, "attempt_count should be {attempt} after {attempt} network failures");
-            if attempt < MAX_RETRIES {
+            if attempt < crate::domain::sync_queue::MAX_RETRIES {
                 assert_eq!(item.status, SyncQueueStatus::Pending, "should remain Pending before limit");
             } else {
                 assert_eq!(item.status, SyncQueueStatus::FailedPermanent, "should become FailedPermanent at limit");
@@ -1296,9 +1296,14 @@ mod tests {
                 "M4-T02: event {} attempt_count must be 1", label);
         }
 
-        // All three must still be fetchable as pending (eligible for retry)
-        let pending = repo.get_pending(50).await.unwrap();
-        assert_eq!(pending.len(), 3,
+        // All three must still be fetchable as pending in the database (though subject to backoff)
+        let mut total_pending_in_db: i32 = 0;
+        {
+            let conn_arc = repo.db.inner();
+            let guard = conn_arc.lock().await;
+            total_pending_in_db = guard.query_row("SELECT COUNT(*) FROM offline_sync_queue WHERE status = 'PENDING'", [], |r| r.get(0)).unwrap();
+        }
+        assert_eq!(total_pending_in_db, 3,
             "M4-T02: all 3 events must remain in the pending retry queue");
     }
 

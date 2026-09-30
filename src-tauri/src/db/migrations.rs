@@ -1801,7 +1801,7 @@ mod tests {
         .unwrap();
 
         let applied = MigrationRunner::run(&mut conn).unwrap();
-        assert_eq!(applied, 4, "018-021 must apply on an existing 017 database");
+        assert_eq!(applied, 5, "018-021+ must apply on an existing 017 database");
 
         let parties: i64 = conn.query_row("SELECT COUNT(*) FROM parties", [], |r| r.get(0)).unwrap();
         assert_eq!(parties, 3, "2 customers + 1 non-colliding supplier");

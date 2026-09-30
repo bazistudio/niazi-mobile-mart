@@ -79,7 +79,7 @@ impl TokenManager {
 
         #[cfg(test)]
         {
-            if private_key.is_none() && public_key.is_empty() {
+            if private_key.is_none() {
                 let (test_private, test_public) = test_keys::key_pair();
                 return Self {
                     private_key: Some(test_private),
@@ -253,6 +253,7 @@ mod tests {
             must_change_password: false,
             has_pin: false,
             access_profile: StaffAccessProfile::public_user_restricted(),
+            branch_id: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
         };
         let token = signer.create_token(user).await;

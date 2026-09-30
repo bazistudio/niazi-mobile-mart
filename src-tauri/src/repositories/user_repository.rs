@@ -81,6 +81,7 @@ mod tests {
             pin_locked_until_ms: None,
             failed_login_attempts: 0,
             login_locked_until_ms: None,
+            branch_id: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };

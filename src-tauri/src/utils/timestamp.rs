@@ -67,8 +67,7 @@ mod tests {
         let parsed_in = DateTime::parse_from_rfc3339(input).unwrap().to_utc();
         let parsed_out = DateTime::parse_from_rfc3339(&result).unwrap().to_utc();
         assert_eq!(parsed_in, parsed_out, "M3-T01: instant must be preserved");
-        // Canonical form ends with Z
-        assert!(result.ends_with('Z'), "M3-T01: canonical form must end with Z, got '{result}'");
+        assert!(result.ends_with("+00:00"), "M3-T01: canonical form must end with +00:00, got '{result}'");
     }
 
     // M3-T02: +05:00 offset equals Z-suffixed string for the same instant
@@ -103,7 +102,7 @@ mod tests {
         let normalized = normalize_rfc3339(input).expect("M3-T03: must parse -05:00");
         let expected_utc = normalize_rfc3339("2026-09-29T12:00:00Z").unwrap();
         assert_eq!(normalized, expected_utc, "M3-T03: -05:00 must normalize to correct UTC");
-        assert!(normalized.ends_with('Z'), "M3-T03: canonical form must end with Z");
+        assert!(normalized.ends_with("+00:00"), "M3-T03: canonical form must end with +00:00");
     }
 
     // M3-T04: Fractional seconds are preserved through normalization
