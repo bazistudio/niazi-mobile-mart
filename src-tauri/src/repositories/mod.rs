@@ -17,6 +17,8 @@ pub mod sync_queue_repository;
 pub mod supplier_repository;
 pub mod terminal_repository;
 pub mod user_repository;
+pub mod repair_repository;
+pub mod used_mobile_repository;
 
 pub mod postgres_branch_repo;
 pub mod postgres_cash_repo;
@@ -58,6 +60,8 @@ pub use sale_repository::SQLiteSaleRepository;
 pub use sales_return_repository::SQLiteSalesReturnRepository;
 pub use sqlite_user_repo::SQLiteUserRepository;
 pub use supplier_repository::SQLiteSupplierRepository;
+pub use repair_repository::RepairRepository as SQLiteRepairRepository;
+pub use used_mobile_repository::UsedMobileRepository as SQLiteUsedMobileRepository;
 pub use user_repository::InMemoryUserRepository;
 
 pub use postgres_branch_repo::PostgresBranchRepository;

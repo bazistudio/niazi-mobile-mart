@@ -19,6 +19,8 @@ pub mod supplier;
 pub mod terminal;
 pub mod auth_snapshot;
 pub mod user;
+pub mod repair;
+pub mod used_mobile;
 
 pub use auth_snapshot::AuthSnapshot;
 
@@ -78,4 +80,11 @@ pub use purchase_return::{
     CreatePurchaseReturnDto, CreatePurchaseReturnLineDto, PurchaseReturn, PurchaseReturnDetailDto,
     PurchaseReturnLine, PurchaseReturnStatus, PurchaseReturnableInfoDto,
     PurchaseReturnableLineDto, PurchaseSettlementMethod,
+};
+pub use repair::{
+    CreateRepairJobDto, RepairJob, RepairJobStatus, RepairJobSyncEventDto, UpdateRepairJobDto,
+};
+pub use used_mobile::{
+    CreateUsedMobileTransactionDto, UsedMobilePaymentStatus, UsedMobileStatus, UsedMobileTransaction,
+    UsedMobileTransactionSyncEventDto, UsedMobileTransactionType,
 };
