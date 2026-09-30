@@ -1126,7 +1126,7 @@ impl ChangeApplier {
         let exists: bool = tx.query_row("SELECT 1 FROM categories WHERE id = ?1", params![category_id], |_| Ok(true)).unwrap_or(false);
         if !exists {
             tx.execute(
-                "INSERT INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![category_id, "Unknown Category (Auto-Healed)", format!("CAT-{}", &category_id[0..4]), 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
             ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal category: {e}")))?;
         }
@@ -1148,7 +1148,7 @@ impl ChangeApplier {
         let exists: bool = tx.query_row("SELECT 1 FROM units WHERE id = ?1", params![unit_id], |_| Ok(true)).unwrap_or(false);
         if !exists {
             tx.execute(
-                "INSERT INTO units (id, name, abbreviation, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO units (id, name, abbreviation, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![unit_id, "Unknown Unit (Auto-Healed)", "UNK", 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
             ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal unit: {e}")))?;
         }
@@ -1181,7 +1181,7 @@ impl ChangeApplier {
         let exists: bool = tx.query_row("SELECT 1 FROM colors WHERE id = ?1", params![color_id], |_| Ok(true)).unwrap_or(false);
         if !exists {
             tx.execute(
-                "INSERT INTO colors (id, name, hex_code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO colors (id, name, hex_code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![color_id, "Unknown Color (Auto-Healed)", "#000000", 1, chrono::Utc::now().to_rfc3339(), chrono::Utc::now().to_rfc3339()],
             ).map_err(|e| DbError::QueryError(format!("Failed to auto-heal color: {e}")))?;
         }
@@ -1883,12 +1883,12 @@ mod tests {
             let guard = conn_arc.lock().await;
             // Ensure branch exists first.
             guard.execute(
-                "INSERT OR IGNORE INTO branches (id, name, organization_id, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT OR IGNORE INTO branches (id, organization_id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 rusqlite::params![branch_id, "00000000-0000-0000-0000-000000000001", "Main Branch", "MAIN", 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
             ).unwrap();
             // Ensure category exists.
             guard.execute(
-                "INSERT OR IGNORE INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT OR IGNORE INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 rusqlite::params!["00000000-0000-0000-0000-000000000010", "Test Cat", "TCAT", 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
             ).unwrap();
             // Insert product row directly (no stock row).
@@ -1929,11 +1929,11 @@ mod tests {
             let conn_arc = db.inner();
             let guard = conn_arc.lock().await;
             guard.execute(
-                "INSERT OR IGNORE INTO branches (id, name, organization_id, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT OR IGNORE INTO branches (id, organization_id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 rusqlite::params![branch_id, "00000000-0000-0000-0000-000000000001", "Main Branch", "MAIN", 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
             ).unwrap();
             guard.execute(
-                "INSERT OR IGNORE INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT OR IGNORE INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 rusqlite::params!["00000000-0000-0000-0000-000000000010", "Test Cat", "TCAT", 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
             ).unwrap();
             guard.execute(
@@ -2032,11 +2032,11 @@ mod tests {
             let conn_arc = db.inner();
             let guard = conn_arc.lock().await;
             guard.execute(
-                "INSERT OR IGNORE INTO branches (id, name, organization_id, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT OR IGNORE INTO branches (id, organization_id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 rusqlite::params![branch_id, "00000000-0000-0000-0000-000000000001", "Main Branch", "MAIN", 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
             ).unwrap();
             guard.execute(
-                "INSERT OR IGNORE INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT OR IGNORE INTO categories (id, name, code, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 rusqlite::params!["00000000-0000-0000-0000-000000000010", "Test Cat", "TCAT", 1, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
             ).unwrap();
             guard.execute(
