@@ -2323,6 +2323,12 @@ async fn sync_push_handler(
 
                 // Same rule as the desktop change applier: guarded upsert; roles receive the
                 // contact fields only when the party is new or strictly newer.
+                //
+                // M3 (server-side): Use is_strictly_newer() for instant-based comparison instead
+                // of raw string comparison.  The raw string guard was broken: a +05:00 event
+                // string sorts after a Z string lexicographically even when they represent the
+                // same UTC instant, causing a same-instant re-delivery to overwrite good data.
+                // This mirrors the identical fix already applied in change_applier.rs.
                 let stored = match niazi_mobile_mart_lib::repositories::PostgresPartyRepository::get_party_tx(&mut tx, &party.id).await {
                     Ok(p) => p,
                     Err(e) => {
@@ -2335,7 +2341,10 @@ async fn sync_push_handler(
                 };
                 let strictly_newer = stored
                     .as_ref()
-                    .map(|p| party.updated_at.as_str() > p.updated_at.as_str())
+                    .map(|p| niazi_mobile_mart_lib::utils::timestamp::is_strictly_newer(
+                        &party.updated_at,
+                        &p.updated_at,
+                    ))
                     .unwrap_or(true);
                 let written = match niazi_mobile_mart_lib::repositories::PostgresPartyRepository::upsert_party_guarded_tx(&mut tx, &party).await {
                     Ok(w) => w,
