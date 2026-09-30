@@ -2335,7 +2335,7 @@ async fn sync_push_handler(
                 };
                 let strictly_newer = stored
                     .as_ref()
-                    .map(|p| party.updated_at.as_str() > p.updated_at.as_str())
+                    .map(|p| niazi_mobile_mart_lib::utils::timestamp::is_strictly_newer(&party.updated_at, &p.updated_at))
                     .unwrap_or(true);
                 let written = match niazi_mobile_mart_lib::repositories::PostgresPartyRepository::upsert_party_guarded_tx(&mut tx, &party).await {
                     Ok(w) => w,
