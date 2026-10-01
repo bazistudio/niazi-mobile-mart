@@ -1,4 +1,5 @@
 pub mod access_control;
+pub mod branch_capabilities;
 pub mod cash;
 pub mod catalog;
 pub mod change_log;
@@ -23,6 +24,7 @@ pub mod repair;
 pub mod used_mobile;
 
 pub use auth_snapshot::AuthSnapshot;
+pub use branch_capabilities::{can_access_invoice_type, InvoiceType};
 
 pub use change_log::{ChangeLogEntry, DeltaPullQuery, DeltaPullResponseDto, SyncCursor};
 pub use sync_queue::{EnqueueOfflineEventDto, SyncQueueItem, SyncQueueStatus};

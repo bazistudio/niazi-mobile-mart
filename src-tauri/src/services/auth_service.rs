@@ -687,6 +687,28 @@ impl AuthService {
 
         Ok(target_branch_id)
     }
+
+    /// Authoritative backend enforcement of invoice type capability for a specific branch.
+    /// Returns Ok(()) if authorized, or an AppError::Forbidden if denied.
+    pub async fn require_invoice_type_capability(
+        app_state: &AppState,
+        branch_id: &str,
+        invoice_type: crate::domain::branch_capabilities::InvoiceType,
+    ) -> AppResult<()> {
+        let all_branches = app_state.branch_repo.list_branches().await?;
+        let branch = all_branches.into_iter().find(|b| b.id == branch_id);
+        
+        let code = match branch {
+            Some(b) => b.code,
+            None => {
+                return Err(AppError::NotFound(format!(
+                    "Requested branch '{}' does not exist", branch_id
+                )));
+            }
+        };
+
+        crate::domain::branch_capabilities::authorize_invoice_type_by_code(&code, invoice_type)
+    }
 }
 
 #[cfg(test)]

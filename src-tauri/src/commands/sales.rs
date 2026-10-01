@@ -14,6 +14,13 @@ pub async fn sale_complete(
 ) -> AppResult<SaleResultDto> {
     AuthService::require_permission(&state, Some("pos"), Some("pos:sale")).await?;
     let authorized_branch = AuthService::require_branch_access(&state, dto.branch_id.as_deref()).await?;
+    AuthService::require_invoice_type_capability(
+        &state,
+        &authorized_branch,
+        crate::domain::branch_capabilities::InvoiceType::NormalSale,
+    )
+    .await?;
+    
     dto.branch_id = Some(authorized_branch);
     let session = state.get_session().await;
     state
