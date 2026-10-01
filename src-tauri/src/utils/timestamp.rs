@@ -249,4 +249,74 @@ mod tests {
         assert!(!is_strictly_newer(&first, &second),
             "M3-T09: idempotent replay must not produce a 'newer' verdict");
     }
+
+    // M3-T10: Server-side PARTY_UPSERTED last-writer guard regression (R-1 fix)
+    //
+    // Before the R-1 fix, server.rs used raw string comparison:
+    //   `party.updated_at.as_str() > p.updated_at.as_str()`
+    // This caused a +05:00 event string to lexicographically sort AFTER a Z string for
+    // the same UTC instant, incorrectly classifying it as "strictly newer" and overwriting
+    // valid central party data with a same-instant re-delivery.
+    //
+    // This test documents the exact conditions under which the bug was triggered and
+    // verifies that is_strictly_newer() — now used by the server handler — is correct.
+    #[test]
+    fn m3_t10_server_party_upsert_guard_regression() {
+        // The two timestamps used in the audit finding — same UTC instant, different representations.
+        let utc_stored   = "2026-09-29T12:00:00Z";          // stored on server (UTC)
+        let pkt_incoming = "2026-09-29T17:00:00+05:00";     // arriving from a PKT terminal
+
+        // ── Pre-fix behaviour (demonstrates the bug, for documentation) ──────
+        // Raw string comparison: "+05:00" suffix > "Z" suffix lexicographically.
+        // This is the broken comparison that was on server.rs:2338 before R-1.
+        assert!(
+            pkt_incoming > utc_stored,
+            "M3-T10 setup: raw string `>` gives wrong result — confirms the pre-fix bug existed"
+        );
+
+        // ── Post-fix behaviour ────────────────────────────────────────────────
+        // Same instant: must NOT be strictly newer (same-instant replay must be a no-op).
+        assert!(
+            !is_strictly_newer(pkt_incoming, utc_stored),
+            "M3-T10: same UTC instant (+05:00 vs Z) must NOT be considered strictly newer"
+        );
+        assert!(
+            !is_strictly_newer(utc_stored, pkt_incoming),
+            "M3-T10: same UTC instant (Z vs +05:00) must NOT be considered strictly newer (reversed)"
+        );
+
+        // Genuinely newer event (1 minute later in PKT = 12:01:00Z > 12:00:00Z).
+        let pkt_newer = "2026-09-29T17:01:00+05:00"; // 12:01:00Z
+        assert!(
+            is_strictly_newer(pkt_newer, utc_stored),
+            "M3-T10: genuinely later PKT timestamp must be recognized as strictly newer than stored UTC"
+        );
+        assert!(
+            !is_strictly_newer(utc_stored, pkt_newer),
+            "M3-T10: stored UTC must NOT be newer than a genuinely later PKT timestamp"
+        );
+
+        // Genuinely older event (1 minute earlier in PKT = 11:59:00Z < 12:00:00Z).
+        let pkt_older = "2026-09-29T16:59:00+05:00"; // 11:59:00Z
+        assert!(
+            !is_strictly_newer(pkt_older, utc_stored),
+            "M3-T10: older PKT timestamp must NOT be considered strictly newer than stored UTC"
+        );
+
+        // Malformed incoming timestamp: conservative false (do not overwrite good data with bad).
+        assert!(
+            !is_strictly_newer("not-a-timestamp", utc_stored),
+            "M3-T10: malformed incoming timestamp must conservatively return false (not newer)"
+        );
+        // Malformed stored timestamp: conservative false (do not overwrite with incoming).
+        assert!(
+            !is_strictly_newer(pkt_incoming, "not-a-timestamp"),
+            "M3-T10: malformed stored timestamp must conservatively return false (not newer)"
+        );
+        // Both malformed: conservative false.
+        assert!(
+            !is_strictly_newer("bad", "also-bad"),
+            "M3-T10: both malformed must conservatively return false"
+        );
+    }
 }
