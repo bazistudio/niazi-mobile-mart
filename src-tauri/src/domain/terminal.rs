@@ -7,6 +7,9 @@ pub struct Terminal {
     pub organization_id: String,
     pub branch_id: Option<String>,
     pub device_name: String,
+    /// Human-readable terminal code used in invoice numbers (e.g. "T1", "T2").
+    /// Stable: assigned once at terminal creation and never changed.
+    pub code: String,
     pub is_active: bool,
     pub is_offline_terminal: bool,
     pub registered_centrally: bool,

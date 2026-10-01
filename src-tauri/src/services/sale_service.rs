@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{FixedOffset, Utc};
 use uuid::Uuid;
 
 use crate::db::connection::DatabaseConnection;
@@ -68,13 +68,30 @@ impl SaleService {
             return pg_repo.complete_sale(&dto, user_id).await;
         }
 
-        // 1. Resolve Branch ID
-        let branch_id = match dto.branch_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-            Some(bid) => bid.to_string(),
-            None => match self.branch_repo.get_main_branch().await? {
-                Some(b) => b.id,
-                None => DEFAULT_MAIN_BRANCH_ID.to_string(),
-            },
+        // 1. Resolve Branch ID and Branch Code
+        // branch_code is used in invoice number generation (B07 collision fix).
+        let (branch_id, branch_code) = {
+            let raw_bid = dto.branch_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            match raw_bid {
+                Some(bid) => {
+                    // Branch ID provided — look it up to get the code
+                    let code = match self.branch_repo.get_branch_by_id(bid).await? {
+                        Some(b) => b.code,
+                        None => {
+                            // Supplied branch_id is unknown — fall back to MAIN code
+                            crate::domain::organization::DEFAULT_MAIN_BRANCH_CODE.to_string()
+                        }
+                    };
+                    (bid.to_string(), code)
+                }
+                None => match self.branch_repo.get_main_branch().await? {
+                    Some(b) => (b.id.clone(), b.code.clone()),
+                    None => (
+                        DEFAULT_MAIN_BRANCH_ID.to_string(),
+                        crate::domain::organization::DEFAULT_MAIN_BRANCH_CODE.to_string(),
+                    ),
+                },
+            }
         };
 
         // 2. Validate Customer if provided
@@ -220,7 +237,16 @@ impl SaleService {
 
         let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(self.db.as_ref().unwrap().clone());
         let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
-        let terminal_id = current_terminal.id;
+        let terminal_id = current_terminal.id.clone();
+        let terminal_code = current_terminal.code.clone();
+
+        // Compute billing month in Asia/Karachi timezone (UTC+05:00, no DST).
+        // The format is YYYYMM (e.g. "202509").
+        let billing_month = {
+            let karachi_offset = FixedOffset::east_opt(5 * 3600).expect("UTC+5 is valid");
+            let now_karachi = Utc::now().with_timezone(&karachi_offset);
+            now_karachi.format("%Y%m").to_string()
+        };
 
         // 6. Execute Atomic SQLite Checkout Transaction
         let db = self.db.as_ref().expect("SQLite database connection required");
@@ -236,8 +262,14 @@ impl SaleService {
                 }
             }
 
-            // B. Generate unique invoice number
-            let invoice_number = SQLiteSaleRepository::next_invoice_number_in_tx(tx)?;
+            // B. Generate unique invoice number (B07: terminal-scoped monthly)
+            let invoice_number = SQLiteSaleRepository::next_invoice_number_in_tx(
+                tx,
+                &terminal_id,
+                &branch_code,
+                &terminal_code,
+                &billing_month,
+            )?;
             let sale_id = Uuid::new_v4().to_string();
 
             // C. Handle Customer Credit & Ledger Entry if credit_amount > 0
@@ -586,7 +618,16 @@ mod tests {
             .await
             .expect("walk-in cash sale must succeed");
 
-        assert_eq!(sale_res.sale.invoice_number, "INV-000001");
+        // B07: new invoices use terminal-scoped monthly format BRANCH-TERMINAL-YYYYMM-NNNNNN
+        // The billing month is dynamic (Asia/Karachi time), so we assert on structure.
+        let inv = &sale_res.sale.invoice_number;
+        let parts: Vec<&str> = inv.splitn(4, '-').collect();
+        assert_eq!(parts.len(), 4, "B07 invoice must have 4 dash-separated parts: {inv}");
+        assert_eq!(parts[0], "MAIN", "Branch code must be MAIN: {inv}");
+        assert_eq!(parts[1], "T1", "Terminal code must be T1: {inv}");
+        assert_eq!(parts[2].len(), 6, "Billing month must be 6 digits (YYYYMM): {inv}");
+        assert!(parts[2].parse::<u32>().is_ok(), "Billing month must be numeric: {inv}");
+        assert_eq!(parts[3], "000001", "First invoice sequence must be 000001: {inv}");
         assert_eq!(sale_res.sale.customer_id, None);
         assert_eq!(sale_res.sale.customer_name_snapshot, None);
         assert_eq!(sale_res.sale.total_amount, 2000);

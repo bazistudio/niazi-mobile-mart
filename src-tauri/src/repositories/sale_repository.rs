@@ -19,23 +19,57 @@ impl SQLiteSaleRepository {
     // Transactional primitives (usable inside `with_transaction`)
     // ──────────────────────────────────────────────────────────────────────────
 
-    /// Generates next sequential invoice number atomically (e.g. INV-000001)
-    pub fn next_invoice_number_in_tx(conn: &Connection) -> DbResult<String> {
+    /// Generates a collision-safe terminal-scoped monthly invoice number atomically.
+    ///
+    /// Format: `{branch_code}-{terminal_code}-{YYYYMM}-{SEQUENCE:06}`
+    /// Example: `MAIN-T1-202609-000001`
+    ///
+    /// The counter key is `invoice_{terminal_id}_{billing_month}` where
+    /// `billing_month` is formatted as `YYYYMM` in Asia/Karachi time (UTC+05:00).
+    ///
+    /// Each terminal+month combination has its own independent sequence starting
+    /// at 1. The maximum sequence is 999_999; exceeding it returns a domain error.
+    ///
+    /// # Arguments
+    /// * `conn` — open SQLite connection (must be inside a transaction)
+    /// * `terminal_id` — stable UUID of the current terminal
+    /// * `branch_code` — human-readable branch code (e.g. "MAIN")
+    /// * `terminal_code` — human-readable terminal code (e.g. "T1")
+    /// * `billing_month` — `YYYYMM` string in Asia/Karachi timezone
+    pub fn next_invoice_number_in_tx(
+        conn: &Connection,
+        terminal_id: &str,
+        branch_code: &str,
+        terminal_code: &str,
+        billing_month: &str,
+    ) -> DbResult<String> {
+        let counter_key = format!("invoice_{}_{}", terminal_id, billing_month);
+
+        // Upsert: create row if first invoice of this terminal/month, else increment.
         conn.execute(
-            "UPDATE counters SET value = value + 1 WHERE name = 'invoice'",
-            [],
+            "INSERT INTO counters (name, value) VALUES (?1, 1)
+             ON CONFLICT(name) DO UPDATE SET value = value + 1",
+            rusqlite::params![&counter_key],
         )
         .map_err(|e| DbError::QueryError(format!("Failed to increment invoice counter: {e}")))?;
 
         let val: i64 = conn
             .query_row(
-                "SELECT value FROM counters WHERE name = 'invoice'",
-                [],
+                "SELECT value FROM counters WHERE name = ?1",
+                rusqlite::params![&counter_key],
                 |row| row.get(0),
             )
             .map_err(|e| DbError::QueryError(format!("Failed to read invoice counter: {e}")))?;
 
-        Ok(format!("INV-{:06}", val))
+        // Overflow guard: terminal+month sequence capped at 999_999
+        if val > 999_999 {
+            return Err(DbError::ConstraintViolation(format!(
+                "Invoice sequence overflow for terminal {} in {}: maximum 999999 invoices per terminal per month exceeded",
+                terminal_code, billing_month
+            )));
+        }
+
+        Ok(format!("{}-{}-{}-{:06}", branch_code, terminal_code, billing_month, val))
     }
 
     /// Inserts a sale header inside transaction
@@ -388,5 +422,301 @@ impl SQLiteSaleRepository {
             created_at: row.get(15)?,
             updated_at: row.get(16)?,
         })
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B07 — Invoice Number Unit Tests
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod invoice_tests {
+    use super::*;
+    use crate::db::migrations::MigrationRunner;
+    use rusqlite::Connection;
+
+    fn open_test_db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        MigrationRunner::run(&mut conn).expect("migrations must run");
+        conn
+    }
+
+    // ── Helper ────────────────────────────────────────────────────────────────
+
+    fn gen(conn: &Connection, terminal_id: &str, branch_code: &str, terminal_code: &str, billing_month: &str) -> String {
+        SQLiteSaleRepository::next_invoice_number_in_tx(conn, terminal_id, branch_code, terminal_code, billing_month)
+            .expect("invoice generation must succeed")
+    }
+
+    fn gen_result(conn: &Connection, terminal_id: &str, branch_code: &str, terminal_code: &str, billing_month: &str) -> crate::db::errors::DbResult<String> {
+        SQLiteSaleRepository::next_invoice_number_in_tx(conn, terminal_id, branch_code, terminal_code, billing_month)
+    }
+
+    const TID1: &str = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const TID2: &str = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    const MONTH_SEP: &str = "202609";
+    const MONTH_OCT: &str = "202610";
+
+    // ── 1. Basic format ───────────────────────────────────────────────────────
+
+    #[test]
+    fn b07_format_first_invoice() {
+        let conn = open_test_db();
+        let inv = gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+        assert_eq!(inv, "MAIN-T1-202609-000001", "First invoice must be ...000001");
+    }
+
+    #[test]
+    fn b07_format_second_invoice() {
+        let conn = open_test_db();
+        gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+        let inv = gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+        assert_eq!(inv, "MAIN-T1-202609-000002");
+    }
+
+    #[test]
+    fn b07_format_sequence_increments_monotonically() {
+        let conn = open_test_db();
+        for expected in 1u64..=10 {
+            let inv = gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+            let parts: Vec<&str> = inv.splitn(4, '-').collect();
+            let seq: u64 = parts[3].parse().expect("sequence must be numeric");
+            assert_eq!(seq, expected, "Expected sequence {expected}, got {seq}");
+        }
+    }
+
+    #[test]
+    fn b07_format_six_digit_zero_padded() {
+        let conn = open_test_db();
+        let inv = gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+        let parts: Vec<&str> = inv.split('-').collect();
+        // format: MAIN - T1 - 202609 - 000001 (4 parts)
+        assert_eq!(parts.len(), 4, "Invoice must have exactly 4 dash-separated parts");
+        assert_eq!(parts[3].len(), 6, "Sequence must be exactly 6 digits");
+    }
+
+    #[test]
+    fn b07_format_contains_billing_month() {
+        let conn = open_test_db();
+        let inv = gen(&conn, TID1, "MAIN", "T1", MONTH_OCT);
+        assert!(inv.contains("202610"), "Invoice must contain billing month 202610");
+    }
+
+    #[test]
+    fn b07_format_contains_branch_and_terminal_code() {
+        let conn = open_test_db();
+        let inv = gen(&conn, TID1, "NORTH", "T3", MONTH_SEP);
+        assert!(inv.starts_with("NORTH-T3-"), "Must start with NORTH-T3-");
+    }
+
+    // ── 2. Terminal isolation ─────────────────────────────────────────────────
+
+    #[test]
+    fn b07_isolation_different_terminals_independent_sequences() {
+        let conn = open_test_db();
+        // Terminal 1: 3 invoices
+        gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+        gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+        gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+
+        // Terminal 2: first invoice must still be 000001
+        let inv_t2 = gen(&conn, TID2, "MAIN", "T2", MONTH_SEP);
+        assert_eq!(inv_t2, "MAIN-T2-202609-000001",
+            "T2's first invoice must be 000001 regardless of T1's sequence");
+    }
+
+    #[test]
+    fn b07_isolation_t1_continues_after_t2_usage() {
+        let conn = open_test_db();
+        gen(&conn, TID1, "MAIN", "T1", MONTH_SEP); // T1 = 1
+        gen(&conn, TID2, "MAIN", "T2", MONTH_SEP); // T2 = 1
+        gen(&conn, TID2, "MAIN", "T2", MONTH_SEP); // T2 = 2
+
+        let inv = gen(&conn, TID1, "MAIN", "T1", MONTH_SEP); // T1 = 2
+        assert_eq!(inv, "MAIN-T1-202609-000002",
+            "T1 must continue its own sequence unaffected by T2");
+    }
+
+    #[test]
+    fn b07_isolation_no_collision_same_seq_different_terminal() {
+        let conn = open_test_db();
+        let inv1 = gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+        let inv2 = gen(&conn, TID2, "MAIN", "T2", MONTH_SEP);
+        assert_ne!(inv1, inv2, "Two terminals must never produce the same invoice number");
+    }
+
+    // ── 3. Branch isolation ───────────────────────────────────────────────────
+
+    #[test]
+    fn b07_branch_isolation_codes_differ() {
+        let conn = open_test_db();
+        let inv_main = gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+        let inv_north = gen(&conn, TID2, "NORTH", "T1", MONTH_SEP);
+        assert!(inv_main.starts_with("MAIN-"), "Main branch invoice must start with MAIN-");
+        assert!(inv_north.starts_with("NORTH-"), "North branch invoice must start with NORTH-");
+        assert_ne!(inv_main, inv_north, "Different branches must produce different invoices");
+    }
+
+    #[test]
+    fn b07_branch_code_appears_in_invoice() {
+        let conn = open_test_db();
+        let inv = gen(&conn, TID1, "EAST", "T1", MONTH_SEP);
+        assert!(inv.starts_with("EAST-T1-"), "Invoice must embed branch code EAST");
+    }
+
+    // ── 4. Monthly reset ──────────────────────────────────────────────────────
+
+    #[test]
+    fn b07_monthly_reset_new_month_starts_at_1() {
+        let conn = open_test_db();
+        // Three invoices in September
+        gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+        gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+        gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+
+        // October must start fresh at 000001
+        let inv_oct = gen(&conn, TID1, "MAIN", "T1", MONTH_OCT);
+        assert_eq!(inv_oct, "MAIN-T1-202610-000001",
+            "New month must reset sequence to 000001");
+    }
+
+    #[test]
+    fn b07_monthly_reset_september_resumes_correctly() {
+        let conn = open_test_db();
+        gen(&conn, TID1, "MAIN", "T1", MONTH_SEP); // Sep 1
+        gen(&conn, TID1, "MAIN", "T1", MONTH_OCT); // Oct 1 — new month
+        let inv = gen(&conn, TID1, "MAIN", "T1", MONTH_SEP); // Sep 2 (backfill test)
+        assert_eq!(inv, "MAIN-T1-202609-000002", "September counter must be independent from October");
+    }
+
+    #[test]
+    fn b07_monthly_reset_twelve_months_all_independent() {
+        let conn = open_test_db();
+        let months = ["202601","202602","202603","202604","202605","202606",
+                      "202607","202608","202609","202610","202611","202612"];
+        for (i, month) in months.iter().enumerate() {
+            let inv = gen(&conn, TID1, "MAIN", "T1", month);
+            let expected = format!("MAIN-T1-{}-000001", month);
+            assert_eq!(inv, expected, "Month {} (index {}) must start at 000001", month, i);
+        }
+    }
+
+    // ── 5. Overflow guard ─────────────────────────────────────────────────────
+
+    #[test]
+    fn b07_overflow_guard_at_999999() {
+        let conn = open_test_db();
+        // Seed the counter to 999_999 directly (avoid slow loop)
+        conn.execute(
+            "INSERT INTO counters (name, value) VALUES ('invoice_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa_202609', 999999)",
+            [],
+        ).expect("counter seed");
+
+        // The NEXT call (which would be 1_000_000) must fail
+        let result = gen_result(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+        assert!(result.is_err(), "Sequence must fail after reaching 999999");
+        let err_str = format!("{:?}", result.unwrap_err());
+        assert!(err_str.contains("overflow") || err_str.contains("999999"),
+            "Error must mention overflow or 999999, got: {}", err_str);
+    }
+
+    #[test]
+    fn b07_overflow_guard_999999_itself_succeeds() {
+        let conn = open_test_db();
+        // Seed counter to 999_998
+        conn.execute(
+            "INSERT INTO counters (name, value) VALUES ('invoice_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa00_202609', 999998)",
+            [],
+        ).expect("counter seed");
+
+        let tid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa00";
+        let result = gen_result(&conn, tid, "MAIN", "T1", MONTH_SEP);
+        assert!(result.is_ok(), "Sequence 999999 must still succeed");
+        assert_eq!(result.unwrap(), "MAIN-T1-202609-999999");
+    }
+
+    // ── 6. Historical INV-NNNNNN compatibility ────────────────────────────────
+
+    #[test]
+    fn b07_historical_counter_untouched() {
+        let conn = open_test_db();
+        // Verify legacy 'invoice' counter still exists and was seeded at 0
+        let val: i64 = conn.query_row(
+            "SELECT value FROM counters WHERE name = 'invoice'",
+            [],
+            |r| r.get(0),
+        ).expect("legacy counter must exist");
+        assert_eq!(val, 0, "Legacy 'invoice' counter must remain at 0 (seeded value)");
+    }
+
+    #[test]
+    fn b07_historical_counter_unaffected_by_new_invoices() {
+        let conn = open_test_db();
+        // Generate several new-format invoices
+        gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+        gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+
+        // Legacy counter must still be 0
+        let val: i64 = conn.query_row(
+            "SELECT value FROM counters WHERE name = 'invoice'",
+            [],
+            |r| r.get(0),
+        ).expect("legacy counter must exist");
+        assert_eq!(val, 0, "New-format invoice generation must NOT touch legacy counter");
+    }
+
+    #[test]
+    fn b07_new_counter_key_distinct_from_legacy() {
+        let conn = open_test_db();
+        gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+
+        // New counter key exists
+        let new_key = format!("invoice_{}_{}", TID1, MONTH_SEP);
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM counters WHERE name = ?1",
+            rusqlite::params![&new_key],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(count, 1, "New-style counter key must exist after invoice generation");
+
+        // Legacy key is untouched
+        let legacy_val: i64 = conn.query_row(
+            "SELECT value FROM counters WHERE name = 'invoice'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(legacy_val, 0, "Legacy counter value must be 0");
+    }
+
+    // ── 7. Concurrent-safe idempotency (counter key structure) ───────────────
+
+    #[test]
+    fn b07_counter_key_includes_terminal_id() {
+        // Verify counter key format used in DB
+        let conn = open_test_db();
+        gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+        gen(&conn, TID2, "MAIN", "T2", MONTH_SEP);
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM counters WHERE name LIKE 'invoice_%'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        // One counter per terminal per month (2 terminals, 1 month = 2 counters + 1 legacy)
+        assert!(count >= 2, "Each terminal must have its own counter row; got {count} counter rows");
+    }
+
+    #[test]
+    fn b07_counter_key_includes_billing_month() {
+        let conn = open_test_db();
+        gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
+        gen(&conn, TID1, "MAIN", "T1", MONTH_OCT);
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM counters WHERE name LIKE ?1",
+            rusqlite::params![format!("invoice_{}_%", TID1)],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(count, 2, "Terminal 1 must have 2 counter rows (Sep and Oct)");
     }
 }

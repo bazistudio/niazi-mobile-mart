@@ -222,6 +222,13 @@ impl BranchRepository {
         }
     }
 
+    pub async fn get_branch_by_id(&self, id: &str) -> AppResult<Option<Branch>> {
+        match self {
+            Self::SQLite(r) => r.get_branch_by_id(id).await,
+            Self::Postgres(r) => r.get_branch_by_id(id).await,
+        }
+    }
+
     pub async fn get_main_branch(&self) -> AppResult<Option<Branch>> {
         match self {
             Self::SQLite(r) => r.get_main_branch().await,

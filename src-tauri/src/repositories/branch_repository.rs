@@ -50,6 +50,35 @@ impl BranchRepository {
         Ok(branches)
     }
 
+    /// Fetches a branch by its UUID, returning None if not found.
+    pub async fn get_branch_by_id(&self, id: &str) -> AppResult<Option<Branch>> {
+        let conn_arc = self.db.inner();
+        let guard = conn_arc.lock().await;
+
+        let sql = "SELECT id, organization_id, name, code, is_active, created_at, updated_at FROM branches WHERE id = ?1 LIMIT 1";
+        let branch = guard
+            .query_row(sql, rusqlite::params![id], |row| {
+                Ok(Branch {
+                    id: row.get(0)?,
+                    organization_id: row.get(1)?,
+                    name: row.get(2)?,
+                    code: row.get(3)?,
+                    is_active: row.get::<_, i64>(4)? == 1,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            })
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(AppError::Database(format!(
+                    "Error querying branch by id: {other}"
+                ))),
+            })?;
+
+        Ok(branch)
+    }
+
     pub async fn get_main_branch(&self) -> AppResult<Option<Branch>> {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;

@@ -39,6 +39,31 @@ impl PostgresBranchRepository {
         Ok(branches)
     }
 
+    /// Fetches a branch by its UUID, returning None if not found.
+    pub async fn get_branch_by_id(&self, id: &str) -> AppResult<Option<Branch>> {
+        let sql = "SELECT id, organization_id, name, code, is_active, created_at, updated_at FROM branches WHERE id = $1 LIMIT 1";
+        let row_opt = sqlx::query(sql)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("PG query branch by id failed: {e}")))?;
+
+        if let Some(row) = row_opt {
+            use sqlx::Row;
+            Ok(Some(Branch {
+                id: row.get("id"),
+                organization_id: row.get("organization_id"),
+                name: row.get("name"),
+                code: row.get("code"),
+                is_active: row.get::<bool, _>("is_active"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub async fn get_main_branch(&self) -> AppResult<Option<Branch>> {
         let sql = "SELECT id, organization_id, name, code, is_active, created_at, updated_at FROM branches WHERE code = 'MAIN' LIMIT 1";
         let row_opt = sqlx::query(sql)

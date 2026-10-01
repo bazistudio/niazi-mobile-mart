@@ -945,6 +945,16 @@ pub const MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_public_rates_is_public ON public_rates(is_public);
         "#,
     },
+    // B07: Add terminal code column for collision-safe invoice numbering.
+    // Existing terminals are seeded with 'T1' (the first and typically only terminal per PC).
+    // New terminals are assigned their code at creation time in the repository.
+    Migration {
+        version: 23,
+        name: "023_add_terminal_code_for_invoice_numbering",
+        up: r#"
+        ALTER TABLE terminals ADD COLUMN code TEXT NOT NULL DEFAULT 'T1';
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction
@@ -1801,7 +1811,7 @@ mod tests {
         .unwrap();
 
         let applied = MigrationRunner::run(&mut conn).unwrap();
-        assert_eq!(applied, 5, "018-021+ must apply on an existing 017 database");
+        assert_eq!(applied, 6, "018-023 must apply on an existing 017 database");
 
         let parties: i64 = conn.query_row("SELECT COUNT(*) FROM parties", [], |r| r.get(0)).unwrap();
         assert_eq!(parties, 3, "2 customers + 1 non-colliding supplier");

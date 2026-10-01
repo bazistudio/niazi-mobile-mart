@@ -24,7 +24,7 @@ impl SQLiteTerminalRepository {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
 
-        let sql = "SELECT id, organization_id, branch_id, device_name, is_active, is_offline_terminal, registered_centrally, created_at, updated_at, last_seen_at FROM terminals WHERE id = ?1";
+        let sql = "SELECT id, organization_id, branch_id, device_name, code, is_active, is_offline_terminal, registered_centrally, created_at, updated_at, last_seen_at FROM terminals WHERE id = ?1";
 
         let term_opt = guard
             .query_row(sql, params![id], |r| {
@@ -33,12 +33,13 @@ impl SQLiteTerminalRepository {
                     organization_id: r.get(1)?,
                     branch_id: r.get(2)?,
                     device_name: r.get(3)?,
-                    is_active: r.get::<_, i32>(4)? == 1,
-                    is_offline_terminal: r.get::<_, i32>(5)? == 1,
-                    registered_centrally: r.get::<_, i32>(6)? == 1,
-                    created_at: r.get(7)?,
-                    updated_at: r.get(8)?,
-                    last_seen_at: r.get(9)?,
+                    code: r.get(4)?,
+                    is_active: r.get::<_, i32>(5)? == 1,
+                    is_offline_terminal: r.get::<_, i32>(6)? == 1,
+                    registered_centrally: r.get::<_, i32>(7)? == 1,
+                    created_at: r.get(8)?,
+                    updated_at: r.get(9)?,
+                    last_seen_at: r.get(10)?,
                 })
             })
             .map(Some)
@@ -55,7 +56,7 @@ impl SQLiteTerminalRepository {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
 
-        let sql = "SELECT id, organization_id, branch_id, device_name, is_active, is_offline_terminal, registered_centrally, created_at, updated_at, last_seen_at FROM terminals ORDER BY created_at ASC LIMIT 1";
+        let sql = "SELECT id, organization_id, branch_id, device_name, code, is_active, is_offline_terminal, registered_centrally, created_at, updated_at, last_seen_at FROM terminals ORDER BY created_at ASC LIMIT 1";
 
         let existing: Option<Terminal> = guard
             .query_row(sql, [], |r| {
@@ -64,12 +65,13 @@ impl SQLiteTerminalRepository {
                     organization_id: r.get(1)?,
                     branch_id: r.get(2)?,
                     device_name: r.get(3)?,
-                    is_active: r.get::<_, i32>(4)? == 1,
-                    is_offline_terminal: r.get::<_, i32>(5)? == 1,
-                    registered_centrally: r.get::<_, i32>(6)? == 1,
-                    created_at: r.get(7)?,
-                    updated_at: r.get(8)?,
-                    last_seen_at: r.get(9)?,
+                    code: r.get(4)?,
+                    is_active: r.get::<_, i32>(5)? == 1,
+                    is_offline_terminal: r.get::<_, i32>(6)? == 1,
+                    registered_centrally: r.get::<_, i32>(7)? == 1,
+                    created_at: r.get(8)?,
+                    updated_at: r.get(9)?,
+                    last_seen_at: r.get(10)?,
                 })
             })
             .map(Some)
@@ -95,6 +97,7 @@ impl SQLiteTerminalRepository {
             organization_id: NIAZI_ORGANIZATION_ID.to_string(),
             branch_id: Some(DEFAULT_MAIN_BRANCH_ID.to_string()),
             device_name: device_name.clone(),
+            code: "T1".to_string(),
             is_active: true,
             is_offline_terminal: false,
             registered_centrally: false,
@@ -104,12 +107,13 @@ impl SQLiteTerminalRepository {
         };
 
         guard.execute(
-            "INSERT INTO terminals (id, organization_id, branch_id, device_name, is_active, is_offline_terminal, registered_centrally, created_at, updated_at, last_seen_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO terminals (id, organization_id, branch_id, device_name, code, is_active, is_offline_terminal, registered_centrally, created_at, updated_at, last_seen_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 &new_terminal.id,
                 &new_terminal.organization_id,
                 &new_terminal.branch_id,
                 &new_terminal.device_name,
+                &new_terminal.code,
                 if new_terminal.is_active { 1 } else { 0 },
                 if new_terminal.is_offline_terminal { 1 } else { 0 },
                 if new_terminal.registered_centrally { 1 } else { 0 },
@@ -128,8 +132,8 @@ impl SQLiteTerminalRepository {
         let guard = conn_arc.lock().await;
 
         guard.execute(
-            "INSERT INTO terminals (id, organization_id, branch_id, device_name, is_active, is_offline_terminal, registered_centrally, created_at, updated_at, last_seen_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            "INSERT INTO terminals (id, organization_id, branch_id, device_name, code, is_active, is_offline_terminal, registered_centrally, created_at, updated_at, last_seen_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
              ON CONFLICT(id) DO UPDATE SET
                branch_id = excluded.branch_id,
                device_name = excluded.device_name,
@@ -143,6 +147,7 @@ impl SQLiteTerminalRepository {
                 &terminal.organization_id,
                 &terminal.branch_id,
                 &terminal.device_name,
+                &terminal.code,
                 if terminal.is_active { 1 } else { 0 },
                 if terminal.is_offline_terminal { 1 } else { 0 },
                 if terminal.registered_centrally { 1 } else { 0 },
@@ -168,7 +173,7 @@ impl PostgresTerminalRepository {
     }
 
     pub async fn find_by_id(&self, id: &str) -> AppResult<Option<Terminal>> {
-        let sql = "SELECT id, organization_id, branch_id, device_name, is_active, is_offline_terminal, registered_centrally, created_at, updated_at, last_seen_at FROM terminals WHERE id = $1";
+        let sql = "SELECT id, organization_id, branch_id, device_name, code, is_active, is_offline_terminal, registered_centrally, created_at, updated_at, last_seen_at FROM terminals WHERE id = $1";
 
         let row_opt = sqlx::query(sql)
             .bind(id)
@@ -183,6 +188,7 @@ impl PostgresTerminalRepository {
                 organization_id: r.get("organization_id"),
                 branch_id: r.get("branch_id"),
                 device_name: r.get("device_name"),
+                code: r.get::<Option<String>, _>("code").unwrap_or_else(|| "T1".to_string()),
                 is_active: r.get::<i32, _>("is_active") == 1,
                 is_offline_terminal: r.get::<i32, _>("is_offline_terminal") == 1,
                 registered_centrally: r.get::<i32, _>("registered_centrally") == 1,
@@ -197,8 +203,8 @@ impl PostgresTerminalRepository {
 
     pub async fn save(&self, terminal: &Terminal) -> AppResult<()> {
         let sql = "
-            INSERT INTO terminals (id, organization_id, branch_id, device_name, is_active, is_offline_terminal, registered_centrally, created_at, updated_at, last_seen_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            INSERT INTO terminals (id, organization_id, branch_id, device_name, code, is_active, is_offline_terminal, registered_centrally, created_at, updated_at, last_seen_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             ON CONFLICT (id) DO UPDATE SET
                 branch_id = EXCLUDED.branch_id,
                 device_name = EXCLUDED.device_name,
@@ -214,6 +220,7 @@ impl PostgresTerminalRepository {
             .bind(&terminal.organization_id)
             .bind(&terminal.branch_id)
             .bind(&terminal.device_name)
+            .bind(&terminal.code)
             .bind(if terminal.is_active { 1 } else { 0 })
             .bind(if terminal.is_offline_terminal { 1 } else { 0 })
             .bind(if terminal.registered_centrally { 1 } else { 0 })
@@ -250,6 +257,7 @@ impl TerminalRepository {
                         organization_id: NIAZI_ORGANIZATION_ID.to_string(),
                         branch_id: Some(DEFAULT_MAIN_BRANCH_ID.to_string()),
                         device_name: "Central Server".to_string(),
+                        code: "T1".to_string(),
                         is_active: true,
                         is_offline_terminal: false,
                         registered_centrally: true,
