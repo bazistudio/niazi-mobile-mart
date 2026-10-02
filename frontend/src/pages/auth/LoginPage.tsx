@@ -316,7 +316,7 @@ export function LoginForm() {
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-900">Account Recovery</h1>
             <p className="text-xs text-slate-500 mt-1">
-              Offline-first authentication recovery options
+              Authentication recovery options
             </p>
           </div>
 
@@ -327,7 +327,7 @@ export function LoginForm() {
                 <span>Staff & Cashier Accounts</span>
               </p>
               <p className="text-[11px] leading-relaxed">
-                Niazi Mobile Mart operates completely offline without external cloud dependencies. If you forgot your password or PIN, your system administrator can generate a temporary login key for you in the Workforce Management panel.
+                If you forgot your password or PIN, your system administrator can generate a temporary login key for you in the Workforce Management panel.
               </p>
             </div>
 

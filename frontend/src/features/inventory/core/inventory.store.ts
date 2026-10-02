@@ -90,7 +90,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
   forceSync: async () => {
     try {
       set({ status: 'loading', error: null });
-      await tauriClient.syncTriggerNow().catch((err) => console.warn('[forceSync] Tauri sync warning:', err));
+
       const requestParams: PaginationParams = {
         page: 1,
         limit: DEFAULT_PAGE_SIZE,

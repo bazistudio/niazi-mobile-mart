@@ -26,11 +26,4 @@ export function logoutUser() {
 export async function getMeUser() {
   return AuthService.getMeUser();
 }
-
-/**
- * LOCAL SNAPSHOT / PIN LOGIN FUNCTION
- * Delegates directly to AuthService.loginWithSnapshot().
- */
-export async function loginUserWithSnapshot(username: string, pin: string) {
-  return AuthService.loginWithSnapshot(username, pin);
-}
+

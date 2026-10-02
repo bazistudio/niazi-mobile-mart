@@ -2295,46 +2295,6 @@ export const tauriClient = {
     };
   },
 
-  // ── Sync Engine Commands ───────────────────────────────────────────────────
-  async syncGetStatus(): Promise<SyncEngineStatus> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SyncEngineStatus>('sync_get_status');
-    }
-    return { pending_count: 0, is_online: true, is_syncing: false };
-  },
-
-  async syncTriggerNow(): Promise<SyncEngineStatus> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SyncEngineStatus>('sync_trigger_now');
-    }
-    return { pending_count: 0, is_online: true, is_syncing: false };
-  },
-
-  async syncListConflicts(limit?: number): Promise<SyncQueueItem[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SyncQueueItem[]>('sync_list_conflicts', { limit });
-    }
-    return [];
-  },
-
-  async syncListFailed(limit?: number): Promise<SyncQueueItem[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SyncQueueItem[]>('sync_list_failed', { limit });
-    }
-    return [];
-  },
-
-  async syncRetryFailedItem(clientEventId: string): Promise<SyncQueueItem> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SyncQueueItem>('sync_retry_failed_item', { clientEventId });
-    }
-    throw new Error('Sync queue retry requires native Tauri environment');
-  },
 };
 
 // ── Type Definitions for Organization & Branch ──────────────────────────────
@@ -3380,33 +3340,7 @@ export interface DashboardProfitSummaryDto {
   total: ProfitMetricsDto;
 }
 
-export interface SyncEngineStatus {
-  pending_count: number;
-  is_online: boolean;
-  is_syncing: boolean;
-  is_auth_paused?: boolean;
-  conflict_count?: number;
-  failed_count?: number;
-  last_synced_at?: string;
-  last_error?: string;
-}
 
-export interface SyncQueueItem {
-  id: string;
-  client_event_id: string;
-  terminal_id: string;
-  organization_id: string;
-  branch_id: string;
-  event_type: string;
-  payload: string;
-  status: 'PENDING' | 'SYNCING' | 'FAILED' | 'SYNCED' | 'CONFLICT' | 'FAILED_PERMANENT';
-  attempt_count: number;
-  last_error?: string | null;
-  last_attempt_at?: string | null;
-  server_event_id?: string | null;
-  created_at: string;
-  updated_at: string;
-}
 
 // ── Party Domain (Phase 1.1) — mirrors src-tauri/src/domain/party.rs ─────────
 

@@ -12,7 +12,6 @@ import { useExpensesStore } from '@/features/expenses';
 import { useInventoryUIStore } from '@/features/inventory/store/inventory-ui.store';
 import { useTerminalStore } from '@/store/useTerminalStore';
 
-import { SyncStatusBadge } from '../common/SyncStatusBadge';
 
 interface TopbarProps {
   setMobileMenuOpen?: (isOpen: boolean) => void;
@@ -50,8 +49,7 @@ export const Topbar = ({ setMobileMenuOpen }: TopbarProps = {}) => {
             <span>New Sale</span>
           </Link>
 
-          {/* Sync Engine Status */}
-          <SyncStatusBadge />
+
 
           {/* Sync Inventory */}
           <button

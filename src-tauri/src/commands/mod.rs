@@ -20,7 +20,7 @@ pub mod storage_purchase;
 pub mod storage_sale;
 pub mod storage_supplier;
 pub mod supplier;
-pub mod sync;
+
 pub mod terminal;
 pub mod updater;
 

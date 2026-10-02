@@ -72,12 +72,6 @@ export class AuthService {
             throw new Error(`Central login succeeded but native desktop session synchronization failed: ${syncErr?.message || syncErr}`);
           }
 
-          // 2. Bootstrap Offline Snapshot Post-Authentication (Non-fatal)
-          try {
-            await tauriClient.authBootstrapCentralSnapshots(token);
-          } catch (bootstrapErr) {
-            console.warn("[AuthService] Failed to bootstrap central snapshots:", bootstrapErr);
-          }
 
           const nativeUser = await tauriClient.getCurrentUser();
           if (nativeUser) {
@@ -109,38 +103,6 @@ export class AuthService {
         return { user, token, session };
       }
 
-      // Offline Snapshot Fallback when Network Error occurs in Tauri Mode
-      if (netError && isTauriEnvironment()) {
-        const snapshotRes = await tauriClient.authLoginSnapshot(identifier, password);
-        const existingToken = getAuthToken();
-        if (existingToken && existingToken !== "native-tauri-session") {
-          await tauriClient.authSyncSession(existingToken).catch(() => {});
-        }
-
-        const user: AuthUser = {
-          id: snapshotRes.user.id,
-          name: snapshotRes.user.name,
-          username: snapshotRes.user.username,
-          email: `${snapshotRes.user.username}@local`,
-          role: (snapshotRes.user.role ? snapshotRes.user.role.toUpperCase() : "STAFF") as any,
-          status: (snapshotRes.user.status ? snapshotRes.user.status.toLowerCase() : (snapshotRes.user.is_active ? "active" : "suspended")) as any,
-          mustChangePassword: snapshotRes.user.must_change_password,
-          permissions: snapshotRes.user.access_profile ? snapshotRes.user.access_profile.allowed_actions : [],
-          createdAt: snapshotRes.user.created_at,
-        };
-
-        const session: AuthSession = {
-          expiresAt: Date.now() + 7 * 24 * 3600 * 1000,
-          deviceId: "native-desktop",
-          user,
-          token: existingToken || "native-tauri-session",
-        };
-
-        setSession(session);
-        useAuthStore.getState().setAuth(user, session);
-
-        return { user, token: existingToken || "native-tauri-session", session };
-      }
 
       if (netError) {
         throw netError;
@@ -179,45 +141,6 @@ export class AuthService {
     throw new Error("No Central API URL configured and not running in native desktop shell");
   }
 
-  /**
-   * Local snapshot PIN authentication in Tauri desktop mode.
-   */
-  static async loginWithSnapshot(username: string, pin: string) {
-    if (!isTauriEnvironment()) {
-      throw new Error("Local snapshot PIN login is supported in native desktop mode only.");
-    }
-
-    const res = await tauriClient.authLoginSnapshot(username, pin);
-
-    const existingToken = getAuthToken();
-    if (existingToken && existingToken !== "native-tauri-session") {
-      await tauriClient.authSyncSession(existingToken).catch(() => {});
-    }
-
-    const user: AuthUser = {
-      id: res.user.id,
-      name: res.user.name,
-      username: res.user.username,
-      email: `${res.user.username}@local`,
-      role: (res.user.role ? res.user.role.toUpperCase() : "STAFF") as any,
-      status: (res.user.status ? res.user.status.toLowerCase() : (res.user.is_active ? "active" : "suspended")) as any,
-      mustChangePassword: res.user.must_change_password,
-      permissions: res.user.access_profile ? res.user.access_profile.allowed_actions : [],
-      createdAt: res.user.created_at,
-    };
-
-    const session: AuthSession = {
-      expiresAt: Date.now() + 7 * 24 * 3600 * 1000,
-      deviceId: "native-desktop",
-      user,
-      token: existingToken || "native-tauri-session",
-    };
-
-    setSession(session);
-    useAuthStore.getState().setAuth(user, session);
-
-    return { user, token: existingToken || "native-tauri-session", session };
-  }
 
   /**
    * Single point of Logout orchestration.
