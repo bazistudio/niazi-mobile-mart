@@ -286,14 +286,26 @@ impl PostgresSupplierRepository {
         for row in rows {
             let is_active_int: i32 = row.try_get(6).unwrap_or(1);
             result.push(SupplierSummaryDto {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                supplier_code: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                name: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
-                phone: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
-                credit_limit: row.try_get(4).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                supplier_code: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                name: row
+                    .try_get(2)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                phone: row
+                    .try_get(3)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                credit_limit: row
+                    .try_get(4)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 outstanding_balance: row.try_get(5).unwrap_or(0),
                 is_active: is_active_int == 1,
-                created_at: row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: row
+                    .try_get(7)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
 
@@ -349,22 +361,38 @@ impl PostgresSupplierRepository {
 
         let mut list = Vec::with_capacity(rows.len());
         for row in rows {
-            let type_str: String = row.try_get(4).map_err(|e| AppError::Database(e.to_string()))?;
+            let type_str: String = row
+                .try_get(4)
+                .map_err(|e| AppError::Database(e.to_string()))?;
             let entry_type = SupplierLedgerEntryType::from_str(&type_str)
                 .unwrap_or(SupplierLedgerEntryType::Purchase);
 
             list.push(SupplierLedgerEntry {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                supplier_id: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                supplier_id: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 reference_id: row.try_get(2).unwrap_or(None),
                 reference_number: row.try_get(3).unwrap_or(None),
                 entry_type,
-                debit: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                credit: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
-                balance_after: row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?,
-                description: row.try_get(8).map_err(|e| AppError::Database(e.to_string()))?,
+                debit: row
+                    .try_get(5)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                credit: row
+                    .try_get(6)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                balance_after: row
+                    .try_get(7)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                description: row
+                    .try_get(8)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 performed_by: row.try_get(9).unwrap_or(None),
-                created_at: row.try_get(10).map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: row
+                    .try_get(10)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
 
@@ -390,18 +418,30 @@ impl PostgresSupplierRepository {
     fn map_supplier_row(row: &sqlx::postgres::PgRow) -> AppResult<Supplier> {
         let is_active_int: i32 = row.try_get(9).unwrap_or(1);
         Ok(Supplier {
-            id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-            supplier_code: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-            name: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
-            phone: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
+            id: row
+                .try_get(0)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            supplier_code: row
+                .try_get(1)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            name: row
+                .try_get(2)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            phone: row
+                .try_get(3)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             alternate_phone: row.try_get(4).unwrap_or(None),
             email: row.try_get(5).unwrap_or(None),
             address: row.try_get(6).unwrap_or(None),
             notes: row.try_get(7).unwrap_or(None),
             credit_limit: row.try_get(8).unwrap_or(0),
             is_active: is_active_int == 1,
-            created_at: row.try_get(10).map_err(|e| AppError::Database(e.to_string()))?,
-            updated_at: row.try_get(11).map_err(|e| AppError::Database(e.to_string()))?,
+            created_at: row
+                .try_get(10)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            updated_at: row
+                .try_get(11)
+                .map_err(|e| AppError::Database(e.to_string()))?,
         })
     }
 }

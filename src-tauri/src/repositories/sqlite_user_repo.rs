@@ -14,15 +14,20 @@ pub struct SQLiteUserRepository {
 impl SQLiteUserRepository {
     /// Checks if a user ID exists in the local SQLite users table inside an active transaction.
     /// Returns Ok(true) if exists, Ok(false) if absent, or Err(DbError) on query error.
-    pub fn user_exists_in_tx(conn: &rusqlite::Connection, id: &str) -> crate::db::errors::DbResult<bool> {
+    pub fn user_exists_in_tx(
+        conn: &rusqlite::Connection,
+        id: &str,
+    ) -> crate::db::errors::DbResult<bool> {
         let exists: bool = conn
-            .query_row(
-                "SELECT 1 FROM users WHERE id = ?1",
-                params![id],
-                |_| Ok(true),
-            )
+            .query_row("SELECT 1 FROM users WHERE id = ?1", params![id], |_| {
+                Ok(true)
+            })
             .optional()
-            .map_err(|e| crate::db::errors::DbError::QueryError(format!("Failed to query user existence: {e}")))?
+            .map_err(|e| {
+                crate::db::errors::DbError::QueryError(format!(
+                    "Failed to query user existence: {e}"
+                ))
+            })?
             .unwrap_or(false);
 
         Ok(exists)
@@ -130,9 +135,9 @@ impl SQLiteUserRepository {
         let conn_arc = self.db.inner();
         let mut guard = conn_arc.lock().await;
 
-        let tx = guard
-            .transaction()
-            .map_err(|e| AppError::Database(format!("Failed to begin SQLite bootstrap transaction: {e}")))?;
+        let tx = guard.transaction().map_err(|e| {
+            AppError::Database(format!("Failed to begin SQLite bootstrap transaction: {e}"))
+        })?;
 
         // 1. Check initialization state inside transaction
         let init: i64 = tx
@@ -168,7 +173,11 @@ impl SQLiteUserRepository {
         // 3. Save admin user
         let role_str = admin_user.role.to_string();
         let is_active_int = admin_user.status.to_i32();
-        let must_change_pwd_int = if admin_user.must_change_password { 1 } else { 0 };
+        let must_change_pwd_int = if admin_user.must_change_password {
+            1
+        } else {
+            0
+        };
 
         tx.execute(
             "INSERT INTO users (
@@ -240,8 +249,9 @@ impl SQLiteUserRepository {
         }
 
         // 6. Commit transaction
-        tx.commit()
-            .map_err(|e| AppError::Database(format!("SQLite bootstrap transaction commit failed: {e}")))?;
+        tx.commit().map_err(|e| {
+            AppError::Database(format!("SQLite bootstrap transaction commit failed: {e}"))
+        })?;
 
         Ok(())
     }
@@ -269,7 +279,9 @@ impl SQLiteUserRepository {
             .map(Some)
             .or_else(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                other => Err(AppError::Database(format!("Error querying user by ID: {other}"))),
+                other => Err(AppError::Database(format!(
+                    "Error querying user by ID: {other}"
+                ))),
             })?;
 
         Ok(user)
@@ -299,7 +311,9 @@ impl SQLiteUserRepository {
             .map(Some)
             .or_else(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                other => Err(AppError::Database(format!("Error querying user by username: {other}"))),
+                other => Err(AppError::Database(format!(
+                    "Error querying user by username: {other}"
+                ))),
             })?;
 
         Ok(user)
@@ -636,10 +650,15 @@ mod tests {
 
         let recovered = repo.find_by_id(&found.id).await.unwrap().unwrap();
         assert_eq!(recovered.login_key_hash, new_hash);
-        assert!(recovered.recovery_key_hash.is_none(), "Recovery key must be invalidated to NULL");
+        assert!(
+            recovered.recovery_key_hash.is_none(),
+            "Recovery key must be invalidated to NULL"
+        );
 
         // Second consumption must fail
-        let second_try = repo.consume_recovery_key_and_reset_password(&found.id, "dummy").await;
+        let second_try = repo
+            .consume_recovery_key_and_reset_password(&found.id, "dummy")
+            .await;
         assert!(second_try.is_err(), "Second consumption must be rejected");
     }
 }

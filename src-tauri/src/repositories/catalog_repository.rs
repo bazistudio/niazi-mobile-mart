@@ -102,7 +102,8 @@ impl SQLiteCatalogRepository {
 
         let mut categories = Vec::new();
         for cat in iter {
-            categories.push(cat.map_err(|e| AppError::Database(format!("Category row error: {e}")))?);
+            categories
+                .push(cat.map_err(|e| AppError::Database(format!("Category row error: {e}")))?);
         }
         Ok(categories)
     }
@@ -112,7 +113,10 @@ impl SQLiteCatalogRepository {
         let now = Utc::now().to_rfc3339();
 
         let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
-        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_desc = dto
+            .description
+            .as_deref()
+            .or(current.description.as_deref());
         let new_active = dto.is_active.unwrap_or(current.is_active);
 
         let conn_arc = self.db.inner();
@@ -229,7 +233,10 @@ impl SQLiteCatalogRepository {
         let now = Utc::now().to_rfc3339();
 
         let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
-        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_desc = dto
+            .description
+            .as_deref()
+            .or(current.description.as_deref());
         let new_active = dto.is_active.unwrap_or(current.is_active);
 
         let conn_arc = self.db.inner();
@@ -258,7 +265,9 @@ impl SQLiteCatalogRepository {
     pub async fn create_unit(&self, id: &str, dto: &CreateUnitDto) -> AppResult<Unit> {
         let factor = dto.conversion_factor.unwrap_or(1);
         if factor < 1 {
-            return Err(AppError::Validation("Unit conversion factor must be at least 1".to_string()));
+            return Err(AppError::Validation(
+                "Unit conversion factor must be at least 1".to_string(),
+            ));
         }
 
         let conn_arc = self.db.inner();
@@ -348,7 +357,9 @@ impl SQLiteCatalogRepository {
         let new_sym = dto.symbol.as_deref().or(current.symbol.as_deref());
         let new_factor = dto.conversion_factor.unwrap_or(current.conversion_factor);
         if new_factor < 1 {
-            return Err(AppError::Validation("Unit conversion factor must be >= 1".to_string()));
+            return Err(AppError::Validation(
+                "Unit conversion factor must be >= 1".to_string(),
+            ));
         }
         let new_active = dto.is_active.unwrap_or(current.is_active);
 
@@ -473,7 +484,10 @@ impl SQLiteCatalogRepository {
         let now = Utc::now().to_rfc3339();
 
         let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
-        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_desc = dto
+            .description
+            .as_deref()
+            .or(current.description.as_deref());
         let new_active = dto.is_active.unwrap_or(current.is_active);
 
         let conn_arc = self.db.inner();
@@ -597,7 +611,10 @@ impl SQLiteCatalogRepository {
         let now = Utc::now().to_rfc3339();
 
         let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
-        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_desc = dto
+            .description
+            .as_deref()
+            .or(current.description.as_deref());
         let new_active = dto.is_active.unwrap_or(current.is_active);
 
         let conn_arc = self.db.inner();
@@ -721,7 +738,10 @@ impl SQLiteCatalogRepository {
         let now = Utc::now().to_rfc3339();
 
         let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
-        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_desc = dto
+            .description
+            .as_deref()
+            .or(current.description.as_deref());
         let new_active = dto.is_active.unwrap_or(current.is_active);
 
         let conn_arc = self.db.inner();
@@ -746,7 +766,10 @@ impl SQLiteCatalogRepository {
     }
     // --- TRANSACTION AWARE HELPERS FOR SYNC DOWNSTREAM ---
 
-    pub fn insert_category_in_tx(tx: &rusqlite::Transaction, entity: &Category) -> crate::db::errors::DbResult<()> {
+    pub fn insert_category_in_tx(
+        tx: &rusqlite::Transaction,
+        entity: &Category,
+    ) -> crate::db::errors::DbResult<()> {
         tx.execute(
             "INSERT INTO categories (id, name, code, description, is_active, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -763,7 +786,10 @@ impl SQLiteCatalogRepository {
         Ok(())
     }
 
-    pub fn insert_brand_in_tx(tx: &rusqlite::Transaction, entity: &Brand) -> crate::db::errors::DbResult<()> {
+    pub fn insert_brand_in_tx(
+        tx: &rusqlite::Transaction,
+        entity: &Brand,
+    ) -> crate::db::errors::DbResult<()> {
         tx.execute(
             "INSERT INTO brands (id, name, code, description, is_active, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -776,11 +802,17 @@ impl SQLiteCatalogRepository {
                 entity.created_at,
                 entity.updated_at
             ],
-        ).map_err(|e| crate::db::errors::DbError::QueryError(format!("Failed to insert brand in tx: {}", e)))?;
+        )
+        .map_err(|e| {
+            crate::db::errors::DbError::QueryError(format!("Failed to insert brand in tx: {}", e))
+        })?;
         Ok(())
     }
 
-    pub fn insert_unit_in_tx(tx: &rusqlite::Transaction, entity: &Unit) -> crate::db::errors::DbResult<()> {
+    pub fn insert_unit_in_tx(
+        tx: &rusqlite::Transaction,
+        entity: &Unit,
+    ) -> crate::db::errors::DbResult<()> {
         tx.execute(
             "INSERT INTO units (id, name, symbol, conversion_factor, is_active, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -797,7 +829,10 @@ impl SQLiteCatalogRepository {
         Ok(())
     }
 
-    pub fn insert_company_in_tx(tx: &rusqlite::Transaction, entity: &Company) -> crate::db::errors::DbResult<()> {
+    pub fn insert_company_in_tx(
+        tx: &rusqlite::Transaction,
+        entity: &Company,
+    ) -> crate::db::errors::DbResult<()> {
         tx.execute(
             "INSERT INTO companies (id, name, code, description, is_active, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -810,11 +845,17 @@ impl SQLiteCatalogRepository {
                 entity.created_at,
                 entity.updated_at
             ],
-        ).map_err(|e| crate::db::errors::DbError::QueryError(format!("Failed to insert company in tx: {}", e)))?;
+        )
+        .map_err(|e| {
+            crate::db::errors::DbError::QueryError(format!("Failed to insert company in tx: {}", e))
+        })?;
         Ok(())
     }
 
-    pub fn insert_quality_in_tx(tx: &rusqlite::Transaction, entity: &Quality) -> crate::db::errors::DbResult<()> {
+    pub fn insert_quality_in_tx(
+        tx: &rusqlite::Transaction,
+        entity: &Quality,
+    ) -> crate::db::errors::DbResult<()> {
         tx.execute(
             "INSERT INTO qualities (id, name, code, description, is_active, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -827,11 +868,17 @@ impl SQLiteCatalogRepository {
                 entity.created_at,
                 entity.updated_at
             ],
-        ).map_err(|e| crate::db::errors::DbError::QueryError(format!("Failed to insert quality in tx: {}", e)))?;
+        )
+        .map_err(|e| {
+            crate::db::errors::DbError::QueryError(format!("Failed to insert quality in tx: {}", e))
+        })?;
         Ok(())
     }
 
-    pub fn insert_color_in_tx(tx: &rusqlite::Transaction, entity: &Color) -> crate::db::errors::DbResult<()> {
+    pub fn insert_color_in_tx(
+        tx: &rusqlite::Transaction,
+        entity: &Color,
+    ) -> crate::db::errors::DbResult<()> {
         tx.execute(
             "INSERT INTO colors (id, name, code, description, is_active, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -844,7 +891,10 @@ impl SQLiteCatalogRepository {
                 entity.created_at,
                 entity.updated_at
             ],
-        ).map_err(|e| crate::db::errors::DbError::QueryError(format!("Failed to insert color in tx: {}", e)))?;
+        )
+        .map_err(|e| {
+            crate::db::errors::DbError::QueryError(format!("Failed to insert color in tx: {}", e))
+        })?;
         Ok(())
     }
 }

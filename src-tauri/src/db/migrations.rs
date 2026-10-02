@@ -974,7 +974,8 @@ impl MigrationRunner {
 
         // Query applied versions and drop statement before running transactions
         let applied_versions: Vec<i32> = {
-            let mut stmt = conn.prepare("SELECT version FROM schema_migrations ORDER BY version ASC")?;
+            let mut stmt =
+                conn.prepare("SELECT version FROM schema_migrations ORDER BY version ASC")?;
             let versions = stmt
                 .query_map([], |row| row.get(0))?
                 .filter_map(|r| r.ok())
@@ -1065,17 +1066,31 @@ impl MigrationRunner {
 
                     for p_res in prod_iter {
                         let p = p_res?;
-                        let key = format!("{}:{}:{}:{}:{}:{}", p.category_id, p.normalized_name, p.brand_id, p.unit_id, p.quality_id, p.color_id);
+                        let key = format!(
+                            "{}:{}:{}:{}:{}:{}",
+                            p.category_id,
+                            p.normalized_name,
+                            p.brand_id,
+                            p.unit_id,
+                            p.quality_id,
+                            p.color_id
+                        );
                         map.entry(key).or_default().push(p);
                     }
                     drop(check_stmt);
 
-                    let collisions: Vec<(&String, &Vec<ProdRecord>)> = map.iter().filter(|(_, list)| list.len() > 1).collect();
+                    let collisions: Vec<(&String, &Vec<ProdRecord>)> =
+                        map.iter().filter(|(_, list)| list.len() > 1).collect();
 
                     if !collisions.is_empty() {
                         let mut report = format!("HARD STOP: Collision preflight discovered {} duplicate product identity groups!\n", collisions.len());
                         for (group_idx, (key, list)) in collisions.iter().enumerate() {
-                            report.push_str(&format!("\nGroup #{}: key='{}', count={}\n", group_idx + 1, key, list.len()));
+                            report.push_str(&format!(
+                                "\nGroup #{}: key='{}', count={}\n",
+                                group_idx + 1,
+                                key,
+                                list.len()
+                            ));
                             for prod in *list {
                                 report.push_str(&format!(
                                     "  - ID: {}, Name: '{}', Normalized: '{}', Category: {}, Brand: {}, Unit: {}, Quality: {}, Color: {}\n",
@@ -1203,15 +1218,16 @@ mod tests {
                 .collect::<Vec<_>>();
             cols.contains(&"minor_unit".to_string())
         };
-        assert!(!has_minor_unit, "minor_unit column must NOT exist in organizations table");
+        assert!(
+            !has_minor_unit,
+            "minor_unit column must NOT exist in organizations table"
+        );
 
         // Verify default Main branch exists
         let branch_name: String = conn
-            .query_row(
-                "SELECT name FROM branches WHERE code='MAIN'",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT name FROM branches WHERE code='MAIN'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(branch_name, "Main Branch");
 
@@ -1227,7 +1243,10 @@ mod tests {
             [],
             |r| r.get(0),
         ).unwrap();
-        assert_eq!(stored_rate, 380000, "1 stored integer = 1 PKR rupee (380000 == Rs 380,000)");
+        assert_eq!(
+            stored_rate, 380000,
+            "1 stored integer = 1 PKR rupee (380000 == Rs 380,000)"
+        );
 
         // Verify Phase 7 Product Catalog & Inventory tables work with constraints
         conn.execute(
@@ -1285,7 +1304,11 @@ mod tests {
 
         // 1. Verify counters table exists and has initial 'invoice' row
         let counter_val: i64 = conn
-            .query_row("SELECT value FROM counters WHERE name = 'invoice'", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM counters WHERE name = 'invoice'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(counter_val, 0);
 
@@ -1318,7 +1341,10 @@ mod tests {
              VALUES ('22222222-2222-2222-2222-222222222222', 'INV-000001', '00000000-0000-0000-0000-000000000002', 1000, 0, 0, 1000, 1000, 0, 'PAID', 'COMPLETED', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
             [],
         );
-        assert!(dup_res.is_err(), "Duplicate invoice_number must be rejected by UNIQUE constraint");
+        assert!(
+            dup_res.is_err(),
+            "Duplicate invoice_number must be rejected by UNIQUE constraint"
+        );
 
         // 4. Verify sale_lines table & foreign key with valid 36-char UUIDs
         conn.execute(
@@ -1360,12 +1386,20 @@ mod tests {
 
         // 1. Verify counters for customer_code and payment_receipt
         let cus_counter: i64 = conn
-            .query_row("SELECT value FROM counters WHERE name = 'customer_code'", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM counters WHERE name = 'customer_code'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(cus_counter, 0);
 
         let rec_counter: i64 = conn
-            .query_row("SELECT value FROM counters WHERE name = 'payment_receipt'", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM counters WHERE name = 'payment_receipt'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(rec_counter, 0);
 
@@ -1409,17 +1443,29 @@ mod tests {
 
         // 1. Verify counters for supplier_code, purchase_number, supplier_payment_receipt
         let sup_counter: i64 = conn
-            .query_row("SELECT value FROM counters WHERE name = 'supplier_code'", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM counters WHERE name = 'supplier_code'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(sup_counter, 0);
 
         let pur_counter: i64 = conn
-            .query_row("SELECT value FROM counters WHERE name = 'purchase_number'", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM counters WHERE name = 'purchase_number'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(pur_counter, 0);
 
         let pay_counter: i64 = conn
-            .query_row("SELECT value FROM counters WHERE name = 'supplier_payment_receipt'", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM counters WHERE name = 'supplier_payment_receipt'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(pay_counter, 0);
 
@@ -1468,13 +1514,21 @@ mod tests {
 
         // 1. Verify expense_number counter initialized
         let exp_counter: i64 = conn
-            .query_row("SELECT value FROM counters WHERE name = 'expense_number'", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM counters WHERE name = 'expense_number'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(exp_counter, 0);
 
         // 2. Verify seeded default expense categories (8 categories)
         let cat_count: i64 = conn
-            .query_row("SELECT count(*) FROM expense_categories WHERE is_active = 1", [], |r| r.get(0))
+            .query_row(
+                "SELECT count(*) FROM expense_categories WHERE is_active = 1",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(cat_count, 8);
 
@@ -1484,7 +1538,10 @@ mod tests {
              VALUES ('e0000002-0000-0000-0000-000000000001', 'Rent', 'Duplicate Rent', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
             [],
         );
-        assert!(dup_cat.is_err(), "Duplicate category name (case-insensitive) must be rejected");
+        assert!(
+            dup_cat.is_err(),
+            "Duplicate category name (case-insensitive) must be rejected"
+        );
 
         // 4. Verify expenses insert & constraints
         conn.execute(
@@ -1498,7 +1555,10 @@ mod tests {
              VALUES ('66666666-6666-6666-6666-666666666666', 'EXP-000001', 'e0000001-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 15000, 'CASH', 'Another Expense', 'COMPLETED', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
             [],
         );
-        assert!(dup_exp.is_err(), "Duplicate expense_number must be rejected");
+        assert!(
+            dup_exp.is_err(),
+            "Duplicate expense_number must be rejected"
+        );
 
         // 5. Verify cash_sessions and single OPEN session per branch constraint
         conn.execute(
@@ -1512,7 +1572,10 @@ mod tests {
              VALUES ('88888888-8888-8888-8888-888888888888', '00000000-0000-0000-0000-000000000002', '2026-01-01', 10000, 'OPEN', '2026-01-01T01:00:00Z')",
             [],
         );
-        assert!(dup_open_session.is_err(), "Multiple OPEN sessions for the same branch must be rejected by unique index");
+        assert!(
+            dup_open_session.is_err(),
+            "Multiple OPEN sessions for the same branch must be rejected by unique index"
+        );
 
         // 6. Verify cash_movements insert
         conn.execute(
@@ -1539,12 +1602,20 @@ mod tests {
 
         // 1. Verify counters for sales and purchase returns
         let sr_counter: i64 = conn
-            .query_row("SELECT value FROM counters WHERE name = 'sales_return_number'", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM counters WHERE name = 'sales_return_number'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(sr_counter, 0);
 
         let pr_counter: i64 = conn
-            .query_row("SELECT value FROM counters WHERE name = 'purchase_return_number'", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM counters WHERE name = 'purchase_return_number'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(pr_counter, 0);
 
@@ -1566,7 +1637,9 @@ mod tests {
         assert!(sr_cols.contains(&"status".to_string()));
 
         // 3. Verify sales_return_lines table columns
-        let mut stmt = conn.prepare("PRAGMA table_info(sales_return_lines)").unwrap();
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(sales_return_lines)")
+            .unwrap();
         let srl_cols: Vec<String> = stmt
             .query_map([], |row| row.get(1))
             .unwrap()
@@ -1598,7 +1671,9 @@ mod tests {
         assert!(pr_cols.contains(&"status".to_string()));
 
         // 5. Verify purchase_return_lines table columns
-        let mut stmt = conn.prepare("PRAGMA table_info(purchase_return_lines)").unwrap();
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(purchase_return_lines)")
+            .unwrap();
         let prl_cols: Vec<String> = stmt
             .query_map([], |row| row.get(1))
             .unwrap()
@@ -1626,14 +1701,16 @@ mod tests {
                 name TEXT NOT NULL,
                 applied_at TEXT NOT NULL
             );",
-        ).unwrap();
+        )
+        .unwrap();
 
         for m in &MIGRATIONS[0..8] {
             conn.execute_batch(m.up).unwrap();
             conn.execute(
                 "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, ?3)",
                 params![m.version, m.name, "2026-01-01T00:00:00Z"],
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         // Insert a sample product prior to migration 009
@@ -1672,7 +1749,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(purch_price, 30000);
-        assert_eq!(avg_cost, 30000, "Existing product average_cost must be initialized to purchase_price");
+        assert_eq!(
+            avg_cost, 30000,
+            "Existing product average_cost must be initialized to purchase_price"
+        );
     }
 
     #[test]
@@ -1687,14 +1767,16 @@ mod tests {
                 name TEXT NOT NULL,
                 applied_at TEXT NOT NULL
             );",
-        ).unwrap();
+        )
+        .unwrap();
 
         for m in &MIGRATIONS[0..9] {
             conn.execute_batch(m.up).unwrap();
             conn.execute(
                 "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, ?3)",
                 params![m.version, m.name, "2026-01-01T00:00:00Z"],
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         // Insert prerequisite data: branch, category, product, sale, and sale lines
@@ -1737,17 +1819,31 @@ mod tests {
 
         // 3. Verify all four required indexes exist
         let indexes: Vec<String> = {
-            let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type='index'").unwrap();
+            let mut stmt = conn
+                .prepare("SELECT name FROM sqlite_master WHERE type='index'")
+                .unwrap();
             stmt.query_map([], |row| row.get(0))
                 .unwrap()
                 .map(|r| r.unwrap())
                 .collect()
         };
 
-        assert!(indexes.contains(&"idx_sales_status_created".to_string()), "idx_sales_status_created missing");
-        assert!(indexes.contains(&"idx_sales_returns_status_created".to_string()), "idx_sales_returns_status_created missing");
-        assert!(indexes.contains(&"idx_sale_lines_product_cost".to_string()), "idx_sale_lines_product_cost missing");
-        assert!(indexes.contains(&"idx_sales_return_lines_sale_line".to_string()), "idx_sales_return_lines_sale_line missing");
+        assert!(
+            indexes.contains(&"idx_sales_status_created".to_string()),
+            "idx_sales_status_created missing"
+        );
+        assert!(
+            indexes.contains(&"idx_sales_returns_status_created".to_string()),
+            "idx_sales_returns_status_created missing"
+        );
+        assert!(
+            indexes.contains(&"idx_sale_lines_product_cost".to_string()),
+            "idx_sale_lines_product_cost missing"
+        );
+        assert!(
+            indexes.contains(&"idx_sales_return_lines_sale_line".to_string()),
+            "idx_sales_return_lines_sale_line missing"
+        );
 
         // 4. Verify historical backfill:
         // Line 1 (was 0) should be backfilled to product.average_cost (32000)
@@ -1756,7 +1852,10 @@ mod tests {
             [],
             |r| r.get(0),
         ).unwrap();
-        assert_eq!(cost_1, 32000, "Legacy 0 cost snapshot should be backfilled to product average_cost");
+        assert_eq!(
+            cost_1, 32000,
+            "Legacy 0 cost snapshot should be backfilled to product average_cost"
+        );
 
         // Line 2 (was 29000) should remain 29000 (never overwritten!)
         let cost_2: i64 = conn.query_row(
@@ -1764,7 +1863,10 @@ mod tests {
             [],
             |r| r.get(0),
         ).unwrap();
-        assert_eq!(cost_2, 29000, "Established non-zero cost snapshot must NEVER be overwritten");
+        assert_eq!(
+            cost_2, 29000,
+            "Established non-zero cost snapshot must NEVER be overwritten"
+        );
 
         // 5. Verify idempotency
         let second_run = MigrationRunner::run(&mut conn).unwrap();
@@ -1813,20 +1915,40 @@ mod tests {
         let applied = MigrationRunner::run(&mut conn).unwrap();
         assert_eq!(applied, 6, "018-023 must apply on an existing 017 database");
 
-        let parties: i64 = conn.query_row("SELECT COUNT(*) FROM parties", [], |r| r.get(0)).unwrap();
+        let parties: i64 = conn
+            .query_row("SELECT COUNT(*) FROM parties", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(parties, 3, "2 customers + 1 non-colliding supplier");
         let unlinked_customers: i64 = conn
-            .query_row("SELECT COUNT(*) FROM customers WHERE party_id IS NULL OR party_id <> id", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM customers WHERE party_id IS NULL OR party_id <> id",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(unlinked_customers, 0);
         let linked_supplier: Option<String> = conn
-            .query_row("SELECT party_id FROM suppliers WHERE supplier_code = 'SUP-000001'", [], |r| r.get(0))
+            .query_row(
+                "SELECT party_id FROM suppliers WHERE supplier_code = 'SUP-000001'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(linked_supplier.as_deref(), Some("33333333-3333-4333-8333-333333333333"));
+        assert_eq!(
+            linked_supplier.as_deref(),
+            Some("33333333-3333-4333-8333-333333333333")
+        );
         let colliding: Option<String> = conn
-            .query_row("SELECT party_id FROM suppliers WHERE supplier_code = 'SUP-000002'", [], |r| r.get(0))
+            .query_row(
+                "SELECT party_id FROM suppliers WHERE supplier_code = 'SUP-000002'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(colliding, None, "a supplier sharing a customer UUID is never merged silently");
+        assert_eq!(
+            colliding, None,
+            "a supplier sharing a customer UUID is never merged silently"
+        );
 
         let blank_name: String = conn
             .query_row("SELECT display_name FROM parties WHERE id = '22222222-2222-4222-8222-222222222222'", [], |r| r.get(0))
@@ -1839,9 +1961,17 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .unwrap();
-        assert_eq!((name.as_str(), credit, email.as_deref()), ("Ali", 5000, Some("a@x.pk")), "role data untouched");
+        assert_eq!(
+            (name.as_str(), credit, email.as_deref()),
+            ("Ali", 5000, Some("a@x.pk")),
+            "role data untouched"
+        );
         let sentinel: i64 = conn
-            .query_row("SELECT COUNT(*) FROM parties WHERE updated_at = '1970-01-01T00:00:00+00:00'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM parties WHERE updated_at = '1970-01-01T00:00:00+00:00'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(sentinel, 3);
 

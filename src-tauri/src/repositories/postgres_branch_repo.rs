@@ -26,13 +26,25 @@ impl PostgresBranchRepository {
             use sqlx::Row;
             let is_active_int: i32 = row.try_get(4).unwrap_or(1);
             branches.push(Branch {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                organization_id: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                name: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
-                code: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                organization_id: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                name: row
+                    .try_get(2)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                code: row
+                    .try_get(3)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 is_active: is_active_int == 1,
-                created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: row
+                    .try_get(5)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                updated_at: row
+                    .try_get(6)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
 
@@ -76,13 +88,25 @@ impl PostgresBranchRepository {
                 use sqlx::Row;
                 let is_active_int: i32 = row.try_get(4).unwrap_or(1);
                 Ok(Some(Branch {
-                    id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                    organization_id: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                    name: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
-                    code: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
+                    id: row
+                        .try_get(0)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    organization_id: row
+                        .try_get(1)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    name: row
+                        .try_get(2)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    code: row
+                        .try_get(3)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
                     is_active: is_active_int == 1,
-                    created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                    updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                    created_at: row
+                        .try_get(5)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    updated_at: row
+                        .try_get(6)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
                 }))
             }
             None => Ok(None),
@@ -90,20 +114,23 @@ impl PostgresBranchRepository {
     }
 
     pub async fn get_dashboard_stats(&self) -> AppResult<OrganizationDashboardStats> {
-        let product_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM products WHERE is_active = 1")
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or((0,));
+        let product_count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM products WHERE is_active = 1")
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or((0,));
 
-        let category_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM categories WHERE is_active = 1")
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or((0,));
+        let category_count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM categories WHERE is_active = 1")
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or((0,));
 
-        let active_staff_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users WHERE is_active = 1")
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or((0,));
+        let active_staff_count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM users WHERE is_active = 1")
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or((0,));
 
         let low_stock_sql = "
             SELECT COUNT(*) FROM products p 
@@ -115,10 +142,11 @@ impl PostgresBranchRepository {
             .await
             .unwrap_or((0,));
 
-        let active_branch_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM branches WHERE is_active = 1")
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or((0,));
+        let active_branch_count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM branches WHERE is_active = 1")
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or((0,));
 
         Ok(OrganizationDashboardStats {
             product_count: product_count.0,
@@ -136,7 +164,9 @@ impl PostgresBranchRepository {
         )
         .fetch_one(&self.pool)
         .await
-        .map_err(|e| AppError::Database(format!("Failed to calculate customer receivables: {e}")))?;
+        .map_err(|e| {
+            AppError::Database(format!("Failed to calculate customer receivables: {e}"))
+        })?;
 
         let supplier_payables: (i64,) = sqlx::query_as(
             "SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT FROM supplier_ledger_entries",

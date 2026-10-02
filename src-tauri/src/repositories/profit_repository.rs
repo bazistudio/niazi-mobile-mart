@@ -1,10 +1,10 @@
-use std::collections::HashMap;
 use rusqlite::Connection;
+use std::collections::HashMap;
 
 use crate::db::connection::DatabaseConnection;
 use crate::domain::profit::{
-    calculate_gross_margin, DailyProfitabilityDto, DashboardProfitSummaryDto, PeriodProfitabilityDto,
-    ProductProfitabilityDto, ProfitMetricsDto, SaleProfitabilityDto,
+    calculate_gross_margin, DailyProfitabilityDto, DashboardProfitSummaryDto,
+    PeriodProfitabilityDto, ProductProfitabilityDto, ProfitMetricsDto, SaleProfitabilityDto,
 };
 use crate::errors::{AppError, AppResult};
 
@@ -91,11 +91,15 @@ impl SQLiteProfitRepository {
                   AND (?3 IS NULL OR s.branch_id = ?3)
             ";
 
-            conn.query_row(
-                sql,
-                rusqlite::params![s_date, e_date, branch_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
-            )
+            conn.query_row(sql, rusqlite::params![s_date, e_date, branch_id], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })
             .map_err(|e| AppError::Database(format!("Failed to query period sales: {e}")))?
         };
 
@@ -115,11 +119,9 @@ impl SQLiteProfitRepository {
                   AND (?3 IS NULL OR sr.branch_id = ?3)
             ";
 
-            conn.query_row(
-                sql,
-                rusqlite::params![s_date, e_date, branch_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
+            conn.query_row(sql, rusqlite::params![s_date, e_date, branch_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
             .map_err(|e| AppError::Database(format!("Failed to query period returns: {e}")))?
         };
 
@@ -187,9 +189,9 @@ impl SQLiteProfitRepository {
                 GROUP BY sale_day
             ";
 
-            let mut stmt = guard
-                .prepare(sql)
-                .map_err(|e| AppError::Database(format!("Failed to prepare daily sales lines: {e}")))?;
+            let mut stmt = guard.prepare(sql).map_err(|e| {
+                AppError::Database(format!("Failed to prepare daily sales lines: {e}"))
+            })?;
 
             let rows = stmt
                 .query_map(rusqlite::params![s_date, e_date, branch_id], |row| {
@@ -200,7 +202,9 @@ impl SQLiteProfitRepository {
                         row.get::<_, i64>(3)?,
                     ))
                 })
-                .map_err(|e| AppError::Database(format!("Failed to query daily sales lines: {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to query daily sales lines: {e}"))
+                })?;
 
             for r in rows {
                 let (day, gross, disc, cogs) = r.map_err(|e| AppError::Database(e.to_string()))?;
@@ -226,9 +230,9 @@ impl SQLiteProfitRepository {
                 GROUP BY sale_day
             ";
 
-            let mut stmt = guard
-                .prepare(sql)
-                .map_err(|e| AppError::Database(format!("Failed to prepare daily sales headers: {e}")))?;
+            let mut stmt = guard.prepare(sql).map_err(|e| {
+                AppError::Database(format!("Failed to prepare daily sales headers: {e}"))
+            })?;
 
             let rows = stmt
                 .query_map(rusqlite::params![s_date, e_date, branch_id], |row| {
@@ -238,10 +242,13 @@ impl SQLiteProfitRepository {
                         row.get::<_, i64>(2)?,
                     ))
                 })
-                .map_err(|e| AppError::Database(format!("Failed to query daily sales headers: {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to query daily sales headers: {e}"))
+                })?;
 
             for r in rows {
-                let (day, inv_disc, net_amount) = r.map_err(|e| AppError::Database(e.to_string()))?;
+                let (day, inv_disc, net_amount) =
+                    r.map_err(|e| AppError::Database(e.to_string()))?;
                 let acc = map.entry(day).or_default();
                 acc.discounts += inv_disc;
                 acc.sales_net += net_amount;
@@ -264,15 +271,17 @@ impl SQLiteProfitRepository {
                 GROUP BY return_day
             ";
 
-            let mut stmt = guard
-                .prepare(sql)
-                .map_err(|e| AppError::Database(format!("Failed to prepare daily return lines: {e}")))?;
+            let mut stmt = guard.prepare(sql).map_err(|e| {
+                AppError::Database(format!("Failed to prepare daily return lines: {e}"))
+            })?;
 
             let rows = stmt
                 .query_map(rusqlite::params![s_date, e_date, branch_id], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
                 })
-                .map_err(|e| AppError::Database(format!("Failed to query daily return lines: {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to query daily return lines: {e}"))
+                })?;
 
             for r in rows {
                 let (day, ret_cogs) = r.map_err(|e| AppError::Database(e.to_string()))?;
@@ -295,15 +304,17 @@ impl SQLiteProfitRepository {
                 GROUP BY return_day
             ";
 
-            let mut stmt = guard
-                .prepare(sql)
-                .map_err(|e| AppError::Database(format!("Failed to prepare daily return headers: {e}")))?;
+            let mut stmt = guard.prepare(sql).map_err(|e| {
+                AppError::Database(format!("Failed to prepare daily return headers: {e}"))
+            })?;
 
             let rows = stmt
                 .query_map(rusqlite::params![s_date, e_date, branch_id], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
                 })
-                .map_err(|e| AppError::Database(format!("Failed to query daily return headers: {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to query daily return headers: {e}"))
+                })?;
 
             for r in rows {
                 let (day, ret_amount) = r.map_err(|e| AppError::Database(e.to_string()))?;
@@ -392,9 +403,9 @@ impl SQLiteProfitRepository {
                 GROUP BY p.id
             ";
 
-            let mut stmt = guard
-                .prepare(sql)
-                .map_err(|e| AppError::Database(format!("Failed to prepare product sales query: {e}")))?;
+            let mut stmt = guard.prepare(sql).map_err(|e| {
+                AppError::Database(format!("Failed to prepare product sales query: {e}"))
+            })?;
 
             let rows = stmt
                 .query_map(
@@ -450,9 +461,9 @@ impl SQLiteProfitRepository {
                 GROUP BY p.id
             ";
 
-            let mut stmt = guard
-                .prepare(sql)
-                .map_err(|e| AppError::Database(format!("Failed to prepare product returns query: {e}")))?;
+            let mut stmt = guard.prepare(sql).map_err(|e| {
+                AppError::Database(format!("Failed to prepare product returns query: {e}"))
+            })?;
 
             let rows = stmt
                 .query_map(
@@ -546,7 +557,10 @@ impl SQLiteProfitRepository {
     // Single Sale Profitability
     // ──────────────────────────────────────────────────────────────────────────
 
-    pub async fn get_sale_profitability(&self, sale_id: &str) -> AppResult<Option<SaleProfitabilityDto>> {
+    pub async fn get_sale_profitability(
+        &self,
+        sale_id: &str,
+    ) -> AppResult<Option<SaleProfitabilityDto>> {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
 
@@ -643,12 +657,8 @@ impl SQLiteProfitRepository {
         let this_month_start = format!("{}-{:02}-01T00:00:00Z", now_utc.year(), now_utc.month());
 
         // 1. Today
-        let today_period = Self::get_period_profitability_in_conn(
-            &guard,
-            Some(&today_start),
-            None,
-            branch_id,
-        )?;
+        let today_period =
+            Self::get_period_profitability_in_conn(&guard, Some(&today_start), None, branch_id)?;
 
         // 2. This Month
         let month_period = Self::get_period_profitability_in_conn(

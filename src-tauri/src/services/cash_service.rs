@@ -31,7 +31,9 @@ impl CashService {
     pub fn new_sqlite(db: DatabaseConnection) -> Self {
         Self {
             cash_repo: CashRepository::SQLite(SQLiteCashRepository::new(db.clone())),
-            branch_repo: BranchRepository::SQLite(crate::repositories::SQLiteBranchRepository::new(db.clone())),
+            branch_repo: BranchRepository::SQLite(
+                crate::repositories::SQLiteBranchRepository::new(db.clone()),
+            ),
             db: Some(db),
         }
     }
@@ -59,7 +61,12 @@ impl CashService {
             ));
         }
 
-        let branch_id = match dto.branch_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let branch_id = match dto
+            .branch_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             Some(bid) => bid.to_string(),
             None => match self.branch_repo.get_main_branch().await? {
                 Some(b) => b.id,
@@ -77,10 +84,16 @@ impl CashService {
             .unwrap_or_else(|| now[0..10].to_string());
 
         let uid = user_id.map(str::to_string);
-        let notes = dto.notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+        let notes = dto
+            .notes
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty());
         let opening_cash = dto.opening_cash;
 
-        let db = self.db.as_ref().expect("SQLite database connection required");
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
         let session = with_transaction(db, move |tx| {
             // Check if there is already an active OPEN session for this branch
             if let Some(active) = SQLiteCashRepository::get_open_session_in_tx(tx, &branch_id)? {
@@ -120,7 +133,10 @@ impl CashService {
         Ok(session)
     }
 
-    pub async fn get_current_session(&self, branch_id: Option<&str>) -> AppResult<Option<CashSession>> {
+    pub async fn get_current_session(
+        &self,
+        branch_id: Option<&str>,
+    ) -> AppResult<Option<CashSession>> {
         let bid = match branch_id.map(str::trim).filter(|s| !s.is_empty()) {
             Some(b) => b.to_string(),
             None => match self.branch_repo.get_main_branch().await? {
@@ -147,7 +163,9 @@ impl CashService {
     ) -> AppResult<Vec<CashSession>> {
         match &self.cash_repo {
             CashRepository::SQLite(r) => r.list_sessions(branch_id, limit, offset).await,
-            CashRepository::Postgres(_) => Err(AppError::Internal("Postgres list_sessions not implemented".into())),
+            CashRepository::Postgres(_) => Err(AppError::Internal(
+                "Postgres list_sessions not implemented".into(),
+            )),
         }
     }
 
@@ -164,10 +182,16 @@ impl CashService {
 
         let sid = dto.session_id.trim().to_string();
         let actual_closing = dto.actual_closing_cash;
-        let notes = dto.notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+        let notes = dto
+            .notes
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty());
         let uid = user_id.map(str::to_string);
 
-        let db = self.db.as_ref().expect("SQLite database connection required");
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
         let closed_session = with_transaction(db, move |tx| {
             let now = Utc::now().to_rfc3339();
 
@@ -249,7 +273,12 @@ impl CashService {
             ));
         }
 
-        let branch_id = match dto.branch_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let branch_id = match dto
+            .branch_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             Some(bid) => bid.to_string(),
             None => match self.branch_repo.get_main_branch().await? {
                 Some(b) => b.id,
@@ -261,7 +290,10 @@ impl CashService {
         let amount = dto.amount;
         let desc = format!("Cash Adjustment ({}): {}", direction.as_str(), reason);
 
-        let db = self.db.as_ref().expect("SQLite database connection required");
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
         let movement = with_transaction(db, move |tx| {
             let now = Utc::now().to_rfc3339();
             let open_session_id = SQLiteCashRepository::get_open_session_id_in_tx(tx, &branch_id)?
@@ -301,7 +333,9 @@ impl CashService {
         let f = filter.unwrap_or_default();
         match &self.cash_repo {
             CashRepository::SQLite(r) => r.list_movements(&f).await,
-            CashRepository::Postgres(_) => Err(AppError::Internal("Postgres list_movements not implemented".into())),
+            CashRepository::Postgres(_) => Err(AppError::Internal(
+                "Postgres list_movements not implemented".into(),
+            )),
         }
     }
 
@@ -326,7 +360,9 @@ impl CashService {
 
         match &self.cash_repo {
             CashRepository::SQLite(r) => r.get_daily_summary(&bid, &target_date).await,
-            CashRepository::Postgres(_) => Err(AppError::Internal("Postgres get_daily_summary not implemented".into())),
+            CashRepository::Postgres(_) => Err(AppError::Internal(
+                "Postgres get_daily_summary not implemented".into(),
+            )),
         }
     }
 }
@@ -1139,25 +1175,29 @@ pub mod tests {
         assert_eq!(summary.expected_closing_cash, 10000);
 
         // 2. Direct atomic rollback verification: insert cash movement then return Err
-        let rollback_res: Result<(), DbError> = crate::db::transaction::with_transaction(&db, |tx| {
-            let m = CashMovement {
-                id: uuid::Uuid::new_v4().to_string(),
-                session_id: None,
-                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-                movement_type: CashMovementType::CashAdjustment,
-                direction: CashMovementDirection::In,
-                amount: 999999,
-                reference_id: None,
-                reference_number: None,
-                payment_method: "CASH".to_string(),
-                description: "Test rollback movement".to_string(),
-                performed_by: None,
-                performed_by_name: None,
-                created_at: chrono::Utc::now().to_rfc3339(),
-            };
-            SQLiteCashRepository::insert_movement_in_tx(tx, &m)?;
-            Err(DbError::ValidationError("Simulated transactional abort".to_string()))
-        }).await;
+        let rollback_res: Result<(), DbError> =
+            crate::db::transaction::with_transaction(&db, |tx| {
+                let m = CashMovement {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    session_id: None,
+                    branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                    movement_type: CashMovementType::CashAdjustment,
+                    direction: CashMovementDirection::In,
+                    amount: 999999,
+                    reference_id: None,
+                    reference_number: None,
+                    payment_method: "CASH".to_string(),
+                    description: "Test rollback movement".to_string(),
+                    performed_by: None,
+                    performed_by_name: None,
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                };
+                SQLiteCashRepository::insert_movement_in_tx(tx, &m)?;
+                Err(DbError::ValidationError(
+                    "Simulated transactional abort".to_string(),
+                ))
+            })
+            .await;
         assert!(rollback_res.is_err());
 
         // Verify movement was rolled back completely

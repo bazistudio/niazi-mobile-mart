@@ -24,7 +24,10 @@ use crate::repositories::{
 
 #[derive(Clone)]
 enum PartyBackend {
-    SQLite { db: DatabaseConnection, repo: SQLitePartyRepository },
+    SQLite {
+        db: DatabaseConnection,
+        repo: SQLitePartyRepository,
+    },
     Postgres(PostgresPartyRepository),
 }
 
@@ -36,12 +39,17 @@ pub struct PartyService {
 impl PartyService {
     pub fn new_sqlite(db: DatabaseConnection) -> Self {
         Self {
-            backend: PartyBackend::SQLite { repo: SQLitePartyRepository::new(db.clone()), db },
+            backend: PartyBackend::SQLite {
+                repo: SQLitePartyRepository::new(db.clone()),
+                db,
+            },
         }
     }
 
     pub fn new_postgres(pool: sqlx::PgPool) -> Self {
-        Self { backend: PartyBackend::Postgres(PostgresPartyRepository::new(pool)) }
+        Self {
+            backend: PartyBackend::Postgres(PostgresPartyRepository::new(pool)),
+        }
     }
 
     pub async fn list_parties(&self, filter: PartyFilter) -> AppResult<Vec<PartySummaryDto>> {
@@ -99,7 +107,12 @@ impl PartyService {
                     updated_at: party.updated_at.clone(),
                 };
                 SQLiteCustomerRepository::insert_customer_in_tx(tx, &customer)?;
-                SQLitePartyRepository::link_role_in_tx(tx, PartyRoleKind::Customer, &customer.id, &party.id)?;
+                SQLitePartyRepository::link_role_in_tx(
+                    tx,
+                    PartyRoleKind::Customer,
+                    &customer.id,
+                    &party.id,
+                )?;
             }
 
             if party_type.includes_supplier() {
@@ -123,11 +136,17 @@ impl PartyService {
                     updated_at: party.updated_at.clone(),
                 };
                 SQLiteSupplierRepository::insert_supplier_in_tx(tx, &supplier)?;
-                SQLitePartyRepository::link_role_in_tx(tx, PartyRoleKind::Supplier, &supplier.id, &party.id)?;
+                SQLitePartyRepository::link_role_in_tx(
+                    tx,
+                    PartyRoleKind::Supplier,
+                    &supplier.id,
+                    &party.id,
+                )?;
             }
 
-            SQLitePartyRepository::get_party_summary_in_tx(tx, &party.id)?
-                .ok_or_else(|| DbError::NotFound(format!("Party '{}' not found after create", party.id)))
+            SQLitePartyRepository::get_party_summary_in_tx(tx, &party.id)?.ok_or_else(|| {
+                DbError::NotFound(format!("Party '{}' not found after create", party.id))
+            })
         })
         .await?;
         Ok(summary)
@@ -204,7 +223,10 @@ mod tests {
         let (svc, _db) = service().await;
         let mut bad = dto(PartyType::Customer);
         bad.phone = " ".into();
-        assert!(matches!(svc.create_party(bad).await, Err(AppError::Validation(_))));
+        assert!(matches!(
+            svc.create_party(bad).await,
+            Err(AppError::Validation(_))
+        ));
     }
 
     #[tokio::test]
@@ -214,7 +236,10 @@ mod tests {
         let updated = svc
             .update_party(
                 &s.party.id,
-                UpdatePartyDto { display_name: Some("Ali Traders Hall Road".into()), ..Default::default() },
+                UpdatePartyDto {
+                    display_name: Some("Ali Traders Hall Road".into()),
+                    ..Default::default()
+                },
             )
             .await
             .unwrap();
@@ -222,12 +247,31 @@ mod tests {
         {
             let conn_arc = db.inner();
             let guard = conn_arc.lock().await;
-            let c: String = guard.query_row("SELECT name FROM customers WHERE party_id = ?1", [&s.party.id], |r| r.get(0)).unwrap();
-            let sp: String = guard.query_row("SELECT name FROM suppliers WHERE party_id = ?1", [&s.party.id], |r| r.get(0)).unwrap();
+            let c: String = guard
+                .query_row(
+                    "SELECT name FROM customers WHERE party_id = ?1",
+                    [&s.party.id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let sp: String = guard
+                .query_row(
+                    "SELECT name FROM suppliers WHERE party_id = ?1",
+                    [&s.party.id],
+                    |r| r.get(0),
+                )
+                .unwrap();
             assert_eq!(c, "Ali Traders Hall Road");
             assert_eq!(sp, "Ali Traders Hall Road");
         }
-        assert!(matches!(svc.update_party("00000000-0000-4000-8000-000000000000", UpdatePartyDto::default()).await, Err(AppError::NotFound(_))));
+        assert!(matches!(
+            svc.update_party(
+                "00000000-0000-4000-8000-000000000000",
+                UpdatePartyDto::default()
+            )
+            .await,
+            Err(AppError::NotFound(_))
+        ));
     }
 
     #[tokio::test]
@@ -258,16 +302,19 @@ mod tests {
 
         // Legacy contact edit of a single-role party mirrors to the party.
         customers
-            .update_customer(&c.id, crate::domain::customer::UpdateCustomerDto {
-                name: Some("Ahmed Mobile".into()),
-                phone: None,
-                alternate_phone: None,
-                email: None,
-                address: None,
-                notes: None,
-                credit_limit: None,
-                is_active: None,
-            })
+            .update_customer(
+                &c.id,
+                crate::domain::customer::UpdateCustomerDto {
+                    name: Some("Ahmed Mobile".into()),
+                    phone: None,
+                    alternate_phone: None,
+                    email: None,
+                    address: None,
+                    notes: None,
+                    credit_limit: None,
+                    is_active: None,
+                },
+            )
             .await
             .unwrap();
         let p = parties.get_party(&c.id).await.unwrap();
@@ -377,9 +424,15 @@ mod tests {
 
         let updated = svc.get_party(&s.party.id).await.unwrap();
         // Customer: 15,000 sale - 5,000 payment = 10,000 receivable
-        assert_eq!(updated.customer_receivable, 10000, "customer_receivable = sale - payment");
+        assert_eq!(
+            updated.customer_receivable, 10000,
+            "customer_receivable = sale - payment"
+        );
         // Supplier: 8,000 purchase - 3,000 payment = 5,000 payable
-        assert_eq!(updated.supplier_payable, 5000, "supplier_payable = purchase - payment");
+        assert_eq!(
+            updated.supplier_payable, 5000,
+            "supplier_payable = purchase - payment"
+        );
     }
 
     /// Verifies PartySummaryDto for a CUSTOMER-only party (no supplier payable).
@@ -491,7 +544,9 @@ mod tests {
 
         // NotFound contract is preserved.
         assert!(matches!(
-            customers.deactivate_customer("00000000-0000-4000-8000-000000000000").await,
+            customers
+                .deactivate_customer("00000000-0000-4000-8000-000000000000")
+                .await,
             Err(AppError::NotFound(_))
         ));
     }
@@ -503,6 +558,9 @@ mod tests {
             .connect_lazy("postgres://localhost/unused")
             .unwrap();
         let svc = PartyService::new_postgres(pool);
-        assert!(matches!(svc.create_party(dto(PartyType::Customer)).await, Err(AppError::Forbidden(_))));
+        assert!(matches!(
+            svc.create_party(dto(PartyType::Customer)).await,
+            Err(AppError::Forbidden(_))
+        ));
     }
 }

@@ -58,7 +58,11 @@ mod tests {
             let conn_arc = db.inner();
             let guard = conn_arc.lock().await;
             let count: i64 = guard
-                .query_row("SELECT count(*) FROM users WHERE username='txtest'", [], |r| r.get(0))
+                .query_row(
+                    "SELECT count(*) FROM users WHERE username='txtest'",
+                    [],
+                    |r| r.get(0),
+                )
                 .unwrap();
             assert_eq!(count, 1);
         }
@@ -80,7 +84,11 @@ mod tests {
             let conn_arc = db.inner();
             let guard = conn_arc.lock().await;
             let count: i64 = guard
-                .query_row("SELECT count(*) FROM users WHERE username='rollbackuser'", [], |r| r.get(0))
+                .query_row(
+                    "SELECT count(*) FROM users WHERE username='rollbackuser'",
+                    [],
+                    |r| r.get(0),
+                )
                 .unwrap();
             assert_eq!(count, 0);
         }

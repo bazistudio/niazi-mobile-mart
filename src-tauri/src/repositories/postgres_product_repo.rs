@@ -18,7 +18,11 @@ impl PostgresProductRepository {
     pub async fn create_product(&self, id: &str, dto: &CreateProductDto) -> AppResult<Product> {
         let now = Utc::now().to_rfc3339();
         let threshold = dto.low_stock_threshold.unwrap_or(5);
-        let barcode_opt = dto.barcode.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let barcode_opt = dto
+            .barcode
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
         let initial_avg_cost = dto.average_cost.unwrap_or(dto.purchase_price);
         let sku = dto.sku.trim().to_uppercase();
         let name = dto.name.trim();
@@ -93,10 +97,18 @@ impl PostgresProductRepository {
         dto: &CreateProductDto,
         user_id: Option<&str>,
     ) -> AppResult<Product> {
-        let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
         let now = Utc::now().to_rfc3339();
         let threshold = dto.low_stock_threshold.unwrap_or(5);
-        let barcode_opt = dto.barcode.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let barcode_opt = dto
+            .barcode
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
         let initial_avg_cost = dto.average_cost.unwrap_or(dto.purchase_price);
         let sku = dto.sku.trim().to_uppercase();
         let name = dto.name.trim();
@@ -172,7 +184,9 @@ impl PostgresProductRepository {
             }
         }
 
-        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok(Product {
             id: id.to_string(),
@@ -223,7 +237,9 @@ impl PostgresProductRepository {
 
         match row_opt {
             Some(row) => Ok(Self::map_product_row(&row)?),
-            None => Err(AppError::NotFound(format!("Product with SKU '{clean}' not found"))),
+            None => Err(AppError::NotFound(format!(
+                "Product with SKU '{clean}' not found"
+            ))),
         }
     }
 
@@ -238,7 +254,9 @@ impl PostgresProductRepository {
 
         match row_opt {
             Some(row) => Ok(Self::map_product_row(&row)?),
-            None => Err(AppError::NotFound(format!("Product with barcode '{clean}' not found"))),
+            None => Err(AppError::NotFound(format!(
+                "Product with barcode '{clean}' not found"
+            ))),
         }
     }
 
@@ -353,12 +371,19 @@ impl PostgresProductRepository {
         let new_purchase = dto.purchase_price.unwrap_or(current.purchase_price);
         let new_avg_cost = dto.average_cost.unwrap_or(current.average_cost);
         let new_sale = dto.sale_price.unwrap_or(current.sale_price);
-        let new_threshold = dto.low_stock_threshold.unwrap_or(current.low_stock_threshold);
-        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_threshold = dto
+            .low_stock_threshold
+            .unwrap_or(current.low_stock_threshold);
+        let new_desc = dto
+            .description
+            .as_deref()
+            .or(current.description.as_deref());
         let new_active = dto.is_active.unwrap_or(current.is_active);
 
         if new_purchase < 0 || new_avg_cost < 0 || new_sale < 0 || new_threshold < 0 {
-            return Err(AppError::Validation("Prices and threshold cannot be negative".to_string()));
+            return Err(AppError::Validation(
+                "Prices and threshold cannot be negative".to_string(),
+            ));
         }
 
         sqlx::query(
@@ -445,7 +470,11 @@ impl PostgresProductRepository {
         product: &Product,
         branch_id_override: Option<&str>,
     ) -> AppResult<Product> {
-        let now = if product.created_at.is_empty() { Utc::now().to_rfc3339() } else { product.created_at.clone() };
+        let now = if product.created_at.is_empty() {
+            Utc::now().to_rfc3339()
+        } else {
+            product.created_at.clone()
+        };
         let updated_at = Utc::now().to_rfc3339();
         let sku = product.sku.trim().to_uppercase();
         let name = product.name.trim();
@@ -513,7 +542,8 @@ impl PostgresProductRepository {
 
         if let Some(qty) = product.initial_quantity {
             if qty > 0 {
-                let target_branch = branch_id_override.unwrap_or(crate::domain::organization::DEFAULT_MAIN_BRANCH_ID);
+                let target_branch = branch_id_override
+                    .unwrap_or(crate::domain::organization::DEFAULT_MAIN_BRANCH_ID);
 
                 let movement_exists: bool = sqlx::query_scalar(
                     "SELECT EXISTS(SELECT 1 FROM stock_movements WHERE product_id = $1 AND branch_id = $2 AND reference_id = 'OPENING_BALANCE')"
@@ -646,7 +676,9 @@ impl PostgresProductRepository {
             .bind(id)
             .execute(&mut **tx)
             .await
-            .map_err(|e| AppError::Database(format!("Failed to project PRODUCT_DEACTIVATED: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to project PRODUCT_DEACTIVATED: {e}"))
+            })?;
 
         Ok(())
     }
@@ -654,27 +686,46 @@ impl PostgresProductRepository {
     fn map_product_row(row: &sqlx::postgres::PgRow) -> AppResult<Product> {
         let is_active_int: i32 = row.try_get(15).unwrap_or(1);
         Ok(Product {
-            id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-            name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+            id: row
+                .try_get(0)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            name: row
+                .try_get(1)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             normalized_name: row.try_get(2).unwrap_or_default(),
-            sku: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
+            sku: row
+                .try_get(3)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             barcode: row.try_get(4).unwrap_or(None),
-            category_id: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
+            category_id: row
+                .try_get(5)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             brand_id: row.try_get(6).unwrap_or(None),
             company_id: row.try_get(7).unwrap_or(None),
             quality_id: row.try_get(8).unwrap_or(None),
             color_id: row.try_get(9).unwrap_or(None),
             unit_id: row.try_get(10).unwrap_or(None),
-            purchase_price: row.try_get(11).map_err(|e| AppError::Database(e.to_string()))?,
-            average_cost: row.try_get(12).map_err(|e| AppError::Database(e.to_string()))?,
-            sale_price: row.try_get(13).map_err(|e| AppError::Database(e.to_string()))?,
-            low_stock_threshold: row.try_get(14).map_err(|e| AppError::Database(e.to_string()))?,
+            purchase_price: row
+                .try_get(11)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            average_cost: row
+                .try_get(12)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            sale_price: row
+                .try_get(13)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            low_stock_threshold: row
+                .try_get(14)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             is_active: is_active_int == 1,
             description: row.try_get(16).unwrap_or(None),
             initial_quantity: None,
-            created_at: row.try_get(17).map_err(|e| AppError::Database(e.to_string()))?,
-            updated_at: row.try_get(18).map_err(|e| AppError::Database(e.to_string()))?,
+            created_at: row
+                .try_get(17)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            updated_at: row
+                .try_get(18)
+                .map_err(|e| AppError::Database(e.to_string()))?,
         })
     }
-
 }

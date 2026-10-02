@@ -204,12 +204,12 @@ mod tests {
             branch_id: "00000000-0000-0000-0000-000000000002".to_string(),
             customer_id: Some("cust_1".to_string()),
             customer_name_snapshot: Some("Tariq Mahmood".to_string()),
-            subtotal: 1300,        // Rs 1,300
-            discount: 50,          // Rs 50
+            subtotal: 1300, // Rs 1,300
+            discount: 50,   // Rs 50
             tax_amount: 0,
-            total_amount: 1250,    // Rs 1,250
-            paid_amount: 1500,     // Rs 1,500
-            change_amount: 250,    // Rs 250
+            total_amount: 1250, // Rs 1,250
+            paid_amount: 1500,  // Rs 1,500
+            change_amount: 250, // Rs 250
             payment_status: PaymentStatus::Paid,
             sale_status: SaleStatus::Completed,
             performed_by: Some("cashier_1".to_string()),
@@ -269,7 +269,10 @@ mod tests {
 
         // 1. Invoice identity
         assert_eq!(result_dto.sale.invoice_number, "INV-000001");
-        assert_eq!(result_dto.sale.customer_name_snapshot.as_deref(), Some("Tariq Mahmood"));
+        assert_eq!(
+            result_dto.sale.customer_name_snapshot.as_deref(),
+            Some("Tariq Mahmood")
+        );
 
         // 2. Integer PKR Money Rule (1 stored integer = 1 PKR, no float decimals)
         assert_eq!(result_dto.sale.subtotal, 1300);
@@ -293,12 +296,18 @@ mod tests {
         assert_eq!(items_sum, result_dto.sale.subtotal);
 
         // 5. Grand total validation: 1300 - 50 = 1250
-        assert_eq!(result_dto.sale.subtotal - result_dto.sale.discount, result_dto.sale.total_amount);
+        assert_eq!(
+            result_dto.sale.subtotal - result_dto.sale.discount,
+            result_dto.sale.total_amount
+        );
 
         // 6. Payment method and tendered
         assert_eq!(result_dto.payments[0].payment_method, "CASH");
         assert_eq!(result_dto.payments[0].amount, 1500);
-        assert_eq!(result_dto.sale.paid_amount - result_dto.sale.total_amount, result_dto.sale.change_amount);
+        assert_eq!(
+            result_dto.sale.paid_amount - result_dto.sale.total_amount,
+            result_dto.sale.change_amount
+        );
     }
 
     #[test]

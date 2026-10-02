@@ -45,7 +45,10 @@ pub async fn purchase_return_get(
     id: String,
 ) -> AppResult<Option<PurchaseReturnDetailDto>> {
     AuthService::require_permission(&state, Some("purchases"), None).await?;
-    let ret = state.purchase_return_service.get_purchase_return(&id).await?;
+    let ret = state
+        .purchase_return_service
+        .get_purchase_return(&id)
+        .await?;
     if let Some(ref r) = ret {
         AuthService::require_branch_access(&state, Some(&r.purchase_return.branch_id)).await?;
     }
@@ -66,7 +69,10 @@ pub async fn purchase_return_list(
         let session = state.get_session().await;
         let is_org_admin = match session.role {
             Some(crate::domain::user::UserRole::Admin) => true,
-            _ => session.access_profile.as_ref().map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+            _ => session
+                .access_profile
+                .as_ref()
+                .map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
         };
         if !is_org_admin {
             Some(authorized_branch)

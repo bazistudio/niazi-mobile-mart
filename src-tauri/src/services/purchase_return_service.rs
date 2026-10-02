@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use chrono::Utc;
 use rusqlite::params;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::db::connection::DatabaseConnection;
@@ -48,13 +48,21 @@ impl PurchaseReturnService {
     }
 
     /// Queries line-by-line returnable status for a purchase order
-    pub async fn get_purchase_returnable_info(&self, purchase_id: &str) -> AppResult<PurchaseReturnableInfoDto> {
-        let db = self.db.as_ref().expect("SQLite database connection required");
+    pub async fn get_purchase_returnable_info(
+        &self,
+        purchase_id: &str,
+    ) -> AppResult<PurchaseReturnableInfoDto> {
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
         let conn_arc = db.inner();
         let guard = conn_arc.lock().await;
 
-        let purchase = SQLitePurchaseRepository::get_by_id_in_tx(&guard, purchase_id)?
-            .ok_or_else(|| AppError::NotFound(format!("Purchase with id '{purchase_id}' not found")))?;
+        let purchase =
+            SQLitePurchaseRepository::get_by_id_in_tx(&guard, purchase_id)?.ok_or_else(|| {
+                AppError::NotFound(format!("Purchase with id '{purchase_id}' not found"))
+            })?;
 
         if purchase.status != PurchaseStatus::Completed {
             return Err(AppError::Validation(format!(
@@ -69,10 +77,15 @@ impl PurchaseReturnService {
         let mut returnable_lines = Vec::with_capacity(lines.len());
         for line in lines {
             let already_returned =
-                SQLitePurchaseReturnRepository::get_returned_quantity_for_purchase_line_in_tx(&guard, &line.id)?;
+                SQLitePurchaseReturnRepository::get_returned_quantity_for_purchase_line_in_tx(
+                    &guard, &line.id,
+                )?;
             let returnable_quantity = line.quantity.saturating_sub(already_returned);
-            let current_stock =
-                SQLiteInventoryRepository::get_stock_in_tx(&guard, &line.product_id, &purchase.branch_id)?;
+            let current_stock = SQLiteInventoryRepository::get_stock_in_tx(
+                &guard,
+                &line.product_id,
+                &purchase.branch_id,
+            )?;
             let effective_unit_cost = if line.quantity > 0 {
                 line.line_total / line.quantity
             } else {
@@ -95,7 +108,8 @@ impl PurchaseReturnService {
         }
 
         let supplier_payable =
-            SQLiteSupplierRepository::get_outstanding_balance_in_tx(&guard, &purchase.supplier_id).unwrap_or(0);
+            SQLiteSupplierRepository::get_outstanding_balance_in_tx(&guard, &purchase.supplier_id)
+                .unwrap_or(0);
 
         let supplier_name: Option<String> = guard
             .query_row(
@@ -126,7 +140,9 @@ impl PurchaseReturnService {
         user_id: Option<&str>,
     ) -> AppResult<PurchaseReturnDetailDto> {
         if dto.lines.is_empty() {
-            return Err(AppError::Validation("At least one line item must be returned".to_string()));
+            return Err(AppError::Validation(
+                "At least one line item must be returned".to_string(),
+            ));
         }
 
         let settlement_method = PurchaseSettlementMethod::from_str(&dto.settlement_method)
@@ -134,7 +150,9 @@ impl PurchaseReturnService {
 
         for line in &dto.lines {
             if line.quantity <= 0 {
-                return Err(AppError::Validation("Return quantity must be greater than 0".to_string()));
+                return Err(AppError::Validation(
+                    "Return quantity must be greater than 0".to_string(),
+                ));
             }
         }
 
@@ -145,7 +163,10 @@ impl PurchaseReturnService {
         let notes_cloned = dto.notes.clone();
         let requested_lines = dto.lines.clone();
 
-        let db = self.db.as_ref().expect("SQLite database connection required");
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
 
         let detail = with_transaction(db, move |tx| {
             // 1. Validate purchase exists and is completed
@@ -376,10 +397,15 @@ impl PurchaseReturnService {
         Ok(detail)
     }
 
-    pub async fn get_purchase_return(&self, id: &str) -> AppResult<Option<PurchaseReturnDetailDto>> {
+    pub async fn get_purchase_return(
+        &self,
+        id: &str,
+    ) -> AppResult<Option<PurchaseReturnDetailDto>> {
         match &self.repo {
             PurchaseReturnRepository::SQLite(r) => r.get_by_id(id).await,
-            PurchaseReturnRepository::Postgres(_) => Err(AppError::Internal("Postgres get_by_id not implemented".into())),
+            PurchaseReturnRepository::Postgres(_) => Err(AppError::Internal(
+                "Postgres get_by_id not implemented".into(),
+            )),
         }
     }
 
@@ -390,7 +416,9 @@ impl PurchaseReturnService {
     ) -> AppResult<Vec<PurchaseReturnDetailDto>> {
         match &self.repo {
             PurchaseReturnRepository::SQLite(r) => r.list_purchase_returns(branch_id, limit).await,
-            PurchaseReturnRepository::Postgres(_) => Err(AppError::Internal("Postgres list_purchase_returns not implemented".into())),
+            PurchaseReturnRepository::Postgres(_) => Err(AppError::Internal(
+                "Postgres list_purchase_returns not implemented".into(),
+            )),
         }
     }
 
@@ -400,7 +428,9 @@ impl PurchaseReturnService {
     ) -> AppResult<Vec<PurchaseReturnDetailDto>> {
         match &self.repo {
             PurchaseReturnRepository::SQLite(r) => r.get_by_purchase_id(purchase_id).await,
-            PurchaseReturnRepository::Postgres(_) => Err(AppError::Internal("Postgres get_by_purchase_id not implemented".into())),
+            PurchaseReturnRepository::Postgres(_) => Err(AppError::Internal(
+                "Postgres get_by_purchase_id not implemented".into(),
+            )),
         }
     }
 }
@@ -412,7 +442,7 @@ mod tests {
     use crate::domain::cash::OpenCashSessionDto;
     use crate::domain::organization::DEFAULT_MAIN_BRANCH_ID;
     use crate::domain::purchases::{CompletePurchaseDto, PurchaseItemDto};
-use crate::domain::supplier::CreateSupplierDto;
+    use crate::domain::supplier::CreateSupplierDto;
     use crate::services::cash_service::CashService;
     use crate::services::purchase_service::PurchaseService;
     use crate::services::supplier_service::SupplierService;
@@ -487,11 +517,13 @@ use crate::domain::supplier::CreateSupplierDto;
                  VALUES (?1, 'Samsung Galaxy A55', 'samsung galaxy a55', 'SMA55-256', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000012', 110000, 130000, 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
                 rusqlite::params![prod_id],
             ).unwrap();
-            guard.execute(
-                "INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+            guard
+                .execute(
+                    "INSERT INTO stock (product_id, branch_id, quantity, updated_at)
                  VALUES (?1, ?2, 0, '2026-01-01T00:00:00Z')",
-                rusqlite::params![prod_id, DEFAULT_MAIN_BRANCH_ID],
-            ).unwrap();
+                    rusqlite::params![prod_id, DEFAULT_MAIN_BRANCH_ID],
+                )
+                .unwrap();
         }
 
         (
@@ -561,7 +593,10 @@ use crate::domain::supplier::CreateSupplierDto;
         assert_eq!(stock_mid, 10);
 
         // Check returnable info
-        let returnable_info = pr_svc.get_purchase_returnable_info(&purch_res.purchase.id).await.unwrap();
+        let returnable_info = pr_svc
+            .get_purchase_returnable_info(&purch_res.purchase.id)
+            .await
+            .unwrap();
         assert_eq!(returnable_info.lines.len(), 1);
         assert_eq!(returnable_info.lines[0].original_quantity, 10);
         assert_eq!(returnable_info.lines[0].returnable_quantity, 10);
@@ -574,10 +609,12 @@ use crate::domain::supplier::CreateSupplierDto;
             .create_purchase_return(
                 CreatePurchaseReturnDto {
                     purchase_id: purch_res.purchase.id.clone(),
-                    lines: vec![crate::domain::purchase_return::CreatePurchaseReturnLineDto {
-                        purchase_line_id: purch_line_id.clone(),
-                        quantity: 4,
-                    }],
+                    lines: vec![
+                        crate::domain::purchase_return::CreatePurchaseReturnLineDto {
+                            purchase_line_id: purch_line_id.clone(),
+                            quantity: 4,
+                        },
+                    ],
                     settlement_method: "CASH".to_string(),
                     reason: Some("Defective batch returned to supplier".to_string()),
                     notes: None,
@@ -622,7 +659,10 @@ use crate::domain::supplier::CreateSupplierDto;
         assert_eq!(last_movement.3, 6);
 
         // 5. Cash drawer received 440,000 cash back from supplier (Cash IN)
-        let summary = cash_svc.get_daily_summary(Some(DEFAULT_MAIN_BRANCH_ID), Some("2026-01-01")).await.unwrap();
+        let summary = cash_svc
+            .get_daily_summary(Some(DEFAULT_MAIN_BRANCH_ID), Some("2026-01-01"))
+            .await
+            .unwrap();
         // Opening: 50,000 + Cash In (supplier refund): 440,000 - Cash Out (purchase): 1,100,000
         assert_eq!(summary.total_cash_in, 440000);
         assert_eq!(summary.total_cash_out, 1100000);
@@ -666,10 +706,12 @@ use crate::domain::supplier::CreateSupplierDto;
             .create_purchase_return(
                 CreatePurchaseReturnDto {
                     purchase_id: purch_res.purchase.id.clone(),
-                    lines: vec![crate::domain::purchase_return::CreatePurchaseReturnLineDto {
-                        purchase_line_id: purch_line_id,
-                        quantity: 2,
-                    }],
+                    lines: vec![
+                        crate::domain::purchase_return::CreatePurchaseReturnLineDto {
+                            purchase_line_id: purch_line_id,
+                            quantity: 2,
+                        },
+                    ],
                     settlement_method: "SUPPLIER_CREDIT".to_string(),
                     reason: Some("Returning 2 phones on credit".to_string()),
                     notes: None,
@@ -722,7 +764,8 @@ use crate::domain::supplier::CreateSupplierDto;
             g.execute(
                 "UPDATE stock SET quantity = 1 WHERE product_id = ?1",
                 rusqlite::params![prod_id],
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         // Attempting to return 3 units when stock is only 1 MUST FAIL (prevent negative stock)
@@ -730,10 +773,12 @@ use crate::domain::supplier::CreateSupplierDto;
             .create_purchase_return(
                 CreatePurchaseReturnDto {
                     purchase_id: purch_res.purchase.id.clone(),
-                    lines: vec![crate::domain::purchase_return::CreatePurchaseReturnLineDto {
-                        purchase_line_id: purch_line_id,
-                        quantity: 3,
-                    }],
+                    lines: vec![
+                        crate::domain::purchase_return::CreatePurchaseReturnLineDto {
+                            purchase_line_id: purch_line_id,
+                            quantity: 3,
+                        },
+                    ],
                     settlement_method: "SUPPLIER_CREDIT".to_string(),
                     reason: None,
                     notes: None,

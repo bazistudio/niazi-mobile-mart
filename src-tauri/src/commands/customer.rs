@@ -14,8 +14,12 @@ pub async fn customer_create(
     state: State<'_, AppState>,
     dto: CreateCustomerDto,
 ) -> AppResult<Customer> {
-    if AuthService::require_permission(&state, Some("customers"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    if AuthService::require_permission(&state, Some("customers"), None)
+        .await
+        .is_err()
+        && AuthService::require_permission(&state, Some("pos"), None)
+            .await
+            .is_err()
     {
         AuthService::require_permission(&state, Some("sales"), None).await?;
     }
@@ -28,8 +32,12 @@ pub async fn customer_update(
     id: String,
     dto: UpdateCustomerDto,
 ) -> AppResult<Customer> {
-    if AuthService::require_permission(&state, Some("customers"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    if AuthService::require_permission(&state, Some("customers"), None)
+        .await
+        .is_err()
+        && AuthService::require_permission(&state, Some("pos"), None)
+            .await
+            .is_err()
     {
         AuthService::require_permission(&state, Some("sales"), None).await?;
     }
@@ -37,12 +45,13 @@ pub async fn customer_update(
 }
 
 #[tauri::command]
-pub async fn customer_get_by_id(
-    state: State<'_, AppState>,
-    id: String,
-) -> AppResult<Customer> {
-    if AuthService::require_permission(&state, Some("customers"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+pub async fn customer_get_by_id(state: State<'_, AppState>, id: String) -> AppResult<Customer> {
+    if AuthService::require_permission(&state, Some("customers"), None)
+        .await
+        .is_err()
+        && AuthService::require_permission(&state, Some("pos"), None)
+            .await
+            .is_err()
     {
         AuthService::require_permission(&state, Some("sales"), None).await?;
     }
@@ -54,8 +63,12 @@ pub async fn customer_get_detail(
     state: State<'_, AppState>,
     id: String,
 ) -> AppResult<CustomerDetailDto> {
-    if AuthService::require_permission(&state, Some("customers"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    if AuthService::require_permission(&state, Some("customers"), None)
+        .await
+        .is_err()
+        && AuthService::require_permission(&state, Some("pos"), None)
+            .await
+            .is_err()
     {
         AuthService::require_permission(&state, Some("sales"), None).await?;
     }
@@ -67,8 +80,12 @@ pub async fn customer_list(
     state: State<'_, AppState>,
     filter: Option<CustomerFilter>,
 ) -> AppResult<Vec<CustomerSummaryDto>> {
-    if AuthService::require_permission(&state, Some("customers"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    if AuthService::require_permission(&state, Some("customers"), None)
+        .await
+        .is_err()
+        && AuthService::require_permission(&state, Some("pos"), None)
+            .await
+            .is_err()
     {
         AuthService::require_permission(&state, Some("sales"), None).await?;
     }
@@ -83,8 +100,12 @@ pub async fn customer_search(
     state: State<'_, AppState>,
     query: String,
 ) -> AppResult<Vec<CustomerSummaryDto>> {
-    if AuthService::require_permission(&state, Some("customers"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    if AuthService::require_permission(&state, Some("customers"), None)
+        .await
+        .is_err()
+        && AuthService::require_permission(&state, Some("pos"), None)
+            .await
+            .is_err()
     {
         AuthService::require_permission(&state, Some("sales"), None).await?;
     }
@@ -137,10 +158,7 @@ pub async fn customer_record_payment(
 }
 
 #[tauri::command]
-pub async fn customer_deactivate(
-    state: State<'_, AppState>,
-    id: String,
-) -> AppResult<()> {
+pub async fn customer_deactivate(state: State<'_, AppState>, id: String) -> AppResult<()> {
     AuthService::require_permission(&state, Some("customers"), None).await?;
     state.customer_service.deactivate_customer(&id).await
 }

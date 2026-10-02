@@ -22,19 +22,33 @@ pub async fn product_create(
 
     if dto.name.trim().is_empty() {
         tracing::error!("[product_create] Validation Error: Product name is empty");
-        return Err(crate::errors::AppError::Validation("Product name cannot be empty".to_string()));
+        return Err(crate::errors::AppError::Validation(
+            "Product name cannot be empty".to_string(),
+        ));
     }
     if dto.sku.trim().is_empty() {
         tracing::error!("[product_create] Validation Error: Product SKU is empty");
-        return Err(crate::errors::AppError::Validation("Product SKU cannot be empty".to_string()));
+        return Err(crate::errors::AppError::Validation(
+            "Product SKU cannot be empty".to_string(),
+        ));
     }
     if dto.purchase_price < 0 {
-        tracing::error!("[product_create] Validation Error: Purchase price is negative ({})", dto.purchase_price);
-        return Err(crate::errors::AppError::Validation("Purchase price cannot be negative".to_string()));
+        tracing::error!(
+            "[product_create] Validation Error: Purchase price is negative ({})",
+            dto.purchase_price
+        );
+        return Err(crate::errors::AppError::Validation(
+            "Purchase price cannot be negative".to_string(),
+        ));
     }
     if dto.sale_price < 0 {
-        tracing::error!("[product_create] Validation Error: Sale price is negative ({})", dto.sale_price);
-        return Err(crate::errors::AppError::Validation("Sale price cannot be negative".to_string()));
+        tracing::error!(
+            "[product_create] Validation Error: Sale price is negative ({})",
+            dto.sale_price
+        );
+        return Err(crate::errors::AppError::Validation(
+            "Sale price cannot be negative".to_string(),
+        ));
     }
 
     if let Err(auth_err) = AuthService::require_org_admin(&state).await {
@@ -90,9 +104,15 @@ pub async fn product_update(
 
 #[tauri::command]
 pub async fn product_get(state: State<'_, AppState>, id: String) -> AppResult<Product> {
-    if AuthService::require_permission(&state, Some("products"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("inventory"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    if AuthService::require_permission(&state, Some("products"), None)
+        .await
+        .is_err()
+        && AuthService::require_permission(&state, Some("inventory"), None)
+            .await
+            .is_err()
+        && AuthService::require_permission(&state, Some("pos"), None)
+            .await
+            .is_err()
     {
         AuthService::require_permission(&state, Some("sales"), None).await?;
     }
@@ -101,9 +121,15 @@ pub async fn product_get(state: State<'_, AppState>, id: String) -> AppResult<Pr
 
 #[tauri::command]
 pub async fn product_get_by_sku(state: State<'_, AppState>, sku: String) -> AppResult<Product> {
-    if AuthService::require_permission(&state, Some("products"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("inventory"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    if AuthService::require_permission(&state, Some("products"), None)
+        .await
+        .is_err()
+        && AuthService::require_permission(&state, Some("inventory"), None)
+            .await
+            .is_err()
+        && AuthService::require_permission(&state, Some("pos"), None)
+            .await
+            .is_err()
     {
         AuthService::require_permission(&state, Some("sales"), None).await?;
     }
@@ -115,9 +141,15 @@ pub async fn product_get_by_barcode(
     state: State<'_, AppState>,
     barcode: String,
 ) -> AppResult<Product> {
-    if AuthService::require_permission(&state, Some("products"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("inventory"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    if AuthService::require_permission(&state, Some("products"), None)
+        .await
+        .is_err()
+        && AuthService::require_permission(&state, Some("inventory"), None)
+            .await
+            .is_err()
+        && AuthService::require_permission(&state, Some("pos"), None)
+            .await
+            .is_err()
     {
         AuthService::require_permission(&state, Some("sales"), None).await?;
     }
@@ -129,9 +161,15 @@ pub async fn product_list(
     state: State<'_, AppState>,
     filter: Option<ProductFilter>,
 ) -> AppResult<Vec<Product>> {
-    if AuthService::require_permission(&state, Some("products"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("inventory"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("pos"), None).await.is_err()
+    if AuthService::require_permission(&state, Some("products"), None)
+        .await
+        .is_err()
+        && AuthService::require_permission(&state, Some("inventory"), None)
+            .await
+            .is_err()
+        && AuthService::require_permission(&state, Some("pos"), None)
+            .await
+            .is_err()
     {
         AuthService::require_permission(&state, Some("sales"), None).await?;
     }

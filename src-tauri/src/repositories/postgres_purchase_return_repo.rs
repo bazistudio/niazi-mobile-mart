@@ -3,8 +3,8 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::domain::purchase_return::{
-    CreatePurchaseReturnDto, PurchaseReturn, PurchaseReturnFilterDto, PurchaseReturnLine,
-    PurchaseReturnDetailDto, PurchaseReturnStatus, PurchaseSettlementMethod,
+    CreatePurchaseReturnDto, PurchaseReturn, PurchaseReturnDetailDto, PurchaseReturnFilterDto,
+    PurchaseReturnLine, PurchaseReturnStatus, PurchaseSettlementMethod,
 };
 use crate::errors::{AppError, AppResult};
 
@@ -52,7 +52,7 @@ impl PostgresPurchaseReturnRepository {
                 "INSERT INTO purchase_return_lines (
                     id, return_id, purchase_line_id, product_id, product_name_snapshot,
                     sku_snapshot, unit_cost, quantity, return_amount, created_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
             )
             .bind(&line.id)
             .bind(&line.return_id)
@@ -155,10 +155,16 @@ impl PostgresPurchaseReturnRepository {
         user_id: Option<&str>,
     ) -> AppResult<PurchaseReturnDetailDto> {
         if dto.lines.is_empty() {
-            return Err(AppError::Validation("Return items cannot be empty".to_string()));
+            return Err(AppError::Validation(
+                "Return items cannot be empty".to_string(),
+            ));
         }
 
-        let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
         // Validate purchase
         let pur_row = sqlx::query("SELECT id, purchase_number, branch_id, supplier_id, status FROM purchases WHERE id = $1")
@@ -171,7 +177,9 @@ impl PostgresPurchaseReturnRepository {
             Some(row) => {
                 let status: String = row.try_get(4).unwrap_or_default();
                 if status != "COMPLETED" {
-                    return Err(AppError::Validation(format!("Cannot return items for purchase with status '{status}'")));
+                    return Err(AppError::Validation(format!(
+                        "Cannot return items for purchase with status '{status}'"
+                    )));
                 }
                 (
                     row.try_get::<String, _>(0).unwrap(),
@@ -180,16 +188,22 @@ impl PostgresPurchaseReturnRepository {
                     row.try_get::<String, _>(3).unwrap(),
                 )
             }
-            None => return Err(AppError::NotFound(format!("Original purchase '{}' not found", dto.purchase_id))),
+            None => {
+                return Err(AppError::NotFound(format!(
+                    "Original purchase '{}' not found",
+                    dto.purchase_id
+                )))
+            }
         };
 
         // Supplier name
-        let supplier_name: Option<String> = sqlx::query_as("SELECT name FROM suppliers WHERE id = $1")
-            .bind(&supplier_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?
-            .map(|r: (String,)| r.0);
+        let supplier_name: Option<String> =
+            sqlx::query_as("SELECT name FROM suppliers WHERE id = $1")
+                .bind(&supplier_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?
+                .map(|r: (String,)| r.0);
 
         struct PreparedReturnLine {
             purchase_line_id: String,
@@ -205,7 +219,9 @@ impl PostgresPurchaseReturnRepository {
 
         for item in &dto.lines {
             if item.quantity <= 0 {
-                return Err(AppError::Validation("Return quantity must be > 0".to_string()));
+                return Err(AppError::Validation(
+                    "Return quantity must be > 0".to_string(),
+                ));
             }
 
             let line_row = sqlx::query("SELECT id, product_id, product_name_snapshot, sku_snapshot, unit_cost, quantity FROM purchase_lines WHERE id = $1 AND purchase_id = $2")
@@ -217,7 +233,12 @@ impl PostgresPurchaseReturnRepository {
 
             let line = match line_row {
                 Some(r) => r,
-                None => return Err(AppError::NotFound(format!("Purchase line '{}' not found for purchase", item.purchase_line_id))),
+                None => {
+                    return Err(AppError::NotFound(format!(
+                        "Purchase line '{}' not found for purchase",
+                        item.purchase_line_id
+                    )))
+                }
             };
 
             let orig_qty: i64 = line.try_get(5).unwrap();
@@ -233,7 +254,9 @@ impl PostgresPurchaseReturnRepository {
             if item.quantity > max_returnable {
                 return Err(AppError::Validation(format!(
                     "Cannot return {} units of product '{}'. Maximum returnable is {}",
-                    item.quantity, line.try_get::<String, _>(2).unwrap(), max_returnable
+                    item.quantity,
+                    line.try_get::<String, _>(2).unwrap(),
+                    max_returnable
                 )));
             }
 
@@ -260,10 +283,11 @@ impl PostgresPurchaseReturnRepository {
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
-        let ret_val: (i64,) = sqlx::query_as("SELECT value FROM counters WHERE name = 'purchase_return_number'")
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let ret_val: (i64,) =
+            sqlx::query_as("SELECT value FROM counters WHERE name = 'purchase_return_number'")
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
 
         let return_number = format!("PR-{:06}", ret_val.0);
         let return_id = Uuid::new_v4().to_string();
@@ -345,13 +369,15 @@ impl PostgresPurchaseReturnRepository {
             .map_err(|e| AppError::Database(e.to_string()))?;
 
             // Deduct stock
-            let current_stock: (i64,) = sqlx::query_as("SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2")
-                .bind(&line.product_id)
-                .bind(&branch_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(|e| AppError::Database(e.to_string()))?
-                .unwrap_or((0,));
+            let current_stock: (i64,) = sqlx::query_as(
+                "SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2",
+            )
+            .bind(&line.product_id)
+            .bind(&branch_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .unwrap_or((0,));
 
             if current_stock.0 < line.return_quantity {
                 return Err(AppError::Validation(format!(
@@ -459,14 +485,20 @@ impl PostgresPurchaseReturnRepository {
             .map_err(|e| AppError::Database(e.to_string()))?;
         }
 
-        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok(PurchaseReturnDetailDto {
             purchase_return,
             lines: inserted_lines,
             purchase_number: purchase_number,
             supplier_payable_after: supplier_balance_after,
-            cash_settled: if settlement_method == PurchaseSettlementMethod::Cash { Some(total_return_amount) } else { None },
+            cash_settled: if settlement_method == PurchaseSettlementMethod::Cash {
+                Some(total_return_amount)
+            } else {
+                None
+            },
         })
     }
 
@@ -539,17 +571,31 @@ impl PostgresPurchaseReturnRepository {
     }
 
     fn map_return_row(row: &sqlx::postgres::PgRow) -> AppResult<PurchaseReturn> {
-        let settlement_method_str: String = row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?;
-        let status_str: String = row.try_get(8).map_err(|e| AppError::Database(e.to_string()))?;
+        let settlement_method_str: String = row
+            .try_get(7)
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let status_str: String = row
+            .try_get(8)
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok(PurchaseReturn {
-            id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-            return_number: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-            purchase_id: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
-            branch_id: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
+            id: row
+                .try_get(0)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            return_number: row
+                .try_get(1)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            purchase_id: row
+                .try_get(2)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            branch_id: row
+                .try_get(3)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             supplier_id: row.try_get(4).unwrap_or_default(),
             supplier_name_snapshot: row.try_get(5).unwrap_or(None),
-            total_amount: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+            total_amount: row
+                .try_get(6)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             settlement_method: PurchaseSettlementMethod::from_str(&settlement_method_str)
                 .map_err(|e| AppError::Database(e.to_string()))?,
             status: PurchaseReturnStatus::from_str(&status_str)
@@ -557,8 +603,12 @@ impl PostgresPurchaseReturnRepository {
             reason: row.try_get(9).unwrap_or(None),
             notes: row.try_get(10).unwrap_or(None),
             performed_by: row.try_get(11).unwrap_or(None),
-            created_at: row.try_get(12).map_err(|e| AppError::Database(e.to_string()))?,
-            updated_at: row.try_get(13).map_err(|e| AppError::Database(e.to_string()))?,
+            created_at: row
+                .try_get(12)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            updated_at: row
+                .try_get(13)
+                .map_err(|e| AppError::Database(e.to_string()))?,
         })
     }
 }

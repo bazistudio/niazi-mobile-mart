@@ -1,6 +1,6 @@
-use std::time::{SystemTime, UNIX_EPOCH};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::domain::access_control::StaffAccessProfile;
 use crate::domain::identity::RequestIdentity;
@@ -38,7 +38,10 @@ const EMBEDDED_JWT_PUBLIC_KEY: &str = include_str!("jwt_public_key.pem");
 
 /// Returns the embedded public key if the file actually contains a PEM public key.
 fn embedded_public_key() -> Option<String> {
-    if EMBEDDED_JWT_PUBLIC_KEY.trim().starts_with("-----BEGIN PUBLIC KEY-----") {
+    if EMBEDDED_JWT_PUBLIC_KEY
+        .trim()
+        .starts_with("-----BEGIN PUBLIC KEY-----")
+    {
         Some(EMBEDDED_JWT_PUBLIC_KEY.trim().to_string())
     } else {
         None
@@ -88,7 +91,10 @@ impl TokenManager {
             }
         }
 
-        Self { private_key, public_key }
+        Self {
+            private_key,
+            public_key,
+        }
     }
 
     /// True when this manager holds a private key and can sign tokens (server only).
@@ -111,7 +117,11 @@ impl TokenManager {
     }
 
     /// Generates a signed JWT Bearer token for an authenticated user with branch context.
-    pub async fn create_token_with_branch(&self, user: SanitizedUser, branch_id: Option<String>) -> String {
+    pub async fn create_token_with_branch(
+        &self,
+        user: SanitizedUser,
+        branch_id: Option<String>,
+    ) -> String {
         let now = current_time_secs();
         let exp = now + 86400; // 24 hours validity
 
@@ -128,7 +138,13 @@ impl TokenManager {
         encode(
             &Header::new(jsonwebtoken::Algorithm::RS256),
             &claims,
-            &EncodingKey::from_rsa_pem(self.private_key.as_ref().expect("Private key missing").as_bytes()).unwrap(),
+            &EncodingKey::from_rsa_pem(
+                self.private_key
+                    .as_ref()
+                    .expect("Private key missing")
+                    .as_bytes(),
+            )
+            .unwrap(),
         )
         .expect("JWT encoding should not fail with valid secret and claims")
     }
@@ -151,16 +167,20 @@ impl TokenManager {
             ));
         }
 
-        let decoding_key = DecodingKey::from_rsa_pem(self.public_key.as_bytes()).map_err(|_| AppError::Unauthorized("Invalid public key configuration".to_string()))?;
+        let decoding_key = DecodingKey::from_rsa_pem(self.public_key.as_bytes())
+            .map_err(|_| AppError::Unauthorized("Invalid public key configuration".to_string()))?;
         let validation = Validation::new(jsonwebtoken::Algorithm::RS256);
 
-        let token_data = decode::<Claims>(clean_token, &decoding_key, &validation).map_err(|e| {
+        let token_data =
+            decode::<Claims>(clean_token, &decoding_key, &validation).map_err(|e| {
                 use jsonwebtoken::errors::ErrorKind;
                 match e.kind() {
-                    ErrorKind::ExpiredSignature => {
-                        AppError::Unauthorized("Authentication token expired. Please log in again.".to_string())
-                    }
-                    _ => AppError::Unauthorized("Invalid or corrupted authentication token".to_string()),
+                    ErrorKind::ExpiredSignature => AppError::Unauthorized(
+                        "Authentication token expired. Please log in again.".to_string(),
+                    ),
+                    _ => AppError::Unauthorized(
+                        "Invalid or corrupted authentication token".to_string(),
+                    ),
                 }
             })?;
 
@@ -220,9 +240,15 @@ mod tests {
     fn test_no_private_key_material_embedded() {
         let source = include_str!("token_service.rs");
         let marker = ["BEGIN", "PRIVATE", "KEY"].join(" ");
-        assert!(!source.contains(&marker), "token_service.rs must not embed a private key");
+        assert!(
+            !source.contains(&marker),
+            "token_service.rs must not embed a private key"
+        );
         let embedded = include_str!("jwt_public_key.pem");
-        assert!(!embedded.contains("PRIVATE"), "embedded key file must hold a public key only");
+        assert!(
+            !embedded.contains("PRIVATE"),
+            "embedded key file must hold a public key only"
+        );
     }
 
     #[test]
@@ -264,10 +290,14 @@ mod tests {
         let other = rsa::RsaPrivateKey::new(&mut rng, 2048).unwrap();
         let other_public = {
             use rsa::pkcs8::{EncodePublicKey, LineEnding};
-            rsa::RsaPublicKey::from(&other).to_public_key_pem(LineEnding::LF).unwrap()
+            rsa::RsaPublicKey::from(&other)
+                .to_public_key_pem(LineEnding::LF)
+                .unwrap()
         };
         let verifier = TokenManager::with_keys(None, other_public);
-        assert!(matches!(verifier.resolve_identity(&token).await, Err(AppError::Unauthorized(_))));
+        assert!(matches!(
+            verifier.resolve_identity(&token).await,
+            Err(AppError::Unauthorized(_))
+        ));
     }
 }
-

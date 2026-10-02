@@ -192,7 +192,6 @@ impl StaffAccessProfile {
         }
     }
 
-
     /// Creates repair mechanic access profile focused on device service jobs
     pub fn repair_mechanic_default() -> Self {
         Self {
@@ -252,28 +251,50 @@ impl StaffAccessProfile {
                 return true;
             }
             // Canonical mapping: "pos.use" matches "pos", "inventory.view" matches "inventory"
-            if clean.starts_with(&format!("{p_lower}.")) || p_lower.starts_with(&format!("{clean}.")) {
+            if clean.starts_with(&format!("{p_lower}."))
+                || p_lower.starts_with(&format!("{clean}."))
+            {
                 return true;
             }
             // Canonical domain aliases for parties
             if (p_lower == "customers" || p_lower == "suppliers" || p_lower == "parties")
-                && (clean == "parties" || clean == "customers" || clean == "suppliers" || clean.starts_with("parties."))
+                && (clean == "parties"
+                    || clean == "customers"
+                    || clean == "suppliers"
+                    || clean.starts_with("parties."))
             {
                 return true;
             }
             if (clean == "customers" || clean == "suppliers" || clean == "parties")
-                && (p_lower == "parties" || p_lower == "customers" || p_lower == "suppliers" || p_lower.starts_with("parties."))
+                && (p_lower == "parties"
+                    || p_lower == "customers"
+                    || p_lower == "suppliers"
+                    || p_lower.starts_with("parties."))
             {
                 return true;
             }
             // Canonical aliases for finance / cash management
-            if (p_lower == "cash" || p_lower == "cash_management" || p_lower == "business-ledger" || p_lower == "finance")
-                && (clean == "finance" || clean == "cash" || clean == "cash_management" || clean == "business-ledger" || clean.starts_with("finance."))
+            if (p_lower == "cash"
+                || p_lower == "cash_management"
+                || p_lower == "business-ledger"
+                || p_lower == "finance")
+                && (clean == "finance"
+                    || clean == "cash"
+                    || clean == "cash_management"
+                    || clean == "business-ledger"
+                    || clean.starts_with("finance."))
             {
                 return true;
             }
-            if (clean == "cash" || clean == "cash_management" || clean == "business-ledger" || clean == "finance")
-                && (p_lower == "finance" || p_lower == "cash" || p_lower == "cash_management" || p_lower == "business-ledger" || p_lower.starts_with("finance."))
+            if (clean == "cash"
+                || clean == "cash_management"
+                || clean == "business-ledger"
+                || clean == "finance")
+                && (p_lower == "finance"
+                    || p_lower == "cash"
+                    || p_lower == "cash_management"
+                    || p_lower == "business-ledger"
+                    || p_lower.starts_with("finance."))
             {
                 return true;
             }
@@ -293,28 +314,54 @@ impl StaffAccessProfile {
             if a_lower == "pos:sale" && (clean == "pos.use" || clean == "pos:sale") {
                 return true;
             }
-            if a_lower == "pos:refund" && (clean == "pos.void_sale" || clean == "sales.manage" || clean == "pos:refund") {
+            if a_lower == "pos:refund"
+                && (clean == "pos.void_sale" || clean == "sales.manage" || clean == "pos:refund")
+            {
                 return true;
             }
-            if a_lower == "stock:adjust" && (clean == "inventory.edit" || clean == "inventory:adjust" || clean == "stock:adjust") {
+            if a_lower == "stock:adjust"
+                && (clean == "inventory.edit"
+                    || clean == "inventory:adjust"
+                    || clean == "stock:adjust")
+            {
                 return true;
             }
-            if a_lower == "stock:transfer" && (clean == "inventory.edit" || clean == "inventory:transfer" || clean == "stock:transfer") {
+            if a_lower == "stock:transfer"
+                && (clean == "inventory.edit"
+                    || clean == "inventory:transfer"
+                    || clean == "stock:transfer")
+            {
                 return true;
             }
-            if (a_lower == "product:create" || a_lower == "product:edit") && (clean == "products.manage" || clean == "inventory.edit" || clean == "inventory:write") {
+            if (a_lower == "product:create" || a_lower == "product:edit")
+                && (clean == "products.manage"
+                    || clean == "inventory.edit"
+                    || clean == "inventory:write")
+            {
                 return true;
             }
-            if a_lower == "inventory:read" && (clean == "inventory.view" || clean == "products.view" || clean == "inventory:read") {
+            if a_lower == "inventory:read"
+                && (clean == "inventory.view"
+                    || clean == "products.view"
+                    || clean == "inventory:read")
+            {
                 return true;
             }
-            if a_lower == "inventory:write" && (clean == "inventory.edit" || clean == "products.manage" || clean == "inventory:write") {
+            if a_lower == "inventory:write"
+                && (clean == "inventory.edit"
+                    || clean == "products.manage"
+                    || clean == "inventory:write")
+            {
                 return true;
             }
-            if a_lower == "inventory:adjust" && (clean == "inventory.edit" || clean == "inventory:adjust") {
+            if a_lower == "inventory:adjust"
+                && (clean == "inventory.edit" || clean == "inventory:adjust")
+            {
                 return true;
             }
-            if a_lower == "inventory:transfer" && (clean == "inventory.edit" || clean == "inventory:transfer") {
+            if a_lower == "inventory:transfer"
+                && (clean == "inventory.edit" || clean == "inventory:transfer")
+            {
                 return true;
             }
             false
@@ -417,4 +464,3 @@ mod tests {
         assert!(!cashier.has_page_access("inventory"));
     }
 }
-

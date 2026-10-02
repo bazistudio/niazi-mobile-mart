@@ -23,7 +23,10 @@ impl SQLiteCashRepository {
     // ──────────────────────────────────────────────────────────────────────────
 
     /// Returns the active OPEN session for a branch, if any
-    pub fn get_open_session_in_tx(conn: &Connection, branch_id: &str) -> DbResult<Option<CashSession>> {
+    pub fn get_open_session_in_tx(
+        conn: &Connection,
+        branch_id: &str,
+    ) -> DbResult<Option<CashSession>> {
         let mut stmt = conn
             .prepare(
                 "SELECT s.id, s.branch_id, b.name, s.business_date, s.opening_cash,
@@ -36,24 +39,35 @@ impl SQLiteCashRepository {
                  LEFT JOIN users u2 ON s.closed_by = u2.id
                  WHERE s.branch_id = ?1 AND s.status = 'OPEN'",
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to prepare get_open_session query: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to prepare get_open_session query: {e}"))
+            })?;
 
         let mut rows = stmt
             .query_map(params![branch_id], Self::map_session_row)
-            .map_err(|e| DbError::QueryError(format!("Failed to execute get_open_session query: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to execute get_open_session query: {e}"))
+            })?;
 
         match rows.next() {
             Some(Ok(s)) => Ok(Some(s)),
-            Some(Err(e)) => Err(DbError::QueryError(format!("Error reading session row: {e}"))),
+            Some(Err(e)) => Err(DbError::QueryError(format!(
+                "Error reading session row: {e}"
+            ))),
             None => Ok(None),
         }
     }
 
     /// Returns just the ID of the active OPEN session for a branch, if any
-    pub fn get_open_session_id_in_tx(conn: &Connection, branch_id: &str) -> DbResult<Option<String>> {
+    pub fn get_open_session_id_in_tx(
+        conn: &Connection,
+        branch_id: &str,
+    ) -> DbResult<Option<String>> {
         let mut stmt = conn
             .prepare("SELECT id FROM cash_sessions WHERE branch_id = ?1 AND status = 'OPEN'")
-            .map_err(|e| DbError::QueryError(format!("Failed to prepare get_open_session_id: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to prepare get_open_session_id: {e}"))
+            })?;
 
         let mut rows = stmt
             .query_map(params![branch_id], |r| r.get::<_, String>(0))
@@ -61,7 +75,9 @@ impl SQLiteCashRepository {
 
         match rows.next() {
             Some(Ok(id)) => Ok(Some(id)),
-            Some(Err(e)) => Err(DbError::QueryError(format!("Error reading session id: {e}"))),
+            Some(Err(e)) => Err(DbError::QueryError(format!(
+                "Error reading session id: {e}"
+            ))),
             None => Ok(None),
         }
     }
@@ -94,7 +110,9 @@ impl SQLiteCashRepository {
             if let rusqlite::Error::SqliteFailure(err, msg) = &e {
                 if err.code == rusqlite::ErrorCode::ConstraintViolation {
                     let msg_str = msg.as_deref().unwrap_or("");
-                    if msg_str.contains("idx_one_open_session_per_branch") || msg_str.contains("UNIQUE") {
+                    if msg_str.contains("idx_one_open_session_per_branch")
+                        || msg_str.contains("UNIQUE")
+                    {
                         return DbError::ConstraintViolation(format!(
                             "An open cash session already exists for branch '{}'",
                             s.branch_id
@@ -122,7 +140,9 @@ impl SQLiteCashRepository {
                  LEFT JOIN users u2 ON s.closed_by = u2.id
                  WHERE s.id = ?1",
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to prepare get_session_by_id query: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to prepare get_session_by_id query: {e}"))
+            })?;
 
         let mut rows = stmt
             .query_map(params![id], Self::map_session_row)
@@ -285,7 +305,9 @@ impl SQLiteCashRepository {
         }
 
         let expected_closing_cash = session.opening_cash + total_cash_in - total_cash_out;
-        let variance = session.actual_closing_cash.map(|actual| actual - expected_closing_cash);
+        let variance = session
+            .actual_closing_cash
+            .map(|actual| actual - expected_closing_cash);
 
         Ok(DailyCashSummaryDto {
             business_date: session.business_date,
@@ -374,7 +396,10 @@ impl SQLiteCashRepository {
         Ok(list)
     }
 
-    pub async fn list_movements(&self, filter: &CashMovementFilterDto) -> AppResult<Vec<CashMovement>> {
+    pub async fn list_movements(
+        &self,
+        filter: &CashMovementFilterDto,
+    ) -> AppResult<Vec<CashMovement>> {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
 
@@ -435,9 +460,11 @@ impl SQLiteCashRepository {
         let rows = stmt
             .query_map(rusqlite_params.as_slice(), |r| {
                 let m_type_str: String = r.get(3)?;
-                let m_type = CashMovementType::from_str(&m_type_str).unwrap_or(CashMovementType::CashAdjustment);
+                let m_type = CashMovementType::from_str(&m_type_str)
+                    .unwrap_or(CashMovementType::CashAdjustment);
                 let dir_str: String = r.get(4)?;
-                let dir = CashMovementDirection::from_str(&dir_str).unwrap_or(CashMovementDirection::In);
+                let dir =
+                    CashMovementDirection::from_str(&dir_str).unwrap_or(CashMovementDirection::In);
 
                 Ok(CashMovement {
                     id: r.get(0)?,
@@ -481,9 +508,8 @@ impl SQLiteCashRepository {
             )
             .map_err(|e| AppError::Database(format!("Failed to prepare session lookup: {e}")))?;
 
-        let session_id_opt: Option<String> = stmt
-            .query_row(params![branch_id, date], |r| r.get(0))
-            .ok();
+        let session_id_opt: Option<String> =
+            stmt.query_row(params![branch_id, date], |r| r.get(0)).ok();
 
         if let Some(session_id) = session_id_opt {
             return Ok(Self::calculate_session_summary_in_tx(&guard, &session_id)?);

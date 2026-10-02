@@ -61,8 +61,8 @@ pub const KNOWN_SERVER_EVENT_TYPES: &[&str] = &[
     "SUPPLIER_PAYMENT_RECORDED",
     "CUSTOMER_CREATED",
     "CUSTOMER_UPDATED",
-    "CUSTOMER_PAYMENT_RECORDED", // SYNC-B2
-    "INVENTORY_OPERATION_RECORDED", // SYNC-H1
+    "CUSTOMER_PAYMENT_RECORDED",                // SYNC-B2
+    "INVENTORY_OPERATION_RECORDED",             // SYNC-H1
     crate::domain::party::PARTY_UPSERTED_EVENT, // "PARTY_UPSERTED"
     // SYNC-H2: catalog master data direct synchronization
     "CATEGORY_CREATED",
@@ -175,7 +175,12 @@ mod tests {
 
         // 1. Valid Auth + Matching Org + Matching Branch -> OK
         assert_eq!(valid_item.organization_id, identity.organization_id);
-        assert!(identity.validate_context(Some(&valid_item.organization_id), Some(&valid_item.branch_id)).is_ok());
+        assert!(identity
+            .validate_context(
+                Some(&valid_item.organization_id),
+                Some(&valid_item.branch_id)
+            )
+            .is_ok());
 
         // 2. Cross-Organization Event -> Prohibited
         let mut cross_org_item = valid_item.clone();
@@ -185,9 +190,15 @@ mod tests {
         // 3. Unauthorized Branch Event -> Prohibited
         let mut cross_branch_item = valid_item.clone();
         cross_branch_item.branch_id = "unauthorized_branch_2".to_string();
-        let branch_res = identity.validate_context(Some(&cross_branch_item.organization_id), Some(&cross_branch_item.branch_id));
+        let branch_res = identity.validate_context(
+            Some(&cross_branch_item.organization_id),
+            Some(&cross_branch_item.branch_id),
+        );
         assert!(branch_res.is_err());
-        assert!(branch_res.unwrap_err().to_string().contains("Unauthorized cross-branch access prohibited"));
+        assert!(branch_res
+            .unwrap_err()
+            .to_string()
+            .contains("Unauthorized cross-branch access prohibited"));
     }
 
     // -------------------------------------------------------------------------
@@ -222,8 +233,8 @@ mod tests {
             "SUPPLIER_PAYMENT_RECORDED",
             "CUSTOMER_CREATED",
             "CUSTOMER_UPDATED",
-            "CUSTOMER_PAYMENT_RECORDED",      // SYNC-B2
-            "INVENTORY_OPERATION_RECORDED",   // SYNC-H1
+            "CUSTOMER_PAYMENT_RECORDED",    // SYNC-B2
+            "INVENTORY_OPERATION_RECORDED", // SYNC-H1
             "PARTY_UPSERTED",
             // SYNC-H2: catalog master data direct synchronization
             "CATEGORY_CREATED",
@@ -294,9 +305,8 @@ mod tests {
     fn test_sync_b1_unknown_event_cannot_reach_synced_path() {
         // Structural: any type not in the registry returns false for the guard
         // expression used in server.rs.
-        let guard_passes = |event_type: &str| -> bool {
-            KNOWN_SERVER_EVENT_TYPES.contains(&event_type)
-        };
+        let guard_passes =
+            |event_type: &str| -> bool { KNOWN_SERVER_EVENT_TYPES.contains(&event_type) };
 
         // Known types pass the guard (would proceed to audit + SYNCED).
         assert!(guard_passes("SALE_CREATED"));
@@ -307,7 +317,7 @@ mod tests {
         assert!(!guard_passes("UNKNOWN_TEST_EVENT"));
         // Old candidate names that were never adopted — must remain absent.
         assert!(!guard_passes("INVENTORY_ADJUSTED")); // rejected name; SYNC-H1 uses INVENTORY_OPERATION_RECORDED
-        assert!(!guard_passes("STOCK_TRANSFER"));     // rejected name; SYNC-H1 uses INVENTORY_OPERATION_RECORDED
+        assert!(!guard_passes("STOCK_TRANSFER")); // rejected name; SYNC-H1 uses INVENTORY_OPERATION_RECORDED
         assert!(!guard_passes(""));
     }
 
@@ -372,9 +382,8 @@ mod tests {
     /// SYNC-B2 — Structural: guard passes for CUSTOMER_PAYMENT_RECORDED.
     #[test]
     fn test_sync_b2_guard_passes_for_customer_payment() {
-        let guard_passes = |event_type: &str| -> bool {
-            KNOWN_SERVER_EVENT_TYPES.contains(&event_type)
-        };
+        let guard_passes =
+            |event_type: &str| -> bool { KNOWN_SERVER_EVENT_TYPES.contains(&event_type) };
         assert!(
             guard_passes("CUSTOMER_PAYMENT_RECORDED"),
             "CUSTOMER_PAYMENT_RECORDED must pass the SYNC-B1 registry guard \
@@ -488,9 +497,8 @@ mod tests {
     /// SYNC-H1 Test 2 — Guard passes for INVENTORY_OPERATION_RECORDED.
     #[test]
     fn test_sync_h1_guard_passes_for_inventory_operation() {
-        let guard_passes = |event_type: &str| -> bool {
-            KNOWN_SERVER_EVENT_TYPES.contains(&event_type)
-        };
+        let guard_passes =
+            |event_type: &str| -> bool { KNOWN_SERVER_EVENT_TYPES.contains(&event_type) };
         assert!(
             guard_passes("INVENTORY_OPERATION_RECORDED"),
             "INVENTORY_OPERATION_RECORDED must pass the SYNC-B1 registry guard \
@@ -518,7 +526,8 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".to_string(),
         };
 
-        let json = serde_json::to_string(&dto).expect("InventoryOperationSyncEventDto must serialise");
+        let json =
+            serde_json::to_string(&dto).expect("InventoryOperationSyncEventDto must serialise");
         assert!(json.contains("op_abc123"));
         assert!(json.contains("INCREASE"));
 
@@ -544,14 +553,15 @@ mod tests {
             product_id: "prod_y".to_string(),
             branch_id: "branch_main".to_string(),
             to_branch_id: None,
-            quantity: 10,            // absolute delta |target - previous|
+            quantity: 10,              // absolute delta |target - previous|
             target_quantity: Some(90), // authoritative resulting stock
             reason: "Annual stocktake correction".to_string().into(),
             performed_by: None,
             created_at: "2026-03-15T08:00:00Z".to_string(),
         };
 
-        let json = serde_json::to_string(&dto).expect("InventoryOperationSyncEventDto must serialise");
+        let json =
+            serde_json::to_string(&dto).expect("InventoryOperationSyncEventDto must serialise");
         assert!(json.contains("ADJUST"));
         assert!(json.contains("op_adj001"));
 
@@ -582,7 +592,8 @@ mod tests {
             created_at: "2026-06-01T10:00:00Z".to_string(),
         };
 
-        let json = serde_json::to_string(&dto).expect("InventoryOperationSyncEventDto must serialise");
+        let json =
+            serde_json::to_string(&dto).expect("InventoryOperationSyncEventDto must serialise");
         assert!(json.contains("TRANSFER"));
         assert!(json.contains("branch_second"));
 
@@ -671,15 +682,32 @@ mod tests {
     /// SYNC-H2 Test 2 — Guard passes for all 6 catalog event types.
     #[test]
     fn test_sync_h2_guard_passes_for_catalog_events() {
-        let guard_passes = |event_type: &str| -> bool {
-            KNOWN_SERVER_EVENT_TYPES.contains(&event_type)
-        };
-        assert!(guard_passes("CATEGORY_CREATED"), "CATEGORY_CREATED must pass the SYNC-B1 registry guard");
-        assert!(guard_passes("BRAND_CREATED"), "BRAND_CREATED must pass the SYNC-B1 registry guard");
-        assert!(guard_passes("UNIT_CREATED"), "UNIT_CREATED must pass the SYNC-B1 registry guard");
-        assert!(guard_passes("COMPANY_CREATED"), "COMPANY_CREATED must pass the SYNC-B1 registry guard");
-        assert!(guard_passes("QUALITY_CREATED"), "QUALITY_CREATED must pass the SYNC-B1 registry guard");
-        assert!(guard_passes("COLOR_CREATED"), "COLOR_CREATED must pass the SYNC-B1 registry guard");
+        let guard_passes =
+            |event_type: &str| -> bool { KNOWN_SERVER_EVENT_TYPES.contains(&event_type) };
+        assert!(
+            guard_passes("CATEGORY_CREATED"),
+            "CATEGORY_CREATED must pass the SYNC-B1 registry guard"
+        );
+        assert!(
+            guard_passes("BRAND_CREATED"),
+            "BRAND_CREATED must pass the SYNC-B1 registry guard"
+        );
+        assert!(
+            guard_passes("UNIT_CREATED"),
+            "UNIT_CREATED must pass the SYNC-B1 registry guard"
+        );
+        assert!(
+            guard_passes("COMPANY_CREATED"),
+            "COMPANY_CREATED must pass the SYNC-B1 registry guard"
+        );
+        assert!(
+            guard_passes("QUALITY_CREATED"),
+            "QUALITY_CREATED must pass the SYNC-B1 registry guard"
+        );
+        assert!(
+            guard_passes("COLOR_CREATED"),
+            "COLOR_CREATED must pass the SYNC-B1 registry guard"
+        );
     }
 
     /// SYNC-H2 Test 3 — Catalog domain structs serialise correctly.
@@ -704,7 +732,8 @@ mod tests {
         let cat_json = serde_json::to_string(&cat).expect("Category must serialise");
         assert!(cat_json.contains("cat_test_001"));
         assert!(cat_json.contains("CAT-PHONE"));
-        let cat_decoded: Category = serde_json::from_str(&cat_json).expect("Category must deserialise");
+        let cat_decoded: Category =
+            serde_json::from_str(&cat_json).expect("Category must deserialise");
         assert_eq!(cat_decoded.id, cat.id);
         assert_eq!(cat_decoded.code, cat.code);
         assert_eq!(cat_decoded.is_active, true);
@@ -720,7 +749,8 @@ mod tests {
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
         let brand_json = serde_json::to_string(&brand).expect("Brand must serialise");
-        let brand_decoded: Brand = serde_json::from_str(&brand_json).expect("Brand must deserialise");
+        let brand_decoded: Brand =
+            serde_json::from_str(&brand_json).expect("Brand must deserialise");
         assert_eq!(brand_decoded.id, brand.id);
         assert_eq!(brand_decoded.code, "BRD-APPLE");
 
@@ -998,7 +1028,14 @@ mod tests {
         let simulate_processing_pass = |rows_from_catalog_insert: u64| -> (bool, &'static str) {
             let catalog_created = rows_from_catalog_insert > 0;
             let change_log_emitted = catalog_created;
-            (change_log_emitted, if catalog_created { "CATEGORY_CREATED emitted" } else { "no duplicate emitted" })
+            (
+                change_log_emitted,
+                if catalog_created {
+                    "CATEGORY_CREATED emitted"
+                } else {
+                    "no duplicate emitted"
+                },
+            )
         };
 
         let (emitted_pass1, label1) = simulate_processing_pass(1); // first delivery: missing → created
@@ -1102,8 +1139,7 @@ mod tests {
 
         // The auto-healed entity.id must match the product's stored foreign key
         assert_eq!(
-            auto_healed_entity.id,
-            product_stored_category_id,
+            auto_healed_entity.id, product_stored_category_id,
             "SYNC-H3: auto-healed category UUID must equal the UUID stored in the \
              product row — no UUID substitution is permitted"
         );
@@ -1158,10 +1194,14 @@ mod tests {
     fn test_h6_first_dependency_failure_remains_retryable() {
         // Simulates: attempt_count was 0, dependency failure increments to 1.
         let item = make_item(1, SyncQueueStatus::Pending);
-        assert!(item.is_eligible_for_retry(chrono::Utc::now()),
-            "item with attempt_count=1 should still be eligible for retry");
-        assert!(item.attempt_count < MAX_RETRIES,
-            "attempt_count must be below MAX_RETRIES to remain retryable");
+        assert!(
+            item.is_eligible_for_retry(chrono::Utc::now()),
+            "item with attempt_count=1 should still be eligible for retry"
+        );
+        assert!(
+            item.attempt_count < MAX_RETRIES,
+            "attempt_count must be below MAX_RETRIES to remain retryable"
+        );
     }
 
     /// H6-3: At MAX_RETRIES the item must no longer be eligible (it should be
@@ -1169,8 +1209,10 @@ mod tests {
     #[test]
     fn test_h6_dependency_failure_at_limit_is_terminal() {
         let item = make_item(MAX_RETRIES, SyncQueueStatus::Pending);
-        assert!(!item.is_eligible_for_retry(chrono::Utc::now()),
-            "item at attempt_count=MAX_RETRIES must NOT be eligible for retry");
+        assert!(
+            !item.is_eligible_for_retry(chrono::Utc::now()),
+            "item at attempt_count=MAX_RETRIES must NOT be eligible for retry"
+        );
     }
 
     /// H6-4: Dependency failure must NOT double-increment.
@@ -1182,7 +1224,10 @@ mod tests {
         let base = 2i32;
         // One dependency failure → expected = 3.
         let after_one = base + 1;
-        assert_eq!(after_one, 3, "one dependency failure on attempt_count=2 must yield 3, not 4");
+        assert_eq!(
+            after_one, 3,
+            "one dependency failure on attempt_count=2 must yield 3, not 4"
+        );
         // Confirm that's still below MAX_RETRIES.
         assert!(after_one < MAX_RETRIES);
     }
@@ -1199,8 +1244,14 @@ mod tests {
                 break;
             }
         }
-        assert!(became_terminal, "repeated dependency failures must eventually reach MAX_RETRIES terminal");
-        assert_eq!(attempt_count, MAX_RETRIES, "should reach terminal at exactly MAX_RETRIES");
+        assert!(
+            became_terminal,
+            "repeated dependency failures must eventually reach MAX_RETRIES terminal"
+        );
+        assert_eq!(
+            attempt_count, MAX_RETRIES,
+            "should reach terminal at exactly MAX_RETRIES"
+        );
     }
 
     /// H6-6: DEPENDENCY_NOT_FOUND error text is preserved after the fix.
@@ -1209,11 +1260,15 @@ mod tests {
     fn test_h6_dependency_failure_preserves_error_classification() {
         let dep_error = "422 DEPENDENCY_NOT_FOUND: party abc not found";
         // The error string must still identify it as a dependency failure.
-        assert!(dep_error.contains("DEPENDENCY_NOT_FOUND"),
-            "error text must preserve DEPENDENCY_NOT_FOUND classification");
+        assert!(
+            dep_error.contains("DEPENDENCY_NOT_FOUND"),
+            "error text must preserve DEPENDENCY_NOT_FOUND classification"
+        );
         // Must NOT be classified as a network failure.
-        assert!(!dep_error.contains("Server unreachable"),
-            "DEPENDENCY_NOT_FOUND must not be confused with network failure");
+        assert!(
+            !dep_error.contains("Server unreachable"),
+            "DEPENDENCY_NOT_FOUND must not be confused with network failure"
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -1225,16 +1280,20 @@ mod tests {
     #[test]
     fn test_h7_first_network_failure_remains_retryable() {
         let item = make_item(1, SyncQueueStatus::Pending);
-        assert!(item.is_eligible_for_retry(chrono::Utc::now()),
-            "item with attempt_count=1 (first network failure) should still be retryable");
+        assert!(
+            item.is_eligible_for_retry(chrono::Utc::now()),
+            "item with attempt_count=1 (first network failure) should still be retryable"
+        );
     }
 
     /// H7-3: At MAX_RETRIES the item must no longer be eligible.
     #[test]
     fn test_h7_network_failure_at_limit_is_terminal() {
         let item = make_item(MAX_RETRIES, SyncQueueStatus::Pending);
-        assert!(!item.is_eligible_for_retry(chrono::Utc::now()),
-            "item at attempt_count=MAX_RETRIES must NOT be eligible for retry");
+        assert!(
+            !item.is_eligible_for_retry(chrono::Utc::now()),
+            "item at attempt_count=MAX_RETRIES must NOT be eligible for retry"
+        );
     }
 
     /// H7-4: Network failure must NOT double-increment.
@@ -1242,7 +1301,10 @@ mod tests {
     fn test_h7_network_failure_no_double_increment() {
         let base = 2i32;
         let after_one = base + 1;
-        assert_eq!(after_one, 3, "one network failure on attempt_count=2 must yield 3, not 4");
+        assert_eq!(
+            after_one, 3,
+            "one network failure on attempt_count=2 must yield 3, not 4"
+        );
     }
 
     /// H7-5: Repeated network failures eventually exhaust the budget.
@@ -1257,7 +1319,10 @@ mod tests {
                 break;
             }
         }
-        assert!(became_terminal, "repeated network failures must eventually reach MAX_RETRIES terminal");
+        assert!(
+            became_terminal,
+            "repeated network failures must eventually reach MAX_RETRIES terminal"
+        );
     }
 
     /// H7-6 / H7-12: Network failure is distinguishable from HTTP application responses.
@@ -1267,15 +1332,23 @@ mod tests {
         let network_err = "Server unreachable: connection refused";
         let http_err = "Sync push HTTP 500: internal server error";
 
-        assert!(network_err.starts_with("Server unreachable"),
-            "transport failure must start with 'Server unreachable'");
-        assert!(http_err.starts_with("Sync push HTTP"),
-            "HTTP application error must start with 'Sync push HTTP'");
+        assert!(
+            network_err.starts_with("Server unreachable"),
+            "transport failure must start with 'Server unreachable'"
+        );
+        assert!(
+            http_err.starts_with("Sync push HTTP"),
+            "HTTP application error must start with 'Sync push HTTP'"
+        );
         // They are mutually exclusive.
-        assert!(!network_err.starts_with("Sync push HTTP"),
-            "network error must not be mistaken for HTTP application error");
-        assert!(!http_err.starts_with("Server unreachable"),
-            "HTTP error must not be mistaken for transport failure");
+        assert!(
+            !network_err.starts_with("Sync push HTTP"),
+            "network error must not be mistaken for HTTP application error"
+        );
+        assert!(
+            !http_err.starts_with("Server unreachable"),
+            "HTTP error must not be mistaken for transport failure"
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -1289,21 +1362,28 @@ mod tests {
         // Domain-level: the is_eligible check on a Synced item returns false
         // (wrong status), so it can never re-enter the retry loop.
         let item = make_item(0, SyncQueueStatus::Synced);
-        assert!(!item.is_eligible_for_retry(chrono::Utc::now()),
-            "Synced item must never be eligible for retry");
+        assert!(
+            !item.is_eligible_for_retry(chrono::Utc::now()),
+            "Synced item must never be eligible for retry"
+        );
     }
 
     /// Regression 14: Existing permanent failure behavior unchanged.
     #[test]
     fn test_regression_failed_permanent_not_retryable() {
         let item = make_item(0, SyncQueueStatus::FailedPermanent);
-        assert!(!item.is_eligible_for_retry(chrono::Utc::now()),
-            "FailedPermanent item must never be eligible for retry");
+        assert!(
+            !item.is_eligible_for_retry(chrono::Utc::now()),
+            "FailedPermanent item must never be eligible for retry"
+        );
     }
 
     /// Regression: MAX_RETRIES constant value must not have changed.
     #[test]
     fn test_regression_max_retries_unchanged() {
-        assert_eq!(MAX_RETRIES, 10, "MAX_RETRIES must remain 10 — the authorized retry budget");
+        assert_eq!(
+            MAX_RETRIES, 10,
+            "MAX_RETRIES must remain 10 — the authorized retry budget"
+        );
     }
 }

@@ -1,20 +1,20 @@
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use crate::db::connection::DatabaseConnection;
 use crate::domain::access_control::StaffAccessProfile;
 use crate::domain::user::{User, UserRole};
 use crate::repositories::{
-    BranchRepository, PostgresTerminalRepository, SQLiteSyncQueueRepository, SQLiteTerminalRepository,
-    SQLiteUserRepository, TerminalRepository, UserRepository,
+    BranchRepository, PostgresTerminalRepository, SQLiteSyncQueueRepository,
+    SQLiteTerminalRepository, SQLiteUserRepository, TerminalRepository, UserRepository,
 };
 use crate::services::{
     CashService, CatalogService, CustomerService, ExpenseService, InventoryService, PartyService,
-    ProductService, ProfitService, PurchaseReturnService, PurchaseService, SaleService, SalesReturnService, SupplierService,
+    ProductService, ProfitService, PurchaseReturnService, PurchaseService, SaleService,
+    SalesReturnService, SupplierService,
 };
-
 
 /// Native application session context owned and strictly enforced by Rust
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -80,7 +80,8 @@ impl AppState {
     /// Creates AppState with SQLite persistence backend (Desktop / Local mode)
     pub fn new_sqlite(app_version: impl Into<String>, db: DatabaseConnection) -> Self {
         let user_repo = UserRepository::SQLite(SQLiteUserRepository::new(db.clone()));
-        let branch_repo = BranchRepository::SQLite(crate::repositories::SQLiteBranchRepository::new(db.clone()));
+        let branch_repo =
+            BranchRepository::SQLite(crate::repositories::SQLiteBranchRepository::new(db.clone()));
         let terminal_repo = TerminalRepository::SQLite(SQLiteTerminalRepository::new(db.clone()));
         let sync_queue_repo = Some(SQLiteSyncQueueRepository::new(db.clone()));
         let catalog_service = CatalogService::new_sqlite(db.clone());
@@ -128,9 +129,14 @@ impl AppState {
     /// Creates AppState with PostgreSQL persistence backend (Cloud Run / HTTP server mode).
     /// CRITICAL ISOLATION: No SQLite database connection is opened or created in this mode.
     pub fn new_postgres(app_version: impl Into<String>, pool: sqlx::PgPool) -> Self {
-        let user_repo = UserRepository::Postgres(crate::repositories::PostgresUserRepository::new(pool.clone()));
-        let branch_repo = BranchRepository::Postgres(crate::repositories::PostgresBranchRepository::new(pool.clone()));
-        let terminal_repo = TerminalRepository::Postgres(PostgresTerminalRepository::new(pool.clone()));
+        let user_repo = UserRepository::Postgres(crate::repositories::PostgresUserRepository::new(
+            pool.clone(),
+        ));
+        let branch_repo = BranchRepository::Postgres(
+            crate::repositories::PostgresBranchRepository::new(pool.clone()),
+        );
+        let terminal_repo =
+            TerminalRepository::Postgres(PostgresTerminalRepository::new(pool.clone()));
         let catalog_service = CatalogService::new_postgres(pool.clone());
         let product_service = ProductService::new_postgres(pool.clone());
         let inventory_service = InventoryService::new_postgres(pool.clone());
@@ -184,11 +190,21 @@ impl AppState {
         match DatabaseConnection::open_file(&path) {
             Ok(db) => Ok(Self::new_sqlite(app_version, db)),
             Err(e) => {
-                tracing::error!("Failed to open persistent SQLite database at {}: {}", path.display(), e);
+                tracing::error!(
+                    "Failed to open persistent SQLite database at {}: {}",
+                    path.display(),
+                    e
+                );
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 DatabaseConnection::open_file(&path)
                     .map(|db| Self::new_sqlite(app_version, db))
-                    .map_err(|err| format!("Critical database initialization error at {}: {}", path.display(), err))
+                    .map_err(|err| {
+                        format!(
+                            "Critical database initialization error at {}: {}",
+                            path.display(),
+                            err
+                        )
+                    })
             }
         }
     }
@@ -202,7 +218,8 @@ impl AppState {
 
     /// Opens an isolated in-memory database for testing and diagnostics
     pub fn in_memory(app_version: impl Into<String>) -> Self {
-        let db = DatabaseConnection::open_in_memory().expect("Failed to open in-memory SQLite database");
+        let db =
+            DatabaseConnection::open_in_memory().expect("Failed to open in-memory SQLite database");
         Self::new(app_version, db)
     }
 
@@ -256,30 +273,7 @@ impl AppState {
         };
     }
 
-    /// Establishes native authenticated session from a verified local authentication snapshot.
-    /// CRITICAL SECURITY RULE: Snapshot native sessions have no Central JWT token (active_token = None).
-    pub async fn set_authenticated_from_snapshot(
-        &self,
-        snapshot: &crate::domain::auth_snapshot::AuthSnapshot,
-        access_profile: StaffAccessProfile,
-    ) {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
 
-        let mut session = self.session.write().await;
-        *session = SessionContext {
-            is_authenticated: true,
-            is_locked: false,
-            user_id: Some(snapshot.user_id.clone()),
-            username: Some(snapshot.username.clone()),
-            role: Some(snapshot.role),
-            login_time_ms: Some(now),
-            access_profile: Some(access_profile),
-            active_token: None,
-        };
-    }
 
     /// Updates active_token on the current session if authenticated
     pub async fn set_active_token(&self, token: Option<String>) {
@@ -288,12 +282,6 @@ impl AppState {
             session.active_token = token;
         }
     }
-
-    /// Returns an instance of SQLiteAuthSnapshotRepository if SQLite database is available
-    pub fn auth_snapshot_repo(&self) -> Option<crate::repositories::SQLiteAuthSnapshotRepository> {
-        self.db.as_ref().map(|db| crate::repositories::SQLiteAuthSnapshotRepository::new(db.clone()))
-    }
-
 
     pub async fn lock_session(&self) -> bool {
         let mut session = self.session.write().await;
@@ -371,12 +359,17 @@ mod tests {
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
 
-        state.set_authenticated_with_token(&user, Some("test_jwt_bearer_token".to_string())).await;
+        state
+            .set_authenticated_with_token(&user, Some("test_jwt_bearer_token".to_string()))
+            .await;
         let auth_session = state.get_session().await;
         assert!(auth_session.is_authenticated);
         assert!(!auth_session.is_locked);
         assert_eq!(auth_session.username, Some("teststaff".to_string()));
-        assert_eq!(auth_session.active_token, Some("test_jwt_bearer_token".to_string()));
+        assert_eq!(
+            auth_session.active_token,
+            Some("test_jwt_bearer_token".to_string())
+        );
 
         // Test lock
         assert!(state.lock_session().await);
@@ -398,17 +391,30 @@ mod tests {
 
     #[tokio::test]
     async fn test_cloud_composition_isolation_and_postgres_selection() {
-        let pool = sqlx::PgPool::connect_lazy("postgres://localhost/dummy_db").expect("connect_lazy should succeed");
+        let pool = sqlx::PgPool::connect_lazy("postgres://localhost/dummy_db")
+            .expect("connect_lazy should succeed");
         let state = AppState::new_postgres("1.0.1", pool);
 
         // 1. Verify SQLite database connection is NOT opened or created (db is None)
-        assert!(state.db.is_none(), "Cloud Run AppState must NOT initialize a SQLite connection");
+        assert!(
+            state.db.is_none(),
+            "Cloud Run AppState must NOT initialize a SQLite connection"
+        );
 
         // 2. Verify PostgreSQL pool is attached
-        assert!(state.pg_pool().is_some(), "PostgreSQL connection pool must be present in Cloud Run mode");
+        assert!(
+            state.pg_pool().is_some(),
+            "PostgreSQL connection pool must be present in Cloud Run mode"
+        );
 
         // 3. Verify repository enums are wired to Postgres variant
-        assert!(matches!(state.user_repo, crate::repositories::UserRepository::Postgres(_)));
-        assert!(matches!(state.branch_repo, crate::repositories::BranchRepository::Postgres(_)));
+        assert!(matches!(
+            state.user_repo,
+            crate::repositories::UserRepository::Postgres(_)
+        ));
+        assert!(matches!(
+            state.branch_repo,
+            crate::repositories::BranchRepository::Postgres(_)
+        ));
     }
 }

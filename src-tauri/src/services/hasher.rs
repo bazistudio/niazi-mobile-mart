@@ -1,11 +1,8 @@
+use crate::errors::{AppError, AppResult};
 use argon2::{
-    password_hash::{
-        rand_core::OsRng,
-        PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
-    },
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
-use crate::errors::{AppError, AppResult};
 
 /// Hashes a credential (login key or PIN) using Argon2id with random OS salt
 pub fn hash_credential(secret: &str) -> AppResult<String> {

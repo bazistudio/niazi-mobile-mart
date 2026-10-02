@@ -24,9 +24,15 @@ impl PostgresSaleRepository {
         dto: &CompleteSaleDto,
         user_id: Option<&str>,
     ) -> AppResult<SaleResultDto> {
-        let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
         let res = Self::complete_sale_tx(&mut tx, dto, user_id, None).await?;
-        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(res)
     }
 
@@ -37,25 +43,34 @@ impl PostgresSaleRepository {
         sale_id_override: Option<&str>,
     ) -> AppResult<SaleResultDto> {
         if dto.items.is_empty() {
-            return Err(AppError::Validation("Cannot complete sale with empty cart".to_string()));
+            return Err(AppError::Validation(
+                "Cannot complete sale with empty cart".to_string(),
+            ));
         }
 
         // 1. Resolve Branch ID and Code
-        let (branch_id, branch_code) = match dto.branch_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let (branch_id, branch_code) = match dto
+            .branch_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             Some(bid) => {
-                let code_opt: Option<(String,)> = sqlx::query_as("SELECT code FROM branches WHERE id = $1")
-                    .bind(bid)
-                    .fetch_optional(&mut **tx)
-                    .await
-                    .map_err(|e| AppError::Database(e.to_string()))?;
+                let code_opt: Option<(String,)> =
+                    sqlx::query_as("SELECT code FROM branches WHERE id = $1")
+                        .bind(bid)
+                        .fetch_optional(&mut **tx)
+                        .await
+                        .map_err(|e| AppError::Database(e.to_string()))?;
                 let code = code_opt.map(|r| r.0).unwrap_or_else(|| "MAIN".to_string());
                 (bid.to_string(), code)
             }
             None => {
-                let row_opt: Option<(String, String)> = sqlx::query_as("SELECT id, code FROM branches WHERE code = 'MAIN' LIMIT 1")
-                    .fetch_optional(&mut **tx)
-                    .await
-                    .map_err(|e| AppError::Database(e.to_string()))?;
+                let row_opt: Option<(String, String)> =
+                    sqlx::query_as("SELECT id, code FROM branches WHERE code = 'MAIN' LIMIT 1")
+                        .fetch_optional(&mut **tx)
+                        .await
+                        .map_err(|e| AppError::Database(e.to_string()))?;
                 match row_opt {
                     Some(r) => (r.0, r.1),
                     None => (DEFAULT_MAIN_BRANCH_ID.to_string(), "MAIN".to_string()),
@@ -68,11 +83,13 @@ impl PostgresSaleRepository {
         if let Some(ref cid) = dto.customer_id {
             let cid_trim = cid.trim();
             if !cid_trim.is_empty() && cid_trim != "walk-in" {
-                let row_opt = sqlx::query("SELECT id, name, credit_limit, is_active FROM customers WHERE id = $1")
-                    .bind(cid_trim)
-                    .fetch_optional(&mut **tx)
-                    .await
-                    .map_err(|e| AppError::Database(e.to_string()))?;
+                let row_opt = sqlx::query(
+                    "SELECT id, name, credit_limit, is_active FROM customers WHERE id = $1",
+                )
+                .bind(cid_trim)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
 
                 if let Some(row) = row_opt {
                     let is_active_int: i32 = row.try_get(3).unwrap_or(1);
@@ -82,12 +99,18 @@ impl PostgresSaleRepository {
                             "Customer '{name}' is inactive. Cannot complete sale."
                         )));
                     }
-                    let id: String = row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?;
-                    let name: String = row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?;
+                    let id: String = row
+                        .try_get(0)
+                        .map_err(|e| AppError::Database(e.to_string()))?;
+                    let name: String = row
+                        .try_get(1)
+                        .map_err(|e| AppError::Database(e.to_string()))?;
                     let credit_limit: i64 = row.try_get(2).unwrap_or(0);
                     customer_opt = Some((id, name, credit_limit));
                 } else {
-                    return Err(AppError::NotFound(format!("Customer '{cid_trim}' not found")));
+                    return Err(AppError::NotFound(format!(
+                        "Customer '{cid_trim}' not found"
+                    )));
                 }
             }
         }
@@ -108,7 +131,9 @@ impl PostgresSaleRepository {
 
         for item in &dto.items {
             if item.quantity <= 0 {
-                return Err(AppError::Validation("Item quantity must be greater than 0".to_string()));
+                return Err(AppError::Validation(
+                    "Item quantity must be greater than 0".to_string(),
+                ));
             }
 
             let row_opt = sqlx::query("SELECT id, name, sku, purchase_price, average_cost, sale_price, is_active FROM products WHERE id = $1")
@@ -119,30 +144,49 @@ impl PostgresSaleRepository {
 
             let row = match row_opt {
                 Some(r) => r,
-                None => return Err(AppError::NotFound(format!("Product '{}' not found", item.product_id))),
+                None => {
+                    return Err(AppError::NotFound(format!(
+                        "Product '{}' not found",
+                        item.product_id
+                    )))
+                }
             };
 
             let is_active_int: i32 = row.try_get(6).unwrap_or(1);
-            let name: String = row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?;
+            let name: String = row
+                .try_get(1)
+                .map_err(|e| AppError::Database(e.to_string()))?;
             if is_active_int != 1 {
                 return Err(AppError::Validation(format!(
                     "Product '{name}' is inactive. Cannot complete sale."
                 )));
             }
 
-            let sale_price: i64 = row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?;
-            let purchase_price: i64 = row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?;
+            let sale_price: i64 = row
+                .try_get(5)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            let purchase_price: i64 = row
+                .try_get(3)
+                .map_err(|e| AppError::Database(e.to_string()))?;
             let avg_cost: i64 = row.try_get(4).unwrap_or(0);
-            let cost_price = if avg_cost > 0 { avg_cost } else { purchase_price };
+            let cost_price = if avg_cost > 0 {
+                avg_cost
+            } else {
+                purchase_price
+            };
 
             let line_disc = item.discount.unwrap_or(0).max(0);
             let subtotal = sale_price * item.quantity;
             let line_total = subtotal.saturating_sub(line_disc);
 
             prepared_lines.push(PreparedLine {
-                product_id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
+                product_id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 product_name: name,
-                sku: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                sku: row
+                    .try_get(2)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 unit_price: sale_price,
                 cost_price,
                 quantity: item.quantity,
@@ -183,7 +227,8 @@ impl PostgresSaleRepository {
 
         if tender_inputs.is_empty() {
             let legacy_amount = dto.paid_amount.unwrap_or(total_amount).max(0);
-            let legacy_method = normalize_payment_method(dto.payment_method.as_deref().unwrap_or("CASH"));
+            let legacy_method =
+                normalize_payment_method(dto.payment_method.as_deref().unwrap_or("CASH"));
             if legacy_method != "CREDIT" && legacy_amount > 0 {
                 tender_inputs.push(TenderInput {
                     method: legacy_method,
@@ -196,18 +241,19 @@ impl PostgresSaleRepository {
 
         let total_tendered: i64 = tender_inputs.iter().map(|t| t.amount).sum();
 
-        let (recorded_paid, change_amount, credit_amount, payment_status) = if total_tendered >= total_amount {
-            let change = total_tendered - total_amount;
-            (total_amount, change, 0, PaymentStatus::Paid)
-        } else {
-            let credit = total_amount - total_tendered;
-            let status = if total_tendered > 0 {
-                PaymentStatus::PartiallyPaid
+        let (recorded_paid, change_amount, credit_amount, payment_status) =
+            if total_tendered >= total_amount {
+                let change = total_tendered - total_amount;
+                (total_amount, change, 0, PaymentStatus::Paid)
             } else {
-                PaymentStatus::Unpaid
+                let credit = total_amount - total_tendered;
+                let status = if total_tendered > 0 {
+                    PaymentStatus::PartiallyPaid
+                } else {
+                    PaymentStatus::Unpaid
+                };
+                (total_tendered, 0, credit, status)
             };
-            (total_tendered, 0, credit, status)
-        };
 
         // 5. Enforce credit sale constraint
         if credit_amount > 0 && customer_opt.is_none() {
@@ -247,10 +293,14 @@ impl PostgresSaleRepository {
         // 7. Generate invoice number — resolve terminal from DTO or fall back to first active terminal
         let (terminal_id, terminal_code) = {
             // Prefer terminal_id supplied by caller (desktop app passes its own registered terminal UUID)
-            let requested_id = dto.terminal_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            let requested_id = dto
+                .terminal_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
             if let Some(tid) = requested_id {
                 let row_opt: Option<(String, String)> = sqlx::query_as(
-                    "SELECT id, code FROM terminals WHERE id = $1 AND is_active = true"
+                    "SELECT id, code FROM terminals WHERE id = $1 AND is_active = true",
                 )
                 .bind(tid)
                 .fetch_optional(&mut **tx)
@@ -273,7 +323,10 @@ impl PostgresSaleRepository {
                 match row_opt {
                     Some(r) => (r.0, r.1),
                     // Branch has no terminals yet — use a deterministic placeholder that doesn't collide
-                    None => ("00000000-0000-0000-0000-000000000099".to_string(), "T1".to_string()),
+                    None => (
+                        "00000000-0000-0000-0000-000000000099".to_string(),
+                        "T1".to_string(),
+                    ),
                 }
             }
         };
@@ -298,7 +351,10 @@ impl PostgresSaleRepository {
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
 
-        let invoice_number = format!("{}-{}-{}-{:06}", branch_code, terminal_code, billing_month, next_val.0);
+        let invoice_number = format!(
+            "{}-{}-{}-{:06}",
+            branch_code, terminal_code, billing_month, next_val.0
+        );
         let sale_id = sale_id_override
             .map(str::trim)
             .filter(|s| !s.is_empty())
@@ -377,7 +433,7 @@ impl PostgresSaleRepository {
                 id, invoice_number, branch_id, customer_id, customer_name_snapshot,
                 subtotal, discount, tax_amount, total_amount, paid_amount, change_amount,
                 payment_status, sale_status, performed_by, notes, created_at, updated_at
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)"
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
         )
         .bind(&sale.id)
         .bind(&sale.invoice_number)
@@ -423,7 +479,7 @@ impl PostgresSaleRepository {
                 "INSERT INTO sale_lines (
                     id, sale_id, product_id, product_name_snapshot, sku_snapshot,
                     unit_price, cost_price_snapshot, quantity, discount, line_total, created_at
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
             )
             .bind(&sale_line.id)
             .bind(&sale_line.sale_id)
@@ -441,12 +497,14 @@ impl PostgresSaleRepository {
             .map_err(|e| AppError::Database(e.to_string()))?;
 
             // Deduct stock
-            let current_stock: (i64,) = sqlx::query_as("SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2")
-                .bind(&line.product_id)
-                .bind(&branch_id)
-                .fetch_one(&mut **tx)
-                .await
-                .map_err(|e| AppError::Database(e.to_string()))?;
+            let current_stock: (i64,) = sqlx::query_as(
+                "SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2",
+            )
+            .bind(&line.product_id)
+            .bind(&branch_id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
             let new_stock = current_stock.0 - line.quantity;
             sqlx::query("UPDATE stock SET quantity = $1, updated_at = $2 WHERE product_id = $3 AND branch_id = $4")
@@ -587,13 +645,17 @@ impl PostgresSaleRepository {
             return Ok(());
         }
 
-        let branch_exists: Option<(String,)> = sqlx::query_as("SELECT id FROM branches WHERE id = $1")
-            .bind(&dto.sale.branch_id)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let branch_exists: Option<(String,)> =
+            sqlx::query_as("SELECT id FROM branches WHERE id = $1")
+                .bind(&dto.sale.branch_id)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
         if branch_exists.is_none() {
-            return Err(AppError::NotFound(format!("Branch {} not found", dto.sale.branch_id)));
+            return Err(AppError::NotFound(format!(
+                "Branch {} not found",
+                dto.sale.branch_id
+            )));
         }
 
         let sale = &dto.sale;
@@ -602,7 +664,7 @@ impl PostgresSaleRepository {
                 id, invoice_number, branch_id, customer_id, customer_name_snapshot,
                 subtotal, discount, tax_amount, total_amount, paid_amount, change_amount,
                 payment_status, sale_status, performed_by, notes, created_at, updated_at
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)"
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
         )
         .bind(&sale.id)
         .bind(&sale.invoice_number)
@@ -630,7 +692,7 @@ impl PostgresSaleRepository {
                 "INSERT INTO sale_lines (
                     id, sale_id, product_id, product_name_snapshot, sku_snapshot,
                     unit_price, cost_price_snapshot, quantity, discount, line_total, created_at
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
             )
             .bind(&sale_line.id)
             .bind(&sale_line.sale_id)
@@ -666,12 +728,14 @@ impl PostgresSaleRepository {
         }
 
         for movement in &dto.stock_movements {
-            let current_stock: Option<(i64,)> = sqlx::query_as("SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2")
-                .bind(&movement.product_id)
-                .bind(&movement.branch_id)
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(|e| AppError::Database(e.to_string()))?;
+            let current_stock: Option<(i64,)> = sqlx::query_as(
+                "SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2",
+            )
+            .bind(&movement.product_id)
+            .bind(&movement.branch_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
             if let Some(stk) = current_stock {
                 let new_stock = stk.0 - movement.quantity;
@@ -810,17 +874,39 @@ impl PostgresSaleRepository {
         let mut list = Vec::with_capacity(rows.len());
         for row in rows {
             list.push(SaleLine {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                sale_id: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                product_id: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
-                product_name_snapshot: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
-                sku_snapshot: row.try_get(4).map_err(|e| AppError::Database(e.to_string()))?,
-                unit_price: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                cost_price_snapshot: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
-                quantity: row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?,
-                discount: row.try_get(8).map_err(|e| AppError::Database(e.to_string()))?,
-                line_total: row.try_get(9).map_err(|e| AppError::Database(e.to_string()))?,
-                created_at: row.try_get(10).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                sale_id: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                product_id: row
+                    .try_get(2)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                product_name_snapshot: row
+                    .try_get(3)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                sku_snapshot: row
+                    .try_get(4)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                unit_price: row
+                    .try_get(5)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                cost_price_snapshot: row
+                    .try_get(6)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                quantity: row
+                    .try_get(7)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                discount: row
+                    .try_get(8)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                line_total: row
+                    .try_get(9)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: row
+                    .try_get(10)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
         Ok(list)
@@ -839,13 +925,23 @@ impl PostgresSaleRepository {
         let mut list = Vec::with_capacity(rows.len());
         for row in rows {
             list.push(SalePayment {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                sale_id: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                amount: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
-                payment_method: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                sale_id: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                amount: row
+                    .try_get(2)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                payment_method: row
+                    .try_get(3)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 reference_number: row.try_get(4).unwrap_or(None),
                 notes: row.try_get(5).unwrap_or(None),
-                created_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: row
+                    .try_get(6)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
         Ok(list)
@@ -934,30 +1030,56 @@ impl PostgresSaleRepository {
     }
 
     fn map_sale_row(row: &sqlx::postgres::PgRow) -> AppResult<Sale> {
-        let p_status_str: String = row.try_get(11).map_err(|e| AppError::Database(e.to_string()))?;
-        let s_status_str: String = row.try_get(12).map_err(|e| AppError::Database(e.to_string()))?;
+        let p_status_str: String = row
+            .try_get(11)
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let s_status_str: String = row
+            .try_get(12)
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
         let payment_status = PaymentStatus::from_str(&p_status_str).unwrap_or(PaymentStatus::Paid);
         let sale_status = SaleStatus::from_str(&s_status_str).unwrap_or(SaleStatus::Completed);
 
         Ok(Sale {
-            id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-            invoice_number: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-            branch_id: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+            id: row
+                .try_get(0)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            invoice_number: row
+                .try_get(1)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            branch_id: row
+                .try_get(2)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             customer_id: row.try_get(3).unwrap_or(None),
             customer_name_snapshot: row.try_get(4).unwrap_or(None),
-            subtotal: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-            discount: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
-            tax_amount: row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?,
-            total_amount: row.try_get(8).map_err(|e| AppError::Database(e.to_string()))?,
-            paid_amount: row.try_get(9).map_err(|e| AppError::Database(e.to_string()))?,
-            change_amount: row.try_get(10).map_err(|e| AppError::Database(e.to_string()))?,
+            subtotal: row
+                .try_get(5)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            discount: row
+                .try_get(6)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            tax_amount: row
+                .try_get(7)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            total_amount: row
+                .try_get(8)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            paid_amount: row
+                .try_get(9)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            change_amount: row
+                .try_get(10)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             payment_status,
             sale_status,
             performed_by: row.try_get(13).unwrap_or(None),
             notes: row.try_get(14).unwrap_or(None),
-            created_at: row.try_get(15).map_err(|e| AppError::Database(e.to_string()))?,
-            updated_at: row.try_get(16).map_err(|e| AppError::Database(e.to_string()))?,
+            created_at: row
+                .try_get(15)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            updated_at: row
+                .try_get(16)
+                .map_err(|e| AppError::Database(e.to_string()))?,
         })
     }
 }

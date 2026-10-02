@@ -14,7 +14,8 @@ pub async fn inventory_increase(
     mut dto: IncreaseStockDto,
 ) -> AppResult<i64> {
     AuthService::require_org_admin(&state).await?;
-    let authorized_branch = AuthService::require_branch_access(&state, Some(&dto.branch_id)).await?;
+    let authorized_branch =
+        AuthService::require_branch_access(&state, Some(&dto.branch_id)).await?;
     dto.branch_id = authorized_branch;
     let session = state.get_session().await;
     state
@@ -29,7 +30,8 @@ pub async fn inventory_decrease(
     mut dto: DecreaseStockDto,
 ) -> AppResult<i64> {
     AuthService::require_permission(&state, Some("inventory"), Some("inventory:write")).await?;
-    let authorized_branch = AuthService::require_branch_access(&state, Some(&dto.branch_id)).await?;
+    let authorized_branch =
+        AuthService::require_branch_access(&state, Some(&dto.branch_id)).await?;
     dto.branch_id = authorized_branch;
     let session = state.get_session().await;
     state
@@ -39,9 +41,13 @@ pub async fn inventory_decrease(
 }
 
 #[tauri::command]
-pub async fn inventory_adjust(state: State<'_, AppState>, mut dto: AdjustStockDto) -> AppResult<i64> {
+pub async fn inventory_adjust(
+    state: State<'_, AppState>,
+    mut dto: AdjustStockDto,
+) -> AppResult<i64> {
     AuthService::require_permission(&state, Some("inventory"), Some("inventory:adjust")).await?;
-    let authorized_branch = AuthService::require_branch_access(&state, Some(&dto.branch_id)).await?;
+    let authorized_branch =
+        AuthService::require_branch_access(&state, Some(&dto.branch_id)).await?;
     dto.branch_id = authorized_branch;
 
     // Check if this adjustment increases stock. Stock increases require Organization Admin authority.
@@ -92,7 +98,10 @@ pub async fn inventory_get_stock(
 ) -> AppResult<i64> {
     AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await?;
     let authorized_branch = AuthService::require_branch_access(&state, Some(&branch_id)).await?;
-    state.inventory_service.get_stock(&product_id, &authorized_branch).await
+    state
+        .inventory_service
+        .get_stock(&product_id, &authorized_branch)
+        .await
 }
 
 #[tauri::command]
@@ -102,7 +111,10 @@ pub async fn inventory_get_stock_map(
 ) -> AppResult<std::collections::HashMap<String, i64>> {
     AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await?;
     let authorized_branch = AuthService::require_branch_access(&state, Some(&branch_id)).await?;
-    state.inventory_service.get_stock_map(&authorized_branch).await
+    state
+        .inventory_service
+        .get_stock_map(&authorized_branch)
+        .await
 }
 
 #[tauri::command]
@@ -119,7 +131,10 @@ pub async fn inventory_get_movements(
         let session = state.get_session().await;
         let is_org_admin = match session.role {
             Some(crate::domain::user::UserRole::Admin) => true,
-            _ => session.access_profile.as_ref().map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+            _ => session
+                .access_profile
+                .as_ref()
+                .map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
         };
         if !is_org_admin {
             Some(AuthService::require_branch_access(&state, None).await?)
@@ -129,7 +144,11 @@ pub async fn inventory_get_movements(
     };
     state
         .inventory_service
-        .list_movements(product_id.as_deref(), target_branch.as_deref(), limit.unwrap_or(50))
+        .list_movements(
+            product_id.as_deref(),
+            target_branch.as_deref(),
+            limit.unwrap_or(50),
+        )
         .await
 }
 
@@ -140,7 +159,10 @@ pub async fn inventory_get_low_stock(
 ) -> AppResult<Vec<LowStockItemDto>> {
     AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await?;
     let authorized_branch = AuthService::require_branch_access(&state, Some(&branch_id)).await?;
-    state.inventory_service.get_low_stock(&authorized_branch).await
+    state
+        .inventory_service
+        .get_low_stock(&authorized_branch)
+        .await
 }
 
 #[cfg(test)]
@@ -189,32 +211,56 @@ mod tests {
         let db = DatabaseConnection::open_in_memory().unwrap();
         let state = AppState::new("5.0.3", db);
 
-        let perm = AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await;
+        let perm =
+            AuthService::require_permission(&state, Some("inventory"), Some("inventory:read"))
+                .await;
         assert!(perm.is_err());
-        assert!(matches!(perm.unwrap_err(), crate::errors::AppError::Unauthorized(_)));
+        assert!(matches!(
+            perm.unwrap_err(),
+            crate::errors::AppError::Unauthorized(_)
+        ));
     }
 
     #[tokio::test]
     async fn test_public_user_inventory_access_forbidden() {
-        let state = setup_state_with_user(UserRole::PublicUser, StaffAccessProfile::public_user_restricted()).await;
+        let state = setup_state_with_user(
+            UserRole::PublicUser,
+            StaffAccessProfile::public_user_restricted(),
+        )
+        .await;
 
-        let perm = AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await;
+        let perm =
+            AuthService::require_permission(&state, Some("inventory"), Some("inventory:read"))
+                .await;
         assert!(perm.is_err());
-        assert!(matches!(perm.unwrap_err(), crate::errors::AppError::Forbidden(_)));
+        assert!(matches!(
+            perm.unwrap_err(),
+            crate::errors::AppError::Forbidden(_)
+        ));
 
-        let perm_adj = AuthService::require_permission(&state, Some("inventory"), Some("inventory:adjust")).await;
+        let perm_adj =
+            AuthService::require_permission(&state, Some("inventory"), Some("inventory:adjust"))
+                .await;
         assert!(perm_adj.is_err());
-        assert!(matches!(perm_adj.unwrap_err(), crate::errors::AppError::Forbidden(_)));
+        assert!(matches!(
+            perm_adj.unwrap_err(),
+            crate::errors::AppError::Forbidden(_)
+        ));
     }
 
     #[tokio::test]
     async fn test_admin_inventory_access_allowed() {
-        let state = setup_state_with_user(UserRole::Admin, StaffAccessProfile::admin_unlimited()).await;
+        let state =
+            setup_state_with_user(UserRole::Admin, StaffAccessProfile::admin_unlimited()).await;
 
-        let perm = AuthService::require_permission(&state, Some("inventory"), Some("inventory:read")).await;
+        let perm =
+            AuthService::require_permission(&state, Some("inventory"), Some("inventory:read"))
+                .await;
         assert!(perm.is_ok());
 
-        let perm_adj = AuthService::require_permission(&state, Some("inventory"), Some("inventory:adjust")).await;
+        let perm_adj =
+            AuthService::require_permission(&state, Some("inventory"), Some("inventory:adjust"))
+                .await;
         assert!(perm_adj.is_ok());
 
         let org_admin_perm = AuthService::require_org_admin(&state).await;
@@ -223,11 +269,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_shop_admin_restricted_from_org_admin_operations() {
-        let state = setup_state_with_user(UserRole::Cashier, StaffAccessProfile::shop_admin_default()).await;
+        let state =
+            setup_state_with_user(UserRole::Cashier, StaffAccessProfile::shop_admin_default())
+                .await;
 
         // Shop Admin is restricted from Org Admin operations
         let org_admin_perm = AuthService::require_org_admin(&state).await;
         assert!(org_admin_perm.is_err());
-        assert!(matches!(org_admin_perm.unwrap_err(), crate::errors::AppError::Forbidden(_)));
+        assert!(matches!(
+            org_admin_perm.unwrap_err(),
+            crate::errors::AppError::Forbidden(_)
+        ));
     }
 }

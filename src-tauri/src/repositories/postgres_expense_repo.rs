@@ -67,12 +67,20 @@ impl PostgresExpenseRepository {
         for row in rows {
             let is_active_int: i32 = row.try_get(3).unwrap_or(1);
             list.push(ExpenseCategory {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                name: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 description: row.try_get(2).unwrap_or(None),
                 is_active: is_active_int == 1,
-                created_at: row.try_get(4).map_err(|e| AppError::Database(e.to_string()))?,
-                updated_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: row
+                    .try_get(4)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                updated_at: row
+                    .try_get(5)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
         Ok(list)
@@ -83,9 +91,15 @@ impl PostgresExpenseRepository {
         dto: &CreateExpenseDto,
         user_id: Option<&str>,
     ) -> AppResult<Expense> {
-        let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
         let exp = Self::create_expense_tx(&mut tx, dto, user_id, None).await?;
-        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(exp)
     }
 
@@ -96,7 +110,9 @@ impl PostgresExpenseRepository {
         expense_id_override: Option<&str>,
     ) -> AppResult<Expense> {
         if dto.amount <= 0 {
-            return Err(AppError::Validation("Expense amount must be greater than 0".to_string()));
+            return Err(AppError::Validation(
+                "Expense amount must be greater than 0".to_string(),
+            ));
         }
 
         sqlx::query("UPDATE counters SET value = value + 1 WHERE name = 'expense_number'")
@@ -104,10 +120,11 @@ impl PostgresExpenseRepository {
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
-        let exp_val: (i64,) = sqlx::query_as("SELECT value FROM counters WHERE name = 'expense_number'")
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let exp_val: (i64,) =
+            sqlx::query_as("SELECT value FROM counters WHERE name = 'expense_number'")
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
 
         let exp_number = format!("EXP-{:06}", exp_val.0);
         let exp_id = expense_id_override
@@ -116,7 +133,11 @@ impl PostgresExpenseRepository {
             .map(String::from)
             .unwrap_or_else(|| Uuid::new_v4().to_string());
         let now = Utc::now().to_rfc3339();
-        let p_method = dto.payment_method.clone().unwrap_or_else(|| "CASH".to_string()).to_uppercase();
+        let p_method = dto
+            .payment_method
+            .clone()
+            .unwrap_or_else(|| "CASH".to_string())
+            .to_uppercase();
 
         let branch_id = dto.branch_id.clone().unwrap_or_else(|| "MAIN".to_string());
         let expense = Expense {
@@ -129,7 +150,10 @@ impl PostgresExpenseRepository {
             payment_method: p_method.clone(),
             description: dto.description.clone(),
             notes: dto.notes.clone(),
-            expense_date: dto.expense_date.clone().unwrap_or_else(|| Utc::now().format("%Y-%m-%d").to_string()),
+            expense_date: dto
+                .expense_date
+                .clone()
+                .unwrap_or_else(|| Utc::now().format("%Y-%m-%d").to_string()),
             status: ExpenseStatus::Completed,
             performed_by: user_id.map(|s| s.to_string()),
             performed_by_name: None,
@@ -141,7 +165,7 @@ impl PostgresExpenseRepository {
             "INSERT INTO expenses (
                 id, expense_number, category_id, branch_id, amount, payment_method,
                 description, notes, expense_date, status, performed_by, created_at, updated_at
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
         .bind(&expense.id)
         .bind(&expense.expense_number)
@@ -271,26 +295,48 @@ impl PostgresExpenseRepository {
     }
 
     fn map_expense_row(row: &sqlx::postgres::PgRow) -> AppResult<Expense> {
-        let status_str: String = row.try_get(9).map_err(|e| AppError::Database(e.to_string()))?;
+        let status_str: String = row
+            .try_get(9)
+            .map_err(|e| AppError::Database(e.to_string()))?;
         let status = ExpenseStatus::from_str(&status_str)
             .ok_or_else(|| AppError::Database(format!("Invalid expense status: '{status_str}'")))?;
 
         Ok(Expense {
-            id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-            expense_number: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-            category_id: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+            id: row
+                .try_get(0)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            expense_number: row
+                .try_get(1)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            category_id: row
+                .try_get(2)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             category_name: None,
-            branch_id: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
-            amount: row.try_get(4).map_err(|e| AppError::Database(e.to_string()))?,
-            payment_method: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-            description: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+            branch_id: row
+                .try_get(3)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            amount: row
+                .try_get(4)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            payment_method: row
+                .try_get(5)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            description: row
+                .try_get(6)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             notes: row.try_get(7).unwrap_or(None),
-            expense_date: row.try_get(8).map_err(|e| AppError::Database(e.to_string()))?,
+            expense_date: row
+                .try_get(8)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             status,
             performed_by: row.try_get(10).unwrap_or(None),
             performed_by_name: None,
-            created_at: row.try_get(11).map_err(|e| AppError::Database(e.to_string()))?,
-            updated_at: row.try_get(12).map_err(|e| AppError::Database(e.to_string()))?,
+            created_at: row
+                .try_get(11)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            updated_at: row
+                .try_get(12)
+                .map_err(|e| AppError::Database(e.to_string()))?,
         })
     }
 }

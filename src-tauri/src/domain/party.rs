@@ -239,7 +239,9 @@ impl From<&Supplier> for PartyRoleContact {
 
 /// Trims; empty becomes `None`.
 pub fn normalize_optional(value: Option<String>) -> Option<String> {
-    value.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+    value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 fn looks_like_email(value: &str) -> bool {
@@ -344,7 +346,10 @@ pub fn incoming_wins(incoming_updated_at: &str, stored_updated_at: &str) -> bool
 
 /// Returns the payload JSON with `party_id` merged in (role payloads stay backward compatible:
 /// older readers ignore the extra key).
-pub fn payload_with_party_id(payload_json: &str, party_id: &str) -> Result<String, serde_json::Error> {
+pub fn payload_with_party_id(
+    payload_json: &str,
+    party_id: &str,
+) -> Result<String, serde_json::Error> {
     let mut value: serde_json::Value = serde_json::from_str(payload_json)?;
     if let Some(obj) = value.as_object_mut() {
         obj.insert(
@@ -356,7 +361,10 @@ pub fn payload_with_party_id(payload_json: &str, party_id: &str) -> Result<Strin
 }
 
 /// Serializes a role record and merges `party_id`.
-pub fn role_payload_with_party_id<T: Serialize>(role: &T, party_id: &str) -> Result<String, serde_json::Error> {
+pub fn role_payload_with_party_id<T: Serialize>(
+    role: &T,
+    party_id: &str,
+) -> Result<String, serde_json::Error> {
     let mut value = serde_json::to_value(role)?;
     if let Some(obj) = value.as_object_mut() {
         obj.insert(
@@ -405,8 +413,14 @@ mod tests {
     #[test]
     fn party_type_from_roles() {
         assert_eq!(PartyType::from_roles(true, true), Some(PartyType::Both));
-        assert_eq!(PartyType::from_roles(true, false), Some(PartyType::Customer));
-        assert_eq!(PartyType::from_roles(false, true), Some(PartyType::Supplier));
+        assert_eq!(
+            PartyType::from_roles(true, false),
+            Some(PartyType::Customer)
+        );
+        assert_eq!(
+            PartyType::from_roles(false, true),
+            Some(PartyType::Supplier)
+        );
         assert_eq!(PartyType::from_roles(false, false), None);
         assert!(PartyType::Both.includes_customer() && PartyType::Both.includes_supplier());
         assert!(!PartyType::Customer.includes_supplier());
@@ -468,13 +482,22 @@ mod tests {
         assert!(validate_create_party(&dto).is_ok());
 
         assert!(validate_update_party(&UpdatePartyDto::default()).is_ok());
-        assert!(validate_update_party(&UpdatePartyDto { display_name: Some(" ".into()), ..Default::default() }).is_err());
-        assert!(validate_update_party(&UpdatePartyDto { phone: Some("".into()), ..Default::default() }).is_err());
+        assert!(validate_update_party(&UpdatePartyDto {
+            display_name: Some(" ".into()),
+            ..Default::default()
+        })
+        .is_err());
+        assert!(validate_update_party(&UpdatePartyDto {
+            phone: Some("".into()),
+            ..Default::default()
+        })
+        .is_err());
     }
 
     #[test]
     fn update_merges_and_clears() {
-        let base = PartyRoleContact::from(&customer()).to_party("11111111-1111-4111-8111-111111111111");
+        let base =
+            PartyRoleContact::from(&customer()).to_party("11111111-1111-4111-8111-111111111111");
         let dto = UpdatePartyDto {
             company_name: Some(" Ali & Sons ".into()),
             email: Some("".into()),
@@ -492,19 +515,32 @@ mod tests {
 
     #[test]
     fn updated_at_guard() {
-        assert!(incoming_wins("2026-09-28T00:00:00+00:00", BACKFILL_UPDATED_AT));
-        assert!(incoming_wins("2026-09-28T00:00:00+00:00", "2026-09-28T00:00:00+00:00"));
-        assert!(!incoming_wins("2026-09-27T00:00:00+00:00", "2026-09-28T00:00:00+00:00"));
+        assert!(incoming_wins(
+            "2026-09-28T00:00:00+00:00",
+            BACKFILL_UPDATED_AT
+        ));
+        assert!(incoming_wins(
+            "2026-09-28T00:00:00+00:00",
+            "2026-09-28T00:00:00+00:00"
+        ));
+        assert!(!incoming_wins(
+            "2026-09-27T00:00:00+00:00",
+            "2026-09-28T00:00:00+00:00"
+        ));
     }
 
     #[test]
     fn payload_party_id_round_trip() {
         let c = customer();
-        let payload = role_payload_with_party_id(&c, "22222222-2222-4222-8222-222222222222").unwrap();
+        let payload =
+            role_payload_with_party_id(&c, "22222222-2222-4222-8222-222222222222").unwrap();
         // Existing readers still parse the role struct.
         let parsed: Customer = serde_json::from_str(&payload).unwrap();
         assert_eq!(parsed, c);
-        assert_eq!(party_id_from_payload(&payload, &c.id), "22222222-2222-4222-8222-222222222222");
+        assert_eq!(
+            party_id_from_payload(&payload, &c.id),
+            "22222222-2222-4222-8222-222222222222"
+        );
         // Legacy payload without party_id -> role id.
         let legacy = serde_json::to_string(&c).unwrap();
         assert_eq!(party_id_from_payload(&legacy, &c.id), c.id);

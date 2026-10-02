@@ -8,8 +8,8 @@ use crate::domain::organization::DEFAULT_MAIN_BRANCH_ID;
 use crate::domain::product::{CreateProductDto, Product, ProductFilter, UpdateProductDto};
 use crate::errors::{AppError, AppResult};
 use crate::repositories::{
-    PostgresProductRepository, ProductRepository, SQLiteInventoryRepository, SQLiteProductRepository,
-    SQLiteUserRepository,
+    PostgresProductRepository, ProductRepository, SQLiteInventoryRepository,
+    SQLiteProductRepository, SQLiteUserRepository,
 };
 
 #[derive(Clone)]
@@ -38,7 +38,11 @@ impl ProductService {
     }
 
     /// Creates a new product with business validation and optional opening stock
-    pub async fn create_product(&self, dto: CreateProductDto, user_id: Option<&str>) -> AppResult<Product> {
+    pub async fn create_product(
+        &self,
+        dto: CreateProductDto,
+        user_id: Option<&str>,
+    ) -> AppResult<Product> {
         if dto.name.trim().is_empty() {
             return Err(AppError::Validation("Product name is required".to_string()));
         }
@@ -46,14 +50,20 @@ impl ProductService {
             return Err(AppError::Validation("Product SKU is required".to_string()));
         }
         if dto.purchase_price < 0 {
-            return Err(AppError::Validation("Purchase price cannot be negative".to_string()));
+            return Err(AppError::Validation(
+                "Purchase price cannot be negative".to_string(),
+            ));
         }
         if dto.sale_price < 0 {
-            return Err(AppError::Validation("Sale price cannot be negative".to_string()));
+            return Err(AppError::Validation(
+                "Sale price cannot be negative".to_string(),
+            ));
         }
         if let Some(threshold) = dto.low_stock_threshold {
             if threshold < 0 {
-                return Err(AppError::Validation("Low stock threshold cannot be negative".to_string()));
+                return Err(AppError::Validation(
+                    "Low stock threshold cannot be negative".to_string(),
+                ));
             }
         }
 
@@ -61,24 +71,43 @@ impl ProductService {
 
         match &self.repo {
             ProductRepository::Postgres(pg_repo) => {
-                pg_repo.create_product_with_initial_stock(&product_id, &dto, user_id).await
+                pg_repo
+                    .create_product_with_initial_stock(&product_id, &dto, user_id)
+                    .await
             }
             ProductRepository::SQLite(_) => {
-                let db = self.db.as_ref().expect("SQLite database connection required");
-                let target_branch = dto.branch_id.clone().unwrap_or_else(|| DEFAULT_MAIN_BRANCH_ID.to_string());
+                let db = self
+                    .db
+                    .as_ref()
+                    .expect("SQLite database connection required");
+                let target_branch = dto
+                    .branch_id
+                    .clone()
+                    .unwrap_or_else(|| DEFAULT_MAIN_BRANCH_ID.to_string());
                 let uid = user_id.map(|s| s.to_string());
                 let pid = product_id.clone();
 
                 let product = with_transaction(db, move |tx| {
-                    let mut product = SQLiteProductRepository::create_product_in_tx(tx, &pid, &dto)?;
+                    let mut product =
+                        SQLiteProductRepository::create_product_in_tx(tx, &pid, &dto)?;
                     product.initial_quantity = dto.initial_quantity;
 
                     if let Some(qty) = dto.initial_quantity {
                         if qty > 0 {
                             let now = Utc::now().to_rfc3339();
-                            SQLiteInventoryRepository::set_stock_in_tx(tx, &pid, &target_branch, qty, &now)?;
+                            SQLiteInventoryRepository::set_stock_in_tx(
+                                tx,
+                                &pid,
+                                &target_branch,
+                                qty,
+                                &now,
+                            )?;
 
-                            let valid_performed_by = SQLiteUserRepository::sanitize_performed_by_in_tx(tx, uid.as_deref())?;
+                            let valid_performed_by =
+                                SQLiteUserRepository::sanitize_performed_by_in_tx(
+                                    tx,
+                                    uid.as_deref(),
+                                )?;
 
                             let movement = StockMovement {
                                 id: Uuid::new_v4().to_string(),
@@ -109,29 +138,40 @@ impl ProductService {
     pub async fn update_product(&self, id: &str, dto: UpdateProductDto) -> AppResult<Product> {
         if let Some(name) = &dto.name {
             if name.trim().is_empty() {
-                return Err(AppError::Validation("Product name cannot be empty".to_string()));
+                return Err(AppError::Validation(
+                    "Product name cannot be empty".to_string(),
+                ));
             }
         }
         if let Some(p) = dto.purchase_price {
             if p < 0 {
-                return Err(AppError::Validation("Purchase price cannot be negative".to_string()));
+                return Err(AppError::Validation(
+                    "Purchase price cannot be negative".to_string(),
+                ));
             }
         }
         if let Some(s) = dto.sale_price {
             if s < 0 {
-                return Err(AppError::Validation("Sale price cannot be negative".to_string()));
+                return Err(AppError::Validation(
+                    "Sale price cannot be negative".to_string(),
+                ));
             }
         }
         if let Some(t) = dto.low_stock_threshold {
             if t < 0 {
-                return Err(AppError::Validation("Low stock threshold cannot be negative".to_string()));
+                return Err(AppError::Validation(
+                    "Low stock threshold cannot be negative".to_string(),
+                ));
             }
         }
 
         match &self.repo {
             ProductRepository::Postgres(pg_repo) => pg_repo.update_product(id, &dto).await,
             ProductRepository::SQLite(_) => {
-                let db = self.db.as_ref().expect("SQLite database connection required");
+                let db = self
+                    .db
+                    .as_ref()
+                    .expect("SQLite database connection required");
                 let id_owned = id.to_string();
 
                 let product = with_transaction(db, move |tx| {
@@ -165,7 +205,10 @@ impl ProductService {
         match &self.repo {
             ProductRepository::Postgres(pg_repo) => pg_repo.deactivate_product(id).await,
             ProductRepository::SQLite(_) => {
-                let db = self.db.as_ref().expect("SQLite database connection required");
+                let db = self
+                    .db
+                    .as_ref()
+                    .expect("SQLite database connection required");
                 let id_owned = id.to_string();
 
                 with_transaction(db, move |tx| {
@@ -236,7 +279,7 @@ mod tests {
                     unit_id: Some(unit_id.clone()),
                     purchase_price: 320000, // Rs 320,000
                     average_cost: None,
-                    sale_price: 380000,     // Rs 380,000
+                    sale_price: 380000, // Rs 380,000
                     low_stock_threshold: Some(5),
                     description: Some("Flagship phone".to_string()),
                     initial_quantity: None,
@@ -381,7 +424,10 @@ mod tests {
                 None,
             )
             .await;
-        assert!(neg_price.is_err(), "Negative purchase price must be rejected");
+        assert!(
+            neg_price.is_err(),
+            "Negative purchase price must be rejected"
+        );
 
         // 6. Deactivate product (soft deletion guardrail)
         service.deactivate_product(&prod1.id).await.unwrap();
@@ -393,7 +439,7 @@ mod tests {
     async fn test_phase_2_product_identity_and_null_semantics() {
         let (_db, service, cat_id, unit_id) = setup_test_context().await;
         let quality1 = "00000000-0000-0000-0000-000000000201"; // Original
-        let color1 = "00000000-0000-0000-0000-000000000301";   // Black
+        let color1 = "00000000-0000-0000-0000-000000000301"; // Black
         let company1 = "00000000-0000-0000-0000-000000000101"; // Official Importer
         let company2 = "00000000-0000-0000-0000-000000000102"; // China Direct
 
@@ -416,14 +462,20 @@ mod tests {
             initial_quantity: None,
             branch_id: None,
         };
-        let p_base = service.create_product(base_dto.clone(), None).await.expect("Base product creation should succeed");
+        let p_base = service
+            .create_product(base_dto.clone(), None)
+            .await
+            .expect("Base product creation should succeed");
 
         // Attempt exact duplicate (Case A repeat) -> REJECT
         let dup_base_dto = CreateProductDto {
             sku: "SKU-A15-DUP".to_string(),
             ..base_dto.clone()
         };
-        assert!(service.create_product(dup_base_dto, None).await.is_err(), "Exact duplicate identity must be rejected");
+        assert!(
+            service.create_product(dup_base_dto, None).await.is_err(),
+            "Exact duplicate identity must be rejected"
+        );
 
         // Case H: Whitespace/case variation -> REJECT
         let space_case_dto = CreateProductDto {
@@ -431,7 +483,10 @@ mod tests {
             sku: "SKU-A15-SPACE".to_string(),
             ..base_dto.clone()
         };
-        assert!(service.create_product(space_case_dto, None).await.is_err(), "Whitespace/case variation duplicate must be rejected");
+        assert!(
+            service.create_product(space_case_dto, None).await.is_err(),
+            "Whitespace/case variation duplicate must be rejected"
+        );
 
         // Case B: Same product but quality = Original -> ALLOW
         let qual_dto = CreateProductDto {
@@ -439,7 +494,10 @@ mod tests {
             quality_id: Some(quality1.to_string()),
             ..base_dto.clone()
         };
-        let p_qual = service.create_product(qual_dto, None).await.expect("Different quality creates distinct product");
+        let p_qual = service
+            .create_product(qual_dto, None)
+            .await
+            .expect("Different quality creates distinct product");
         assert_ne!(p_base.id, p_qual.id);
 
         // Case C: Same product but color = Black -> ALLOW
@@ -448,7 +506,10 @@ mod tests {
             color_id: Some(color1.to_string()),
             ..base_dto.clone()
         };
-        let p_color = service.create_product(color_dto, None).await.expect("Different color creates distinct product");
+        let p_color = service
+            .create_product(color_dto, None)
+            .await
+            .expect("Different color creates distinct product");
         assert_ne!(p_base.id, p_color.id);
 
         // Case D: Same product with company changed -> REJECT (company excluded from identity)
@@ -470,7 +531,10 @@ mod tests {
             initial_quantity: None,
             branch_id: None,
         };
-        let _p_comp1 = service.create_product(comp1_dto.clone(), None).await.expect("First company product creation succeeds");
+        let _p_comp1 = service
+            .create_product(comp1_dto.clone(), None)
+            .await
+            .expect("First company product creation succeeds");
 
         let comp2_dto = CreateProductDto {
             sku: "SKU-NOKIA-CMP2".to_string(),
@@ -550,11 +614,23 @@ mod tests {
             .unwrap();
 
         // Product count before restock = 2
-        let prods_before = prod_service.list_products(crate::domain::product::ProductFilter { is_active: Some(true), ..Default::default() }).await.unwrap();
+        let prods_before = prod_service
+            .list_products(crate::domain::product::ProductFilter {
+                is_active: Some(true),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         assert_eq!(prods_before.len(), 2);
 
-        let stock_a_before = inv_service.get_stock(&prod_a.id, main_branch_id).await.unwrap();
-        let stock_b_before = inv_service.get_stock(&prod_b.id, main_branch_id).await.unwrap();
+        let stock_a_before = inv_service
+            .get_stock(&prod_a.id, main_branch_id)
+            .await
+            .unwrap();
+        let stock_b_before = inv_service
+            .get_stock(&prod_b.id, main_branch_id)
+            .await
+            .unwrap();
         assert_eq!(stock_a_before, 10);
         assert_eq!(stock_b_before, 20);
 
@@ -575,11 +651,24 @@ mod tests {
         assert_eq!(new_b_stock, 30);
 
         // Verify Product A stock is UNCHANGED
-        let stock_a_after_b_restock = inv_service.get_stock(&prod_a.id, main_branch_id).await.unwrap();
+        let stock_a_after_b_restock = inv_service
+            .get_stock(&prod_a.id, main_branch_id)
+            .await
+            .unwrap();
         assert_eq!(stock_a_after_b_restock, 10);
 
         // Product count after restock MUST REMAIN EXACTLY 2
-        let prods_after = prod_service.list_products(crate::domain::product::ProductFilter { is_active: Some(true), ..Default::default() }).await.unwrap();
-        assert_eq!(prods_after.len(), 2, "Product Master count must remain unchanged after restock");
+        let prods_after = prod_service
+            .list_products(crate::domain::product::ProductFilter {
+                is_active: Some(true),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            prods_after.len(),
+            2,
+            "Product Master count must remain unchanged after restock"
+        );
     }
 }

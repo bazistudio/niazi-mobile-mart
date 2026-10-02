@@ -46,7 +46,9 @@ impl PurchaseSettlementMethod {
     pub fn from_str(s: &str) -> Result<Self, String> {
         match s.to_uppercase().as_str() {
             "CASH" => Ok(PurchaseSettlementMethod::Cash),
-            "SUPPLIER_CREDIT" | "SUPPLIER_ACCOUNT" | "CREDIT" => Ok(PurchaseSettlementMethod::SupplierCredit),
+            "SUPPLIER_CREDIT" | "SUPPLIER_ACCOUNT" | "CREDIT" => {
+                Ok(PurchaseSettlementMethod::SupplierCredit)
+            }
             other => Err(format!("Unknown purchase settlement method: {other}")),
         }
     }

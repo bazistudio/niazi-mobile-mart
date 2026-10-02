@@ -11,7 +11,6 @@
 /// re-expressed as `YYYY-MM-DDTHH:MM:SS[.frac]Z`.  Malformed input returns
 /// `Err`, which callers must surface explicitly — silent corruption is worse
 /// than a visible failure.
-
 use chrono::{DateTime, FixedOffset};
 
 use crate::db::errors::DbError;
@@ -29,9 +28,7 @@ use crate::db::errors::DbError;
 /// a silent wrong value.
 pub fn normalize_rfc3339(raw: &str) -> Result<String, DbError> {
     let dt: DateTime<FixedOffset> = DateTime::parse_from_rfc3339(raw).map_err(|e| {
-        DbError::ValidationError(format!(
-            "M3: invalid RFC3339 timestamp '{raw}': {e}"
-        ))
+        DbError::ValidationError(format!("M3: invalid RFC3339 timestamp '{raw}': {e}"))
     })?;
     // Convert to UTC then re-serialize; chrono produces "…Z" suffix for UTC.
     Ok(dt.to_utc().to_rfc3339())
@@ -67,31 +64,42 @@ mod tests {
         let parsed_in = DateTime::parse_from_rfc3339(input).unwrap().to_utc();
         let parsed_out = DateTime::parse_from_rfc3339(&result).unwrap().to_utc();
         assert_eq!(parsed_in, parsed_out, "M3-T01: instant must be preserved");
-        assert!(result.ends_with("+00:00"), "M3-T01: canonical form must end with +00:00, got '{result}'");
+        assert!(
+            result.ends_with("+00:00"),
+            "M3-T01: canonical form must end with +00:00, got '{result}'"
+        );
     }
 
     // M3-T02: +05:00 offset equals Z-suffixed string for the same instant
     #[test]
     fn m3_t02_positive_offset_equals_utc_equivalent() {
         let with_offset = "2026-09-29T17:00:00+05:00";
-        let utc_equiv   = "2026-09-29T12:00:00Z";
+        let utc_equiv = "2026-09-29T12:00:00Z";
 
         let normalized_offset = normalize_rfc3339(with_offset).expect("M3-T02: must parse +05:00");
-        let normalized_utc    = normalize_rfc3339(utc_equiv).expect("M3-T02: must parse Z");
+        let normalized_utc = normalize_rfc3339(utc_equiv).expect("M3-T02: must parse Z");
 
         // Both must represent exactly the same UTC instant
-        assert_eq!(normalized_offset, normalized_utc,
-            "M3-T02: +05:00 and Z representations of the same moment must normalize identically");
+        assert_eq!(
+            normalized_offset, normalized_utc,
+            "M3-T02: +05:00 and Z representations of the same moment must normalize identically"
+        );
 
         // The raw strings are NOT equal (this was the bug)
-        assert_ne!(with_offset, utc_equiv,
-            "M3-T02: raw strings differ — confirms the pre-fix lexicographic comparison was wrong");
+        assert_ne!(
+            with_offset, utc_equiv,
+            "M3-T02: raw strings differ — confirms the pre-fix lexicographic comparison was wrong"
+        );
 
         // Crucially: is_strictly_newer must return false (same instant)
-        assert!(!is_strictly_newer(with_offset, utc_equiv),
-            "M3-T02: same instant must not be 'strictly newer'");
-        assert!(!is_strictly_newer(utc_equiv, with_offset),
-            "M3-T02: same instant must not be 'strictly newer' (reversed)");
+        assert!(
+            !is_strictly_newer(with_offset, utc_equiv),
+            "M3-T02: same instant must not be 'strictly newer'"
+        );
+        assert!(
+            !is_strictly_newer(utc_equiv, with_offset),
+            "M3-T02: same instant must not be 'strictly newer' (reversed)"
+        );
     }
 
     // M3-T03: Negative offset normalizes correctly
@@ -101,8 +109,14 @@ mod tests {
         let input = "2026-09-29T07:00:00-05:00";
         let normalized = normalize_rfc3339(input).expect("M3-T03: must parse -05:00");
         let expected_utc = normalize_rfc3339("2026-09-29T12:00:00Z").unwrap();
-        assert_eq!(normalized, expected_utc, "M3-T03: -05:00 must normalize to correct UTC");
-        assert!(normalized.ends_with("+00:00"), "M3-T03: canonical form must end with +00:00");
+        assert_eq!(
+            normalized, expected_utc,
+            "M3-T03: -05:00 must normalize to correct UTC"
+        );
+        assert!(
+            normalized.ends_with("+00:00"),
+            "M3-T03: canonical form must end with +00:00"
+        );
     }
 
     // M3-T04: Fractional seconds are preserved through normalization
@@ -113,16 +127,20 @@ mod tests {
         // The normalized string must parse to exactly the same instant
         let original_instant = DateTime::parse_from_rfc3339(input).unwrap().to_utc();
         let normalized_instant = DateTime::parse_from_rfc3339(&normalized).unwrap().to_utc();
-        assert_eq!(original_instant, normalized_instant,
-            "M3-T04: fractional-second precision must not be lost");
+        assert_eq!(
+            original_instant, normalized_instant,
+            "M3-T04: fractional-second precision must not be lost"
+        );
 
         // With +05:30 offset and fractional seconds
         let input2 = "2026-09-29T17:30:00.500+05:30";
         let normalized2 = normalize_rfc3339(input2).expect("M3-T04: must parse fractional+offset");
         let inst2 = DateTime::parse_from_rfc3339(input2).unwrap().to_utc();
         let norm_inst2 = DateTime::parse_from_rfc3339(&normalized2).unwrap().to_utc();
-        assert_eq!(inst2, norm_inst2,
-            "M3-T04: fractional seconds with offset must normalize to correct instant");
+        assert_eq!(
+            inst2, norm_inst2,
+            "M3-T04: fractional seconds with offset must normalize to correct instant"
+        );
     }
 
     // M3-T05: Malformed timestamp is rejected deterministically (not silently wrapped)
@@ -130,12 +148,12 @@ mod tests {
     fn m3_t05_malformed_timestamp_rejected() {
         let bad_inputs = &[
             "not-a-date",
-            "2026-13-01T00:00:00Z",       // month 13
-            "2026-09-29T25:00:00Z",       // hour 25
-            "2026-09-29",                  // date only — not RFC3339
-            "1234567890",                  // unix epoch integer as string
-            "",                            // empty string
-            "2026-09-29T12:00:00",         // missing timezone — not RFC3339
+            "2026-13-01T00:00:00Z", // month 13
+            "2026-09-29T25:00:00Z", // hour 25
+            "2026-09-29",           // date only — not RFC3339
+            "1234567890",           // unix epoch integer as string
+            "",                     // empty string
+            "2026-09-29T12:00:00",  // missing timezone — not RFC3339
         ];
         for bad in bad_inputs.iter() {
             let result = normalize_rfc3339(bad);
@@ -162,25 +180,40 @@ mod tests {
         let same_a = "2026-09-29T17:00:00+05:00";
         let same_b = "2026-09-29T12:00:00Z";
 
-        assert!(!is_strictly_newer(same_a, same_b), "M3-T06: same instant: a not newer than b");
-        assert!(!is_strictly_newer(same_b, same_a), "M3-T06: same instant: b not newer than a");
+        assert!(
+            !is_strictly_newer(same_a, same_b),
+            "M3-T06: same instant: a not newer than b"
+        );
+        assert!(
+            !is_strictly_newer(same_b, same_a),
+            "M3-T06: same instant: b not newer than a"
+        );
 
         // A genuine 1-second later event
-        let later   = "2026-09-29T17:00:01+05:00";   // 12:00:01Z
-        let earlier = "2026-09-29T12:00:00Z";          // 12:00:00Z
+        let later = "2026-09-29T17:00:01+05:00"; // 12:00:01Z
+        let earlier = "2026-09-29T12:00:00Z"; // 12:00:00Z
 
-        assert!(is_strictly_newer(later, earlier),
-            "M3-T06: later instant must be strictly newer than earlier");
-        assert!(!is_strictly_newer(earlier, later),
-            "M3-T06: earlier instant must NOT be strictly newer than later");
+        assert!(
+            is_strictly_newer(later, earlier),
+            "M3-T06: later instant must be strictly newer than earlier"
+        );
+        assert!(
+            !is_strictly_newer(earlier, later),
+            "M3-T06: earlier instant must NOT be strictly newer than later"
+        );
 
         // Lexicographic trap: "+05:00" suffix > "Z" suffix in raw string comparison
         // Confirm is_strictly_newer does NOT fall into this trap for same-instant pair
         let trap_a = "2026-09-29T17:00:00+05:00";
         let trap_b = "2026-09-29T12:00:00Z";
-        assert!(trap_a > trap_b, "M3-T06 setup: raw string comparison gives wrong result (expected)");
-        assert!(!is_strictly_newer(trap_a, trap_b),
-            "M3-T06: is_strictly_newer must not reproduce the lexicographic bug");
+        assert!(
+            trap_a > trap_b,
+            "M3-T06 setup: raw string comparison gives wrong result (expected)"
+        );
+        assert!(
+            !is_strictly_newer(trap_a, trap_b),
+            "M3-T06: is_strictly_newer must not reproduce the lexicographic bug"
+        );
     }
 
     // M3-T07: Valid timestamp passes through sync/change-application path (PARTY_UPSERTED guard)
@@ -203,7 +236,7 @@ mod tests {
         );
 
         // A genuinely newer event (1 minute later in PKT)
-        let genuinely_newer = "2026-09-29T17:01:00+05:00";  // 12:01:00Z
+        let genuinely_newer = "2026-09-29T17:01:00+05:00"; // 12:01:00Z
         assert!(
             is_strictly_newer(genuinely_newer, stored_updated_at),
             "M3-T07: genuinely newer event must be recognized correctly"
@@ -220,7 +253,10 @@ mod tests {
         let malformed = "totally-broken-timestamp";
         let result = normalize_rfc3339(malformed);
         // Must be Err — M2 cursor advancement relies on Err, not panic
-        assert!(result.is_err(), "M3-T08: malformed input must return Err for M2 to skip gracefully");
+        assert!(
+            result.is_err(),
+            "M3-T08: malformed input must return Err for M2 to skip gracefully"
+        );
         // Must not panic — the test itself proves this
     }
 
@@ -232,22 +268,29 @@ mod tests {
     fn m3_t09_replay_idempotency_consistent_timestamp_state() {
         let ts = "2026-09-29T17:00:00+05:00";
 
-        let first  = normalize_rfc3339(ts).unwrap();
+        let first = normalize_rfc3339(ts).unwrap();
         let second = normalize_rfc3339(ts).unwrap();
-        assert_eq!(first, second, "M3-T09: normalizing the same input twice must be idempotent");
+        assert_eq!(
+            first, second,
+            "M3-T09: normalizing the same input twice must be idempotent"
+        );
 
         // Two representations of the same instant must normalize to the same string
         let utc_form = "2026-09-29T12:00:00Z";
         let pkt_form = "2026-09-29T17:00:00+05:00";
         let norm_utc = normalize_rfc3339(utc_form).unwrap();
         let norm_pkt = normalize_rfc3339(pkt_form).unwrap();
-        assert_eq!(norm_utc, norm_pkt,
+        assert_eq!(
+            norm_utc, norm_pkt,
             "M3-T09: different representations of the same instant must normalize identically: \
-             utc='{norm_utc}' pkt='{norm_pkt}'");
+             utc='{norm_utc}' pkt='{norm_pkt}'"
+        );
 
         // is_strictly_newer on normalized vs original must be consistent
-        assert!(!is_strictly_newer(&first, &second),
-            "M3-T09: idempotent replay must not produce a 'newer' verdict");
+        assert!(
+            !is_strictly_newer(&first, &second),
+            "M3-T09: idempotent replay must not produce a 'newer' verdict"
+        );
     }
 
     // M3-T10: Server-side PARTY_UPSERTED last-writer guard regression (R-1 fix)
@@ -263,8 +306,8 @@ mod tests {
     #[test]
     fn m3_t10_server_party_upsert_guard_regression() {
         // The two timestamps used in the audit finding — same UTC instant, different representations.
-        let utc_stored   = "2026-09-29T12:00:00Z";          // stored on server (UTC)
-        let pkt_incoming = "2026-09-29T17:00:00+05:00";     // arriving from a PKT terminal
+        let utc_stored = "2026-09-29T12:00:00Z"; // stored on server (UTC)
+        let pkt_incoming = "2026-09-29T17:00:00+05:00"; // arriving from a PKT terminal
 
         // ── Pre-fix behaviour (demonstrates the bug, for documentation) ──────
         // Raw string comparison: "+05:00" suffix > "Z" suffix lexicographically.

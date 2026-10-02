@@ -74,15 +74,31 @@ impl PostgresChangeLogRepository {
         let mut list = Vec::with_capacity(rows.len());
         for r in rows {
             list.push(ChangeLogEntry {
-                sequence: r.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                organization_id: r.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                branch_id: r.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                sequence: r
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                organization_id: r
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                branch_id: r
+                    .try_get(2)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 client_event_id: r.try_get(3).unwrap_or(None),
-                event_type: r.try_get(4).map_err(|e| AppError::Database(e.to_string()))?,
-                entity_type: r.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                entity_id: r.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
-                payload: r.try_get(7).map_err(|e| AppError::Database(e.to_string()))?,
-                created_at: r.try_get(8).map_err(|e| AppError::Database(e.to_string()))?,
+                event_type: r
+                    .try_get(4)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                entity_type: r
+                    .try_get(5)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                entity_id: r
+                    .try_get(6)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                payload: r
+                    .try_get(7)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: r
+                    .try_get(8)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
 

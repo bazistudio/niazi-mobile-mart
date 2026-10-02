@@ -176,7 +176,9 @@ impl SQLitePartyRepository {
                     party.id,
                 ],
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to copy party contact to {table}: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to copy party contact to {table}: {e}"))
+            })?;
         }
         Ok(())
     }
@@ -191,7 +193,11 @@ impl SQLitePartyRepository {
         .map_err(|e| DbError::QueryError(format!("Failed to count party roles: {e}")))
     }
 
-    pub fn party_id_of_role_in_tx(conn: &Connection, kind: PartyRoleKind, role_id: &str) -> DbResult<Option<String>> {
+    pub fn party_id_of_role_in_tx(
+        conn: &Connection,
+        kind: PartyRoleKind,
+        role_id: &str,
+    ) -> DbResult<Option<String>> {
         let sql = format!("SELECT party_id FROM {} WHERE id = ?1", kind.table());
         let res: Option<Option<String>> = conn
             .query_row(&sql, params![role_id], |row| row.get(0))
@@ -201,7 +207,12 @@ impl SQLitePartyRepository {
     }
 
     /// Links a role to a party only if the role is unlinked and the party has no role of this kind yet.
-    pub fn link_role_in_tx(conn: &Connection, kind: PartyRoleKind, role_id: &str, party_id: &str) -> DbResult<()> {
+    pub fn link_role_in_tx(
+        conn: &Connection,
+        kind: PartyRoleKind,
+        role_id: &str,
+        party_id: &str,
+    ) -> DbResult<()> {
         let table = kind.table();
         let sql = format!(
             "UPDATE {table} SET party_id = ?1
@@ -209,7 +220,9 @@ impl SQLitePartyRepository {
                AND NOT EXISTS (SELECT 1 FROM {table} o WHERE o.party_id = ?1)"
         );
         conn.execute(&sql, params![party_id, role_id])
-            .map_err(|e| DbError::QueryError(format!("Failed to link {table} row to party: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to link {table} row to party: {e}"))
+            })?;
         Ok(())
     }
 
@@ -226,7 +239,10 @@ impl SQLitePartyRepository {
         party_id: &str,
     ) -> DbResult<Option<String>> {
         let derived = contact.to_party(party_id);
-        let sql = format!("SELECT party_id FROM {} WHERE id = ?1", contact.kind.table());
+        let sql = format!(
+            "SELECT party_id FROM {} WHERE id = ?1",
+            contact.kind.table()
+        );
         let role_row: Option<Option<String>> = conn
             .query_row(&sql, params![contact.role_id], |row| row.get(0))
             .optional()
@@ -300,7 +316,9 @@ impl SQLitePartyRepository {
         let effective = Self::ensure_party_for_role_in_tx(conn, contact, &contact.role_id)?;
         let party_id = effective.clone().unwrap_or_else(|| contact.role_id.clone());
         let role_payload = crate::domain::party::role_payload_with_party_id(role, &party_id)
-            .map_err(|e| DbError::ValidationError(format!("Failed to serialize role payload: {e}")))?;
+            .map_err(|e| {
+                DbError::ValidationError(format!("Failed to serialize role payload: {e}"))
+            })?;
 
         let mut party_payload = None;
         if emit_party_event {
@@ -308,23 +326,34 @@ impl SQLitePartyRepository {
                 if Self::linked_role_count_in_tx(conn, &pid)? == 1 {
                     if let Some(party) = Self::get_party_in_tx(conn, &pid)? {
                         party_payload = Some(serde_json::to_string(&party).map_err(|e| {
-                            DbError::ValidationError(format!("Failed to serialize party payload: {e}"))
+                            DbError::ValidationError(format!(
+                                "Failed to serialize party payload: {e}"
+                            ))
                         })?);
                     }
                 }
             }
         }
-        Ok(RolePartyPayloads { role_payload, party_payload })
+        Ok(RolePartyPayloads {
+            role_payload,
+            party_payload,
+        })
     }
 
-    pub fn get_party_summary_in_tx(conn: &Connection, id: &str) -> DbResult<Option<PartySummaryDto>> {
+    pub fn get_party_summary_in_tx(
+        conn: &Connection,
+        id: &str,
+    ) -> DbResult<Option<PartySummaryDto>> {
         let sql = format!("{SUMMARY_SELECT} WHERE p.id = ?1");
         conn.query_row(&sql, params![id], Self::map_summary)
             .optional()
             .map_err(|e| DbError::QueryError(format!("Failed to query party summary: {e}")))
     }
 
-    pub fn list_parties_in_tx(conn: &Connection, filter: &PartyFilter) -> DbResult<Vec<PartySummaryDto>> {
+    pub fn list_parties_in_tx(
+        conn: &Connection,
+        filter: &PartyFilter,
+    ) -> DbResult<Vec<PartySummaryDto>> {
         let mut sql = format!("{SUMMARY_SELECT} WHERE 1=1");
         let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
@@ -353,7 +382,10 @@ impl SQLitePartyRepository {
             }
         }
         sql.push_str(" ORDER BY p.display_name COLLATE NOCASE ASC, p.id ASC LIMIT ? OFFSET ?");
-        let limit = filter.limit.unwrap_or(MAX_PARTY_PAGE).clamp(1, MAX_PARTY_PAGE);
+        let limit = filter
+            .limit
+            .unwrap_or(MAX_PARTY_PAGE)
+            .clamp(1, MAX_PARTY_PAGE);
         let offset = filter.offset.unwrap_or(0).max(0);
         values.push(Box::new(limit));
         values.push(Box::new(offset));
@@ -446,11 +478,25 @@ mod tests {
         let cust = customer(C1, "Ali", "2026-02-01T00:00:00+00:00");
         crate::repositories::SQLiteCustomerRepository::insert_customer_in_tx(&c, &cust).unwrap();
         let contact = PartyRoleContact::from(&cust);
-        assert_eq!(SQLitePartyRepository::ensure_party_for_role_in_tx(&c, &contact, C1).unwrap().as_deref(), Some(C1));
-        assert_eq!(SQLitePartyRepository::ensure_party_for_role_in_tx(&c, &contact, C1).unwrap().as_deref(), Some(C1));
-        let n: i64 = c.query_row("SELECT COUNT(*) FROM parties", [], |r| r.get(0)).unwrap();
+        assert_eq!(
+            SQLitePartyRepository::ensure_party_for_role_in_tx(&c, &contact, C1)
+                .unwrap()
+                .as_deref(),
+            Some(C1)
+        );
+        assert_eq!(
+            SQLitePartyRepository::ensure_party_for_role_in_tx(&c, &contact, C1)
+                .unwrap()
+                .as_deref(),
+            Some(C1)
+        );
+        let n: i64 = c
+            .query_row("SELECT COUNT(*) FROM parties", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 1);
-        let s = SQLitePartyRepository::get_party_summary_in_tx(&c, C1).unwrap().unwrap();
+        let s = SQLitePartyRepository::get_party_summary_in_tx(&c, C1)
+            .unwrap()
+            .unwrap();
         assert_eq!(s.party_type, Some(PartyType::Customer));
         assert_eq!(s.customer_id.as_deref(), Some(C1));
     }
@@ -460,20 +506,32 @@ mod tests {
         let c = conn();
         let cust = customer(C1, "Ali", "2026-02-01T00:00:00+00:00");
         crate::repositories::SQLiteCustomerRepository::insert_customer_in_tx(&c, &cust).unwrap();
-        SQLitePartyRepository::ensure_party_for_role_in_tx(&c, &PartyRoleContact::from(&cust), C1).unwrap();
+        SQLitePartyRepository::ensure_party_for_role_in_tx(&c, &PartyRoleContact::from(&cust), C1)
+            .unwrap();
         let sup = supplier(S1, "Ali Supplies");
         crate::repositories::SQLiteSupplierRepository::insert_supplier_in_tx(&c, &sup).unwrap();
-        SQLitePartyRepository::ensure_party_for_role_in_tx(&c, &PartyRoleContact::from(&sup), C1).unwrap();
-        let s = SQLitePartyRepository::get_party_summary_in_tx(&c, C1).unwrap().unwrap();
+        SQLitePartyRepository::ensure_party_for_role_in_tx(&c, &PartyRoleContact::from(&sup), C1)
+            .unwrap();
+        let s = SQLitePartyRepository::get_party_summary_in_tx(&c, C1)
+            .unwrap()
+            .unwrap();
         assert_eq!(s.party_type, Some(PartyType::Both));
         assert_eq!(s.supplier_id.as_deref(), Some(S1));
         // Two roles: supplier contact did NOT overwrite the party.
         assert_eq!(s.party.display_name, "Ali");
         // A second customer can never join the same party.
-        let other = customer("22222222-2222-4222-8222-222222222222", "Other", "2026-02-01T00:00:00+00:00");
+        let other = customer(
+            "22222222-2222-4222-8222-222222222222",
+            "Other",
+            "2026-02-01T00:00:00+00:00",
+        );
         crate::repositories::SQLiteCustomerRepository::insert_customer_in_tx(&c, &other).unwrap();
         SQLitePartyRepository::link_role_in_tx(&c, PartyRoleKind::Customer, &other.id, C1).unwrap();
-        assert_eq!(SQLitePartyRepository::party_id_of_role_in_tx(&c, PartyRoleKind::Customer, &other.id).unwrap(), None);
+        assert_eq!(
+            SQLitePartyRepository::party_id_of_role_in_tx(&c, PartyRoleKind::Customer, &other.id)
+                .unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -481,14 +539,23 @@ mod tests {
         let c = conn();
         let cust = customer(C1, "Ali", "2026-02-01T00:00:00+00:00");
         crate::repositories::SQLiteCustomerRepository::insert_customer_in_tx(&c, &cust).unwrap();
-        SQLitePartyRepository::ensure_party_for_role_in_tx(&c, &PartyRoleContact::from(&cust), C1).unwrap();
-        let mut p = SQLitePartyRepository::get_party_in_tx(&c, C1).unwrap().unwrap();
+        SQLitePartyRepository::ensure_party_for_role_in_tx(&c, &PartyRoleContact::from(&cust), C1)
+            .unwrap();
+        let mut p = SQLitePartyRepository::get_party_in_tx(&c, C1)
+            .unwrap()
+            .unwrap();
         p.display_name = "Ali Traders".into();
         p.company_name = Some("Ali & Sons".into());
         p.updated_at = "2026-03-01T00:00:00+00:00".into();
         assert!(SQLitePartyRepository::upsert_party_guarded_in_tx(&c, &p).unwrap());
         SQLitePartyRepository::copy_party_to_roles_in_tx(&c, &p).unwrap();
-        let name: String = c.query_row("SELECT name FROM customers WHERE id = ?1", params![C1], |r| r.get(0)).unwrap();
+        let name: String = c
+            .query_row(
+                "SELECT name FROM customers WHERE id = ?1",
+                params![C1],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(name, "Ali Traders");
         // Stale write is rejected.
         let mut stale = p.clone();
@@ -496,8 +563,11 @@ mod tests {
         stale.updated_at = "2026-02-15T00:00:00+00:00".into();
         assert!(!SQLitePartyRepository::upsert_party_guarded_in_tx(&c, &stale).unwrap());
         // Older role write does not overwrite the newer party edit.
-        SQLitePartyRepository::ensure_party_for_role_in_tx(&c, &PartyRoleContact::from(&cust), C1).unwrap();
-        let now = SQLitePartyRepository::get_party_in_tx(&c, C1).unwrap().unwrap();
+        SQLitePartyRepository::ensure_party_for_role_in_tx(&c, &PartyRoleContact::from(&cust), C1)
+            .unwrap();
+        let now = SQLitePartyRepository::get_party_in_tx(&c, C1)
+            .unwrap()
+            .unwrap();
         assert_eq!(now.display_name, "Ali Traders");
         assert_eq!(now.company_name.as_deref(), Some("Ali & Sons"));
     }
@@ -507,16 +577,32 @@ mod tests {
         let c = conn();
         let cust = customer(C1, "Ali", "2026-02-01T00:00:00+00:00");
         crate::repositories::SQLiteCustomerRepository::insert_customer_in_tx(&c, &cust).unwrap();
-        SQLitePartyRepository::ensure_party_for_role_in_tx(&c, &PartyRoleContact::from(&cust), C1).unwrap();
+        SQLitePartyRepository::ensure_party_for_role_in_tx(&c, &PartyRoleContact::from(&cust), C1)
+            .unwrap();
         let sup = supplier(S1, "Hall Road Parts");
         crate::repositories::SQLiteSupplierRepository::insert_supplier_in_tx(&c, &sup).unwrap();
-        SQLitePartyRepository::ensure_party_for_role_in_tx(&c, &PartyRoleContact::from(&sup), S1).unwrap();
+        SQLitePartyRepository::ensure_party_for_role_in_tx(&c, &PartyRoleContact::from(&sup), S1)
+            .unwrap();
         let all = SQLitePartyRepository::list_parties_in_tx(&c, &PartyFilter::default()).unwrap();
         assert_eq!(all.len(), 2);
-        let sups = SQLitePartyRepository::list_parties_in_tx(&c, &PartyFilter { party_type: Some(PartyType::Supplier), ..Default::default() }).unwrap();
+        let sups = SQLitePartyRepository::list_parties_in_tx(
+            &c,
+            &PartyFilter {
+                party_type: Some(PartyType::Supplier),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(sups.len(), 1);
         assert_eq!(sups[0].party.id, S1);
-        let found = SQLitePartyRepository::list_parties_in_tx(&c, &PartyFilter { search: Some("hall".into()), ..Default::default() }).unwrap();
+        let found = SQLitePartyRepository::list_parties_in_tx(
+            &c,
+            &PartyFilter {
+                search: Some("hall".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(found.len(), 1);
     }
 }

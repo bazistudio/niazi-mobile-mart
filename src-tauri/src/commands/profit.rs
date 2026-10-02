@@ -1,8 +1,8 @@
 use tauri::State;
 
 use crate::domain::profit::{
-    DailyProfitabilityDto, DashboardProfitSummaryDto, PeriodProfitabilityDto, ProductProfitabilityDto,
-    SaleProfitabilityDto,
+    DailyProfitabilityDto, DashboardProfitSummaryDto, PeriodProfitabilityDto,
+    ProductProfitabilityDto, SaleProfitabilityDto,
 };
 use crate::errors::AppResult;
 use crate::services::auth_service::AuthService;
@@ -23,7 +23,10 @@ pub async fn profit_get_period(
         let session = state.get_session().await;
         let is_org_admin = match session.role {
             Some(crate::domain::user::UserRole::Admin) => true,
-            _ => session.access_profile.as_ref().map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+            _ => session
+                .access_profile
+                .as_ref()
+                .map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
         };
         if !is_org_admin {
             Some(authorized_branch)
@@ -52,7 +55,10 @@ pub async fn profit_get_daily(
         let session = state.get_session().await;
         let is_org_admin = match session.role {
             Some(crate::domain::user::UserRole::Admin) => true,
-            _ => session.access_profile.as_ref().map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+            _ => session
+                .access_profile
+                .as_ref()
+                .map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
         };
         if !is_org_admin {
             Some(authorized_branch)
@@ -82,7 +88,10 @@ pub async fn profit_get_product(
         let session = state.get_session().await;
         let is_org_admin = match session.role {
             Some(crate::domain::user::UserRole::Admin) => true,
-            _ => session.access_profile.as_ref().map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+            _ => session
+                .access_profile
+                .as_ref()
+                .map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
         };
         if !is_org_admin {
             Some(authorized_branch)
@@ -123,7 +132,10 @@ pub async fn profit_get_dashboard_summary(
         let session = state.get_session().await;
         let is_org_admin = match session.role {
             Some(crate::domain::user::UserRole::Admin) => true,
-            _ => session.access_profile.as_ref().map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+            _ => session
+                .access_profile
+                .as_ref()
+                .map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
         };
         if !is_org_admin {
             Some(authorized_branch)

@@ -29,7 +29,9 @@ impl SQLiteCustomerRepository {
             "UPDATE counters SET value = value + 1 WHERE name = 'customer_code'",
             [],
         )
-        .map_err(|e| DbError::QueryError(format!("Failed to increment customer_code counter: {e}")))?;
+        .map_err(|e| {
+            DbError::QueryError(format!("Failed to increment customer_code counter: {e}"))
+        })?;
 
         let val: i64 = conn
             .query_row(
@@ -37,7 +39,9 @@ impl SQLiteCustomerRepository {
                 [],
                 |row| row.get(0),
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to read customer_code counter: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to read customer_code counter: {e}"))
+            })?;
 
         Ok(format!("CUS-{:06}", val))
     }
@@ -48,7 +52,9 @@ impl SQLiteCustomerRepository {
             "UPDATE counters SET value = value + 1 WHERE name = 'payment_receipt'",
             [],
         )
-        .map_err(|e| DbError::QueryError(format!("Failed to increment payment_receipt counter: {e}")))?;
+        .map_err(|e| {
+            DbError::QueryError(format!("Failed to increment payment_receipt counter: {e}"))
+        })?;
 
         let val: i64 = conn
             .query_row(
@@ -56,13 +62,18 @@ impl SQLiteCustomerRepository {
                 [],
                 |row| row.get(0),
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to read payment_receipt counter: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to read payment_receipt counter: {e}"))
+            })?;
 
         Ok(format!("REC-{:06}", val))
     }
 
     /// Authoritative outstanding balance calculation from ledger inside transaction: SUM(debit) - SUM(credit)
-    pub fn calculate_outstanding_balance_in_tx(conn: &Connection, customer_id: &str) -> DbResult<i64> {
+    pub fn calculate_outstanding_balance_in_tx(
+        conn: &Connection,
+        customer_id: &str,
+    ) -> DbResult<i64> {
         let bal: i64 = conn
             .query_row(
                 "SELECT COALESCE(SUM(debit) - SUM(credit), 0) FROM customer_ledger_entries WHERE customer_id = ?1",
@@ -75,12 +86,19 @@ impl SQLiteCustomerRepository {
     }
 
     /// Appends an auditable customer ledger entry inside transaction
-    pub fn insert_ledger_entry_in_tx(conn: &Connection, entry: &CustomerLedgerEntry) -> DbResult<()> {
+    pub fn insert_ledger_entry_in_tx(
+        conn: &Connection,
+        entry: &CustomerLedgerEntry,
+    ) -> DbResult<()> {
         if entry.debit < 0 || entry.credit < 0 {
-            return Err(DbError::ConstraintViolation("Ledger debit and credit must be non-negative".to_string()));
+            return Err(DbError::ConstraintViolation(
+                "Ledger debit and credit must be non-negative".to_string(),
+            ));
         }
         if entry.balance_after < 0 {
-            return Err(DbError::ConstraintViolation("Customer balance cannot be negative".to_string()));
+            return Err(DbError::ConstraintViolation(
+                "Customer balance cannot be negative".to_string(),
+            ));
         }
 
         conn.execute(
@@ -135,7 +153,9 @@ impl SQLiteCustomerRepository {
         match res {
             Ok(c) => Ok(Some(c)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(DbError::QueryError(format!("Failed to query customer: {e}"))),
+            Err(e) => Err(DbError::QueryError(format!(
+                "Failed to query customer: {e}"
+            ))),
         }
     }
 
@@ -174,7 +194,11 @@ impl SQLiteCustomerRepository {
         Ok(())
     }
 
-    pub fn update_customer_in_tx(conn: &Connection, id: &str, dto: &UpdateCustomerDto) -> DbResult<Customer> {
+    pub fn update_customer_in_tx(
+        conn: &Connection,
+        id: &str,
+        dto: &UpdateCustomerDto,
+    ) -> DbResult<Customer> {
         let existing = Self::get_customer_by_id_in_tx(conn, id)?
             .ok_or_else(|| DbError::NotFound(format!("Customer '{id}' not found")))?;
 
@@ -382,7 +406,9 @@ impl SQLiteCustomerRepository {
         match res {
             Ok(c) => Ok(Some(c)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(AppError::Database(format!("Failed to query customer by phone: {e}"))),
+            Err(e) => Err(AppError::Database(format!(
+                "Failed to query customer by phone: {e}"
+            ))),
         }
     }
 
@@ -422,7 +448,10 @@ impl SQLiteCustomerRepository {
     }
 
     /// Lists customers with summary information and outstanding balance
-    pub async fn list_customers(&self, filter: &CustomerFilter) -> AppResult<Vec<CustomerSummaryDto>> {
+    pub async fn list_customers(
+        &self,
+        filter: &CustomerFilter,
+    ) -> AppResult<Vec<CustomerSummaryDto>> {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
 
@@ -432,7 +461,7 @@ impl SQLiteCustomerRepository {
                     c.is_active, c.created_at
              FROM customers c
              LEFT JOIN customer_ledger_entries l ON c.id = l.customer_id
-             WHERE 1=1"
+             WHERE 1=1",
         );
 
         let mut param_values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -462,11 +491,12 @@ impl SQLiteCustomerRepository {
             }
         }
 
-        let mut stmt = guard
-            .prepare(&query)
-            .map_err(|e| AppError::Database(format!("Failed to prepare customer list query: {e}")))?;
+        let mut stmt = guard.prepare(&query).map_err(|e| {
+            AppError::Database(format!("Failed to prepare customer list query: {e}"))
+        })?;
 
-        let params_slice: Vec<&dyn rusqlite::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
+        let params_slice: Vec<&dyn rusqlite::ToSql> =
+            param_values.iter().map(|b| b.as_ref()).collect();
 
         let rows = stmt
             .query_map(params_slice.as_slice(), |row| {

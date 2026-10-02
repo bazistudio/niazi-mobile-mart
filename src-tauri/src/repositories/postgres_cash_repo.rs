@@ -57,7 +57,7 @@ impl PostgresCashRepository {
         sqlx::query(
             "INSERT INTO cash_sessions (
                 id, branch_id, business_date, opening_cash, status, opened_at, opened_by, notes
-             ) VALUES ($1, $2, $3, $4, 'OPEN', $5, $6, $7)"
+             ) VALUES ($1, $2, $3, $4, 'OPEN', $5, $6, $7)",
         )
         .bind(&session.id)
         .bind(&session.branch_id)
@@ -84,10 +84,16 @@ impl PostgresCashRepository {
             .ok_or_else(|| AppError::NotFound(format!("Session '{}' not found", dto.session_id)))?;
 
         if open_session.status != CashSessionStatus::Open {
-            return Err(AppError::Validation("Cash session is already closed".to_string()));
+            return Err(AppError::Validation(
+                "Cash session is already closed".to_string(),
+            ));
         }
 
-        let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
         // Calculate expected closing cash: opening_cash + IN movements - OUT movements
         let in_total: (i64,) = sqlx::query_as(
@@ -114,7 +120,7 @@ impl PostgresCashRepository {
             "UPDATE cash_sessions
              SET expected_closing_cash = $1, actual_closing_cash = $2, cash_variance = $3,
                  status = 'CLOSED', closed_at = $4, closed_by = $5, notes = COALESCE($6, notes)
-             WHERE id = $7"
+             WHERE id = $7",
         )
         .bind(expected)
         .bind(dto.actual_closing_cash)
@@ -127,7 +133,9 @@ impl PostgresCashRepository {
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
 
-        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok(CashSession {
             id: open_session.id,
@@ -183,15 +191,12 @@ impl PostgresCashRepository {
         user_id: Option<&str>,
     ) -> AppResult<CashMovement> {
         let branch_id = dto.branch_id.as_deref().unwrap_or("MAIN");
-        let open_session_id = self
-            .get_open_session(branch_id)
-            .await?
-            .map(|s| s.id);
+        let open_session_id = self.get_open_session(branch_id).await?.map(|s| s.id);
 
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
-        let direction = CashMovementDirection::from_str(&dto.direction)
-            .unwrap_or(CashMovementDirection::In);
+        let direction =
+            CashMovementDirection::from_str(&dto.direction).unwrap_or(CashMovementDirection::In);
 
         let movement = CashMovement {
             id: id.clone(),
@@ -293,21 +298,32 @@ impl PostgresCashRepository {
     }
 
     fn map_session_row(row: &sqlx::postgres::PgRow) -> AppResult<CashSession> {
-        let status_str: String = row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?;
-        let status = CashSessionStatus::from_str(&status_str)
-            .unwrap_or(CashSessionStatus::Open);
+        let status_str: String = row
+            .try_get(7)
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let status = CashSessionStatus::from_str(&status_str).unwrap_or(CashSessionStatus::Open);
 
         Ok(CashSession {
-            id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-            branch_id: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+            id: row
+                .try_get(0)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            branch_id: row
+                .try_get(1)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             branch_name: None,
-            business_date: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
-            opening_cash: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
+            business_date: row
+                .try_get(2)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            opening_cash: row
+                .try_get(3)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             expected_closing_cash: row.try_get(4).unwrap_or(None),
             actual_closing_cash: row.try_get(5).unwrap_or(None),
             cash_variance: row.try_get(6).unwrap_or(None),
             status,
-            opened_at: row.try_get(8).map_err(|e| AppError::Database(e.to_string()))?,
+            opened_at: row
+                .try_get(8)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             closed_at: row.try_get(9).unwrap_or(None),
             opened_by: row.try_get(10).unwrap_or(None),
             opened_by_name: None,
@@ -318,28 +334,40 @@ impl PostgresCashRepository {
     }
 
     fn map_movement_row(row: &sqlx::postgres::PgRow) -> AppResult<CashMovement> {
-        let mtype_str: String = row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?;
-        let dir_str: String = row.try_get(4).map_err(|e| AppError::Database(e.to_string()))?;
+        let mtype_str: String = row
+            .try_get(3)
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let dir_str: String = row
+            .try_get(4)
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
-        let movement_type = CashMovementType::from_str(&mtype_str)
-            .unwrap_or(CashMovementType::CashAdjustment);
-        let direction = CashMovementDirection::from_str(&dir_str)
-            .unwrap_or(CashMovementDirection::In);
+        let movement_type =
+            CashMovementType::from_str(&mtype_str).unwrap_or(CashMovementType::CashAdjustment);
+        let direction =
+            CashMovementDirection::from_str(&dir_str).unwrap_or(CashMovementDirection::In);
 
         Ok(CashMovement {
-            id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
+            id: row
+                .try_get(0)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             session_id: row.try_get(1).unwrap_or(None),
-            branch_id: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+            branch_id: row
+                .try_get(2)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             movement_type,
             direction,
-            amount: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
+            amount: row
+                .try_get(5)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             reference_id: row.try_get(6).unwrap_or(None),
             reference_number: row.try_get(7).unwrap_or(None),
             payment_method: row.try_get(8).unwrap_or_else(|_| "CASH".to_string()),
             description: row.try_get(9).unwrap_or_default(),
             performed_by: row.try_get(10).unwrap_or(None),
             performed_by_name: None,
-            created_at: row.try_get(11).map_err(|e| AppError::Database(e.to_string()))?,
+            created_at: row
+                .try_get(11)
+                .map_err(|e| AppError::Database(e.to_string()))?,
         })
     }
 }

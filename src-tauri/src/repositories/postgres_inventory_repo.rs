@@ -42,8 +42,12 @@ impl PostgresInventoryRepository {
 
         let mut map = std::collections::HashMap::with_capacity(rows.len());
         for row in rows {
-            let pid: String = row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?;
-            let qty: i64 = row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?;
+            let pid: String = row
+                .try_get(0)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            let qty: i64 = row
+                .try_get(1)
+                .map_err(|e| AppError::Database(e.to_string()))?;
             map.insert(pid, qty);
         }
         Ok(map)
@@ -54,7 +58,11 @@ impl PostgresInventoryRepository {
         dto: &IncreaseStockDto,
         user_id: Option<&str>,
     ) -> AppResult<i64> {
-        let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
         let now = Utc::now().to_rfc3339();
 
         let current: i64 = sqlx::query_as(
@@ -102,7 +110,9 @@ impl PostgresInventoryRepository {
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
 
-        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(new_qty)
     }
 
@@ -111,7 +121,11 @@ impl PostgresInventoryRepository {
         dto: &DecreaseStockDto,
         user_id: Option<&str>,
     ) -> AppResult<i64> {
-        let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
         let now = Utc::now().to_rfc3339();
 
         let current: i64 = sqlx::query_as(
@@ -164,7 +178,9 @@ impl PostgresInventoryRepository {
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
 
-        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(new_qty)
     }
 
@@ -173,7 +189,11 @@ impl PostgresInventoryRepository {
         dto: &AdjustStockDto,
         user_id: Option<&str>,
     ) -> AppResult<i64> {
-        let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
         let now = Utc::now().to_rfc3339();
 
         let current: i64 = sqlx::query_as(
@@ -222,7 +242,9 @@ impl PostgresInventoryRepository {
             .map_err(|e| AppError::Database(e.to_string()))?;
         }
 
-        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(dto.target_quantity)
     }
 
@@ -231,7 +253,11 @@ impl PostgresInventoryRepository {
         dto: &TransferStockDto,
         user_id: Option<&str>,
     ) -> AppResult<()> {
-        let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
         let now = Utc::now().to_rfc3339();
 
         let src_curr: i64 = sqlx::query_as(
@@ -332,7 +358,9 @@ impl PostgresInventoryRepository {
         .await
         .map_err(|e| AppError::Database(e.to_string()))?;
 
-        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
     }
 
@@ -376,22 +404,38 @@ impl PostgresInventoryRepository {
 
         let mut list = Vec::with_capacity(rows.len());
         for row in rows {
-            let mtype_str: String = row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?;
+            let mtype_str: String = row
+                .try_get(3)
+                .map_err(|e| AppError::Database(e.to_string()))?;
             let mtype = StockMovementType::from_str(&mtype_str)
                 .map_err(|e| AppError::Database(e.to_string()))?;
 
             list.push(StockMovement {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                product_id: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                branch_id: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                product_id: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                branch_id: row
+                    .try_get(2)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 movement_type: mtype,
-                quantity: row.try_get(4).map_err(|e| AppError::Database(e.to_string()))?,
-                previous_stock: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                resulting_stock: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                quantity: row
+                    .try_get(4)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                previous_stock: row
+                    .try_get(5)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                resulting_stock: row
+                    .try_get(6)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 reason: row.try_get(7).unwrap_or(None),
                 performed_by: row.try_get(8).unwrap_or(None),
                 reference_id: row.try_get(9).unwrap_or(None),
-                created_at: row.try_get(10).map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: row
+                    .try_get(10)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
         Ok(list)
@@ -466,7 +510,9 @@ impl PostgresInventoryRepository {
                 .bind(&now)
                 .execute(&mut **tx)
                 .await
-                .map_err(|e| AppError::Database(format!("Failed to upsert stock (INCREASE): {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to upsert stock (INCREASE): {e}"))
+                })?;
 
                 sqlx::query(
                     "INSERT INTO stock_movements
@@ -486,7 +532,9 @@ impl PostgresInventoryRepository {
                 .bind(&now)
                 .execute(&mut **tx)
                 .await
-                .map_err(|e| AppError::Database(format!("Failed to insert movement (INCREASE): {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to insert movement (INCREASE): {e}"))
+                })?;
             }
 
             "DECREASE" => {
@@ -520,7 +568,9 @@ impl PostgresInventoryRepository {
                 .bind(&dto.branch_id)
                 .execute(&mut **tx)
                 .await
-                .map_err(|e| AppError::Database(format!("Failed to update stock (DECREASE): {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to update stock (DECREASE): {e}"))
+                })?;
 
                 sqlx::query(
                     "INSERT INTO stock_movements
@@ -540,7 +590,9 @@ impl PostgresInventoryRepository {
                 .bind(&now)
                 .execute(&mut **tx)
                 .await
-                .map_err(|e| AppError::Database(format!("Failed to insert movement (DECREASE): {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to insert movement (DECREASE): {e}"))
+                })?;
             }
 
             "ADJUST" => {
@@ -596,7 +648,9 @@ impl PostgresInventoryRepository {
                     .bind(&now)
                     .execute(&mut **tx)
                     .await
-                    .map_err(|e| AppError::Database(format!("Failed to insert movement (ADJUST): {e}")))?;
+                    .map_err(|e| {
+                        AppError::Database(format!("Failed to insert movement (ADJUST): {e}"))
+                    })?;
                 }
             }
 
@@ -651,7 +705,9 @@ impl PostgresInventoryRepository {
                 .bind(&dto.branch_id)
                 .execute(&mut **tx)
                 .await
-                .map_err(|e| AppError::Database(format!("Failed to update source stock (TRANSFER): {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to update source stock (TRANSFER): {e}"))
+                })?;
 
                 // Increment destination (upsert in case row doesn't exist yet)
                 sqlx::query(
@@ -666,7 +722,9 @@ impl PostgresInventoryRepository {
                 .bind(&now)
                 .execute(&mut **tx)
                 .await
-                .map_err(|e| AppError::Database(format!("Failed to upsert dest stock (TRANSFER): {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to upsert dest stock (TRANSFER): {e}"))
+                })?;
 
                 // TRANSFER_OUT movement (operation_id as reference_id for idempotency)
                 sqlx::query(
@@ -687,7 +745,9 @@ impl PostgresInventoryRepository {
                 .bind(&now)
                 .execute(&mut **tx)
                 .await
-                .map_err(|e| AppError::Database(format!("Failed to insert TRANSFER_OUT movement: {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to insert TRANSFER_OUT movement: {e}"))
+                })?;
 
                 // TRANSFER_IN movement (same operation_id as reference_id)
                 sqlx::query(
@@ -708,7 +768,9 @@ impl PostgresInventoryRepository {
                 .bind(&now)
                 .execute(&mut **tx)
                 .await
-                .map_err(|e| AppError::Database(format!("Failed to insert TRANSFER_IN movement: {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to insert TRANSFER_IN movement: {e}"))
+                })?;
             }
 
             other => {
@@ -740,11 +802,21 @@ impl PostgresInventoryRepository {
         let mut list = Vec::with_capacity(rows.len());
         for row in rows {
             list.push(LowStockItemDto {
-                product_id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                product_name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                sku: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
-                branch_id: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
-                branch_name: row.try_get(4).map_err(|e| AppError::Database(e.to_string()))?,
+                product_id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                product_name: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                sku: row
+                    .try_get(2)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                branch_id: row
+                    .try_get(3)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                branch_name: row
+                    .try_get(4)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 current_quantity: row.try_get(5).unwrap_or(0),
                 threshold: row.try_get(6).unwrap_or(5),
             });

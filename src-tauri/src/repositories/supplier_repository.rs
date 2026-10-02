@@ -29,7 +29,9 @@ impl SQLiteSupplierRepository {
             "UPDATE counters SET value = value + 1 WHERE name = 'supplier_code'",
             [],
         )
-        .map_err(|e| DbError::QueryError(format!("Failed to increment supplier_code counter: {e}")))?;
+        .map_err(|e| {
+            DbError::QueryError(format!("Failed to increment supplier_code counter: {e}"))
+        })?;
 
         let val: i64 = conn
             .query_row(
@@ -37,7 +39,9 @@ impl SQLiteSupplierRepository {
                 [],
                 |row| row.get(0),
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to read supplier_code counter: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to read supplier_code counter: {e}"))
+            })?;
 
         Ok(format!("SUP-{:06}", val))
     }
@@ -48,7 +52,11 @@ impl SQLiteSupplierRepository {
             "UPDATE counters SET value = value + 1 WHERE name = 'supplier_payment_receipt'",
             [],
         )
-        .map_err(|e| DbError::QueryError(format!("Failed to increment supplier_payment_receipt counter: {e}")))?;
+        .map_err(|e| {
+            DbError::QueryError(format!(
+                "Failed to increment supplier_payment_receipt counter: {e}"
+            ))
+        })?;
 
         let val: i64 = conn
             .query_row(
@@ -56,7 +64,11 @@ impl SQLiteSupplierRepository {
                 [],
                 |row| row.get(0),
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to read supplier_payment_receipt counter: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!(
+                    "Failed to read supplier_payment_receipt counter: {e}"
+                ))
+            })?;
 
         Ok(format!("PAY-{:06}", val))
     }
@@ -115,11 +127,17 @@ impl SQLiteSupplierRepository {
         match res {
             Ok(s) => Ok(Some(s)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(DbError::QueryError(format!("Failed to query supplier: {e}"))),
+            Err(e) => Err(DbError::QueryError(format!(
+                "Failed to query supplier: {e}"
+            ))),
         }
     }
 
-    pub fn update_supplier_in_tx(conn: &Connection, id: &str, dto: &UpdateSupplierDto) -> DbResult<Supplier> {
+    pub fn update_supplier_in_tx(
+        conn: &Connection,
+        id: &str,
+        dto: &UpdateSupplierDto,
+    ) -> DbResult<Supplier> {
         let existing = Self::get_by_id_in_tx(conn, id)?
             .ok_or_else(|| DbError::QueryError(format!("Supplier with ID {id} not found")))?;
 
@@ -196,7 +214,10 @@ impl SQLiteSupplierRepository {
     }
 
     /// Inserts an append-only supplier ledger entry inside an active transaction
-    pub fn insert_ledger_entry_in_tx(conn: &Connection, entry: &SupplierLedgerEntry) -> DbResult<()> {
+    pub fn insert_ledger_entry_in_tx(
+        conn: &Connection,
+        entry: &SupplierLedgerEntry,
+    ) -> DbResult<()> {
         conn.execute(
             "INSERT INTO supplier_ledger_entries (
                 id, supplier_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at
@@ -260,7 +281,9 @@ impl SQLiteSupplierRepository {
         match res {
             Ok(s) => Ok(Some(s)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(AppError::Database(format!("Failed to query supplier by code: {e}"))),
+            Err(e) => Err(AppError::Database(format!(
+                "Failed to query supplier by code: {e}"
+            ))),
         }
     }
 
@@ -310,7 +333,8 @@ impl SQLiteSupplierRepository {
             .prepare(&sql)
             .map_err(|e| AppError::Database(e.to_string()))?;
 
-        let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+        let params_slice: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|b| b.as_ref()).collect();
 
         let rows = stmt
             .query_map(params_slice.as_slice(), |row| {
@@ -397,9 +421,9 @@ impl SQLiteSupplierRepository {
             .map_err(|e| AppError::Database(format!("Failed to update supplier: {e}")))?;
 
         drop(guard);
-        self.get_by_id(id)
-            .await?
-            .ok_or_else(|| AppError::NotFound(format!("Supplier with ID {id} not found after update")))
+        self.get_by_id(id).await?.ok_or_else(|| {
+            AppError::NotFound(format!("Supplier with ID {id} not found after update"))
+        })
     }
 
     pub async fn deactivate(&self, id: &str) -> AppResult<()> {
@@ -414,7 +438,9 @@ impl SQLiteSupplierRepository {
             .map_err(|e| AppError::Database(format!("Failed to deactivate supplier: {e}")))?;
 
         if rows_affected == 0 {
-            return Err(AppError::NotFound(format!("Supplier with ID {id} not found")));
+            return Err(AppError::NotFound(format!(
+                "Supplier with ID {id} not found"
+            )));
         }
 
         Ok(())
@@ -423,7 +449,8 @@ impl SQLiteSupplierRepository {
     pub async fn get_outstanding_balance(&self, supplier_id: &str) -> AppResult<i64> {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
-        let bal = Self::get_outstanding_balance_in_tx(&guard, supplier_id).map_err(AppError::from)?;
+        let bal =
+            Self::get_outstanding_balance_in_tx(&guard, supplier_id).map_err(AppError::from)?;
         Ok(bal)
     }
 
@@ -479,12 +506,13 @@ impl SQLiteSupplierRepository {
     }
 
     pub async fn get_statement(&self, supplier_id: &str) -> AppResult<SupplierStatementDto> {
-        let supplier = self
-            .get_by_id(supplier_id)
-            .await?
-            .ok_or_else(|| AppError::NotFound(format!("Supplier with ID {supplier_id} not found")))?;
+        let supplier = self.get_by_id(supplier_id).await?.ok_or_else(|| {
+            AppError::NotFound(format!("Supplier with ID {supplier_id} not found"))
+        })?;
 
-        let entries_raw = self.get_ledger_entries(supplier_id, Some(1000), Some(0)).await?;
+        let entries_raw = self
+            .get_ledger_entries(supplier_id, Some(1000), Some(0))
+            .await?;
         let current_balance = self.get_outstanding_balance(supplier_id).await?;
 
         let entries = entries_raw
@@ -513,10 +541,9 @@ impl SQLiteSupplierRepository {
     }
 
     pub async fn get_detail(&self, supplier_id: &str) -> AppResult<SupplierDetailDto> {
-        let supplier = self
-            .get_by_id(supplier_id)
-            .await?
-            .ok_or_else(|| AppError::NotFound(format!("Supplier with ID {supplier_id} not found")))?;
+        let supplier = self.get_by_id(supplier_id).await?.ok_or_else(|| {
+            AppError::NotFound(format!("Supplier with ID {supplier_id} not found"))
+        })?;
 
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;

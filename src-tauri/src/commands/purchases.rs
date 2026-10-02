@@ -13,7 +13,8 @@ pub async fn purchase_complete(
     mut dto: CompletePurchaseDto,
 ) -> AppResult<PurchaseResultDto> {
     AuthService::require_org_admin(&state).await?;
-    let authorized_branch = AuthService::require_branch_access(&state, dto.branch_id.as_deref()).await?;
+    let authorized_branch =
+        AuthService::require_branch_access(&state, dto.branch_id.as_deref()).await?;
     dto.branch_id = Some(authorized_branch);
     let user_id = { state.session.read().await.user_id.clone() };
     state
@@ -41,7 +42,10 @@ pub async fn purchase_get_by_number(
     purchase_number: String,
 ) -> AppResult<Option<Purchase>> {
     AuthService::require_permission(&state, Some("purchases"), None).await?;
-    let purchase = state.purchase_service.get_purchase_by_number(&purchase_number).await?;
+    let purchase = state
+        .purchase_service
+        .get_purchase_by_number(&purchase_number)
+        .await?;
     if let Some(ref p) = purchase {
         AuthService::require_branch_access(&state, Some(&p.branch_id)).await?;
     }
@@ -62,7 +66,10 @@ pub async fn purchase_list(
         let session = state.get_session().await;
         let is_org_admin = match session.role {
             Some(crate::domain::user::UserRole::Admin) => true,
-            _ => session.access_profile.as_ref().map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+            _ => session
+                .access_profile
+                .as_ref()
+                .map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
         };
         if !is_org_admin {
             f.branch_id = Some(authorized_branch);
@@ -77,9 +84,15 @@ pub async fn purchase_get_lines(
     purchase_id: String,
 ) -> AppResult<Vec<PurchaseLine>> {
     AuthService::require_permission(&state, Some("purchases"), None).await?;
-    let purchase = state.purchase_service.get_purchase_by_id(&purchase_id).await?;
+    let purchase = state
+        .purchase_service
+        .get_purchase_by_id(&purchase_id)
+        .await?;
     if let Some(ref p) = purchase {
         AuthService::require_branch_access(&state, Some(&p.branch_id)).await?;
     }
-    state.purchase_service.get_purchase_lines(&purchase_id).await
+    state
+        .purchase_service
+        .get_purchase_lines(&purchase_id)
+        .await
 }

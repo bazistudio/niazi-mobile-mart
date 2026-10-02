@@ -49,7 +49,10 @@ mod tests {
 
         // Second call: returns the EXACT SAME terminal identity (reused)
         let t2 = TerminalService::get_current_terminal(&repo).await.unwrap();
-        assert_eq!(t1.id, t2.id, "Terminal ID must be reused across restarts/calls");
+        assert_eq!(
+            t1.id, t2.id,
+            "Terminal ID must be reused across restarts/calls"
+        );
 
         // Separate second DB (simulating PC #2) generates a unique terminal ID
         let db2 = DatabaseConnection::open_in_memory().unwrap();
@@ -57,6 +60,9 @@ mod tests {
         let repo2 = TerminalRepository::SQLite(sqlite_repo2);
 
         let t3 = TerminalService::get_current_terminal(&repo2).await.unwrap();
-        assert_ne!(t1.id, t3.id, "Terminal A and Terminal B must have distinct unique UUIDs");
+        assert_ne!(
+            t1.id, t3.id,
+            "Terminal A and Terminal B must have distinct unique UUIDs"
+        );
     }
 }

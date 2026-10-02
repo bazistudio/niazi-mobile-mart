@@ -1,12 +1,9 @@
-
 use crate::domain::profit::{
     DashboardProfitSummaryDto, PeriodProfitabilityDto, ProductProfitabilityDto,
     SaleProfitabilityDto,
 };
 use crate::errors::{AppError, AppResult};
-use crate::repositories::{
-    PostgresProfitRepository, ProfitRepository, SQLiteProfitRepository,
-};
+use crate::repositories::{PostgresProfitRepository, ProfitRepository, SQLiteProfitRepository};
 
 use crate::db::connection::DatabaseConnection;
 
@@ -41,9 +38,16 @@ impl ProfitService {
     ) -> AppResult<PeriodProfitabilityDto> {
         match &self.profit_repo {
             ProfitRepository::SQLite(r) => {
-                r.get_period_profitability(start_date.as_deref(), end_date.as_deref(), branch_id.as_deref()).await
+                r.get_period_profitability(
+                    start_date.as_deref(),
+                    end_date.as_deref(),
+                    branch_id.as_deref(),
+                )
+                .await
             }
-            ProfitRepository::Postgres(_) => Err(AppError::Internal("Postgres get_period_profitability not implemented".into())),
+            ProfitRepository::Postgres(_) => Err(AppError::Internal(
+                "Postgres get_period_profitability not implemented".into(),
+            )),
         }
     }
 
@@ -56,9 +60,16 @@ impl ProfitService {
     ) -> AppResult<Vec<crate::domain::profit::DailyProfitabilityDto>> {
         match &self.profit_repo {
             ProfitRepository::SQLite(r) => {
-                r.get_daily_profitability(start_date.as_deref(), end_date.as_deref(), branch_id.as_deref()).await
+                r.get_daily_profitability(
+                    start_date.as_deref(),
+                    end_date.as_deref(),
+                    branch_id.as_deref(),
+                )
+                .await
             }
-            ProfitRepository::Postgres(_) => Err(AppError::Internal("Postgres get_daily_profitability not implemented".into())),
+            ProfitRepository::Postgres(_) => Err(AppError::Internal(
+                "Postgres get_daily_profitability not implemented".into(),
+            )),
         }
     }
 
@@ -72,20 +83,33 @@ impl ProfitService {
     ) -> AppResult<Vec<ProductProfitabilityDto>> {
         match &self.profit_repo {
             ProfitRepository::SQLite(r) => {
-                r.get_product_profitability(product_id.as_deref(), start_date.as_deref(), end_date.as_deref(), branch_id.as_deref()).await
+                r.get_product_profitability(
+                    product_id.as_deref(),
+                    start_date.as_deref(),
+                    end_date.as_deref(),
+                    branch_id.as_deref(),
+                )
+                .await
             }
-            ProfitRepository::Postgres(_) => Err(AppError::Internal("Postgres get_product_profitability not implemented".into())),
+            ProfitRepository::Postgres(_) => Err(AppError::Internal(
+                "Postgres get_product_profitability not implemented".into(),
+            )),
         }
     }
 
     /// Fetches realized profitability for a specific sale
-    pub async fn get_sale_profitability(&self, sale_id: &str) -> AppResult<Option<SaleProfitabilityDto>> {
+    pub async fn get_sale_profitability(
+        &self,
+        sale_id: &str,
+    ) -> AppResult<Option<SaleProfitabilityDto>> {
         if sale_id.trim().is_empty() {
             return Err(AppError::Validation("Sale ID cannot be empty".to_string()));
         }
         match &self.profit_repo {
             ProfitRepository::SQLite(r) => r.get_sale_profitability(sale_id).await,
-            ProfitRepository::Postgres(_) => Err(AppError::Internal("Postgres get_sale_profitability not implemented".into())),
+            ProfitRepository::Postgres(_) => Err(AppError::Internal(
+                "Postgres get_sale_profitability not implemented".into(),
+            )),
         }
     }
 
@@ -95,8 +119,12 @@ impl ProfitService {
         branch_id: Option<String>,
     ) -> AppResult<DashboardProfitSummaryDto> {
         match &self.profit_repo {
-            ProfitRepository::SQLite(r) => r.get_dashboard_profit_summary(branch_id.as_deref()).await,
-            ProfitRepository::Postgres(r) => r.get_profit_summary(branch_id.as_deref(), None, None).await,
+            ProfitRepository::SQLite(r) => {
+                r.get_dashboard_profit_summary(branch_id.as_deref()).await
+            }
+            ProfitRepository::Postgres(r) => {
+                r.get_profit_summary(branch_id.as_deref(), None, None).await
+            }
         }
     }
 }
@@ -205,7 +233,8 @@ mod tests {
             "INSERT INTO stock (product_id, branch_id, quantity, updated_at)
              VALUES (?1, ?2, ?3, '2026-01-01T00:00:00Z')",
             params![prod_id, DEFAULT_MAIN_BRANCH_ID, stock_qty],
-        ).unwrap();
+        )
+        .unwrap();
         prod_id
     }
 
@@ -216,7 +245,8 @@ mod tests {
     async fn test_1_sale_captures_average_cost() {
         let (db, sale_service, _, _, profit_service, branch_id) = setup_test_context().await;
 
-        let prod_id = seed_test_product(&db, "Screen Protector", "PROT-103", 100, 103, 150, 10).await;
+        let prod_id =
+            seed_test_product(&db, "Screen Protector", "PROT-103", 100, 103, 150, 10).await;
 
         // Sell 2 units
         let sale_result = sale_service
@@ -300,12 +330,20 @@ mod tests {
             conn.execute(
                 "UPDATE products SET average_cost = 110 WHERE id = ?1",
                 params![prod_id],
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         // Verify original sale STILL has cost_price_snapshot = 103 and COGS = 206
-        let sale_profit = profit_service.get_sale_profitability(&sale_id).await.unwrap().unwrap();
-        assert_eq!(sale_profit.cogs, 206, "COGS must remain 206, NOT recalculate to 220!");
+        let sale_profit = profit_service
+            .get_sale_profitability(&sale_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            sale_profit.cogs, 206,
+            "COGS must remain 206, NOT recalculate to 220!"
+        );
         assert_eq!(sale_profit.gross_profit, 94);
 
         // Verify line cost snapshot directly in SQLite
@@ -316,7 +354,8 @@ mod tests {
                 "SELECT cost_price_snapshot FROM sale_lines WHERE sale_id = ?1",
                 params![sale_id],
                 |r| r.get(0),
-            ).unwrap()
+            )
+            .unwrap()
         };
         assert_eq!(snapshot, 103, "Snapshot must be immutable in SQLite");
     }
@@ -361,7 +400,10 @@ mod tests {
         // Gross margin = (250 * 100) / 950 = 26%
         assert_eq!(sale_result.gross_margin, 26);
 
-        let report = profit_service.get_period_profitability(None, None, Some(branch_id)).await.unwrap();
+        let report = profit_service
+            .get_period_profitability(None, None, Some(branch_id))
+            .await
+            .unwrap();
         assert_eq!(report.gross_revenue, 1000);
         assert_eq!(report.discounts, 50);
         assert_eq!(report.net_revenue, 950);
@@ -386,7 +428,8 @@ mod tests {
     // ──────────────────────────────────────────────────────────────────────────
     #[tokio::test]
     async fn test_7_credit_sale_financial_separation() {
-        let (db, sale_service, _, cust_service, profit_service, branch_id) = setup_test_context().await;
+        let (db, sale_service, _, cust_service, profit_service, branch_id) =
+            setup_test_context().await;
 
         let prod_id = seed_test_product(&db, "Credit Item", "CR-1", 600, 600, 1000, 10).await;
 
@@ -433,7 +476,10 @@ mod tests {
         assert_eq!(sale_result.gross_profit, 400);
 
         // Customer receivable created (1000)
-        let ledger = cust_service.get_customer_detail(&customer.id).await.unwrap();
+        let ledger = cust_service
+            .get_customer_detail(&customer.id)
+            .await
+            .unwrap();
         assert_eq!(ledger.outstanding_balance, 1000);
 
         // Verify NO cash movement was recorded for this sale
@@ -444,12 +490,19 @@ mod tests {
                 "SELECT COUNT(*) FROM cash_movements WHERE reference_id = ?1",
                 params![sale_result.sale.id],
                 |r| r.get(0),
-            ).unwrap()
+            )
+            .unwrap()
         };
-        assert_eq!(cash_movements_count, 0, "Credit sale must NOT generate cash movements");
+        assert_eq!(
+            cash_movements_count, 0,
+            "Credit sale must NOT generate cash movements"
+        );
 
         // Verify profit reporting counts the credit sale revenue and COGS
-        let period = profit_service.get_period_profitability(None, None, Some(branch_id.clone())).await.unwrap();
+        let period = profit_service
+            .get_period_profitability(None, None, Some(branch_id.clone()))
+            .await
+            .unwrap();
         assert_eq!(period.net_revenue, 1000);
         assert_eq!(period.cogs, 600);
         assert_eq!(period.gross_profit, 400);
@@ -497,12 +550,16 @@ mod tests {
                 "SELECT direction, amount FROM cash_movements WHERE reference_id = ?1",
                 params![sale_result.sale.id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
-            ).unwrap()
+            )
+            .unwrap()
         };
         assert_eq!(dir, "IN");
         assert_eq!(amount, 500);
 
-        let period = profit_service.get_period_profitability(None, None, Some(branch_id)).await.unwrap();
+        let period = profit_service
+            .get_period_profitability(None, None, Some(branch_id))
+            .await
+            .unwrap();
         assert_eq!(period.net_revenue, 500);
         assert_eq!(period.cogs, 300);
         assert_eq!(period.gross_profit, 200);
@@ -513,7 +570,8 @@ mod tests {
     // ──────────────────────────────────────────────────────────────────────────
     #[tokio::test]
     async fn test_9_sales_return_reverses_profitability() {
-        let (db, sale_service, sales_ret_service, _, profit_service, branch_id) = setup_test_context().await;
+        let (db, sale_service, sales_ret_service, _, profit_service, branch_id) =
+            setup_test_context().await;
 
         // Original item: cost = 103, sale price = 150
         let prod_id = seed_test_product(&db, "Headphone", "HP-1", 103, 103, 150, 10).await;
@@ -550,7 +608,8 @@ mod tests {
             conn.execute(
                 "UPDATE products SET average_cost = 999 WHERE id = ?1",
                 params![prod_id],
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         // Return 1 unit
@@ -578,14 +637,21 @@ mod tests {
         // Net COGS: 206 - 103 = 103 (uses 103 snapshot, NOT 999!)
         // Gross profit: 150 - 103 = 47
         // Gross margin: (47 * 100) / 150 = 31%
-        let sale_profit = profit_service.get_sale_profitability(&sale_id).await.unwrap().unwrap();
+        let sale_profit = profit_service
+            .get_sale_profitability(&sale_id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(sale_profit.net_revenue, 150);
         assert_eq!(sale_profit.cogs, 103);
         assert_eq!(sale_profit.gross_profit, 47);
         assert_eq!(sale_profit.gross_margin, 31);
 
         // Period report after return
-        let period = profit_service.get_period_profitability(None, None, Some(branch_id)).await.unwrap();
+        let period = profit_service
+            .get_period_profitability(None, None, Some(branch_id))
+            .await
+            .unwrap();
         assert_eq!(period.net_revenue, 150);
         assert_eq!(period.cogs, 103);
         assert_eq!(period.gross_profit, 47);
@@ -609,7 +675,11 @@ mod tests {
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
                     customer_id: None,
-                    items: vec![SaleItemDto { product_id: prod_id.clone(), quantity: 1, discount: None }],
+                    items: vec![SaleItemDto {
+                        product_id: prod_id.clone(),
+                        quantity: 1,
+                        discount: None,
+                    }],
                     discount: None,
                     paid_amount: Some(200),
                     payment_method: Some("CASH".to_string()),
@@ -624,7 +694,11 @@ mod tests {
         {
             let conn_arc = db.inner();
             let conn = conn_arc.lock().await;
-            conn.execute("UPDATE products SET average_cost = 105 WHERE id = ?1", params![prod_id]).unwrap();
+            conn.execute(
+                "UPDATE products SET average_cost = 105 WHERE id = ?1",
+                params![prod_id],
+            )
+            .unwrap();
         }
 
         // Sale B at cost 105
@@ -634,7 +708,11 @@ mod tests {
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
                     customer_id: None,
-                    items: vec![SaleItemDto { product_id: prod_id.clone(), quantity: 1, discount: None }],
+                    items: vec![SaleItemDto {
+                        product_id: prod_id.clone(),
+                        quantity: 1,
+                        discount: None,
+                    }],
                     discount: None,
                     paid_amount: Some(200),
                     payment_method: Some("CASH".to_string()),
@@ -649,7 +727,11 @@ mod tests {
         {
             let conn_arc = db.inner();
             let conn = conn_arc.lock().await;
-            conn.execute("UPDATE products SET average_cost = 110 WHERE id = ?1", params![prod_id]).unwrap();
+            conn.execute(
+                "UPDATE products SET average_cost = 110 WHERE id = ?1",
+                params![prod_id],
+            )
+            .unwrap();
         }
 
         // Sale C at cost 110
@@ -659,7 +741,11 @@ mod tests {
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
                     customer_id: None,
-                    items: vec![SaleItemDto { product_id: prod_id.clone(), quantity: 1, discount: None }],
+                    items: vec![SaleItemDto {
+                        product_id: prod_id.clone(),
+                        quantity: 1,
+                        discount: None,
+                    }],
                     discount: None,
                     paid_amount: Some(200),
                     payment_method: Some("CASH".to_string()),
@@ -704,7 +790,11 @@ mod tests {
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
                     customer_id: None,
-                    items: vec![SaleItemDto { product_id: prod_id, quantity: 1, discount: None }],
+                    items: vec![SaleItemDto {
+                        product_id: prod_id,
+                        quantity: 1,
+                        discount: None,
+                    }],
                     discount: None,
                     paid_amount: Some(200),
                     payment_method: Some("CASH".to_string()),
@@ -722,11 +812,15 @@ mod tests {
             conn.execute(
                 "UPDATE sales SET sale_status = 'VOIDED' WHERE id = ?1",
                 params![s.sale.id],
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         // Verify period profitability ignores the voided sale completely
-        let period = profit_service.get_period_profitability(None, None, Some(branch_id)).await.unwrap();
+        let period = profit_service
+            .get_period_profitability(None, None, Some(branch_id))
+            .await
+            .unwrap();
         assert_eq!(period.sales_count, 0);
         assert_eq!(period.net_revenue, 0);
         assert_eq!(period.cogs, 0);
@@ -750,7 +844,11 @@ mod tests {
                 CompleteSaleDto {
                     branch_id: Some(branch_id),
                     customer_id: None,
-                    items: vec![SaleItemDto { product_id: prod_id.clone(), quantity: 10, discount: None }],
+                    items: vec![SaleItemDto {
+                        product_id: prod_id.clone(),
+                        quantity: 10,
+                        discount: None,
+                    }],
                     discount: None,
                     paid_amount: Some(2000),
                     payment_method: Some("CASH".to_string()),
@@ -766,9 +864,19 @@ mod tests {
         let (sales_cnt, lines_cnt, stock_qty): (i64, i64, i64) = {
             let conn_arc = db.inner();
             let conn = conn_arc.lock().await;
-            let sc: i64 = conn.query_row("SELECT COUNT(*) FROM sales", [], |r| r.get(0)).unwrap();
-            let lc: i64 = conn.query_row("SELECT COUNT(*) FROM sale_lines", [], |r| r.get(0)).unwrap();
-            let sq: i64 = conn.query_row("SELECT quantity FROM stock WHERE product_id = ?1", params![prod_id], |r| r.get(0)).unwrap();
+            let sc: i64 = conn
+                .query_row("SELECT COUNT(*) FROM sales", [], |r| r.get(0))
+                .unwrap();
+            let lc: i64 = conn
+                .query_row("SELECT COUNT(*) FROM sale_lines", [], |r| r.get(0))
+                .unwrap();
+            let sq: i64 = conn
+                .query_row(
+                    "SELECT quantity FROM stock WHERE product_id = ?1",
+                    params![prod_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
             (sc, lc, sq)
         };
 
@@ -793,7 +901,11 @@ mod tests {
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
                     customer_id: None,
-                    items: vec![SaleItemDto { product_id: prod_id.clone(), quantity: 2, discount: None }],
+                    items: vec![SaleItemDto {
+                        product_id: prod_id.clone(),
+                        quantity: 2,
+                        discount: None,
+                    }],
                     discount: None,
                     paid_amount: Some(1600),
                     payment_method: Some("CASH".to_string()),
@@ -825,11 +937,16 @@ mod tests {
                 "SELECT cost_price_snapshot FROM sale_lines WHERE sale_id = ?1",
                 params![sale_result.sale.id],
                 |r| r.get(0),
-            ).unwrap()
+            )
+            .unwrap()
         };
         assert_eq!(snapshot, 500, "Historical snapshot must NOT change");
 
-        let sale_prof = profit_service.get_sale_profitability(&sale_result.sale.id).await.unwrap().expect("sale profitability");
+        let sale_prof = profit_service
+            .get_sale_profitability(&sale_result.sale.id)
+            .await
+            .unwrap()
+            .expect("sale profitability");
         assert_eq!(sale_prof.cogs, 1000, "Historical sale COGS must NOT change");
         assert_eq!(sale_prof.gross_profit, 600);
     }
@@ -850,7 +967,11 @@ mod tests {
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
                     customer_id: None,
-                    items: vec![SaleItemDto { product_id: prod_id.clone(), quantity: 2, discount: None }],
+                    items: vec![SaleItemDto {
+                        product_id: prod_id.clone(),
+                        quantity: 2,
+                        discount: None,
+                    }],
                     discount: None,
                     paid_amount: Some(800),
                     payment_method: Some("CASH".to_string()),
@@ -865,7 +986,10 @@ mod tests {
         assert_eq!(sale_result.gross_profit, 300); // 800 - 500
         assert_eq!(sale_result.gross_margin, 37); // 300 * 100 / 800 = 37%
 
-        let prod_prof = profit_service.get_product_profitability(Some(prod_id), None, None, Some(branch_id)).await.unwrap();
+        let prod_prof = profit_service
+            .get_product_profitability(Some(prod_id), None, None, Some(branch_id))
+            .await
+            .unwrap();
         assert_eq!(prod_prof.len(), 1);
         assert_eq!(prod_prof[0].cogs, 500);
         assert_eq!(prod_prof[0].gross_profit, 300);
@@ -887,7 +1011,11 @@ mod tests {
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
                     customer_id: None,
-                    items: vec![SaleItemDto { product_id: prod_id, quantity: 1, discount: None }],
+                    items: vec![SaleItemDto {
+                        product_id: prod_id,
+                        quantity: 1,
+                        discount: None,
+                    }],
                     discount: None,
                     paid_amount: Some(300),
                     payment_method: Some("CASH".to_string()),
@@ -902,7 +1030,10 @@ mod tests {
         assert_eq!(sale_result.gross_profit, -200);
         assert_eq!(sale_result.gross_margin, -66); // -200 * 100 / 300 = -66%
 
-        let summary = profit_service.get_dashboard_profit_summary(Some(branch_id)).await.unwrap();
+        let summary = profit_service
+            .get_dashboard_profit_summary(Some(branch_id))
+            .await
+            .unwrap();
         assert_eq!(summary.today.gross_profit, -200);
         assert_eq!(summary.total.gross_profit, -200);
     }

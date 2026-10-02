@@ -1,7 +1,7 @@
+use crate::db::errors::{DbError, DbResult};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::db::errors::{DbError, DbResult};
 
 /// Canonical UUID v4 generator for all domain entities across local and online databases
 pub fn generate_uuid_v4() -> String {

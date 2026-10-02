@@ -462,17 +462,19 @@ impl AdminService {
 
         let login_key_hash = hash_credential(&effective_key)?;
 
-        let profile = payload.access_profile.unwrap_or_else(|| match payload.role {
-            UserRole::Admin => StaffAccessProfile::admin_unlimited(),
-            UserRole::ShopAdmin => StaffAccessProfile::shop_admin_default(),
-            UserRole::Manager => StaffAccessProfile::manager_default(),
-            UserRole::Accountant => StaffAccessProfile::accountant_default(),
-            UserRole::Salesman => StaffAccessProfile::salesman_default(),
-            UserRole::Cashier => StaffAccessProfile::cashier_default(),
-            UserRole::RepairMechanic => StaffAccessProfile::repair_mechanic_default(),
-            UserRole::Staff => StaffAccessProfile::staff_default(),
-            UserRole::PublicUser => StaffAccessProfile::public_user_restricted(),
-        });
+        let profile = payload
+            .access_profile
+            .unwrap_or_else(|| match payload.role {
+                UserRole::Admin => StaffAccessProfile::admin_unlimited(),
+                UserRole::ShopAdmin => StaffAccessProfile::shop_admin_default(),
+                UserRole::Manager => StaffAccessProfile::manager_default(),
+                UserRole::Accountant => StaffAccessProfile::accountant_default(),
+                UserRole::Salesman => StaffAccessProfile::salesman_default(),
+                UserRole::Cashier => StaffAccessProfile::cashier_default(),
+                UserRole::RepairMechanic => StaffAccessProfile::repair_mechanic_default(),
+                UserRole::Staff => StaffAccessProfile::staff_default(),
+                UserRole::PublicUser => StaffAccessProfile::public_user_restricted(),
+            });
 
         let now = Utc::now().to_rfc3339();
         let new_user = User {
@@ -619,9 +621,10 @@ impl AdminService {
         Self::ensure_admin(app_state).await?;
 
         let session = app_state.get_session().await;
-        let admin_id = session.user_id.as_deref().ok_or_else(|| {
-            AppError::Unauthorized("No active session user".to_string())
-        })?;
+        let admin_id = session
+            .user_id
+            .as_deref()
+            .ok_or_else(|| AppError::Unauthorized("No active session user".to_string()))?;
 
         let user = match repo.find_by_id(admin_id).await? {
             Some(u) => u,
@@ -871,7 +874,9 @@ mod tests {
             "2256",
         )
         .await;
-        assert!(login_res.is_ok(), "User should be able to log in with 4-digit PIN");
+        assert!(
+            login_res.is_ok(),
+            "User should be able to log in with 4-digit PIN"
+        );
     }
 }
-

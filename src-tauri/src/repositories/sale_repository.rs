@@ -69,7 +69,10 @@ impl SQLiteSaleRepository {
             )));
         }
 
-        Ok(format!("{}-{}-{}-{:06}", branch_code, terminal_code, billing_month, val))
+        Ok(format!(
+            "{}-{}-{}-{:06}",
+            branch_code, terminal_code, billing_month, val
+        ))
     }
 
     /// Inserts a sale header inside transaction
@@ -103,7 +106,10 @@ impl SQLiteSaleRepository {
         .map_err(|e| {
             let s = e.to_string();
             if s.contains("UNIQUE constraint failed: sales.invoice_number") {
-                DbError::ConstraintViolation(format!("Duplicate invoice number '{}'", sale.invoice_number))
+                DbError::ConstraintViolation(format!(
+                    "Duplicate invoice number '{}'",
+                    sale.invoice_number
+                ))
             } else {
                 DbError::QueryError(format!("Failed to insert sale: {e}"))
             }
@@ -196,7 +202,10 @@ impl SQLiteSaleRepository {
     }
 
     /// Fetches all open (UNPAID or PARTIALLY_PAID) sales for a customer ordered chronologically (FIFO for payment allocation)
-    pub fn get_open_sales_by_customer_in_tx(conn: &Connection, customer_id: &str) -> DbResult<Vec<Sale>> {
+    pub fn get_open_sales_by_customer_in_tx(
+        conn: &Connection,
+        customer_id: &str,
+    ) -> DbResult<Vec<Sale>> {
         let mut stmt = conn
             .prepare(
                 "SELECT id, invoice_number, branch_id, customer_id, customer_name_snapshot,
@@ -253,7 +262,9 @@ impl SQLiteSaleRepository {
         match res {
             Ok(s) => Ok(Some(s)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(DbError::QueryError(format!("Failed to query sale by id: {e}"))),
+            Err(e) => Err(DbError::QueryError(format!(
+                "Failed to query sale by id: {e}"
+            ))),
         }
     }
 
@@ -283,7 +294,9 @@ impl SQLiteSaleRepository {
         match res {
             Ok(s) => Ok(Some(s)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(AppError::Database(format!("Failed to query sale by invoice: {e}"))),
+            Err(e) => Err(AppError::Database(format!(
+                "Failed to query sale by invoice: {e}"
+            ))),
         }
     }
 
@@ -302,7 +315,9 @@ impl SQLiteSaleRepository {
                 "SELECT id, sale_id, amount, payment_method, reference_number, notes, created_at
                  FROM sale_payments WHERE sale_id = ?1 ORDER BY created_at ASC, id ASC",
             )
-            .map_err(|e| AppError::Database(format!("Failed to prepare sale payments query: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to prepare sale payments query: {e}"))
+            })?;
 
         let rows = stmt
             .query_map(params![sale_id], |row| {
@@ -334,7 +349,7 @@ impl SQLiteSaleRepository {
             "SELECT id, invoice_number, branch_id, customer_id, customer_name_snapshot,
                     subtotal, discount, tax_amount, total_amount, paid_amount, change_amount,
                     payment_status, sale_status, performed_by, notes, created_at, updated_at
-             FROM sales WHERE 1=1"
+             FROM sales WHERE 1=1",
         );
 
         let mut param_values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -382,7 +397,8 @@ impl SQLiteSaleRepository {
             .prepare(&query)
             .map_err(|e| AppError::Database(format!("Failed to prepare sales list query: {e}")))?;
 
-        let params_slice: Vec<&dyn rusqlite::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
+        let params_slice: Vec<&dyn rusqlite::ToSql> =
+            param_values.iter().map(|b| b.as_ref()).collect();
 
         let rows = stmt
             .query_map(params_slice.as_slice(), |row| Self::map_sale_row(row))
@@ -443,13 +459,37 @@ mod invoice_tests {
 
     // ── Helper ────────────────────────────────────────────────────────────────
 
-    fn gen(conn: &Connection, terminal_id: &str, branch_code: &str, terminal_code: &str, billing_month: &str) -> String {
-        SQLiteSaleRepository::next_invoice_number_in_tx(conn, terminal_id, branch_code, terminal_code, billing_month)
-            .expect("invoice generation must succeed")
+    fn gen(
+        conn: &Connection,
+        terminal_id: &str,
+        branch_code: &str,
+        terminal_code: &str,
+        billing_month: &str,
+    ) -> String {
+        SQLiteSaleRepository::next_invoice_number_in_tx(
+            conn,
+            terminal_id,
+            branch_code,
+            terminal_code,
+            billing_month,
+        )
+        .expect("invoice generation must succeed")
     }
 
-    fn gen_result(conn: &Connection, terminal_id: &str, branch_code: &str, terminal_code: &str, billing_month: &str) -> crate::db::errors::DbResult<String> {
-        SQLiteSaleRepository::next_invoice_number_in_tx(conn, terminal_id, branch_code, terminal_code, billing_month)
+    fn gen_result(
+        conn: &Connection,
+        terminal_id: &str,
+        branch_code: &str,
+        terminal_code: &str,
+        billing_month: &str,
+    ) -> crate::db::errors::DbResult<String> {
+        SQLiteSaleRepository::next_invoice_number_in_tx(
+            conn,
+            terminal_id,
+            branch_code,
+            terminal_code,
+            billing_month,
+        )
     }
 
     const TID1: &str = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -463,7 +503,10 @@ mod invoice_tests {
     fn b07_format_first_invoice() {
         let conn = open_test_db();
         let inv = gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
-        assert_eq!(inv, "MAIN-T1-202609-000001", "First invoice must be ...000001");
+        assert_eq!(
+            inv, "MAIN-T1-202609-000001",
+            "First invoice must be ...000001"
+        );
     }
 
     #[test]
@@ -491,7 +534,11 @@ mod invoice_tests {
         let inv = gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
         let parts: Vec<&str> = inv.split('-').collect();
         // format: MAIN - T1 - 202609 - 000001 (4 parts)
-        assert_eq!(parts.len(), 4, "Invoice must have exactly 4 dash-separated parts");
+        assert_eq!(
+            parts.len(),
+            4,
+            "Invoice must have exactly 4 dash-separated parts"
+        );
         assert_eq!(parts[3].len(), 6, "Sequence must be exactly 6 digits");
     }
 
@@ -499,7 +546,10 @@ mod invoice_tests {
     fn b07_format_contains_billing_month() {
         let conn = open_test_db();
         let inv = gen(&conn, TID1, "MAIN", "T1", MONTH_OCT);
-        assert!(inv.contains("202610"), "Invoice must contain billing month 202610");
+        assert!(
+            inv.contains("202610"),
+            "Invoice must contain billing month 202610"
+        );
     }
 
     #[test]
@@ -521,8 +571,10 @@ mod invoice_tests {
 
         // Terminal 2: first invoice must still be 000001
         let inv_t2 = gen(&conn, TID2, "MAIN", "T2", MONTH_SEP);
-        assert_eq!(inv_t2, "MAIN-T2-202609-000001",
-            "T2's first invoice must be 000001 regardless of T1's sequence");
+        assert_eq!(
+            inv_t2, "MAIN-T2-202609-000001",
+            "T2's first invoice must be 000001 regardless of T1's sequence"
+        );
     }
 
     #[test]
@@ -533,8 +585,10 @@ mod invoice_tests {
         gen(&conn, TID2, "MAIN", "T2", MONTH_SEP); // T2 = 2
 
         let inv = gen(&conn, TID1, "MAIN", "T1", MONTH_SEP); // T1 = 2
-        assert_eq!(inv, "MAIN-T1-202609-000002",
-            "T1 must continue its own sequence unaffected by T2");
+        assert_eq!(
+            inv, "MAIN-T1-202609-000002",
+            "T1 must continue its own sequence unaffected by T2"
+        );
     }
 
     #[test]
@@ -542,7 +596,10 @@ mod invoice_tests {
         let conn = open_test_db();
         let inv1 = gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
         let inv2 = gen(&conn, TID2, "MAIN", "T2", MONTH_SEP);
-        assert_ne!(inv1, inv2, "Two terminals must never produce the same invoice number");
+        assert_ne!(
+            inv1, inv2,
+            "Two terminals must never produce the same invoice number"
+        );
     }
 
     // ── 3. Branch isolation ───────────────────────────────────────────────────
@@ -552,16 +609,28 @@ mod invoice_tests {
         let conn = open_test_db();
         let inv_main = gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
         let inv_north = gen(&conn, TID2, "NORTH", "T1", MONTH_SEP);
-        assert!(inv_main.starts_with("MAIN-"), "Main branch invoice must start with MAIN-");
-        assert!(inv_north.starts_with("NORTH-"), "North branch invoice must start with NORTH-");
-        assert_ne!(inv_main, inv_north, "Different branches must produce different invoices");
+        assert!(
+            inv_main.starts_with("MAIN-"),
+            "Main branch invoice must start with MAIN-"
+        );
+        assert!(
+            inv_north.starts_with("NORTH-"),
+            "North branch invoice must start with NORTH-"
+        );
+        assert_ne!(
+            inv_main, inv_north,
+            "Different branches must produce different invoices"
+        );
     }
 
     #[test]
     fn b07_branch_code_appears_in_invoice() {
         let conn = open_test_db();
         let inv = gen(&conn, TID1, "EAST", "T1", MONTH_SEP);
-        assert!(inv.starts_with("EAST-T1-"), "Invoice must embed branch code EAST");
+        assert!(
+            inv.starts_with("EAST-T1-"),
+            "Invoice must embed branch code EAST"
+        );
     }
 
     // ── 4. Monthly reset ──────────────────────────────────────────────────────
@@ -576,8 +645,10 @@ mod invoice_tests {
 
         // October must start fresh at 000001
         let inv_oct = gen(&conn, TID1, "MAIN", "T1", MONTH_OCT);
-        assert_eq!(inv_oct, "MAIN-T1-202610-000001",
-            "New month must reset sequence to 000001");
+        assert_eq!(
+            inv_oct, "MAIN-T1-202610-000001",
+            "New month must reset sequence to 000001"
+        );
     }
 
     #[test]
@@ -586,18 +657,27 @@ mod invoice_tests {
         gen(&conn, TID1, "MAIN", "T1", MONTH_SEP); // Sep 1
         gen(&conn, TID1, "MAIN", "T1", MONTH_OCT); // Oct 1 — new month
         let inv = gen(&conn, TID1, "MAIN", "T1", MONTH_SEP); // Sep 2 (backfill test)
-        assert_eq!(inv, "MAIN-T1-202609-000002", "September counter must be independent from October");
+        assert_eq!(
+            inv, "MAIN-T1-202609-000002",
+            "September counter must be independent from October"
+        );
     }
 
     #[test]
     fn b07_monthly_reset_twelve_months_all_independent() {
         let conn = open_test_db();
-        let months = ["202601","202602","202603","202604","202605","202606",
-                      "202607","202608","202609","202610","202611","202612"];
+        let months = [
+            "202601", "202602", "202603", "202604", "202605", "202606", "202607", "202608",
+            "202609", "202610", "202611", "202612",
+        ];
         for (i, month) in months.iter().enumerate() {
             let inv = gen(&conn, TID1, "MAIN", "T1", month);
             let expected = format!("MAIN-T1-{}-000001", month);
-            assert_eq!(inv, expected, "Month {} (index {}) must start at 000001", month, i);
+            assert_eq!(
+                inv, expected,
+                "Month {} (index {}) must start at 000001",
+                month, i
+            );
         }
     }
 
@@ -616,8 +696,11 @@ mod invoice_tests {
         let result = gen_result(&conn, TID1, "MAIN", "T1", MONTH_SEP);
         assert!(result.is_err(), "Sequence must fail after reaching 999999");
         let err_str = format!("{:?}", result.unwrap_err());
-        assert!(err_str.contains("overflow") || err_str.contains("999999"),
-            "Error must mention overflow or 999999, got: {}", err_str);
+        assert!(
+            err_str.contains("overflow") || err_str.contains("999999"),
+            "Error must mention overflow or 999999, got: {}",
+            err_str
+        );
     }
 
     #[test]
@@ -641,12 +724,17 @@ mod invoice_tests {
     fn b07_historical_counter_untouched() {
         let conn = open_test_db();
         // Verify legacy 'invoice' counter still exists and was seeded at 0
-        let val: i64 = conn.query_row(
-            "SELECT value FROM counters WHERE name = 'invoice'",
-            [],
-            |r| r.get(0),
-        ).expect("legacy counter must exist");
-        assert_eq!(val, 0, "Legacy 'invoice' counter must remain at 0 (seeded value)");
+        let val: i64 = conn
+            .query_row(
+                "SELECT value FROM counters WHERE name = 'invoice'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("legacy counter must exist");
+        assert_eq!(
+            val, 0,
+            "Legacy 'invoice' counter must remain at 0 (seeded value)"
+        );
     }
 
     #[test]
@@ -657,12 +745,17 @@ mod invoice_tests {
         gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
 
         // Legacy counter must still be 0
-        let val: i64 = conn.query_row(
-            "SELECT value FROM counters WHERE name = 'invoice'",
-            [],
-            |r| r.get(0),
-        ).expect("legacy counter must exist");
-        assert_eq!(val, 0, "New-format invoice generation must NOT touch legacy counter");
+        let val: i64 = conn
+            .query_row(
+                "SELECT value FROM counters WHERE name = 'invoice'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("legacy counter must exist");
+        assert_eq!(
+            val, 0,
+            "New-format invoice generation must NOT touch legacy counter"
+        );
     }
 
     #[test]
@@ -672,19 +765,26 @@ mod invoice_tests {
 
         // New counter key exists
         let new_key = format!("invoice_{}_{}", TID1, MONTH_SEP);
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM counters WHERE name = ?1",
-            rusqlite::params![&new_key],
-            |r| r.get(0),
-        ).unwrap();
-        assert_eq!(count, 1, "New-style counter key must exist after invoice generation");
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM counters WHERE name = ?1",
+                rusqlite::params![&new_key],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "New-style counter key must exist after invoice generation"
+        );
 
         // Legacy key is untouched
-        let legacy_val: i64 = conn.query_row(
-            "SELECT value FROM counters WHERE name = 'invoice'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let legacy_val: i64 = conn
+            .query_row(
+                "SELECT value FROM counters WHERE name = 'invoice'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(legacy_val, 0, "Legacy counter value must be 0");
     }
 
@@ -697,13 +797,18 @@ mod invoice_tests {
         gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
         gen(&conn, TID2, "MAIN", "T2", MONTH_SEP);
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM counters WHERE name LIKE 'invoice_%'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM counters WHERE name LIKE 'invoice_%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         // One counter per terminal per month (2 terminals, 1 month = 2 counters + 1 legacy)
-        assert!(count >= 2, "Each terminal must have its own counter row; got {count} counter rows");
+        assert!(
+            count >= 2,
+            "Each terminal must have its own counter row; got {count} counter rows"
+        );
     }
 
     #[test]
@@ -712,11 +817,16 @@ mod invoice_tests {
         gen(&conn, TID1, "MAIN", "T1", MONTH_SEP);
         gen(&conn, TID1, "MAIN", "T1", MONTH_OCT);
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM counters WHERE name LIKE ?1",
-            rusqlite::params![format!("invoice_{}_%", TID1)],
-            |r| r.get(0),
-        ).unwrap();
-        assert_eq!(count, 2, "Terminal 1 must have 2 counter rows (Sep and Oct)");
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM counters WHERE name LIKE ?1",
+                rusqlite::params![format!("invoice_{}_%", TID1)],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 2,
+            "Terminal 1 must have 2 counter rows (Sep and Oct)"
+        );
     }
 }

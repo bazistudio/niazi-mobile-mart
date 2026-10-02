@@ -25,12 +25,11 @@ impl PostgresUserRepository {
     }
 
     pub async fn count_active_admins(&self) -> AppResult<i64> {
-        let row: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM users WHERE role = 'ADMIN' AND is_active = 1",
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| AppError::Database(format!("Failed to count active admins: {e}")))?;
+        let row: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM users WHERE role = 'ADMIN' AND is_active = 1")
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| AppError::Database(format!("Failed to count active admins: {e}")))?;
 
         Ok(row.0)
     }
@@ -100,13 +99,12 @@ impl PostgresUserRepository {
         }
 
         // 2. Check for username collision inside transaction
-        let existing: Option<(String,)> = sqlx::query_as(
-            "SELECT id FROM users WHERE LOWER(username) = LOWER($1)",
-        )
-        .bind(&admin_user.username)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|e| AppError::Database(format!("Username check failed: {e}")))?;
+        let existing: Option<(String,)> =
+            sqlx::query_as("SELECT id FROM users WHERE LOWER(username) = LOWER($1)")
+                .bind(&admin_user.username)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| AppError::Database(format!("Username check failed: {e}")))?;
 
         if existing.is_some() {
             return Err(AppError::Conflict(format!(
@@ -118,7 +116,11 @@ impl PostgresUserRepository {
         // 3. Insert user
         let role_str = admin_user.role.to_string();
         let is_active_int = admin_user.status.to_i32();
-        let must_change_pwd_int = if admin_user.must_change_password { 1 } else { 0 };
+        let must_change_pwd_int = if admin_user.must_change_password {
+            1
+        } else {
+            0
+        };
 
         sqlx::query(
             "INSERT INTO users (
@@ -425,7 +427,9 @@ impl PostgresUserRepository {
     fn map_user_row(row: &sqlx::postgres::PgRow) -> AppResult<User> {
         use sqlx::Row;
 
-        let role_str: String = row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?;
+        let role_str: String = row
+            .try_get(5)
+            .map_err(|e| AppError::Database(e.to_string()))?;
         let role = match role_str.to_uppercase().as_str() {
             "ADMIN" | "OWNER" | "SUPER_ADMIN" | "MULTI_ADMIN" => UserRole::Admin,
             "SHOP_ADMIN" | "BRANCH_ADMIN" => UserRole::ShopAdmin,
@@ -438,7 +442,9 @@ impl PostgresUserRepository {
             _ => UserRole::Staff,
         };
 
-        let is_active_int: i32 = row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?;
+        let is_active_int: i32 = row
+            .try_get(6)
+            .map_err(|e| AppError::Database(e.to_string()))?;
         let status = UserStatus::from_i32(is_active_int);
         let pin_locked_ms: Option<i64> = row.try_get(8).unwrap_or(None);
         let login_locked_ms: Option<i64> = row.try_get(10).unwrap_or(None);
@@ -484,10 +490,18 @@ impl PostgresUserRepository {
         };
 
         Ok(User {
-            id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-            name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-            username: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
-            login_key_hash: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
+            id: row
+                .try_get(0)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            name: row
+                .try_get(1)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            username: row
+                .try_get(2)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            login_key_hash: row
+                .try_get(3)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             pin_hash: row.try_get(4).unwrap_or(None),
             role,
             status,
@@ -500,8 +514,12 @@ impl PostgresUserRepository {
             failed_login_attempts: row.try_get::<i32, _>(9).unwrap_or(0) as u32,
             login_locked_until_ms: login_locked_ms.map(|v| v as u128),
             branch_id,
-            created_at: row.try_get(11).map_err(|e| AppError::Database(e.to_string()))?,
-            updated_at: row.try_get(12).map_err(|e| AppError::Database(e.to_string()))?,
+            created_at: row
+                .try_get(11)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            updated_at: row
+                .try_get(12)
+                .map_err(|e| AppError::Database(e.to_string()))?,
         })
     }
 }

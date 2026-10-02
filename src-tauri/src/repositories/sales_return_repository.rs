@@ -27,7 +27,11 @@ impl SQLiteSalesReturnRepository {
             "UPDATE counters SET value = value + 1 WHERE name = 'sales_return_number'",
             [],
         )
-        .map_err(|e| DbError::QueryError(format!("Failed to increment sales_return_number counter: {e}")))?;
+        .map_err(|e| {
+            DbError::QueryError(format!(
+                "Failed to increment sales_return_number counter: {e}"
+            ))
+        })?;
 
         let val: i64 = conn
             .query_row(
@@ -35,7 +39,9 @@ impl SQLiteSalesReturnRepository {
                 [],
                 |row| row.get(0),
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to read sales_return_number counter: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to read sales_return_number counter: {e}"))
+            })?;
 
         Ok(format!("SRET-{:06}", val))
     }
@@ -70,7 +76,10 @@ impl SQLiteSalesReturnRepository {
     }
 
     /// Inserts multiple sales return lines inside transaction
-    pub fn insert_sales_return_lines_in_tx(conn: &Connection, lines: &[SalesReturnLine]) -> DbResult<()> {
+    pub fn insert_sales_return_lines_in_tx(
+        conn: &Connection,
+        lines: &[SalesReturnLine],
+    ) -> DbResult<()> {
         let mut stmt = conn
             .prepare(
                 "INSERT INTO sales_return_lines (
@@ -78,7 +87,9 @@ impl SQLiteSalesReturnRepository {
                     sku_snapshot, unit_price, quantity, return_amount, created_at
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to prepare sales return lines insert: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to prepare sales return lines insert: {e}"))
+            })?;
 
         for line in lines {
             stmt.execute(params![
@@ -93,14 +104,19 @@ impl SQLiteSalesReturnRepository {
                 line.return_amount,
                 line.created_at,
             ])
-            .map_err(|e| DbError::QueryError(format!("Failed to execute sales return line insert: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to execute sales return line insert: {e}"))
+            })?;
         }
 
         Ok(())
     }
 
     /// Queries total completed returned quantity for a specific sale line
-    pub fn get_returned_quantity_for_sale_line_in_tx(conn: &Connection, sale_line_id: &str) -> DbResult<i64> {
+    pub fn get_returned_quantity_for_sale_line_in_tx(
+        conn: &Connection,
+        sale_line_id: &str,
+    ) -> DbResult<i64> {
         let returned: i64 = conn
             .query_row(
                 "SELECT COALESCE(SUM(srl.quantity), 0)
@@ -110,7 +126,11 @@ impl SQLiteSalesReturnRepository {
                 params![sale_line_id],
                 |row| row.get(0),
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to query returned quantity for sale line: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!(
+                    "Failed to query returned quantity for sale line: {e}"
+                ))
+            })?;
 
         Ok(returned)
     }
@@ -150,12 +170,17 @@ impl SQLiteSalesReturnRepository {
         match res {
             Ok(ret) => Ok(Some(ret)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(DbError::QueryError(format!("Failed to get sales return by id: {e}"))),
+            Err(e) => Err(DbError::QueryError(format!(
+                "Failed to get sales return by id: {e}"
+            ))),
         }
     }
 
     /// Reads lines for a sales return inside transaction
-    pub fn get_lines_by_return_id_in_tx(conn: &Connection, return_id: &str) -> DbResult<Vec<SalesReturnLine>> {
+    pub fn get_lines_by_return_id_in_tx(
+        conn: &Connection,
+        return_id: &str,
+    ) -> DbResult<Vec<SalesReturnLine>> {
         let mut stmt = conn
             .prepare(
                 "SELECT id, return_id, sale_line_id, product_id, product_name_snapshot,
@@ -163,7 +188,9 @@ impl SQLiteSalesReturnRepository {
                  FROM sales_return_lines
                  WHERE return_id = ?1",
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to prepare sales return lines query: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to prepare sales return lines query: {e}"))
+            })?;
 
         let rows = stmt
             .query_map(params![return_id], |row| {
@@ -184,7 +211,9 @@ impl SQLiteSalesReturnRepository {
 
         let mut lines = Vec::new();
         for r in rows {
-            lines.push(r.map_err(|e| DbError::QueryError(format!("Error reading sales return line: {e}")))?);
+            lines.push(r.map_err(|e| {
+                DbError::QueryError(format!("Error reading sales return line: {e}"))
+            })?);
         }
 
         Ok(lines)
@@ -246,15 +275,18 @@ impl SQLiteSalesReturnRepository {
         query.push_str(" ORDER BY created_at DESC LIMIT ?");
         params_vec.push(Box::new(lim));
 
-        let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+        let params_slice: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|b| b.as_ref()).collect();
 
-        let mut stmt = guard
-            .prepare(&query)
-            .map_err(|e| DbError::QueryError(format!("Failed to prepare list sales returns query: {e}")))?;
+        let mut stmt = guard.prepare(&query).map_err(|e| {
+            DbError::QueryError(format!("Failed to prepare list sales returns query: {e}"))
+        })?;
 
         let ids: Vec<String> = stmt
             .query_map(params_slice.as_slice(), |row| row.get(0))
-            .map_err(|e| DbError::QueryError(format!("Failed to execute list sales returns query: {e}")))?
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to execute list sales returns query: {e}"))
+            })?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -274,7 +306,11 @@ impl SQLiteSalesReturnRepository {
 
         let mut stmt = guard
             .prepare("SELECT id FROM sales_returns WHERE sale_id = ?1 ORDER BY created_at DESC")
-            .map_err(|e| DbError::QueryError(format!("Failed to prepare sales returns by sale query: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!(
+                    "Failed to prepare sales returns by sale query: {e}"
+                ))
+            })?;
 
         let ids: Vec<String> = stmt
             .query_map(params![sale_id], |row| row.get(0))

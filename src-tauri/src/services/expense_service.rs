@@ -31,7 +31,9 @@ impl ExpenseService {
     pub fn new_sqlite(db: DatabaseConnection) -> Self {
         Self {
             expense_repo: ExpenseRepository::SQLite(SQLiteExpenseRepository::new(db.clone())),
-            branch_repo: BranchRepository::SQLite(crate::repositories::SQLiteBranchRepository::new(db.clone())),
+            branch_repo: BranchRepository::SQLite(
+                crate::repositories::SQLiteBranchRepository::new(db.clone()),
+            ),
             db: Some(db),
         }
     }
@@ -48,10 +50,15 @@ impl ExpenseService {
     // Category Management
     // ──────────────────────────────────────────────────────────────────────────
 
-    pub async fn create_category(&self, dto: CreateExpenseCategoryDto) -> AppResult<ExpenseCategory> {
+    pub async fn create_category(
+        &self,
+        dto: CreateExpenseCategoryDto,
+    ) -> AppResult<ExpenseCategory> {
         let name = dto.name.trim();
         if name.is_empty() {
-            return Err(AppError::Validation("Category name cannot be empty".to_string()));
+            return Err(AppError::Validation(
+                "Category name cannot be empty".to_string(),
+            ));
         }
 
         let id = Uuid::new_v4().to_string();
@@ -60,7 +67,11 @@ impl ExpenseService {
         let cat = ExpenseCategory {
             id,
             name: name.to_string(),
-            description: dto.description.as_ref().map(|d| d.trim().to_string()).filter(|d| !d.is_empty()),
+            description: dto
+                .description
+                .as_ref()
+                .map(|d| d.trim().to_string())
+                .filter(|d| !d.is_empty()),
             is_active: true,
             created_at: now.clone(),
             updated_at: now,
@@ -80,7 +91,9 @@ impl ExpenseService {
         let now = Utc::now().to_rfc3339();
         match &self.expense_repo {
             ExpenseRepository::SQLite(r) => r.update_category(id, &dto, &now).await,
-            ExpenseRepository::Postgres(_) => Err(AppError::Internal("Postgres update_category not implemented".into())),
+            ExpenseRepository::Postgres(_) => Err(AppError::Internal(
+                "Postgres update_category not implemented".into(),
+            )),
         }
     }
 
@@ -90,7 +103,9 @@ impl ExpenseService {
                 .get_category_by_id(id)
                 .await?
                 .ok_or_else(|| AppError::NotFound(format!("Expense category '{id}' not found"))),
-            ExpenseRepository::Postgres(_) => Err(AppError::Internal("Postgres get_category_by_id not implemented".into())),
+            ExpenseRepository::Postgres(_) => Err(AppError::Internal(
+                "Postgres get_category_by_id not implemented".into(),
+            )),
         }
     }
 
@@ -111,20 +126,31 @@ impl ExpenseService {
         dto: CreateExpenseDto,
     ) -> AppResult<Expense> {
         if dto.amount <= 0 {
-            return Err(AppError::Validation("Expense amount must be greater than 0".to_string()));
+            return Err(AppError::Validation(
+                "Expense amount must be greater than 0".to_string(),
+            ));
         }
 
         let desc = dto.description.trim().to_string();
         if desc.is_empty() {
-            return Err(AppError::Validation("Expense description is required".to_string()));
+            return Err(AppError::Validation(
+                "Expense description is required".to_string(),
+            ));
         }
 
         let cat_id = dto.category_id.trim().to_string();
         if cat_id.is_empty() {
-            return Err(AppError::Validation("Expense category ID is required".to_string()));
+            return Err(AppError::Validation(
+                "Expense category ID is required".to_string(),
+            ));
         }
 
-        let branch_id = match dto.branch_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let branch_id = match dto
+            .branch_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             Some(bid) => bid.to_string(),
             None => match self.branch_repo.get_main_branch().await? {
                 Some(b) => b.id,
@@ -148,7 +174,11 @@ impl ExpenseService {
             .map(str::to_string)
             .unwrap_or_else(|| Utc::now().to_rfc3339());
 
-        let notes = dto.notes.as_ref().map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+        let notes = dto
+            .notes
+            .as_ref()
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty());
         let uid = user_id.map(str::to_string);
         if let ExpenseRepository::Postgres(pg_repo) = &self.expense_repo {
             return pg_repo.create_expense(&dto, user_id).await;
@@ -156,14 +186,19 @@ impl ExpenseService {
 
         let amount = dto.amount;
 
-        let db = self.db.as_ref().expect("SQLite database connection required");
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
 
         let result = with_transaction(db, move |tx| {
             let now = Utc::now().to_rfc3339();
 
             // 1. Verify Category exists and is active
             let category = SQLiteExpenseRepository::get_category_by_id_in_tx(tx, &cat_id)?
-                .ok_or_else(|| DbError::NotFound(format!("Expense category '{cat_id}' not found")))?;
+                .ok_or_else(|| {
+                    DbError::NotFound(format!("Expense category '{cat_id}' not found"))
+                })?;
 
             if !category.is_active {
                 return Err(DbError::ValidationError(format!(
@@ -198,7 +233,8 @@ impl ExpenseService {
 
             // 3. If CASH payment method, record authoritative Cash Movement OUT
             if payment_method == "CASH" {
-                let open_session_id = SQLiteCashRepository::get_open_session_id_in_tx(tx, &branch_id)?;
+                let open_session_id =
+                    SQLiteCashRepository::get_open_session_id_in_tx(tx, &branch_id)?;
 
                 let cash_movement = CashMovement {
                     id: Uuid::new_v4().to_string(),
@@ -234,7 +270,10 @@ impl ExpenseService {
         let eid = expense_id.trim().to_string();
         let uid = user_id.map(str::to_string);
 
-        let db = self.db.as_ref().expect("SQLite database connection required");
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
         let cancelled_expense = with_transaction(db, move |tx| {
             let now = Utc::now().to_rfc3339();
 
@@ -253,7 +292,8 @@ impl ExpenseService {
 
             // If it was a CASH expense, create immutable compensating Cash Movement IN
             if current.payment_method == "CASH" {
-                let open_session_id = SQLiteCashRepository::get_open_session_id_in_tx(tx, &current.branch_id)?;
+                let open_session_id =
+                    SQLiteCashRepository::get_open_session_id_in_tx(tx, &current.branch_id)?;
 
                 let reversal_movement = CashMovement {
                     id: Uuid::new_v4().to_string(),
@@ -265,7 +305,10 @@ impl ExpenseService {
                     reference_id: Some(current.id.clone()),
                     reference_number: Some(current.expense_number.clone()),
                     payment_method: "CASH".to_string(),
-                    description: format!("Reversal of Cancelled Expense {}", current.expense_number),
+                    description: format!(
+                        "Reversal of Cancelled Expense {}",
+                        current.expense_number
+                    ),
                     performed_by: uid,
                     performed_by_name: None,
                     created_at: now.clone(),

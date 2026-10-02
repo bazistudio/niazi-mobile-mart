@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use super::access_control::StaffAccessProfile;
+use serde::{Deserialize, Serialize};
 
 /// System roles (internal staff roles vs external public rate app users)
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

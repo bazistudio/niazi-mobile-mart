@@ -207,7 +207,8 @@ impl SQLiteProductRepository {
             .prepare(&query)
             .map_err(|e| AppError::Database(format!("Failed to prepare product query: {e}")))?;
 
-        let rusqlite_params: Vec<&dyn rusqlite::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
+        let rusqlite_params: Vec<&dyn rusqlite::ToSql> =
+            param_values.iter().map(|b| b.as_ref()).collect();
 
         let iter = stmt
             .query_map(&rusqlite_params[..], |row| {
@@ -271,7 +272,10 @@ impl SQLiteProductRepository {
 
         let now = Utc::now().to_rfc3339();
         let affected = guard
-            .execute("UPDATE products SET is_active = 0, updated_at = ?1 WHERE id = ?2", params![now, id])
+            .execute(
+                "UPDATE products SET is_active = 0, updated_at = ?1 WHERE id = ?2",
+                params![now, id],
+            )
             .map_err(|e| AppError::Database(format!("Failed to deactivate product: {e}")))?;
 
         if affected == 0 {
@@ -346,10 +350,22 @@ impl SQLiteProductRepository {
             "00000000-0000-0000-0000-000000000010".to_string()
         };
 
-        let norm_unit = unit_id.map(str::trim).filter(|s| s.len() == 36).map(String::from);
-        let norm_brand = brand_id.map(str::trim).filter(|s| s.len() == 36).map(String::from);
-        let norm_quality = quality_id.map(str::trim).filter(|s| s.len() == 36).map(String::from);
-        let norm_color = color_id.map(str::trim).filter(|s| s.len() == 36).map(String::from);
+        let norm_unit = unit_id
+            .map(str::trim)
+            .filter(|s| s.len() == 36)
+            .map(String::from);
+        let norm_brand = brand_id
+            .map(str::trim)
+            .filter(|s| s.len() == 36)
+            .map(String::from);
+        let norm_quality = quality_id
+            .map(str::trim)
+            .filter(|s| s.len() == 36)
+            .map(String::from);
+        let norm_color = color_id
+            .map(str::trim)
+            .filter(|s| s.len() == 36)
+            .map(String::from);
 
         let mut stmt = conn.prepare(
             "SELECT id, name, normalized_name, category_id, unit_id, brand_id, quality_id, color_id FROM products WHERE is_active = 1"
@@ -369,7 +385,16 @@ impl SQLiteProductRepository {
         })?;
 
         for item in iter {
-            let (id, _existing_name, existing_norm_name, existing_cat, existing_unit, existing_brand, existing_quality, existing_color) = item?;
+            let (
+                id,
+                _existing_name,
+                existing_norm_name,
+                existing_cat,
+                existing_unit,
+                existing_brand,
+                existing_quality,
+                existing_color,
+            ) = item?;
 
             if let Some(ex_id) = exclude_id {
                 if id == ex_id {
@@ -382,10 +407,26 @@ impl SQLiteProductRepository {
             } else {
                 "00000000-0000-0000-0000-000000000010".to_string()
             };
-            let existing_norm_unit = existing_unit.as_deref().map(str::trim).filter(|s| s.len() == 36).map(String::from);
-            let existing_norm_brand = existing_brand.as_deref().map(str::trim).filter(|s| s.len() == 36).map(String::from);
-            let existing_norm_quality = existing_quality.as_deref().map(str::trim).filter(|s| s.len() == 36).map(String::from);
-            let existing_norm_color = existing_color.as_deref().map(str::trim).filter(|s| s.len() == 36).map(String::from);
+            let existing_norm_unit = existing_unit
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| s.len() == 36)
+                .map(String::from);
+            let existing_norm_brand = existing_brand
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| s.len() == 36)
+                .map(String::from);
+            let existing_norm_quality = existing_quality
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| s.len() == 36)
+                .map(String::from);
+            let existing_norm_color = existing_color
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| s.len() == 36)
+                .map(String::from);
 
             if existing_norm_name == norm_name
                 && existing_safe_cat == safe_category_id
@@ -395,7 +436,7 @@ impl SQLiteProductRepository {
                 && existing_norm_color == norm_color
             {
                 return Err(crate::db::errors::DbError::ValidationError(
-                    "An equivalent product already exists.".to_string()
+                    "An equivalent product already exists.".to_string(),
                 ));
             }
         }
@@ -413,7 +454,11 @@ impl SQLiteProductRepository {
 
         let now = Utc::now().to_rfc3339();
         let threshold = dto.low_stock_threshold.unwrap_or(5);
-        let barcode_opt = dto.barcode.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let barcode_opt = dto
+            .barcode
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
         let initial_avg_cost = dto.average_cost.unwrap_or(dto.purchase_price);
 
         let norm_name = crate::domain::product::normalize_product_name(&dto.name);
@@ -538,7 +583,11 @@ impl SQLiteProductRepository {
     ) -> Result<(), crate::db::errors::DbError> {
         Self::ensure_default_master_data(conn);
 
-        let barcode_opt = product.barcode.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let barcode_opt = product
+            .barcode
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
         let norm_name = if product.normalized_name.is_empty() {
             crate::domain::product::normalize_product_name(&product.name)
         } else {
@@ -660,7 +709,11 @@ impl SQLiteProductRepository {
             current.barcode
         };
 
-        let raw_category = dto.category_id.as_deref().unwrap_or(&current.category_id).trim();
+        let raw_category = dto
+            .category_id
+            .as_deref()
+            .unwrap_or(&current.category_id)
+            .trim();
         let safe_category = if raw_category.len() == 36 {
             raw_category
         } else if current.category_id.len() == 36 {
@@ -687,12 +740,19 @@ impl SQLiteProductRepository {
         let new_purchase = dto.purchase_price.unwrap_or(current.purchase_price);
         let new_avg_cost = dto.average_cost.unwrap_or(current.average_cost);
         let new_sale = dto.sale_price.unwrap_or(current.sale_price);
-        let new_threshold = dto.low_stock_threshold.unwrap_or(current.low_stock_threshold);
-        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_threshold = dto
+            .low_stock_threshold
+            .unwrap_or(current.low_stock_threshold);
+        let new_desc = dto
+            .description
+            .as_deref()
+            .or(current.description.as_deref());
         let new_active = dto.is_active.unwrap_or(current.is_active);
 
         if new_purchase < 0 || new_avg_cost < 0 || new_sale < 0 || new_threshold < 0 {
-            return Err(crate::db::errors::DbError::ValidationError("Prices and threshold cannot be negative".to_string()));
+            return Err(crate::db::errors::DbError::ValidationError(
+                "Prices and threshold cannot be negative".to_string(),
+            ));
         }
 
         Self::check_composite_duplicate_in_tx(
@@ -775,11 +835,16 @@ impl SQLiteProductRepository {
     ) -> Result<(), crate::db::errors::DbError> {
         let now = Utc::now().to_rfc3339();
         let affected = conn
-            .execute("UPDATE products SET is_active = 0, updated_at = ?1 WHERE id = ?2", params![now, id])
+            .execute(
+                "UPDATE products SET is_active = 0, updated_at = ?1 WHERE id = ?2",
+                params![now, id],
+            )
             .map_err(crate::db::errors::DbError::from)?;
 
         if affected == 0 {
-            return Err(crate::db::errors::DbError::NotFound(format!("Product '{id}' not found")));
+            return Err(crate::db::errors::DbError::NotFound(format!(
+                "Product '{id}' not found"
+            )));
         }
 
         Ok(())

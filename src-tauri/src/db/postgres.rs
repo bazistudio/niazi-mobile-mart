@@ -65,12 +65,9 @@ impl PostgresAdapter {
             })?;
 
         // Validate connection health immediately
-        sqlx::query("SELECT 1")
-            .execute(&pool)
-            .await
-            .map_err(|e| {
-                DbError::ConnectionError(format!("PostgreSQL health check failed: {e}"))
-            })?;
+        sqlx::query("SELECT 1").execute(&pool).await.map_err(|e| {
+            DbError::ConnectionError(format!("PostgreSQL health check failed: {e}"))
+        })?;
 
         info!("PostgreSQL connection pool initialized successfully ({max_connections} max connections)");
 
@@ -86,16 +83,22 @@ impl PostgresAdapter {
     pub async fn run_migrations(&self) -> DbResult<()> {
         info!("Running PostgreSQL schema migrations...");
         let schema_001 = include_str!("../../migrations/postgres/001_initial_schema.sql");
-        let schema_002 = include_str!("../../migrations/postgres/002_add_terminals_and_sync_queue.sql");
+        let schema_002 =
+            include_str!("../../migrations/postgres/002_add_terminals_and_sync_queue.sql");
         let schema_003 = include_str!("../../migrations/postgres/003_add_change_log.sql");
-        let schema_004 = include_str!("../../migrations/postgres/004_add_master_data_foundation.sql");
-        let schema_005 = include_str!("../../migrations/postgres/005_product_identity_and_normalization.sql");
+        let schema_004 =
+            include_str!("../../migrations/postgres/004_add_master_data_foundation.sql");
+        let schema_005 =
+            include_str!("../../migrations/postgres/005_product_identity_and_normalization.sql");
         let schema_006 = include_str!("../../migrations/postgres/006_multi_payment.sql");
         let schema_007 = include_str!("../../migrations/postgres/007_parties_foundation.sql");
         let schema_008 = include_str!("../../migrations/postgres/008_search_index_parity.sql");
         let schema_009 = include_str!("../../migrations/postgres/009_fix_public_rates_fk.sql");
-        let schema_010 = include_str!("../../migrations/postgres/010_add_terminal_code_for_invoice_numbering.sql");
-        let schema_011 = include_str!("../../migrations/postgres/011_terminal_invoice_counters.sql");
+        let schema_010 = include_str!(
+            "../../migrations/postgres/010_add_terminal_code_for_invoice_numbering.sql"
+        );
+        let schema_011 =
+            include_str!("../../migrations/postgres/011_terminal_invoice_counters.sql");
 
         let mut tx = self.pool.begin().await.map_err(|e| {
             DbError::MigrationError(format!("Failed to begin migration transaction: {e}"))
@@ -104,57 +107,79 @@ impl PostgresAdapter {
         sqlx::raw_sql(schema_001)
             .execute(&mut *tx)
             .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 001: {e}")))?;
+            .map_err(|e| {
+                DbError::MigrationError(format!("Failed to execute PostgreSQL migration 001: {e}"))
+            })?;
 
         sqlx::raw_sql(schema_002)
             .execute(&mut *tx)
             .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 002: {e}")))?;
+            .map_err(|e| {
+                DbError::MigrationError(format!("Failed to execute PostgreSQL migration 002: {e}"))
+            })?;
 
         sqlx::raw_sql(schema_003)
             .execute(&mut *tx)
             .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 003: {e}")))?;
+            .map_err(|e| {
+                DbError::MigrationError(format!("Failed to execute PostgreSQL migration 003: {e}"))
+            })?;
 
         sqlx::raw_sql(schema_004)
             .execute(&mut *tx)
             .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 004: {e}")))?;
+            .map_err(|e| {
+                DbError::MigrationError(format!("Failed to execute PostgreSQL migration 004: {e}"))
+            })?;
 
         sqlx::raw_sql(schema_005)
             .execute(&mut *tx)
             .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 005: {e}")))?;
+            .map_err(|e| {
+                DbError::MigrationError(format!("Failed to execute PostgreSQL migration 005: {e}"))
+            })?;
 
         sqlx::raw_sql(schema_006)
             .execute(&mut *tx)
             .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 006: {e}")))?;
+            .map_err(|e| {
+                DbError::MigrationError(format!("Failed to execute PostgreSQL migration 006: {e}"))
+            })?;
 
         sqlx::raw_sql(schema_007)
             .execute(&mut *tx)
             .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 007: {e}")))?;
+            .map_err(|e| {
+                DbError::MigrationError(format!("Failed to execute PostgreSQL migration 007: {e}"))
+            })?;
 
         sqlx::raw_sql(schema_008)
             .execute(&mut *tx)
             .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 008: {e}")))?;
+            .map_err(|e| {
+                DbError::MigrationError(format!("Failed to execute PostgreSQL migration 008: {e}"))
+            })?;
 
         sqlx::raw_sql(schema_009)
             .execute(&mut *tx)
             .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 009: {e}")))?;
+            .map_err(|e| {
+                DbError::MigrationError(format!("Failed to execute PostgreSQL migration 009: {e}"))
+            })?;
 
         sqlx::raw_sql(schema_010)
             .execute(&mut *tx)
             .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 010: {e}")))?;
+            .map_err(|e| {
+                DbError::MigrationError(format!("Failed to execute PostgreSQL migration 010: {e}"))
+            })?;
 
         sqlx::raw_sql(schema_011)
             .execute(&mut *tx)
             .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 011: {e}")))?;
+            .map_err(|e| {
+                DbError::MigrationError(format!("Failed to execute PostgreSQL migration 011: {e}"))
+            })?;
 
         tx.commit().await.map_err(|e| {
             DbError::MigrationError(format!("Failed to commit migration transaction: {e}"))
@@ -183,7 +208,10 @@ mod tests {
         assert_eq!(parse_pool_max_connections(Some("0")), 2);
         assert_eq!(parse_pool_max_connections(Some("-3")), 2);
         assert_eq!(parse_pool_max_connections(Some(" 4 ")), 4);
-        assert_eq!(parse_pool_max_connections(Some("50")), MAX_PG_POOL_MAX_CONNECTIONS);
+        assert_eq!(
+            parse_pool_max_connections(Some("50")),
+            MAX_PG_POOL_MAX_CONNECTIONS
+        );
     }
 
     /// Verifies that the PostgresAdapter correctly rejects a missing DATABASE_URL.
@@ -251,7 +279,9 @@ mod tests {
             .await
             .expect("Query inside transaction should work");
 
-        tx.commit().await.expect("Transaction commit should succeed");
+        tx.commit()
+            .await
+            .expect("Transaction commit should succeed");
 
         // Validate transaction rollback
         let mut tx2 = adapter

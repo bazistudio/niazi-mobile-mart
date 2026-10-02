@@ -162,8 +162,6 @@ pub fn run() {
             let menu = Menu::with_items(handle, &[&file_menu, &help_menu])?;
             app.set_menu(menu)?;
 
-
-
             if let Some(window) = app.get_webview_window("main") {
                 #[cfg(debug_assertions)]
                 window.open_devtools();
@@ -360,7 +358,6 @@ pub fn run() {
             commands::profit::profit_get_product,
             commands::profit::profit_get_sale,
             commands::profit::profit_get_dashboard_summary,
-
         ])
         .run(tauri::generate_context!())
         .expect("error while running Niazi Mobile Mart Tauri application");

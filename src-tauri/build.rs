@@ -3,9 +3,8 @@ fn main() {
         tauri_build::build();
     });
     if res.is_err() {
-        println!("cargo:warning=tauri-winres skipped (windres not available in PATH); continuing build");
+        println!(
+            "cargo:warning=tauri-winres skipped (windres not available in PATH); continuing build"
+        );
     }
 }
-
-
-

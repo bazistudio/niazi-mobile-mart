@@ -23,7 +23,10 @@ impl SQLiteInventoryRepository {
     }
 
     /// Returns a map of product_id -> quantity for all products in the specified branch
-    pub async fn get_stock_map(&self, branch_id: &str) -> AppResult<std::collections::HashMap<String, i64>> {
+    pub async fn get_stock_map(
+        &self,
+        branch_id: &str,
+    ) -> AppResult<std::collections::HashMap<String, i64>> {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
 
@@ -39,7 +42,8 @@ impl SQLiteInventoryRepository {
 
         let mut map = std::collections::HashMap::new();
         for item in iter {
-            let (pid, qty) = item.map_err(|e| AppError::Database(format!("Stock map row error: {e}")))?;
+            let (pid, qty) =
+                item.map_err(|e| AppError::Database(format!("Stock map row error: {e}")))?;
             map.insert(pid, qty);
         }
         Ok(map)
@@ -73,7 +77,9 @@ impl SQLiteInventoryRepository {
         updated_at: &str,
     ) -> DbResult<()> {
         if quantity < 0 {
-            return Err(DbError::ConstraintViolation("Stock quantity cannot be negative".to_string()));
+            return Err(DbError::ConstraintViolation(
+                "Stock quantity cannot be negative".to_string(),
+            ));
         }
 
         conn.execute(
@@ -92,13 +98,19 @@ impl SQLiteInventoryRepository {
     /// Inserts an immutable stock movement record inside an active transaction
     pub fn insert_movement_in_tx(conn: &Connection, movement: &StockMovement) -> DbResult<()> {
         if movement.quantity <= 0 {
-            return Err(DbError::ConstraintViolation("Movement quantity must be greater than 0".to_string()));
+            return Err(DbError::ConstraintViolation(
+                "Movement quantity must be greater than 0".to_string(),
+            ));
         }
         if movement.resulting_stock < 0 {
-            return Err(DbError::ConstraintViolation("Resulting stock cannot be negative".to_string()));
+            return Err(DbError::ConstraintViolation(
+                "Resulting stock cannot be negative".to_string(),
+            ));
         }
         if movement.previous_stock < 0 {
-            return Err(DbError::ConstraintViolation("Previous stock cannot be negative".to_string()));
+            return Err(DbError::ConstraintViolation(
+                "Previous stock cannot be negative".to_string(),
+            ));
         }
 
         conn.execute(
@@ -148,17 +160,23 @@ impl SQLiteInventoryRepository {
         query.push_str(" ORDER BY created_at DESC LIMIT ?");
         param_values.push(Box::new(limit as i64));
 
-        let mut stmt = guard
-            .prepare(&query)
-            .map_err(|e| AppError::Database(format!("Failed to prepare stock movements query: {e}")))?;
+        let mut stmt = guard.prepare(&query).map_err(|e| {
+            AppError::Database(format!("Failed to prepare stock movements query: {e}"))
+        })?;
 
-        let rusqlite_params: Vec<&dyn rusqlite::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
+        let rusqlite_params: Vec<&dyn rusqlite::ToSql> =
+            param_values.iter().map(|b| b.as_ref()).collect();
 
         let iter = stmt
             .query_map(&rusqlite_params[..], |row| {
                 let mtype_str: String = row.get(3)?;
-                let mtype = StockMovementType::from_str(&mtype_str)
-                    .map_err(|e| rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))))?;
+                let mtype = StockMovementType::from_str(&mtype_str).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        3,
+                        rusqlite::types::Type::Text,
+                        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+                    )
+                })?;
 
                 Ok(StockMovement {
                     id: row.get(0)?,
@@ -178,7 +196,9 @@ impl SQLiteInventoryRepository {
 
         let mut list = Vec::new();
         for item in iter {
-            list.push(item.map_err(|e| AppError::Database(format!("Stock movement row error: {e}")))?);
+            list.push(
+                item.map_err(|e| AppError::Database(format!("Stock movement row error: {e}")))?,
+            );
         }
         Ok(list)
     }

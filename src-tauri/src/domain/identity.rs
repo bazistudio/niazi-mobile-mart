@@ -48,15 +48,26 @@ impl RequestIdentity {
 
     /// Checks if user has permission to perform a specific action
     pub fn can_perform_action(&self, action: &str) -> bool {
-        if self.access_profile.allowed_actions.contains(&"*".to_string()) {
+        if self
+            .access_profile
+            .allowed_actions
+            .contains(&"*".to_string())
+        {
             return true;
         }
-        self.access_profile.allowed_actions.iter().any(|a| a == action)
+        self.access_profile
+            .allowed_actions
+            .iter()
+            .any(|a| a == action)
     }
 
     /// Evaluates effective permissions and returns Ok(()) or AppError::Forbidden (403).
     /// Enforces: Role Permissions + Individual Overrides = Effective Permissions.
-    pub fn authorize_permission(&self, page: Option<&str>, action: Option<&str>) -> Result<(), crate::errors::AppError> {
+    pub fn authorize_permission(
+        &self,
+        page: Option<&str>,
+        action: Option<&str>,
+    ) -> Result<(), crate::errors::AppError> {
         if self.is_admin() {
             return Ok(());
         }
@@ -82,7 +93,11 @@ impl RequestIdentity {
 
     /// Validates organization and branch context integrity against trusted request identity.
     /// Rejects client attempt to access another organization or unauthorized branch.
-    pub fn validate_context(&self, req_org_id: Option<&str>, req_branch_id: Option<&str>) -> Result<(), crate::errors::AppError> {
+    pub fn validate_context(
+        &self,
+        req_org_id: Option<&str>,
+        req_branch_id: Option<&str>,
+    ) -> Result<(), crate::errors::AppError> {
         // Validate Organization Context
         if let Some(org_id) = req_org_id {
             if org_id != self.organization_id {
@@ -109,7 +124,10 @@ impl RequestIdentity {
     /// - Non-admin staff bound to a branch MUST use their assigned branch.
     /// - If non-admin staff attempts to request a different branch (client tampering), returns 403 Forbidden.
     /// - Admins or unrestricted staff use requested branch or fall back to assigned/main branch.
-    pub fn resolve_branch(&self, requested_branch_id: Option<&str>) -> Result<String, crate::errors::AppError> {
+    pub fn resolve_branch(
+        &self,
+        requested_branch_id: Option<&str>,
+    ) -> Result<String, crate::errors::AppError> {
         let requested_clean = requested_branch_id.map(str::trim).filter(|s| !s.is_empty());
 
         if let Some(assigned) = &self.branch_id {
@@ -117,7 +135,8 @@ impl RequestIdentity {
                 if let Some(req) = requested_clean {
                     if req != assigned {
                         return Err(crate::errors::AppError::Forbidden(
-                            "Access denied: Unauthorized cross-branch access prohibited".to_string(),
+                            "Access denied: Unauthorized cross-branch access prohibited"
+                                .to_string(),
                         ));
                     }
                 }
@@ -159,7 +178,10 @@ mod tests {
 
         let identity = RequestIdentity::from_user(&user, 1000);
         assert_eq!(identity.user_id, "usr_123");
-        assert_eq!(identity.organization_id, "00000000-0000-0000-0000-000000000001");
+        assert_eq!(
+            identity.organization_id,
+            "00000000-0000-0000-0000-000000000001"
+        );
         assert!(identity.is_admin());
         assert!(identity.can_access_page("dashboard"));
         assert!(identity.can_perform_action("sale:create"));
@@ -218,17 +240,28 @@ mod tests {
         identity.branch_id = Some("branch_branch1".to_string());
 
         // Matching org and matching branch -> OK
-        assert!(identity.validate_context(Some("00000000-0000-0000-0000-000000000001"), Some("branch_branch1")).is_ok());
+        assert!(identity
+            .validate_context(
+                Some("00000000-0000-0000-0000-000000000001"),
+                Some("branch_branch1")
+            )
+            .is_ok());
 
         // Cross-organization tampering -> Err(Forbidden)
         let org_err = identity.validate_context(Some("other_org_id"), None);
         assert!(org_err.is_err());
-        assert!(org_err.unwrap_err().to_string().contains("Cross-organization data access prohibited"));
+        assert!(org_err
+            .unwrap_err()
+            .to_string()
+            .contains("Cross-organization data access prohibited"));
 
         // Cross-branch tampering -> Err(Forbidden)
         let branch_err = identity.validate_context(None, Some("unauthorized_branch_2"));
         assert!(branch_err.is_err());
-        assert!(branch_err.unwrap_err().to_string().contains("Unauthorized cross-branch access prohibited"));
+        assert!(branch_err
+            .unwrap_err()
+            .to_string()
+            .contains("Unauthorized cross-branch access prohibited"));
     }
 
     #[test]
@@ -261,7 +294,10 @@ mod tests {
         // 3. Client tampering: Branch A user attempting to request BRANCH_B -> 403 Forbidden
         let err_tamper = identity.resolve_branch(Some("BRANCH_B"));
         assert!(err_tamper.is_err());
-        assert!(err_tamper.unwrap_err().to_string().contains("Unauthorized cross-branch access prohibited"));
+        assert!(err_tamper
+            .unwrap_err()
+            .to_string()
+            .contains("Unauthorized cross-branch access prohibited"));
 
         // 4. Admin user assigned to BRANCH_A attempting to request BRANCH_B -> Allowed via Admin privilege
         let admin_user = SanitizedUser {

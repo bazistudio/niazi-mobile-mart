@@ -568,287 +568,137 @@ export const tauriClient = {
   },
 
   // ── Catalog Domain ────────────────────────────────────────────────────────
-  async categoryCreate(dto: CreateCategoryDto): Promise<Category> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Category>('category_create', { dto });
-    }
-    return await httpFetch<Category>('/api/v1/catalog/categories', {
+  async categoryCreate(dto: CreateCategoryDto): Promise<Category> {    return await httpFetch<Category>('/api/v1/catalog/categories', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async categoryGet(id: string): Promise<Category> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Category>('category_get', { id });
-    }
-    return await httpFetch<Category>(`/api/v1/catalog/categories/${id}`);
+  async categoryGet(id: string): Promise<Category> {    return await httpFetch<Category>(`/api/v1/catalog/categories/${id}`);
   },
 
-  async categoryList(): Promise<Category[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Category[]>('category_list');
-    }
-    return await httpFetch<Category[]>('/api/v1/catalog/categories');
+  async categoryList(): Promise<Category[]> {    return await httpFetch<Category[]>('/api/v1/catalog/categories');
   },
 
-  async categoryUpdate(id: string, dto: UpdateCategoryDto): Promise<Category> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Category>('category_update', { id, dto });
-    }
-    return await httpFetch<Category>(`/api/v1/catalog/categories/${id}`, {
+  async categoryUpdate(id: string, dto: UpdateCategoryDto): Promise<Category> {    return await httpFetch<Category>(`/api/v1/catalog/categories/${id}`, {
       method: 'PUT',
       body: JSON.stringify(dto),
     });
   },
 
-  async brandCreate(dto: CreateBrandDto): Promise<Brand> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Brand>('brand_create', { dto });
-    }
-    return await httpFetch<Brand>('/api/v1/catalog/brands', {
+  async brandCreate(dto: CreateBrandDto): Promise<Brand> {    return await httpFetch<Brand>('/api/v1/catalog/brands', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async brandGet(id: string): Promise<Brand> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Brand>('brand_get', { id });
-    }
-    return await httpFetch<Brand>(`/api/v1/catalog/brands/${id}`);
+  async brandGet(id: string): Promise<Brand> {    return await httpFetch<Brand>(`/api/v1/catalog/brands/${id}`);
   },
 
-  async brandList(): Promise<Brand[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Brand[]>('brand_list');
-    }
-    return await httpFetch<Brand[]>('/api/v1/catalog/brands');
+  async brandList(): Promise<Brand[]> {    return await httpFetch<Brand[]>('/api/v1/catalog/brands');
   },
 
-  async brandUpdate(id: string, dto: UpdateBrandDto): Promise<Brand> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Brand>('brand_update', { id, dto });
-    }
-    return await httpFetch<Brand>(`/api/v1/catalog/brands/${id}`, {
+  async brandUpdate(id: string, dto: UpdateBrandDto): Promise<Brand> {    return await httpFetch<Brand>(`/api/v1/catalog/brands/${id}`, {
       method: 'PUT',
       body: JSON.stringify(dto),
     });
   },
 
-  async unitCreate(dto: CreateUnitDto): Promise<Unit> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Unit>('unit_create', { dto });
-    }
-    return await httpFetch<Unit>('/api/v1/catalog/units', {
+  async unitCreate(dto: CreateUnitDto): Promise<Unit> {    return await httpFetch<Unit>('/api/v1/catalog/units', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async unitGet(id: string): Promise<Unit> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Unit>('unit_get', { id });
-    }
-    return await httpFetch<Unit>(`/api/v1/catalog/units/${id}`);
+  async unitGet(id: string): Promise<Unit> {    return await httpFetch<Unit>(`/api/v1/catalog/units/${id}`);
   },
 
-  async unitList(): Promise<Unit[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Unit[]>('unit_list');
-    }
-    return await httpFetch<Unit[]>('/api/v1/catalog/units');
+  async unitList(): Promise<Unit[]> {    return await httpFetch<Unit[]>('/api/v1/catalog/units');
   },
 
-  async unitUpdate(id: string, dto: UpdateUnitDto): Promise<Unit> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Unit>('unit_update', { id, dto });
-    }
-    return await httpFetch<Unit>(`/api/v1/catalog/units/${id}`, {
+  async unitUpdate(id: string, dto: UpdateUnitDto): Promise<Unit> {    return await httpFetch<Unit>(`/api/v1/catalog/units/${id}`, {
       method: 'PUT',
       body: JSON.stringify(dto),
     });
   },
 
-  async companyCreate(dto: { name: string; code?: string; description?: string | null }): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke('company_create', { dto });
-    }
-    return await httpFetch('/api/v1/catalog/companies', {
+  async companyCreate(dto: { name: string; code?: string; description?: string | null }): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {    return await httpFetch('/api/v1/catalog/companies', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async companyGet(id: string): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke('company_get', { id });
-    }
-    return await httpFetch(`/api/v1/catalog/companies/${id}`);
+  async companyGet(id: string): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {    return await httpFetch(`/api/v1/catalog/companies/${id}`);
   },
 
-  async companyList(): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke('company_list');
-    }
-    return await httpFetch('/api/v1/catalog/companies');
+  async companyList(): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }[]> {    return await httpFetch('/api/v1/catalog/companies');
   },
 
-  async companyUpdate(id: string, dto: { name?: string; description?: string | null; is_active?: boolean }): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke('company_update', { id, dto });
-    }
-    return await httpFetch(`/api/v1/catalog/companies/${id}`, {
+  async companyUpdate(id: string, dto: { name?: string; description?: string | null; is_active?: boolean }): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {    return await httpFetch(`/api/v1/catalog/companies/${id}`, {
       method: 'PUT',
       body: JSON.stringify(dto),
     });
   },
 
-  async qualityCreate(dto: { name: string; code?: string; description?: string | null }): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke('quality_create', { dto });
-    }
-    return await httpFetch('/api/v1/catalog/qualities', {
+  async qualityCreate(dto: { name: string; code?: string; description?: string | null }): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {    return await httpFetch('/api/v1/catalog/qualities', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async qualityGet(id: string): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke('quality_get', { id });
-    }
-    return await httpFetch(`/api/v1/catalog/qualities/${id}`);
+  async qualityGet(id: string): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {    return await httpFetch(`/api/v1/catalog/qualities/${id}`);
   },
 
-  async qualityList(): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke('quality_list');
-    }
-    return await httpFetch('/api/v1/catalog/qualities');
+  async qualityList(): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }[]> {    return await httpFetch('/api/v1/catalog/qualities');
   },
 
-  async qualityUpdate(id: string, dto: { name?: string; description?: string | null; is_active?: boolean }): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke('quality_update', { id, dto });
-    }
-    return await httpFetch(`/api/v1/catalog/qualities/${id}`, {
+  async qualityUpdate(id: string, dto: { name?: string; description?: string | null; is_active?: boolean }): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {    return await httpFetch(`/api/v1/catalog/qualities/${id}`, {
       method: 'PUT',
       body: JSON.stringify(dto),
     });
   },
 
-  async colorCreate(dto: { name: string; code?: string; description?: string | null }): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke('color_create', { dto });
-    }
-    return await httpFetch('/api/v1/catalog/colors', {
+  async colorCreate(dto: { name: string; code?: string; description?: string | null }): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {    return await httpFetch('/api/v1/catalog/colors', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async colorGet(id: string): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke('color_get', { id });
-    }
-    return await httpFetch(`/api/v1/catalog/colors/${id}`);
+  async colorGet(id: string): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {    return await httpFetch(`/api/v1/catalog/colors/${id}`);
   },
 
-  async colorList(): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke('color_list');
-    }
-    return await httpFetch('/api/v1/catalog/colors');
+  async colorList(): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }[]> {    return await httpFetch('/api/v1/catalog/colors');
   },
 
-  async colorUpdate(id: string, dto: { name?: string; description?: string | null; is_active?: boolean }): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke('color_update', { id, dto });
-    }
-    return await httpFetch(`/api/v1/catalog/colors/${id}`, {
+  async colorUpdate(id: string, dto: { name?: string; description?: string | null; is_active?: boolean }): Promise<{ id: string; name: string; code: string; description?: string | null; is_active: boolean; created_at: string; updated_at: string }> {    return await httpFetch(`/api/v1/catalog/colors/${id}`, {
       method: 'PUT',
       body: JSON.stringify(dto),
     });
   },
 
   // ── Product Domain ─────────────────────────────────────────────────────────
-  async productCreate(dto: CreateProductDto): Promise<Product> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('product_create', { dto });
-    }
-    return await httpFetch<Product>('/api/v1/products', {
+  async productCreate(dto: CreateProductDto): Promise<Product> {    return await httpFetch<Product>('/api/v1/products', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async productUpdate(id: string, dto: UpdateProductDto): Promise<Product> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('product_update', { id, dto });
-    }
-    return await httpFetch<Product>(`/api/v1/products/${id}`, {
+  async productUpdate(id: string, dto: UpdateProductDto): Promise<Product> {    return await httpFetch<Product>(`/api/v1/products/${id}`, {
       method: 'PUT',
       body: JSON.stringify(dto),
     });
   },
 
-  async productGet(id: string): Promise<Product> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('product_get', { id });
-    }
-    return await httpFetch<Product>(`/api/v1/products/${id}`);
+  async productGet(id: string): Promise<Product> {    return await httpFetch<Product>(`/api/v1/products/${id}`);
   },
 
-  async productGetBySku(sku: string): Promise<Product> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('product_get_by_sku', { sku });
-    }
-    return await httpFetch<Product>(`/api/v1/products/sku/${encodeURIComponent(sku)}`);
+  async productGetBySku(sku: string): Promise<Product> {    return await httpFetch<Product>(`/api/v1/products/sku/${encodeURIComponent(sku)}`);
   },
 
-  async productGetByBarcode(barcode: string): Promise<Product> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('product_get_by_barcode', { barcode });
-    }
-    return await httpFetch<Product>(`/api/v1/products/barcode/${encodeURIComponent(barcode)}`);
+  async productGetByBarcode(barcode: string): Promise<Product> {    return await httpFetch<Product>(`/api/v1/products/barcode/${encodeURIComponent(barcode)}`);
   },
 
-  async productList(filter?: ProductFilter): Promise<Product[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product[]>('product_list', { filter });
-    }
-    const params = new URLSearchParams();
+  async productList(filter?: ProductFilter): Promise<Product[]> {    const params = new URLSearchParams();
     if (filter?.search) params.set('search', filter.search);
     if (filter?.category_id) params.set('category_id', filter.category_id);
     if (filter?.brand_id) params.set('brand_id', filter.brand_id);
@@ -862,67 +712,35 @@ export const tauriClient = {
     return await httpFetch<Product[]>(`/api/v1/products${qs ? `?${qs}` : ''}`);
   },
 
-  async productDeactivate(id: string): Promise<void> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('product_deactivate', { id });
-      return;
-    }
-    await httpFetch<void>(`/api/v1/products/${id}`, { method: 'DELETE' });
+  async productDeactivate(id: string): Promise<void> {    await httpFetch<void>(`/api/v1/products/${id}`, { method: 'DELETE' });
   },
 
   // ── Inventory Domain ───────────────────────────────────────────────────────
-  async inventoryIncrease(dto: IncreaseStockDto): Promise<number> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('inventory_increase', { dto });
-    }
-    return await httpFetch<number>('/api/v1/inventory/increase', {
+  async inventoryIncrease(dto: IncreaseStockDto): Promise<number> {    return await httpFetch<number>('/api/v1/inventory/increase', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async inventoryDecrease(dto: DecreaseStockDto): Promise<number> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('inventory_decrease', { dto });
-    }
-    return await httpFetch<number>('/api/v1/inventory/decrease', {
+  async inventoryDecrease(dto: DecreaseStockDto): Promise<number> {    return await httpFetch<number>('/api/v1/inventory/decrease', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async inventoryAdjust(dto: AdjustStockDto): Promise<number> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('inventory_adjust', { dto });
-    }
-    return await httpFetch<number>('/api/v1/inventory/adjust', {
+  async inventoryAdjust(dto: AdjustStockDto): Promise<number> {    return await httpFetch<number>('/api/v1/inventory/adjust', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async inventoryTransfer(dto: TransferStockDto): Promise<void> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('inventory_transfer', { dto });
-      return;
-    }
-    await httpFetch<void>('/api/v1/inventory/transfer', {
+  async inventoryTransfer(dto: TransferStockDto): Promise<void> {    await httpFetch<void>('/api/v1/inventory/transfer', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async inventoryGetStock(productId: string, branchId: string): Promise<number> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('inventory_get_stock', { productId, branchId });
-    }
-    return await httpFetch<number>(`/api/v1/inventory/stock?product_id=${productId}&branch_id=${branchId}`);
+  async inventoryGetStock(productId: string, branchId: string): Promise<number> {    return await httpFetch<number>(`/api/v1/inventory/stock?product_id=${productId}&branch_id=${branchId}`);
   },
 
   async inventoryGetStockMap(branchId: string): Promise<Record<string, number>> {
@@ -937,12 +755,7 @@ export const tauriClient = {
     productId?: string,
     branchId?: string,
     limit?: number
-  ): Promise<StockMovement[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<StockMovement[]>('inventory_get_movements', { productId, branchId, limit });
-    }
-    const params = new URLSearchParams();
+  ): Promise<StockMovement[]> {    const params = new URLSearchParams();
     if (productId) params.set('product_id', productId);
     if (branchId) params.set('branch_id', branchId);
     if (limit) params.set('limit', String(limit));
@@ -950,84 +763,39 @@ export const tauriClient = {
     return await httpFetch<StockMovement[]>(`/api/v1/inventory/movements${qs ? `?${qs}` : ''}`);
   },
 
-  async inventoryGetLowStock(branchId: string): Promise<LowStockItemDto[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<LowStockItemDto[]>('inventory_get_low_stock', { branchId });
-    }
-    return await httpFetch<LowStockItemDto[]>(`/api/v1/inventory/low-stock?branch_id=${branchId}`);
+  async inventoryGetLowStock(branchId: string): Promise<LowStockItemDto[]> {    return await httpFetch<LowStockItemDto[]>(`/api/v1/inventory/low-stock?branch_id=${branchId}`);
   },
 
   // ── Organization & Branch Operations ──────────────────────────────────────
-  async branchList(): Promise<Branch[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Branch[]>('branch_list');
-    }
-    return await httpFetch<Branch[]>('/api/v1/organization/branches');
+  async branchList(): Promise<Branch[]> {    return await httpFetch<Branch[]>('/api/v1/organization/branches');
   },
 
-  async branchGetMain(): Promise<Branch | null> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Branch | null>('branch_get_main');
-    }
-    return await httpFetch<Branch | null>('/api/v1/organization/branches/main');
+  async branchGetMain(): Promise<Branch | null> {    return await httpFetch<Branch | null>('/api/v1/organization/branches/main');
   },
 
-  async organizationGetDashboardStats(): Promise<OrganizationDashboardStats> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<OrganizationDashboardStats>('organization_get_dashboard_stats');
-    }
-    return await httpFetch<OrganizationDashboardStats>('/api/v1/organization/dashboard/stats');
+  async organizationGetDashboardStats(): Promise<OrganizationDashboardStats> {    return await httpFetch<OrganizationDashboardStats>('/api/v1/organization/dashboard/stats');
   },
 
   // ── Customer & Ledger Domain ──────────────────────────────────────────────
-  async customerCreate(dto: CreateCustomerDto): Promise<Customer> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Customer>('customer_create', { dto });
-    }
-    return await httpFetch<Customer>('/api/v1/customers', {
+  async customerCreate(dto: CreateCustomerDto): Promise<Customer> {    return await httpFetch<Customer>('/api/v1/customers', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async customerUpdate(id: string, dto: UpdateCustomerDto): Promise<Customer> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Customer>('customer_update', { id, dto });
-    }
-    return await httpFetch<Customer>(`/api/v1/customers/${id}`, {
+  async customerUpdate(id: string, dto: UpdateCustomerDto): Promise<Customer> {    return await httpFetch<Customer>(`/api/v1/customers/${id}`, {
       method: 'PUT',
       body: JSON.stringify(dto),
     });
   },
 
-  async customerGetById(id: string): Promise<Customer> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Customer>('customer_get_by_id', { id });
-    }
-    return await httpFetch<Customer>(`/api/v1/customers/${id}`);
+  async customerGetById(id: string): Promise<Customer> {    return await httpFetch<Customer>(`/api/v1/customers/${id}`);
   },
 
-  async customerGetDetail(id: string): Promise<CustomerDetailDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CustomerDetailDto>('customer_get_detail', { id });
-    }
-    return await httpFetch<CustomerDetailDto>(`/api/v1/customers/${id}/detail`);
+  async customerGetDetail(id: string): Promise<CustomerDetailDto> {    return await httpFetch<CustomerDetailDto>(`/api/v1/customers/${id}/detail`);
   },
 
-  async customerList(filter?: CustomerFilter): Promise<CustomerSummaryDto[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CustomerSummaryDto[]>('customer_list', { filter });
-    }
-    const params = new URLSearchParams();
+  async customerList(filter?: CustomerFilter): Promise<CustomerSummaryDto[]> {    const params = new URLSearchParams();
     if (filter?.search) params.set('search', filter.search);
     if (filter?.is_active !== undefined && filter.is_active !== null) params.set('is_active', String(filter.is_active));
     if (filter?.limit) params.set('limit', String(filter.limit));
@@ -1036,111 +804,55 @@ export const tauriClient = {
     return await httpFetch<CustomerSummaryDto[]>(`/api/v1/customers${qs ? `?${qs}` : ''}`);
   },
 
-  async customerSearch(query: string): Promise<CustomerSummaryDto[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CustomerSummaryDto[]>('customer_search', { query });
-    }
-    return await httpFetch<CustomerSummaryDto[]>(`/api/v1/customers/search?q=${encodeURIComponent(query)}`);
+  async customerSearch(query: string): Promise<CustomerSummaryDto[]> {    return await httpFetch<CustomerSummaryDto[]>(`/api/v1/customers/search?q=${encodeURIComponent(query)}`);
   },
 
   async customerGetLedger(
     customerId: string,
     limit?: number,
     offset?: number
-  ): Promise<CustomerLedgerEntry[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CustomerLedgerEntry[]>('customer_get_ledger', { customerId, limit, offset });
-    }
-    const params = new URLSearchParams();
+  ): Promise<CustomerLedgerEntry[]> {    const params = new URLSearchParams();
     if (limit) params.set('limit', String(limit));
     if (offset) params.set('offset', String(offset));
     const qs = params.toString();
     return await httpFetch<CustomerLedgerEntry[]>(`/api/v1/customers/${customerId}/ledger${qs ? `?${qs}` : ''}`);
   },
 
-  async customerGetStatement(customerId: string): Promise<CustomerStatementDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CustomerStatementDto>('customer_get_statement', { customerId });
-    }
-    return await httpFetch<CustomerStatementDto>(`/api/v1/customers/${customerId}/statement`);
+  async customerGetStatement(customerId: string): Promise<CustomerStatementDto> {    return await httpFetch<CustomerStatementDto>(`/api/v1/customers/${customerId}/statement`);
   },
 
-  async customerGetBalance(customerId: string): Promise<number> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('customer_get_balance', { customerId });
-    }
-    return await httpFetch<number>(`/api/v1/customers/${customerId}/balance`);
+  async customerGetBalance(customerId: string): Promise<number> {    return await httpFetch<number>(`/api/v1/customers/${customerId}/balance`);
   },
 
-  async customerRecordPayment(dto: RecordCustomerPaymentDto): Promise<CustomerPaymentResultDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CustomerPaymentResultDto>('customer_record_payment', { dto });
-    }
-    return await httpFetch<CustomerPaymentResultDto>('/api/v1/customers/payments', {
+  async customerRecordPayment(dto: RecordCustomerPaymentDto): Promise<CustomerPaymentResultDto> {    return await httpFetch<CustomerPaymentResultDto>('/api/v1/customers/payments', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async customerDeactivate(id: string): Promise<void> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('customer_deactivate', { id });
-      return;
-    }
-    await httpFetch<void>(`/api/v1/customers/${id}`, { method: 'DELETE' });
+  async customerDeactivate(id: string): Promise<void> {    await httpFetch<void>(`/api/v1/customers/${id}`, { method: 'DELETE' });
   },
 
   // ── Supplier & Procurement Domain ─────────────────────────────────────────
-  async supplierCreate(dto: CreateSupplierDto): Promise<Supplier> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Supplier>('supplier_create', { dto });
-    }
-    return await httpFetch<Supplier>('/api/v1/suppliers', {
+  async supplierCreate(dto: CreateSupplierDto): Promise<Supplier> {    return await httpFetch<Supplier>('/api/v1/suppliers', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async supplierUpdate(id: string, dto: UpdateSupplierDto): Promise<Supplier> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Supplier>('supplier_update', { id, dto });
-    }
-    return await httpFetch<Supplier>(`/api/v1/suppliers/${id}`, {
+  async supplierUpdate(id: string, dto: UpdateSupplierDto): Promise<Supplier> {    return await httpFetch<Supplier>(`/api/v1/suppliers/${id}`, {
       method: 'PUT',
       body: JSON.stringify(dto),
     });
   },
 
-  async supplierGetById(id: string): Promise<Supplier | null> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Supplier | null>('supplier_get_by_id', { id });
-    }
-    return await httpFetch<Supplier | null>(`/api/v1/suppliers/${id}`);
+  async supplierGetById(id: string): Promise<Supplier | null> {    return await httpFetch<Supplier | null>(`/api/v1/suppliers/${id}`);
   },
 
-  async supplierGetDetail(id: string): Promise<SupplierDetailDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SupplierDetailDto>('supplier_get_detail', { id });
-    }
-    return await httpFetch<SupplierDetailDto>(`/api/v1/suppliers/${id}/detail`);
+  async supplierGetDetail(id: string): Promise<SupplierDetailDto> {    return await httpFetch<SupplierDetailDto>(`/api/v1/suppliers/${id}/detail`);
   },
 
-  async supplierList(filter?: SupplierFilter): Promise<SupplierSummaryDto[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SupplierSummaryDto[]>('supplier_list', { filter });
-    }
-    const params = new URLSearchParams();
+  async supplierList(filter?: SupplierFilter): Promise<SupplierSummaryDto[]> {    const params = new URLSearchParams();
     if (filter?.search) params.set('search', filter.search);
     if (filter?.is_active !== undefined && filter.is_active !== null) params.set('is_active', String(filter.is_active));
     if (filter?.limit) params.set('limit', String(filter.limit));
@@ -1149,100 +861,49 @@ export const tauriClient = {
     return await httpFetch<SupplierSummaryDto[]>(`/api/v1/suppliers${qs ? `?${qs}` : ''}`);
   },
 
-  async supplierSearch(query: string): Promise<SupplierSummaryDto[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SupplierSummaryDto[]>('supplier_search', { query });
-    }
-    return await httpFetch<SupplierSummaryDto[]>(`/api/v1/suppliers/search?q=${encodeURIComponent(query)}`);
+  async supplierSearch(query: string): Promise<SupplierSummaryDto[]> {    return await httpFetch<SupplierSummaryDto[]>(`/api/v1/suppliers/search?q=${encodeURIComponent(query)}`);
   },
 
-  async supplierGetBalance(supplierId: string): Promise<number> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('supplier_get_balance', { supplierId });
-    }
-    return await httpFetch<number>(`/api/v1/suppliers/${supplierId}/balance`);
+  async supplierGetBalance(supplierId: string): Promise<number> {    return await httpFetch<number>(`/api/v1/suppliers/${supplierId}/balance`);
   },
 
   async supplierGetLedger(
     supplierId: string,
     limit?: number,
     offset?: number
-  ): Promise<SupplierLedgerEntry[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SupplierLedgerEntry[]>('supplier_get_ledger', { supplierId, limit, offset });
-    }
-    const params = new URLSearchParams();
+  ): Promise<SupplierLedgerEntry[]> {    const params = new URLSearchParams();
     if (limit) params.set('limit', String(limit));
     if (offset) params.set('offset', String(offset));
     const qs = params.toString();
     return await httpFetch<SupplierLedgerEntry[]>(`/api/v1/suppliers/${supplierId}/ledger${qs ? `?${qs}` : ''}`);
   },
 
-  async supplierGetStatement(supplierId: string): Promise<SupplierStatementDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SupplierStatementDto>('supplier_get_statement', { supplierId });
-    }
-    return await httpFetch<SupplierStatementDto>(`/api/v1/suppliers/${supplierId}/statement`);
+  async supplierGetStatement(supplierId: string): Promise<SupplierStatementDto> {    return await httpFetch<SupplierStatementDto>(`/api/v1/suppliers/${supplierId}/statement`);
   },
 
-  async supplierRecordPayment(dto: RecordSupplierPaymentDto): Promise<SupplierPaymentResultDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SupplierPaymentResultDto>('supplier_record_payment', { dto });
-    }
-    return await httpFetch<SupplierPaymentResultDto>('/api/v1/suppliers/payments', {
+  async supplierRecordPayment(dto: RecordSupplierPaymentDto): Promise<SupplierPaymentResultDto> {    return await httpFetch<SupplierPaymentResultDto>('/api/v1/suppliers/payments', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async supplierDeactivate(id: string): Promise<void> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('supplier_deactivate', { id });
-      return;
-    }
-    await httpFetch<void>(`/api/v1/suppliers/${id}`, { method: 'DELETE' });
+  async supplierDeactivate(id: string): Promise<void> {    await httpFetch<void>(`/api/v1/suppliers/${id}`, { method: 'DELETE' });
   },
 
   // ── Sales & Checkout Domain ────────────────────────────────────────────────
-  async saleComplete(dto: CompleteSaleDto): Promise<SaleResultDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SaleResultDto>('sale_complete', { dto });
-    }
-    return await httpFetch<SaleResultDto>('/api/v1/sales', {
+  async saleComplete(dto: CompleteSaleDto): Promise<SaleResultDto> {    return await httpFetch<SaleResultDto>('/api/v1/sales', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async saleGetById(id: string): Promise<Sale | null> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Sale | null>('sale_get_by_id', { id });
-    }
-    return await httpFetch<Sale | null>(`/api/v1/sales/${id}`);
+  async saleGetById(id: string): Promise<Sale | null> {    return await httpFetch<Sale | null>(`/api/v1/sales/${id}`);
   },
 
-  async saleGetByInvoice(invoiceNumber: string): Promise<Sale | null> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Sale | null>('sale_get_by_invoice', { invoiceNumber });
-    }
-    return await httpFetch<Sale | null>(`/api/v1/sales/invoice/${encodeURIComponent(invoiceNumber)}`);
+  async saleGetByInvoice(invoiceNumber: string): Promise<Sale | null> {    return await httpFetch<Sale | null>(`/api/v1/sales/invoice/${encodeURIComponent(invoiceNumber)}`);
   },
 
-  async saleList(filter?: SaleFilterDto): Promise<Sale[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Sale[]>('sale_list', { filter });
-    }
-    const params = new URLSearchParams();
+  async saleList(filter?: SaleFilterDto): Promise<Sale[]> {    const params = new URLSearchParams();
     if (filter?.customer_id) params.set('customer_id', filter.customer_id);
     if (filter?.branch_id) params.set('branch_id', filter.branch_id);
     if (filter?.payment_status) params.set('payment_status', filter.payment_status);
@@ -1256,56 +917,26 @@ export const tauriClient = {
     return await httpFetch<Sale[]>(`/api/v1/sales${qs ? `?${qs}` : ''}`);
   },
 
-  async saleGetLines(saleId: string): Promise<SaleLine[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SaleLine[]>('sale_get_lines', { saleId });
-    }
-    return await httpFetch<SaleLine[]>(`/api/v1/sales/${saleId}/lines`);
+  async saleGetLines(saleId: string): Promise<SaleLine[]> {    return await httpFetch<SaleLine[]>(`/api/v1/sales/${saleId}/lines`);
   },
 
-  async saleGetPayments(saleId: string): Promise<SalePayment[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SalePayment[]>('sale_get_payments', { saleId });
-    }
-    return await httpFetch<SalePayment[]>(`/api/v1/sales/${saleId}/payments`);
+  async saleGetPayments(saleId: string): Promise<SalePayment[]> {    return await httpFetch<SalePayment[]>(`/api/v1/sales/${saleId}/payments`);
   },
 
   // ── Purchasing Domain ──────────────────────────────────────────────────────
-  async purchaseComplete(dto: CompletePurchaseDto): Promise<PurchaseResultDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<PurchaseResultDto>('purchase_complete', { dto });
-    }
-    return await httpFetch<PurchaseResultDto>('/api/v1/purchases', {
+  async purchaseComplete(dto: CompletePurchaseDto): Promise<PurchaseResultDto> {    return await httpFetch<PurchaseResultDto>('/api/v1/purchases', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async purchaseGetById(id: string): Promise<Purchase | null> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Purchase | null>('purchase_get_by_id', { id });
-    }
-    return await httpFetch<Purchase | null>(`/api/v1/purchases/${id}`);
+  async purchaseGetById(id: string): Promise<Purchase | null> {    return await httpFetch<Purchase | null>(`/api/v1/purchases/${id}`);
   },
 
-  async purchaseGetByNumber(purchaseNumber: string): Promise<Purchase | null> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Purchase | null>('purchase_get_by_number', { purchaseNumber });
-    }
-    return await httpFetch<Purchase | null>(`/api/v1/purchases/number/${encodeURIComponent(purchaseNumber)}`);
+  async purchaseGetByNumber(purchaseNumber: string): Promise<Purchase | null> {    return await httpFetch<Purchase | null>(`/api/v1/purchases/number/${encodeURIComponent(purchaseNumber)}`);
   },
 
-  async purchaseList(filter?: PurchaseFilterDto): Promise<Purchase[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Purchase[]>('purchase_list', { filter });
-    }
-    const params = new URLSearchParams();
+  async purchaseList(filter?: PurchaseFilterDto): Promise<Purchase[]> {    const params = new URLSearchParams();
     if (filter?.supplier_id) params.set('supplier_id', filter.supplier_id);
     if (filter?.branch_id) params.set('branch_id', filter.branch_id);
     if (filter?.start_date) params.set('start_date', filter.start_date);
@@ -1316,71 +947,36 @@ export const tauriClient = {
     return await httpFetch<Purchase[]>(`/api/v1/purchases${qs ? `?${qs}` : ''}`);
   },
 
-  async purchaseGetLines(purchaseId: string): Promise<PurchaseLine[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<PurchaseLine[]>('purchase_get_lines', { purchaseId });
-    }
-    return await httpFetch<PurchaseLine[]>(`/api/v1/purchases/${purchaseId}/lines`);
+  async purchaseGetLines(purchaseId: string): Promise<PurchaseLine[]> {    return await httpFetch<PurchaseLine[]>(`/api/v1/purchases/${purchaseId}/lines`);
   },
 
   // ── Expense Domain ──────────────────────────────────────────────────────────
-  async expenseCategoryCreate(dto: CreateExpenseCategoryDto): Promise<ExpenseCategory> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<ExpenseCategory>('expense_category_create', { dto });
-    }
-    return await httpFetch<ExpenseCategory>('/api/v1/expenses/categories', {
+  async expenseCategoryCreate(dto: CreateExpenseCategoryDto): Promise<ExpenseCategory> {    return await httpFetch<ExpenseCategory>('/api/v1/expenses/categories', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async expenseCategoryUpdate(id: string, dto: UpdateExpenseCategoryDto): Promise<ExpenseCategory> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<ExpenseCategory>('expense_category_update', { id, dto });
-    }
-    return await httpFetch<ExpenseCategory>(`/api/v1/expenses/categories/${id}`, {
+  async expenseCategoryUpdate(id: string, dto: UpdateExpenseCategoryDto): Promise<ExpenseCategory> {    return await httpFetch<ExpenseCategory>(`/api/v1/expenses/categories/${id}`, {
       method: 'PUT',
       body: JSON.stringify(dto),
     });
   },
 
-  async expenseCategoryList(activeOnly?: boolean): Promise<ExpenseCategory[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<ExpenseCategory[]>('expense_category_list', { activeOnly });
-    }
-    const qs = activeOnly !== undefined ? `?active_only=${activeOnly}` : '';
+  async expenseCategoryList(activeOnly?: boolean): Promise<ExpenseCategory[]> {    const qs = activeOnly !== undefined ? `?active_only=${activeOnly}` : '';
     return await httpFetch<ExpenseCategory[]>(`/api/v1/expenses/categories${qs}`);
   },
 
-  async expenseCreate(dto: CreateExpenseDto): Promise<Expense> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Expense>('expense_create', { dto });
-    }
-    return await httpFetch<Expense>('/api/v1/expenses', {
+  async expenseCreate(dto: CreateExpenseDto): Promise<Expense> {    return await httpFetch<Expense>('/api/v1/expenses', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async expenseGetById(id: string): Promise<Expense | null> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Expense | null>('expense_get_by_id', { id });
-    }
-    return await httpFetch<Expense | null>(`/api/v1/expenses/${id}`);
+  async expenseGetById(id: string): Promise<Expense | null> {    return await httpFetch<Expense | null>(`/api/v1/expenses/${id}`);
   },
 
-  async expenseList(filter?: ExpenseFilterDto): Promise<Expense[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Expense[]>('expense_list', { filter });
-    }
-    const params = new URLSearchParams();
+  async expenseList(filter?: ExpenseFilterDto): Promise<Expense[]> {    const params = new URLSearchParams();
     if (filter?.branch_id) params.set('branch_id', filter.branch_id);
     if (filter?.category_id) params.set('category_id', filter.category_id);
     if (filter?.start_date) params.set('start_date', filter.start_date);
@@ -1391,60 +987,30 @@ export const tauriClient = {
     return await httpFetch<Expense[]>(`/api/v1/expenses${qs ? `?${qs}` : ''}`);
   },
 
-  async expenseCancel(id: string, _reason?: string): Promise<Expense> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Expense>('expense_cancel', { id });
-    }
-    return await httpFetch<Expense>(`/api/v1/expenses/${id}`, { method: 'DELETE' });
+  async expenseCancel(id: string, _reason?: string): Promise<Expense> {    return await httpFetch<Expense>(`/api/v1/expenses/${id}`, { method: 'DELETE' });
   },
 
   // ── Cash Management & Daily Closing Domain ──────────────────────────────────
-  async cashSessionOpen(dto: OpenCashSessionDto): Promise<CashSession> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CashSession>('cash_session_open', { dto });
-    }
-    return await httpFetch<CashSession>('/api/v1/cash/sessions/open', {
+  async cashSessionOpen(dto: OpenCashSessionDto): Promise<CashSession> {    return await httpFetch<CashSession>('/api/v1/cash/sessions/open', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async cashSessionGetCurrent(branchId?: string): Promise<CashSession | null> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CashSession | null>('cash_session_get_current', { branchId });
-    }
-    const qs = branchId ? `?branch_id=${branchId}` : '';
+  async cashSessionGetCurrent(branchId?: string): Promise<CashSession | null> {    const qs = branchId ? `?branch_id=${branchId}` : '';
     return await httpFetch<CashSession | null>(`/api/v1/cash/sessions/current${qs}`);
   },
 
-  async cashSessionGetById(id: string): Promise<CashSession> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CashSession>('cash_session_get_by_id', { id });
-    }
-    return await httpFetch<CashSession>(`/api/v1/cash/sessions/${id}`);
+  async cashSessionGetById(id: string): Promise<CashSession> {    return await httpFetch<CashSession>(`/api/v1/cash/sessions/${id}`);
   },
 
-  async cashSessionClose(dto: CloseCashSessionDto): Promise<CashSession> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CashSession>('cash_session_close', { dto });
-    }
-    return await httpFetch<CashSession>(`/api/v1/cash/sessions/${dto.session_id}/close`, {
+  async cashSessionClose(dto: CloseCashSessionDto): Promise<CashSession> {    return await httpFetch<CashSession>(`/api/v1/cash/sessions/${dto.session_id}/close`, {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async cashSessionList(branchId?: string, limit?: number, offset?: number): Promise<CashSession[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CashSession[]>('cash_session_list', { branchId, limit, offset });
-    }
-    const params = new URLSearchParams();
+  async cashSessionList(branchId?: string, limit?: number, offset?: number): Promise<CashSession[]> {    const params = new URLSearchParams();
     if (branchId) params.set('branch_id', branchId);
     if (limit) params.set('limit', String(limit));
     if (offset) params.set('offset', String(offset));
@@ -1452,23 +1018,13 @@ export const tauriClient = {
     return await httpFetch<CashSession[]>(`/api/v1/cash/sessions${qs ? `?${qs}` : ''}`);
   },
 
-  async cashAdjustmentCreate(dto: CreateCashAdjustmentDto): Promise<CashMovement> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CashMovement>('cash_adjustment_create', { dto });
-    }
-    return await httpFetch<CashMovement>('/api/v1/cash/adjustments', {
+  async cashAdjustmentCreate(dto: CreateCashAdjustmentDto): Promise<CashMovement> {    return await httpFetch<CashMovement>('/api/v1/cash/adjustments', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async cashMovementList(filter?: CashMovementFilterDto): Promise<CashMovement[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CashMovement[]>('cash_movement_list', { filter });
-    }
-    const params = new URLSearchParams();
+  async cashMovementList(filter?: CashMovementFilterDto): Promise<CashMovement[]> {    const params = new URLSearchParams();
     if (filter?.branch_id) params.set('branch_id', filter.branch_id);
     if (filter?.session_id) params.set('session_id', filter.session_id);
     if (filter?.start_date) params.set('start_date', filter.start_date);
@@ -1479,12 +1035,7 @@ export const tauriClient = {
     return await httpFetch<CashMovement[]>(`/api/v1/cash/movements${qs ? `?${qs}` : ''}`);
   },
 
-  async cashDailySummary(branchId?: string, businessDate?: string): Promise<DailyCashSummaryDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<DailyCashSummaryDto>('cash_get_daily_summary', { branchId, businessDate });
-    }
-    const params = new URLSearchParams();
+  async cashDailySummary(branchId?: string, businessDate?: string): Promise<DailyCashSummaryDto> {    const params = new URLSearchParams();
     if (branchId) params.set('branch_id', branchId);
     if (businessDate) params.set('business_date', businessDate);
     const qs = params.toString();
@@ -1492,39 +1043,19 @@ export const tauriClient = {
   },
 
   // ── Returns & Stock Reversal Domain ────────────────────────────────────────
-  async salesReturnGetReturnable(saleId: string): Promise<SaleReturnableInfoDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SaleReturnableInfoDto>('sales_return_get_returnable', { saleId });
-    }
-    return await httpFetch<SaleReturnableInfoDto>(`/api/v1/sales-returns/returnable/${saleId}`);
+  async salesReturnGetReturnable(saleId: string): Promise<SaleReturnableInfoDto> {    return await httpFetch<SaleReturnableInfoDto>(`/api/v1/sales-returns/returnable/${saleId}`);
   },
 
-  async salesReturnCreate(dto: CreateSalesReturnDto): Promise<SalesReturnResultDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SalesReturnResultDto>('sales_return_create', { dto });
-    }
-    return await httpFetch<SalesReturnResultDto>('/api/v1/sales-returns', {
+  async salesReturnCreate(dto: CreateSalesReturnDto): Promise<SalesReturnResultDto> {    return await httpFetch<SalesReturnResultDto>('/api/v1/sales-returns', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async salesReturnGet(id: string): Promise<SalesReturnDetailDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SalesReturnDetailDto>('sales_return_get', { id });
-    }
-    return await httpFetch<SalesReturnDetailDto>(`/api/v1/sales-returns/${id}`);
+  async salesReturnGet(id: string): Promise<SalesReturnDetailDto> {    return await httpFetch<SalesReturnDetailDto>(`/api/v1/sales-returns/${id}`);
   },
 
-  async salesReturnList(filter?: SalesReturnFilterDto): Promise<SalesReturn[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SalesReturn[]>('sales_return_list', { filter });
-    }
-    const params = new URLSearchParams();
+  async salesReturnList(filter?: SalesReturnFilterDto): Promise<SalesReturn[]> {    const params = new URLSearchParams();
     if (filter?.branch_id) params.set('branch_id', filter.branch_id);
     if (filter?.customer_id) params.set('customer_id', filter.customer_id);
     if (filter?.sale_id) params.set('sale_id', filter.sale_id);
@@ -1536,47 +1067,22 @@ export const tauriClient = {
     return await httpFetch<SalesReturn[]>(`/api/v1/sales-returns${qs ? `?${qs}` : ''}`);
   },
 
-  async salesReturnGetBySale(saleId: string): Promise<SalesReturn[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SalesReturn[]>('sales_return_get_by_sale', { saleId });
-    }
-    return await httpFetch<SalesReturn[]>(`/api/v1/sales-returns/by-sale/${saleId}`);
+  async salesReturnGetBySale(saleId: string): Promise<SalesReturn[]> {    return await httpFetch<SalesReturn[]>(`/api/v1/sales-returns/by-sale/${saleId}`);
   },
 
-  async purchaseReturnGetReturnable(purchaseId: string): Promise<PurchaseReturnableInfoDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<PurchaseReturnableInfoDto>('purchase_return_get_returnable', { purchaseId });
-    }
-    return await httpFetch<PurchaseReturnableInfoDto>(`/api/v1/purchase-returns/returnable/${purchaseId}`);
+  async purchaseReturnGetReturnable(purchaseId: string): Promise<PurchaseReturnableInfoDto> {    return await httpFetch<PurchaseReturnableInfoDto>(`/api/v1/purchase-returns/returnable/${purchaseId}`);
   },
 
-  async purchaseReturnCreate(dto: CreatePurchaseReturnDto): Promise<PurchaseReturnResultDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<PurchaseReturnResultDto>('purchase_return_create', { dto });
-    }
-    return await httpFetch<PurchaseReturnResultDto>('/api/v1/purchase-returns', {
+  async purchaseReturnCreate(dto: CreatePurchaseReturnDto): Promise<PurchaseReturnResultDto> {    return await httpFetch<PurchaseReturnResultDto>('/api/v1/purchase-returns', {
       method: 'POST',
       body: JSON.stringify(dto),
     });
   },
 
-  async purchaseReturnGet(id: string): Promise<PurchaseReturnDetailDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<PurchaseReturnDetailDto>('purchase_return_get', { id });
-    }
-    return await httpFetch<PurchaseReturnDetailDto>(`/api/v1/purchase-returns/${id}`);
+  async purchaseReturnGet(id: string): Promise<PurchaseReturnDetailDto> {    return await httpFetch<PurchaseReturnDetailDto>(`/api/v1/purchase-returns/${id}`);
   },
 
-  async purchaseReturnList(filter?: PurchaseReturnFilterDto): Promise<PurchaseReturn[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<PurchaseReturn[]>('purchase_return_list', { filter });
-    }
-    const params = new URLSearchParams();
+  async purchaseReturnList(filter?: PurchaseReturnFilterDto): Promise<PurchaseReturn[]> {    const params = new URLSearchParams();
     if (filter?.branch_id) params.set('branch_id', filter.branch_id);
     if (filter?.supplier_id) params.set('supplier_id', filter.supplier_id);
     if (filter?.purchase_id) params.set('purchase_id', filter.purchase_id);
@@ -1589,12 +1095,7 @@ export const tauriClient = {
     return await httpFetch<PurchaseReturn[]>(`/api/v1/purchase-returns${qs ? `?${qs}` : ''}`);
   },
 
-  async purchaseReturnGetByPurchase(purchaseId: string): Promise<PurchaseReturn[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<PurchaseReturn[]>('purchase_return_get_by_purchase', { purchaseId });
-    }
-    return await httpFetch<PurchaseReturn[]>(`/api/v1/purchase-returns/by-purchase/${purchaseId}`);
+  async purchaseReturnGetByPurchase(purchaseId: string): Promise<PurchaseReturn[]> {    return await httpFetch<PurchaseReturn[]>(`/api/v1/purchase-returns/by-purchase/${purchaseId}`);
   },
 
   // ── Profitability & COGS ────────────────────────────────────────────────────
@@ -1602,16 +1103,7 @@ export const tauriClient = {
     startDate?: string | null,
     endDate?: string | null,
     branchId?: string | null
-  ): Promise<PeriodProfitabilityDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<PeriodProfitabilityDto>('profit_get_period', {
-        startDate: startDate || null,
-        endDate: endDate || null,
-        branchId: branchId || null,
-      });
-    }
-    const params = new URLSearchParams();
+  ): Promise<PeriodProfitabilityDto> {    const params = new URLSearchParams();
     if (startDate) params.set('start_date', startDate);
     if (endDate) params.set('end_date', endDate);
     if (branchId) params.set('branch_id', branchId);
@@ -1623,16 +1115,7 @@ export const tauriClient = {
     startDate?: string | null,
     endDate?: string | null,
     branchId?: string | null
-  ): Promise<DailyProfitabilityDto[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<DailyProfitabilityDto[]>('profit_get_daily', {
-        startDate: startDate || null,
-        endDate: endDate || null,
-        branchId: branchId || null,
-      });
-    }
-    const params = new URLSearchParams();
+  ): Promise<DailyProfitabilityDto[]> {    const params = new URLSearchParams();
     if (startDate) params.set('start_date', startDate);
     if (endDate) params.set('end_date', endDate);
     if (branchId) params.set('branch_id', branchId);
@@ -1645,17 +1128,7 @@ export const tauriClient = {
     startDate?: string | null,
     endDate?: string | null,
     branchId?: string | null
-  ): Promise<ProductProfitabilityDto[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<ProductProfitabilityDto[]>('profit_get_product', {
-        productId: productId || null,
-        startDate: startDate || null,
-        endDate: endDate || null,
-        branchId: branchId || null,
-      });
-    }
-    const params = new URLSearchParams();
+  ): Promise<ProductProfitabilityDto[]> {    const params = new URLSearchParams();
     if (productId) params.set('product_id', productId);
     if (startDate) params.set('start_date', startDate);
     if (endDate) params.set('end_date', endDate);
@@ -1664,30 +1137,13 @@ export const tauriClient = {
     return await httpFetch<ProductProfitabilityDto[]>(`/api/v1/profit/product${qs ? `?${qs}` : ''}`);
   },
 
-  async profitGetSale(saleId: string): Promise<SaleProfitabilityDto | null> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SaleProfitabilityDto | null>('profit_get_sale', { saleId });
-    }
-    return await httpFetch<SaleProfitabilityDto | null>(`/api/v1/profit/sale/${saleId}`);
+  async profitGetSale(saleId: string): Promise<SaleProfitabilityDto | null> {    return await httpFetch<SaleProfitabilityDto | null>(`/api/v1/profit/sale/${saleId}`);
   },
 
-  async organizationGetDashboardBalances(): Promise<DashboardBalancesDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<DashboardBalancesDto>('organization_get_dashboard_balances');
-    }
-    return await httpFetch<DashboardBalancesDto>('/api/v1/organization/dashboard/balances');
+  async organizationGetDashboardBalances(): Promise<DashboardBalancesDto> {    return await httpFetch<DashboardBalancesDto>('/api/v1/organization/dashboard/balances');
   },
 
-  async profitGetDashboardSummary(branchId?: string | null): Promise<DashboardProfitSummaryDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<DashboardProfitSummaryDto>('profit_get_dashboard_summary', {
-        branchId: branchId || null,
-      });
-    }
-    const qs = branchId ? `?branch_id=${branchId}` : '';
+  async profitGetDashboardSummary(branchId?: string | null): Promise<DashboardProfitSummaryDto> {    const qs = branchId ? `?branch_id=${branchId}` : '';
     return await httpFetch<DashboardProfitSummaryDto>(`/api/v1/profit/dashboard-summary${qs}`);
   },
 

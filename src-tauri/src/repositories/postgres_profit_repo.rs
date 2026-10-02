@@ -46,10 +46,12 @@ impl PostgresProfitRepository {
         }
 
         // Gross Revenue
-        let rev_row: (i64,) = sqlx::query_as(&format!("SELECT COALESCE(SUM(total_amount), 0)::BIGINT FROM sales {sale_where}"))
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or((0,));
+        let rev_row: (i64,) = sqlx::query_as(&format!(
+            "SELECT COALESCE(SUM(total_amount), 0)::BIGINT FROM sales {sale_where}"
+        ))
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or((0,));
         let gross_revenue = rev_row.0;
 
         // COGS
@@ -66,20 +68,24 @@ impl PostgresProfitRepository {
         let cogs = cogs_row.0;
 
         // Sales Returns amount
-        let sret_row: (i64,) = sqlx::query_as(&format!("SELECT COALESCE(SUM(total_amount), 0)::BIGINT FROM sales_returns {sret_where}"))
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or((0,));
+        let sret_row: (i64,) = sqlx::query_as(&format!(
+            "SELECT COALESCE(SUM(total_amount), 0)::BIGINT FROM sales_returns {sret_where}"
+        ))
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or((0,));
         let returns_amount = sret_row.0;
 
         let net_revenue = gross_revenue.saturating_sub(returns_amount);
         let gross_profit = net_revenue.saturating_sub(cogs);
 
         // Operating Expenses
-        let exp_row: (i64,) = sqlx::query_as(&format!("SELECT COALESCE(SUM(amount), 0)::BIGINT FROM expenses {exp_where}"))
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or((0,));
+        let exp_row: (i64,) = sqlx::query_as(&format!(
+            "SELECT COALESCE(SUM(amount), 0)::BIGINT FROM expenses {exp_where}"
+        ))
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or((0,));
         let total_expenses = exp_row.0;
 
         let net_profit = gross_profit.saturating_sub(total_expenses);
@@ -91,16 +97,19 @@ impl PostgresProfitRepository {
         };
 
         // Purchases Amount
-        let pur_row: (i64,) = sqlx::query_as(&format!("SELECT COALESCE(SUM(total_amount), 0)::BIGINT FROM purchases {pur_where}"))
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or((0,));
+        let pur_row: (i64,) = sqlx::query_as(&format!(
+            "SELECT COALESCE(SUM(total_amount), 0)::BIGINT FROM purchases {pur_where}"
+        ))
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or((0,));
         let _total_purchases = pur_row.0;
 
-        let sales_count: (i64,) = sqlx::query_as(&format!("SELECT COUNT(*) FROM sales {sale_where}"))
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or((0,));
+        let sales_count: (i64,) =
+            sqlx::query_as(&format!("SELECT COUNT(*) FROM sales {sale_where}"))
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or((0,));
 
         Ok(DashboardProfitSummaryDto {
             today: crate::domain::profit::ProfitMetricsDto {

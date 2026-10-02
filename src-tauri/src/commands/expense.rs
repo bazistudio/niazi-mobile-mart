@@ -33,7 +33,10 @@ pub async fn expense_category_list(
     active_only: Option<bool>,
 ) -> AppResult<Vec<ExpenseCategory>> {
     AuthService::require_permission(&state, Some("expenses"), None).await?;
-    state.expense_service.list_categories(active_only.unwrap_or(false)).await
+    state
+        .expense_service
+        .list_categories(active_only.unwrap_or(false))
+        .await
 }
 
 #[tauri::command]
@@ -42,16 +45,17 @@ pub async fn expense_create(
     mut dto: CreateExpenseDto,
 ) -> AppResult<Expense> {
     AuthService::require_permission(&state, Some("expenses"), None).await?;
-    let authorized_branch = AuthService::require_branch_access(&state, dto.branch_id.as_deref()).await?;
+    let authorized_branch =
+        AuthService::require_branch_access(&state, dto.branch_id.as_deref()).await?;
     dto.branch_id = Some(authorized_branch);
     let session = state.get_session().await;
-    state.expense_service.create_expense(session.user_id.as_deref(), dto).await
+    state
+        .expense_service
+        .create_expense(session.user_id.as_deref(), dto)
+        .await
 }
 #[tauri::command]
-pub async fn expense_get_by_id(
-    state: State<'_, AppState>,
-    id: String,
-) -> AppResult<Expense> {
+pub async fn expense_get_by_id(state: State<'_, AppState>, id: String) -> AppResult<Expense> {
     AuthService::require_permission(&state, Some("expenses"), None).await?;
     let expense = state.expense_service.get_expense_by_id(&id).await?;
     AuthService::require_branch_access(&state, Some(&expense.branch_id)).await?;
@@ -72,7 +76,10 @@ pub async fn expense_list(
         let session = state.get_session().await;
         let is_org_admin = match session.role {
             Some(crate::domain::user::UserRole::Admin) => true,
-            _ => session.access_profile.as_ref().map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+            _ => session
+                .access_profile
+                .as_ref()
+                .map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
         };
         if !is_org_admin {
             f.branch_id = Some(authorized_branch);
@@ -82,13 +89,13 @@ pub async fn expense_list(
 }
 
 #[tauri::command]
-pub async fn expense_cancel(
-    state: State<'_, AppState>,
-    id: String,
-) -> AppResult<Expense> {
+pub async fn expense_cancel(state: State<'_, AppState>, id: String) -> AppResult<Expense> {
     AuthService::require_permission(&state, Some("expenses"), None).await?;
     let expense = state.expense_service.get_expense_by_id(&id).await?;
     AuthService::require_branch_access(&state, Some(&expense.branch_id)).await?;
     let session = state.get_session().await;
-    state.expense_service.cancel_expense(session.user_id.as_deref(), &id).await
+    state
+        .expense_service
+        .cancel_expense(session.user_id.as_deref(), &id)
+        .await
 }

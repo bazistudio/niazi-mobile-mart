@@ -27,7 +27,9 @@ impl SQLitePurchaseRepository {
             "UPDATE counters SET value = value + 1 WHERE name = 'purchase_number'",
             [],
         )
-        .map_err(|e| DbError::QueryError(format!("Failed to increment purchase_number counter: {e}")))?;
+        .map_err(|e| {
+            DbError::QueryError(format!("Failed to increment purchase_number counter: {e}"))
+        })?;
 
         let val: i64 = conn
             .query_row(
@@ -35,7 +37,9 @@ impl SQLitePurchaseRepository {
                 [],
                 |row| row.get(0),
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to read purchase_number counter: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to read purchase_number counter: {e}"))
+            })?;
 
         Ok(format!("PUR-{:06}", val))
     }
@@ -80,7 +84,9 @@ impl SQLitePurchaseRepository {
                     quantity, unit_cost, discount, line_total, created_at
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to prepare purchase_lines insert: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to prepare purchase_lines insert: {e}"))
+            })?;
 
         for line in lines {
             stmt.execute(params![
@@ -125,7 +131,8 @@ impl SQLitePurchaseRepository {
                     credit_amount: row.get(8)?,
                     payment_status: PurchasePaymentStatus::from_str(&pay_str)
                         .unwrap_or(PurchasePaymentStatus::Unpaid),
-                    status: PurchaseStatus::from_str(&status_str).unwrap_or(PurchaseStatus::Completed),
+                    status: PurchaseStatus::from_str(&status_str)
+                        .unwrap_or(PurchaseStatus::Completed),
                     notes: row.get(11)?,
                     performed_by: row.get(12)?,
                     created_at: row.get(13)?,
@@ -137,19 +144,26 @@ impl SQLitePurchaseRepository {
         match res {
             Ok(p) => Ok(Some(p)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(DbError::QueryError(format!("Failed to query purchase by id: {e}"))),
+            Err(e) => Err(DbError::QueryError(format!(
+                "Failed to query purchase by id: {e}"
+            ))),
         }
     }
 
     /// Reads lines for a purchase inside transaction
-    pub fn get_purchase_lines_in_tx(conn: &Connection, purchase_id: &str) -> DbResult<Vec<PurchaseLine>> {
+    pub fn get_purchase_lines_in_tx(
+        conn: &Connection,
+        purchase_id: &str,
+    ) -> DbResult<Vec<PurchaseLine>> {
         let mut stmt = conn
             .prepare(
                 "SELECT id, purchase_id, product_id, product_name_snapshot, sku_snapshot,
                         quantity, unit_cost, discount, line_total, created_at
                  FROM purchase_lines WHERE purchase_id = ?1 ORDER BY created_at ASC, id ASC",
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to prepare purchase lines query: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to prepare purchase lines query: {e}"))
+            })?;
 
         let rows = stmt
             .query_map(params![purchase_id], |row| {
@@ -170,7 +184,9 @@ impl SQLitePurchaseRepository {
 
         let mut lines = Vec::new();
         for r in rows {
-            lines.push(r.map_err(|e| DbError::QueryError(format!("Error reading purchase line: {e}")))?);
+            lines.push(
+                r.map_err(|e| DbError::QueryError(format!("Error reading purchase line: {e}")))?,
+            );
         }
 
         Ok(lines)
@@ -192,7 +208,9 @@ impl SQLitePurchaseRepository {
                    AND payment_status IN ('UNPAID', 'PARTIALLY_PAID')
                  ORDER BY created_at ASC, purchase_number ASC",
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to prepare FIFO purchases query: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to prepare FIFO purchases query: {e}"))
+            })?;
 
         let rows = stmt
             .query_map(params![supplier_id], |row| {
@@ -211,7 +229,8 @@ impl SQLitePurchaseRepository {
                     credit_amount: row.get(8)?,
                     payment_status: PurchasePaymentStatus::from_str(&pay_str)
                         .unwrap_or(PurchasePaymentStatus::Unpaid),
-                    status: PurchaseStatus::from_str(&status_str).unwrap_or(PurchaseStatus::Completed),
+                    status: PurchaseStatus::from_str(&status_str)
+                        .unwrap_or(PurchaseStatus::Completed),
                     notes: row.get(11)?,
                     performed_by: row.get(12)?,
                     created_at: row.get(13)?,
@@ -276,7 +295,8 @@ impl SQLitePurchaseRepository {
                     credit_amount: row.get(8)?,
                     payment_status: PurchasePaymentStatus::from_str(&pay_str)
                         .unwrap_or(PurchasePaymentStatus::Unpaid),
-                    status: PurchaseStatus::from_str(&status_str).unwrap_or(PurchaseStatus::Completed),
+                    status: PurchaseStatus::from_str(&status_str)
+                        .unwrap_or(PurchaseStatus::Completed),
                     notes: row.get(11)?,
                     performed_by: row.get(12)?,
                     created_at: row.get(13)?,
@@ -288,7 +308,9 @@ impl SQLitePurchaseRepository {
         match res {
             Ok(p) => Ok(Some(p)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(AppError::Database(format!("Failed to query purchase by id: {e}"))),
+            Err(e) => Err(AppError::Database(format!(
+                "Failed to query purchase by id: {e}"
+            ))),
         }
     }
 
@@ -318,7 +340,8 @@ impl SQLitePurchaseRepository {
                     credit_amount: row.get(8)?,
                     payment_status: PurchasePaymentStatus::from_str(&pay_str)
                         .unwrap_or(PurchasePaymentStatus::Unpaid),
-                    status: PurchaseStatus::from_str(&status_str).unwrap_or(PurchaseStatus::Completed),
+                    status: PurchaseStatus::from_str(&status_str)
+                        .unwrap_or(PurchaseStatus::Completed),
                     notes: row.get(11)?,
                     performed_by: row.get(12)?,
                     created_at: row.get(13)?,
@@ -330,7 +353,9 @@ impl SQLitePurchaseRepository {
         match res {
             Ok(p) => Ok(Some(p)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(AppError::Database(format!("Failed to query purchase by number: {e}"))),
+            Err(e) => Err(AppError::Database(format!(
+                "Failed to query purchase by number: {e}"
+            ))),
         }
     }
 
@@ -432,7 +457,8 @@ impl SQLitePurchaseRepository {
             .prepare(&sql)
             .map_err(|e| AppError::Database(e.to_string()))?;
 
-        let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+        let params_slice: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|b| b.as_ref()).collect();
 
         let rows = stmt
             .query_map(params_slice.as_slice(), |row| {
@@ -451,7 +477,8 @@ impl SQLitePurchaseRepository {
                     credit_amount: row.get(8)?,
                     payment_status: PurchasePaymentStatus::from_str(&pay_str)
                         .unwrap_or(PurchasePaymentStatus::Unpaid),
-                    status: PurchaseStatus::from_str(&status_str).unwrap_or(PurchaseStatus::Completed),
+                    status: PurchaseStatus::from_str(&status_str)
+                        .unwrap_or(PurchaseStatus::Completed),
                     notes: row.get(11)?,
                     performed_by: row.get(12)?,
                     created_at: row.get(13)?,

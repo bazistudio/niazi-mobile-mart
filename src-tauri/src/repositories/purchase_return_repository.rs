@@ -28,7 +28,11 @@ impl SQLitePurchaseReturnRepository {
             "UPDATE counters SET value = value + 1 WHERE name = 'purchase_return_number'",
             [],
         )
-        .map_err(|e| DbError::QueryError(format!("Failed to increment purchase_return_number counter: {e}")))?;
+        .map_err(|e| {
+            DbError::QueryError(format!(
+                "Failed to increment purchase_return_number counter: {e}"
+            ))
+        })?;
 
         let val: i64 = conn
             .query_row(
@@ -36,7 +40,11 @@ impl SQLitePurchaseReturnRepository {
                 [],
                 |row| row.get(0),
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to read purchase_return_number counter: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!(
+                    "Failed to read purchase_return_number counter: {e}"
+                ))
+            })?;
 
         Ok(format!("PRET-{:06}", val))
     }
@@ -82,7 +90,11 @@ impl SQLitePurchaseReturnRepository {
                     sku_snapshot, unit_cost, quantity, return_amount, created_at
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to prepare purchase return lines insert: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!(
+                    "Failed to prepare purchase return lines insert: {e}"
+                ))
+            })?;
 
         for line in lines {
             stmt.execute(params![
@@ -97,7 +109,11 @@ impl SQLitePurchaseReturnRepository {
                 line.return_amount,
                 line.created_at,
             ])
-            .map_err(|e| DbError::QueryError(format!("Failed to execute purchase return line insert: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!(
+                    "Failed to execute purchase return line insert: {e}"
+                ))
+            })?;
         }
 
         Ok(())
@@ -117,7 +133,11 @@ impl SQLitePurchaseReturnRepository {
                 params![purchase_line_id],
                 |row| row.get(0),
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to query returned quantity for purchase line: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!(
+                    "Failed to query returned quantity for purchase line: {e}"
+                ))
+            })?;
 
         Ok(returned)
     }
@@ -157,7 +177,9 @@ impl SQLitePurchaseReturnRepository {
         match res {
             Ok(ret) => Ok(Some(ret)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(DbError::QueryError(format!("Failed to get purchase return by id: {e}"))),
+            Err(e) => Err(DbError::QueryError(format!(
+                "Failed to get purchase return by id: {e}"
+            ))),
         }
     }
 
@@ -173,7 +195,11 @@ impl SQLitePurchaseReturnRepository {
                  FROM purchase_return_lines
                  WHERE return_id = ?1",
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to prepare purchase return lines query: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!(
+                    "Failed to prepare purchase return lines query: {e}"
+                ))
+            })?;
 
         let rows = stmt
             .query_map(params![return_id], |row| {
@@ -190,18 +216,25 @@ impl SQLitePurchaseReturnRepository {
                     created_at: row.get(9)?,
                 })
             })
-            .map_err(|e| DbError::QueryError(format!("Failed to query purchase return lines: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to query purchase return lines: {e}"))
+            })?;
 
         let mut lines = Vec::new();
         for r in rows {
-            lines.push(r.map_err(|e| DbError::QueryError(format!("Error reading purchase return line: {e}")))?);
+            lines.push(r.map_err(|e| {
+                DbError::QueryError(format!("Error reading purchase return line: {e}"))
+            })?);
         }
 
         Ok(lines)
     }
 
     /// Reads a complete PurchaseReturnDetailDto inside transaction
-    pub fn get_detail_in_tx(conn: &Connection, id: &str) -> DbResult<Option<PurchaseReturnDetailDto>> {
+    pub fn get_detail_in_tx(
+        conn: &Connection,
+        id: &str,
+    ) -> DbResult<Option<PurchaseReturnDetailDto>> {
         let ret = match Self::get_by_id_in_tx(conn, id)? {
             Some(r) => r,
             None => return Ok(None),
@@ -256,15 +289,22 @@ impl SQLitePurchaseReturnRepository {
         query.push_str(" ORDER BY created_at DESC LIMIT ?");
         params_vec.push(Box::new(lim));
 
-        let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+        let params_slice: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|b| b.as_ref()).collect();
 
-        let mut stmt = guard
-            .prepare(&query)
-            .map_err(|e| DbError::QueryError(format!("Failed to prepare list purchase returns query: {e}")))?;
+        let mut stmt = guard.prepare(&query).map_err(|e| {
+            DbError::QueryError(format!(
+                "Failed to prepare list purchase returns query: {e}"
+            ))
+        })?;
 
         let ids: Vec<String> = stmt
             .query_map(params_slice.as_slice(), |row| row.get(0))
-            .map_err(|e| DbError::QueryError(format!("Failed to execute list purchase returns query: {e}")))?
+            .map_err(|e| {
+                DbError::QueryError(format!(
+                    "Failed to execute list purchase returns query: {e}"
+                ))
+            })?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -278,13 +318,22 @@ impl SQLitePurchaseReturnRepository {
         Ok(results)
     }
 
-    pub async fn get_by_purchase_id(&self, purchase_id: &str) -> AppResult<Vec<PurchaseReturnDetailDto>> {
+    pub async fn get_by_purchase_id(
+        &self,
+        purchase_id: &str,
+    ) -> AppResult<Vec<PurchaseReturnDetailDto>> {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
 
         let mut stmt = guard
-            .prepare("SELECT id FROM purchase_returns WHERE purchase_id = ?1 ORDER BY created_at DESC")
-            .map_err(|e| DbError::QueryError(format!("Failed to prepare purchase returns by purchase query: {e}")))?;
+            .prepare(
+                "SELECT id FROM purchase_returns WHERE purchase_id = ?1 ORDER BY created_at DESC",
+            )
+            .map_err(|e| {
+                DbError::QueryError(format!(
+                    "Failed to prepare purchase returns by purchase query: {e}"
+                ))
+            })?;
 
         let ids: Vec<String> = stmt
             .query_map(params![purchase_id], |row| row.get(0))

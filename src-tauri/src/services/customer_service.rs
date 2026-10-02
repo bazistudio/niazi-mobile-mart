@@ -33,14 +33,18 @@ impl CustomerService {
     pub fn new_sqlite(db: DatabaseConnection) -> Self {
         Self {
             customer_repo: CustomerRepository::SQLite(SQLiteCustomerRepository::new(db.clone())),
-            branch_repo: BranchRepository::SQLite(crate::repositories::SQLiteBranchRepository::new(db.clone())),
+            branch_repo: BranchRepository::SQLite(
+                crate::repositories::SQLiteBranchRepository::new(db.clone()),
+            ),
             db: Some(db),
         }
     }
 
     pub fn new_postgres(pool: sqlx::PgPool) -> Self {
         Self {
-            customer_repo: CustomerRepository::Postgres(PostgresCustomerRepository::new(pool.clone())),
+            customer_repo: CustomerRepository::Postgres(PostgresCustomerRepository::new(
+                pool.clone(),
+            )),
             branch_repo: BranchRepository::Postgres(PostgresBranchRepository::new(pool)),
             db: None,
         }
@@ -50,17 +54,23 @@ impl CustomerService {
     pub async fn create_customer(&self, dto: CreateCustomerDto) -> AppResult<Customer> {
         let name = dto.name.trim();
         if name.is_empty() {
-            return Err(AppError::Validation("Customer name cannot be empty".to_string()));
+            return Err(AppError::Validation(
+                "Customer name cannot be empty".to_string(),
+            ));
         }
 
         let phone = dto.phone.trim();
         if phone.is_empty() {
-            return Err(AppError::Validation("Customer phone number cannot be empty".to_string()));
+            return Err(AppError::Validation(
+                "Customer phone number cannot be empty".to_string(),
+            ));
         }
 
         let credit_limit = dto.credit_limit.unwrap_or(0);
         if credit_limit < 0 {
-            return Err(AppError::Validation("Credit limit cannot be negative".to_string()));
+            return Err(AppError::Validation(
+                "Credit limit cannot be negative".to_string(),
+            ));
         }
 
         let id = Uuid::new_v4().to_string();
@@ -70,7 +80,10 @@ impl CustomerService {
         let customer_code = match &self.customer_repo {
             CustomerRepository::Postgres(_) => format!("CUST-{:08}", Uuid::new_v4().simple()),
             CustomerRepository::SQLite(_) => {
-                let db = self.db.as_ref().expect("SQLite database connection required");
+                let db = self
+                    .db
+                    .as_ref()
+                    .expect("SQLite database connection required");
                 with_transaction(db, |tx| {
                     SQLiteCustomerRepository::next_customer_code_in_tx(tx)
                 })
@@ -83,10 +96,22 @@ impl CustomerService {
             customer_code,
             name: name.to_string(),
             phone: phone.to_string(),
-            alternate_phone: dto.alternate_phone.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()),
-            email: dto.email.map(|e| e.trim().to_string()).filter(|e| !e.is_empty()),
-            address: dto.address.map(|a| a.trim().to_string()).filter(|a| !a.is_empty()),
-            notes: dto.notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+            alternate_phone: dto
+                .alternate_phone
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty()),
+            email: dto
+                .email
+                .map(|e| e.trim().to_string())
+                .filter(|e| !e.is_empty()),
+            address: dto
+                .address
+                .map(|a| a.trim().to_string())
+                .filter(|a| !a.is_empty()),
+            notes: dto
+                .notes
+                .map(|n| n.trim().to_string())
+                .filter(|n| !n.is_empty()),
             credit_limit,
             is_active: true,
             created_at: now.clone(),
@@ -97,7 +122,10 @@ impl CustomerService {
         if let (CustomerRepository::SQLite(_), Some(db)) = (&self.customer_repo, db_opt) {
             let customer_clone = customer.clone();
             with_transaction(db, move |tx| {
-                crate::repositories::SQLiteCustomerRepository::insert_customer_in_tx(tx, &customer_clone)?;
+                crate::repositories::SQLiteCustomerRepository::insert_customer_in_tx(
+                    tx,
+                    &customer_clone,
+                )?;
 
                 // Phase 1.1: every customer role is linked to a canonical party (party.id = customer.id).
                 crate::repositories::SQLitePartyRepository::link_role_and_build_payloads_in_tx(
@@ -107,7 +135,8 @@ impl CustomerService {
                     false,
                 )?;
                 Ok(())
-            }).await?;
+            })
+            .await?;
             Ok(customer)
         } else {
             self.customer_repo.create_customer(&customer).await
@@ -118,17 +147,23 @@ impl CustomerService {
     pub async fn update_customer(&self, id: &str, dto: UpdateCustomerDto) -> AppResult<Customer> {
         if let Some(ref name) = dto.name {
             if name.trim().is_empty() {
-                return Err(AppError::Validation("Customer name cannot be empty".to_string()));
+                return Err(AppError::Validation(
+                    "Customer name cannot be empty".to_string(),
+                ));
             }
         }
         if let Some(ref phone) = dto.phone {
             if phone.trim().is_empty() {
-                return Err(AppError::Validation("Customer phone number cannot be empty".to_string()));
+                return Err(AppError::Validation(
+                    "Customer phone number cannot be empty".to_string(),
+                ));
             }
         }
         if let Some(limit) = dto.credit_limit {
             if limit < 0 {
-                return Err(AppError::Validation("Credit limit cannot be negative".to_string()));
+                return Err(AppError::Validation(
+                    "Credit limit cannot be negative".to_string(),
+                ));
             }
         }
 
@@ -137,7 +172,9 @@ impl CustomerService {
             let id_clone = id.to_string();
             let dto_clone = dto.clone();
             let updated = with_transaction(db, move |tx| {
-                let cust = crate::repositories::SQLiteCustomerRepository::update_customer_in_tx(tx, &id_clone, &dto_clone)?;
+                let cust = crate::repositories::SQLiteCustomerRepository::update_customer_in_tx(
+                    tx, &id_clone, &dto_clone,
+                )?;
                 // Phase 1.1: keep the canonical party linked; a single-role party mirrors this edit.
                 crate::repositories::SQLitePartyRepository::link_role_and_build_payloads_in_tx(
                     tx,
@@ -146,7 +183,8 @@ impl CustomerService {
                     true,
                 )?;
                 Ok(cust)
-            }).await?;
+            })
+            .await?;
             Ok(updated)
         } else {
             self.customer_repo.update_customer(id, &dto).await
@@ -167,7 +205,10 @@ impl CustomerService {
     }
 
     /// Lists customers with filters
-    pub async fn list_customers(&self, filter: CustomerFilter) -> AppResult<Vec<CustomerSummaryDto>> {
+    pub async fn list_customers(
+        &self,
+        filter: CustomerFilter,
+    ) -> AppResult<Vec<CustomerSummaryDto>> {
         self.customer_repo.list_customers(&filter).await
     }
 
@@ -178,7 +219,9 @@ impl CustomerService {
 
     /// Gets authoritative current outstanding balance for customer
     pub async fn get_balance(&self, customer_id: &str) -> AppResult<i64> {
-        self.customer_repo.get_outstanding_balance(customer_id).await
+        self.customer_repo
+            .get_outstanding_balance(customer_id)
+            .await
     }
 
     /// Gets customer ledger history
@@ -188,7 +231,9 @@ impl CustomerService {
         limit: Option<i64>,
         offset: Option<i64>,
     ) -> AppResult<Vec<CustomerLedgerEntry>> {
-        self.customer_repo.get_ledger(customer_id, limit, offset).await
+        self.customer_repo
+            .get_ledger(customer_id, limit, offset)
+            .await
     }
 
     /// Gets printable customer statement
@@ -233,11 +278,15 @@ impl CustomerService {
         dto: RecordCustomerPaymentDto,
     ) -> AppResult<CustomerPaymentResultDto> {
         if dto.amount <= 0 {
-            return Err(AppError::Validation("Payment amount must be greater than 0".to_string()));
+            return Err(AppError::Validation(
+                "Payment amount must be greater than 0".to_string(),
+            ));
         }
 
         if let CustomerRepository::Postgres(_) = &self.customer_repo {
-            return Err(AppError::Internal("Postgres record_customer_payment not implemented".into()));
+            return Err(AppError::Internal(
+                "Postgres record_customer_payment not implemented".into(),
+            ));
         }
 
         let customer = self.get_customer_by_id(&dto.customer_id).await?;
@@ -261,11 +310,15 @@ impl CustomerService {
             None => DEFAULT_MAIN_BRANCH_ID.to_string(),
         };
 
-        let db = self.db.as_ref().expect("SQLite database connection required");
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
 
         let result = with_transaction(db, move |tx| {
             // 1. Authoritative current outstanding balance
-            let current_balance = SQLiteCustomerRepository::calculate_outstanding_balance_in_tx(tx, &cid)?;
+            let current_balance =
+                SQLiteCustomerRepository::calculate_outstanding_balance_in_tx(tx, &cid)?;
 
             // 2. Reject overpayment
             if amount > current_balance {
@@ -282,7 +335,9 @@ impl CustomerService {
 
             // 4. Insert customer ledger credit entry
             let ledger_desc = match &notes {
-                Some(n) if !n.trim().is_empty() => format!("Payment Receipt {}: {}", receipt_number, n.trim()),
+                Some(n) if !n.trim().is_empty() => {
+                    format!("Payment Receipt {}: {}", receipt_number, n.trim())
+                }
                 _ => format!("Payment Receipt {} via {}", receipt_number, p_method),
             };
 
@@ -290,7 +345,9 @@ impl CustomerService {
                 id: Uuid::new_v4().to_string(),
                 customer_id: cid.clone(),
                 reference_id: Some(payment_id.clone()),
-                reference_number: ref_num_input.clone().or_else(|| Some(receipt_number.clone())),
+                reference_number: ref_num_input
+                    .clone()
+                    .or_else(|| Some(receipt_number.clone())),
                 entry_type: CustomerLedgerEntryType::Payment,
                 debit: 0,
                 credit: amount,
@@ -326,11 +383,7 @@ impl CustomerService {
                 };
 
                 SQLiteSaleRepository::update_sale_payment_status_in_tx(
-                    tx,
-                    &sale.id,
-                    new_paid,
-                    new_status,
-                    &now,
+                    tx, &sale.id, new_paid, new_status, &now,
                 )?;
 
                 allocated_sales.push(AllocatedSaleDto {
@@ -349,7 +402,8 @@ impl CustomerService {
             // 6. If payment method is CASH, record authoritative Cash Movement IN
             //    (cash movements are intentionally terminal-local — not synced globally)
             if p_method == "CASH" {
-                let open_session_id = SQLiteCashRepository::get_open_session_id_in_tx(tx, &branch_id)?;
+                let open_session_id =
+                    SQLiteCashRepository::get_open_session_id_in_tx(tx, &branch_id)?;
                 let cash_movement = CashMovement {
                     id: Uuid::new_v4().to_string(),
                     session_id: open_session_id,
@@ -532,7 +586,10 @@ mod tests {
         // Deactivate customer
         service.deactivate_customer(&c.id).await.unwrap();
         let fetched = service.get_customer_by_id(&c.id).await.unwrap();
-        assert!(!fetched.is_active, "Customer must be inactive after deactivation");
+        assert!(
+            !fetched.is_active,
+            "Customer must be inactive after deactivation"
+        );
     }
 
     #[tokio::test]
@@ -616,7 +673,10 @@ mod tests {
                 },
             )
             .await;
-        assert!(overpay_err.is_err(), "Overpayment > balance must be rejected");
+        assert!(
+            overpay_err.is_err(),
+            "Overpayment > balance must be rejected"
+        );
 
         // Verify balance remained 6,000
         let bal_after_rejected = service.get_balance(&customer.id).await.unwrap();
@@ -742,11 +802,19 @@ mod tests {
         assert_eq!(stmt.current_balance, 12000);
         assert_eq!(stmt.entries.len(), 2);
 
-        let sale_row = stmt.entries.iter().find(|e| e.entry_type == "SALE").expect("sale entry");
+        let sale_row = stmt
+            .entries
+            .iter()
+            .find(|e| e.entry_type == "SALE")
+            .expect("sale entry");
         assert_eq!(sale_row.debit, 20000);
         assert_eq!(sale_row.credit, 0);
 
-        let pay_row = stmt.entries.iter().find(|e| e.entry_type == "PAYMENT").expect("payment entry");
+        let pay_row = stmt
+            .entries
+            .iter()
+            .find(|e| e.entry_type == "PAYMENT")
+            .expect("payment entry");
         assert_eq!(pay_row.debit, 0);
         assert_eq!(pay_row.credit, 8000);
     }

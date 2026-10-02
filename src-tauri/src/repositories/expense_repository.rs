@@ -27,7 +27,9 @@ impl SQLiteExpenseRepository {
             "UPDATE counters SET value = value + 1 WHERE name = 'expense_number'",
             [],
         )
-        .map_err(|e| DbError::QueryError(format!("Failed to increment expense_number counter: {e}")))?;
+        .map_err(|e| {
+            DbError::QueryError(format!("Failed to increment expense_number counter: {e}"))
+        })?;
 
         let val: i64 = conn
             .query_row(
@@ -35,13 +37,18 @@ impl SQLiteExpenseRepository {
                 [],
                 |row| row.get(0),
             )
-            .map_err(|e| DbError::QueryError(format!("Failed to read expense_number counter: {e}")))?;
+            .map_err(|e| {
+                DbError::QueryError(format!("Failed to read expense_number counter: {e}"))
+            })?;
 
         Ok(format!("EXP-{:06}", val))
     }
 
     /// Fetches an expense category by ID inside a transaction
-    pub fn get_category_by_id_in_tx(conn: &Connection, id: &str) -> DbResult<Option<ExpenseCategory>> {
+    pub fn get_category_by_id_in_tx(
+        conn: &Connection,
+        id: &str,
+    ) -> DbResult<Option<ExpenseCategory>> {
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, description, is_active, created_at, updated_at
@@ -115,7 +122,8 @@ impl SQLiteExpenseRepository {
         let mut rows = stmt
             .query_map(params![id], |row| {
                 let status_str: String = row.get(10)?;
-                let status = ExpenseStatus::from_str(&status_str).unwrap_or(ExpenseStatus::Completed);
+                let status =
+                    ExpenseStatus::from_str(&status_str).unwrap_or(ExpenseStatus::Completed);
                 Ok(Expense {
                     id: row.get(0)?,
                     expense_number: row.get(1)?,
@@ -153,7 +161,9 @@ impl SQLiteExpenseRepository {
             .map_err(|e| DbError::QueryError(format!("Failed to cancel expense: {e}")))?;
 
         if rows == 0 {
-            return Err(DbError::NotFound(format!("Expense '{id}' not found or already cancelled")));
+            return Err(DbError::NotFound(format!(
+                "Expense '{id}' not found or already cancelled"
+            )));
         }
 
         Ok(())
@@ -204,7 +214,12 @@ impl SQLiteExpenseRepository {
         let current = Self::get_category_by_id_in_tx(&guard, id)?
             .ok_or_else(|| AppError::NotFound(format!("Expense category '{id}' not found")))?;
 
-        let new_name = dto.name.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()).unwrap_or(&current.name);
+        let new_name = dto
+            .name
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&current.name);
         let new_desc = dto.description.clone().or(current.description);
         let new_active = dto.is_active.unwrap_or(current.is_active);
 
@@ -319,7 +334,9 @@ impl SQLiteExpenseRepository {
 
         if let Some(ref s) = filter.search {
             let search_term = format!("%{}%", s.trim());
-            query.push_str(" AND (e.expense_number LIKE ? OR e.description LIKE ? OR c.name LIKE ?)");
+            query.push_str(
+                " AND (e.expense_number LIKE ? OR e.description LIKE ? OR c.name LIKE ?)",
+            );
             param_values.push(Box::new(search_term.clone()));
             param_values.push(Box::new(search_term.clone()));
             param_values.push(Box::new(search_term));
@@ -351,7 +368,8 @@ impl SQLiteExpenseRepository {
         let rows = stmt
             .query_map(rusqlite_params.as_slice(), |row| {
                 let status_str: String = row.get(10)?;
-                let status = ExpenseStatus::from_str(&status_str).unwrap_or(ExpenseStatus::Completed);
+                let status =
+                    ExpenseStatus::from_str(&status_str).unwrap_or(ExpenseStatus::Completed);
                 Ok(Expense {
                     id: row.get(0)?,
                     expense_number: row.get(1)?,

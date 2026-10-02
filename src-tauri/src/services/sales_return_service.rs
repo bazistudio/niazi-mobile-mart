@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use chrono::Utc;
 use rusqlite::Connection;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::db::connection::DatabaseConnection;
@@ -47,8 +47,14 @@ impl SalesReturnService {
     }
 
     /// Queries line-by-line returnable status for a sale
-    pub async fn get_sale_returnable_info(&self, sale_id: &str) -> AppResult<SaleReturnableInfoDto> {
-        let db = self.db.as_ref().expect("SQLite database connection required");
+    pub async fn get_sale_returnable_info(
+        &self,
+        sale_id: &str,
+    ) -> AppResult<SaleReturnableInfoDto> {
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
         let conn_arc = db.inner();
         let guard = conn_arc.lock().await;
 
@@ -68,7 +74,9 @@ impl SalesReturnService {
         let mut returnable_lines = Vec::with_capacity(lines.len());
         for line in lines {
             let already_returned =
-                SQLiteSalesReturnRepository::get_returned_quantity_for_sale_line_in_tx(&guard, &line.id)?;
+                SQLiteSalesReturnRepository::get_returned_quantity_for_sale_line_in_tx(
+                    &guard, &line.id,
+                )?;
             let returnable_quantity = line.quantity.saturating_sub(already_returned);
             let effective_unit_price = if line.quantity > 0 {
                 line.line_total / line.quantity
@@ -117,15 +125,19 @@ impl SalesReturnService {
         user_id: Option<&str>,
     ) -> AppResult<SalesReturnDetailDto> {
         if dto.lines.is_empty() {
-            return Err(AppError::Validation("At least one line item must be returned".to_string()));
+            return Err(AppError::Validation(
+                "At least one line item must be returned".to_string(),
+            ));
         }
 
-        let refund_method = SalesRefundMethod::from_str(&dto.refund_method)
-            .map_err(|e| AppError::Validation(e))?;
+        let refund_method =
+            SalesRefundMethod::from_str(&dto.refund_method).map_err(|e| AppError::Validation(e))?;
 
         for line in &dto.lines {
             if line.quantity <= 0 {
-                return Err(AppError::Validation("Return quantity must be greater than 0".to_string()));
+                return Err(AppError::Validation(
+                    "Return quantity must be greater than 0".to_string(),
+                ));
             }
         }
 
@@ -136,7 +148,10 @@ impl SalesReturnService {
         let notes_cloned = dto.notes.clone();
         let requested_lines = dto.lines.clone();
 
-        let db = self.db.as_ref().expect("SQLite database connection required");
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
         let detail = with_transaction(db, move |tx| {
             // 1. Validate sale exists and is completed
             let sale = SQLiteSaleRepository::get_sale_by_id_in_tx(tx, &sale_id)?
@@ -356,7 +371,9 @@ impl SalesReturnService {
     pub async fn get_sales_return(&self, id: &str) -> AppResult<Option<SalesReturnDetailDto>> {
         match &self.repo {
             SalesReturnRepository::SQLite(r) => r.get_by_id(id).await,
-            SalesReturnRepository::Postgres(_) => Err(AppError::Internal("Postgres get_by_id not implemented".into())),
+            SalesReturnRepository::Postgres(_) => Err(AppError::Internal(
+                "Postgres get_by_id not implemented".into(),
+            )),
         }
     }
 
@@ -367,25 +384,37 @@ impl SalesReturnService {
     ) -> AppResult<Vec<SalesReturnDetailDto>> {
         match &self.repo {
             SalesReturnRepository::SQLite(r) => r.list_sales_returns(branch_id, limit).await,
-            SalesReturnRepository::Postgres(_) => Err(AppError::Internal("Postgres list_sales_returns not implemented".into())),
+            SalesReturnRepository::Postgres(_) => Err(AppError::Internal(
+                "Postgres list_sales_returns not implemented".into(),
+            )),
         }
     }
 
-    pub async fn get_sales_returns_by_sale(&self, sale_id: &str) -> AppResult<Vec<SalesReturnDetailDto>> {
+    pub async fn get_sales_returns_by_sale(
+        &self,
+        sale_id: &str,
+    ) -> AppResult<Vec<SalesReturnDetailDto>> {
         match &self.repo {
             SalesReturnRepository::SQLite(r) => r.get_by_sale_id(sale_id).await,
-            SalesReturnRepository::Postgres(_) => Err(AppError::Internal("Postgres get_by_sale_id not implemented".into())),
+            SalesReturnRepository::Postgres(_) => Err(AppError::Internal(
+                "Postgres get_by_sale_id not implemented".into(),
+            )),
         }
     }
 }
 
 /// Helper inside transaction to mark sale REFUNDED if all quantities across all lines have been returned
-fn check_and_update_sale_refunded_status(conn: &Connection, sale_id: &str, now: &str) -> DbResult<bool> {
+fn check_and_update_sale_refunded_status(
+    conn: &Connection,
+    sale_id: &str,
+    now: &str,
+) -> DbResult<bool> {
     let lines = SQLiteSaleRepository::get_sale_lines_in_tx(conn, sale_id)?;
     let mut all_returned = true;
 
     for line in lines {
-        let returned = SQLiteSalesReturnRepository::get_returned_quantity_for_sale_line_in_tx(conn, &line.id)?;
+        let returned =
+            SQLiteSalesReturnRepository::get_returned_quantity_for_sale_line_in_tx(conn, &line.id)?;
         if returned < line.quantity {
             all_returned = false;
             break;
@@ -397,7 +426,9 @@ fn check_and_update_sale_refunded_status(conn: &Connection, sale_id: &str, now: 
             "UPDATE sales SET sale_status = 'REFUNDED', updated_at = ?1 WHERE id = ?2",
             rusqlite::params![now, sale_id],
         )
-        .map_err(|e| DbError::QueryError(format!("Failed to update sale status to REFUNDED: {e}")))?;
+        .map_err(|e| {
+            DbError::QueryError(format!("Failed to update sale status to REFUNDED: {e}"))
+        })?;
     }
 
     Ok(all_returned)
@@ -475,14 +506,23 @@ mod tests {
                  VALUES (?1, 'iPhone 15 Pro', 'iphone 15 pro', 'IP15P-128', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000012', 270000, 300000, 5, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
                 rusqlite::params![prod_id],
             ).unwrap();
-            guard.execute(
-                "INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+            guard
+                .execute(
+                    "INSERT INTO stock (product_id, branch_id, quantity, updated_at)
                  VALUES (?1, ?2, 50, '2026-01-01T00:00:00Z')",
-                rusqlite::params![prod_id, DEFAULT_MAIN_BRANCH_ID],
-            ).unwrap();
+                    rusqlite::params![prod_id, DEFAULT_MAIN_BRANCH_ID],
+                )
+                .unwrap();
         }
 
-        (db, sr_service, sale_service, cash_service, cust_service, prod_id)
+        (
+            db,
+            sr_service,
+            sale_service,
+            cash_service,
+            cust_service,
+            prod_id,
+        )
     }
 
     #[tokio::test]
@@ -541,7 +581,10 @@ mod tests {
         assert_eq!(stock_mid, 45);
 
         // Check returnable info
-        let returnable_info = sr_svc.get_sale_returnable_info(&sale_res.sale.id).await.unwrap();
+        let returnable_info = sr_svc
+            .get_sale_returnable_info(&sale_res.sale.id)
+            .await
+            .unwrap();
         assert_eq!(returnable_info.lines.len(), 1);
         assert_eq!(returnable_info.lines[0].original_quantity, 5);
         assert_eq!(returnable_info.lines[0].returnable_quantity, 5);
@@ -601,12 +644,18 @@ mod tests {
         assert_eq!(last_movement.3, 47);
 
         // 5. Verify remaining returnable is now 3
-        let returnable_after = sr_svc.get_sale_returnable_info(&sale_res.sale.id).await.unwrap();
+        let returnable_after = sr_svc
+            .get_sale_returnable_info(&sale_res.sale.id)
+            .await
+            .unwrap();
         assert_eq!(returnable_after.lines[0].already_returned_quantity, 2);
         assert_eq!(returnable_after.lines[0].returnable_quantity, 3);
 
         // 6. Verify cash drawer summary reflects cash refund OUT
-        let summary = cash_svc.get_daily_summary(Some(DEFAULT_MAIN_BRANCH_ID), Some("2026-01-01")).await.unwrap();
+        let summary = cash_svc
+            .get_daily_summary(Some(DEFAULT_MAIN_BRANCH_ID), Some("2026-01-01"))
+            .await
+            .unwrap();
         // Opening: 10,000 + Cash Sale In: 1,500,000 - Refund Out: 600,000 = 910,000
         assert_eq!(summary.total_cash_in, 1500000);
         assert_eq!(summary.total_cash_out, 600000);
@@ -855,11 +904,13 @@ mod tests {
         // Verify sale status updated to REFUNDED
         let conn_arc = db.inner();
         let guard = conn_arc.lock().await;
-        let sale_status: String = guard.query_row(
-            "SELECT sale_status FROM sales WHERE id = ?1",
-            rusqlite::params![sale_res.sale.id],
-            |r| r.get(0),
-        ).unwrap();
+        let sale_status: String = guard
+            .query_row(
+                "SELECT sale_status FROM sales WHERE id = ?1",
+                rusqlite::params![sale_res.sale.id],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(sale_status, "REFUNDED");
     }
 }

@@ -8,9 +8,7 @@ use crate::domain::catalog::{
     UpdateCategoryDto, UpdateColorDto, UpdateCompanyDto, UpdateQualityDto, UpdateUnitDto,
 };
 use crate::errors::{AppError, AppResult};
-use crate::repositories::{
-    CatalogRepository, PostgresCatalogRepository, SQLiteCatalogRepository,
-};
+use crate::repositories::{CatalogRepository, PostgresCatalogRepository, SQLiteCatalogRepository};
 
 #[derive(Clone)]
 pub struct CatalogService {
@@ -41,10 +39,14 @@ impl CatalogService {
 
     pub async fn create_category(&self, dto: CreateCategoryDto) -> AppResult<Category> {
         if dto.name.trim().is_empty() {
-            return Err(AppError::Validation("Category name is required".to_string()));
+            return Err(AppError::Validation(
+                "Category name is required".to_string(),
+            ));
         }
         if dto.code.trim().is_empty() {
-            return Err(AppError::Validation("Category code is required".to_string()));
+            return Err(AppError::Validation(
+                "Category code is required".to_string(),
+            ));
         }
 
         let id = Uuid::new_v4().to_string();
@@ -52,7 +54,10 @@ impl CatalogService {
         match &self.repo {
             CatalogRepository::Postgres(_) => self.repo.create_category(&id, &dto).await,
             CatalogRepository::SQLite(_) => {
-                let db = self.db.as_ref().expect("SQLite database connection required");
+                let db = self
+                    .db
+                    .as_ref()
+                    .expect("SQLite database connection required");
                 let now = chrono::Utc::now().to_rfc3339();
                 let entity = Category {
                     id: id.clone(),
@@ -67,7 +72,8 @@ impl CatalogService {
                 let result = with_transaction(db, move |tx| {
                     SQLiteCatalogRepository::insert_category_in_tx(tx, &entity)?;
                     Ok(entity)
-                }).await?;
+                })
+                .await?;
                 Ok(result)
             }
         }
@@ -84,7 +90,9 @@ impl CatalogService {
     pub async fn update_category(&self, id: &str, dto: UpdateCategoryDto) -> AppResult<Category> {
         if let Some(name) = &dto.name {
             if name.trim().is_empty() {
-                return Err(AppError::Validation("Category name cannot be empty".to_string()));
+                return Err(AppError::Validation(
+                    "Category name cannot be empty".to_string(),
+                ));
             }
         }
         self.repo.update_category(id, &dto).await
@@ -105,7 +113,10 @@ impl CatalogService {
         match &self.repo {
             CatalogRepository::Postgres(_) => self.repo.create_brand(&id, &dto).await,
             CatalogRepository::SQLite(_) => {
-                let db = self.db.as_ref().expect("SQLite database connection required");
+                let db = self
+                    .db
+                    .as_ref()
+                    .expect("SQLite database connection required");
                 let now = chrono::Utc::now().to_rfc3339();
                 let entity = Brand {
                     id: id.clone(),
@@ -120,7 +131,8 @@ impl CatalogService {
                 let result = with_transaction(db, move |tx| {
                     SQLiteCatalogRepository::insert_brand_in_tx(tx, &entity)?;
                     Ok(entity)
-                }).await?;
+                })
+                .await?;
                 Ok(result)
             }
         }
@@ -137,7 +149,9 @@ impl CatalogService {
     pub async fn update_brand(&self, id: &str, dto: UpdateBrandDto) -> AppResult<Brand> {
         if let Some(name) = &dto.name {
             if name.trim().is_empty() {
-                return Err(AppError::Validation("Brand name cannot be empty".to_string()));
+                return Err(AppError::Validation(
+                    "Brand name cannot be empty".to_string(),
+                ));
             }
         }
         self.repo.update_brand(id, &dto).await
@@ -151,7 +165,9 @@ impl CatalogService {
         }
         if let Some(factor) = dto.conversion_factor {
             if factor < 1 {
-                return Err(AppError::Validation("Conversion factor must be >= 1".to_string()));
+                return Err(AppError::Validation(
+                    "Conversion factor must be >= 1".to_string(),
+                ));
             }
         }
 
@@ -160,13 +176,20 @@ impl CatalogService {
         match &self.repo {
             CatalogRepository::Postgres(_) => self.repo.create_unit(&id, &dto).await,
             CatalogRepository::SQLite(_) => {
-                let db = self.db.as_ref().expect("SQLite database connection required");
+                let db = self
+                    .db
+                    .as_ref()
+                    .expect("SQLite database connection required");
                 let now = chrono::Utc::now().to_rfc3339();
                 let factor = dto.conversion_factor.unwrap_or(1);
                 let entity = Unit {
                     id: id.clone(),
                     name: dto.name.trim().to_string(),
-                    symbol: dto.symbol.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+                    symbol: dto
+                        .symbol
+                        .clone()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty()),
                     conversion_factor: factor,
                     is_active: true,
                     created_at: now.clone(),
@@ -176,7 +199,8 @@ impl CatalogService {
                 let result = with_transaction(db, move |tx| {
                     SQLiteCatalogRepository::insert_unit_in_tx(tx, &entity)?;
                     Ok(entity)
-                }).await?;
+                })
+                .await?;
                 Ok(result)
             }
         }
@@ -193,12 +217,16 @@ impl CatalogService {
     pub async fn update_unit(&self, id: &str, dto: UpdateUnitDto) -> AppResult<Unit> {
         if let Some(name) = &dto.name {
             if name.trim().is_empty() {
-                return Err(AppError::Validation("Unit name cannot be empty".to_string()));
+                return Err(AppError::Validation(
+                    "Unit name cannot be empty".to_string(),
+                ));
             }
         }
         if let Some(factor) = dto.conversion_factor {
             if factor < 1 {
-                return Err(AppError::Validation("Conversion factor must be >= 1".to_string()));
+                return Err(AppError::Validation(
+                    "Conversion factor must be >= 1".to_string(),
+                ));
             }
         }
         self.repo.update_unit(id, &dto).await
@@ -216,9 +244,15 @@ impl CatalogService {
         match &self.repo {
             CatalogRepository::Postgres(_) => self.repo.create_company(&id, &dto).await,
             CatalogRepository::SQLite(_) => {
-                let db = self.db.as_ref().expect("SQLite database connection required");
+                let db = self
+                    .db
+                    .as_ref()
+                    .expect("SQLite database connection required");
                 let now = chrono::Utc::now().to_rfc3339();
-                let code = dto.code.as_deref().unwrap_or(&dto.name)
+                let code = dto
+                    .code
+                    .as_deref()
+                    .unwrap_or(&dto.name)
                     .trim()
                     .to_uppercase()
                     .replace(|c: char| !c.is_alphanumeric(), "_");
@@ -235,7 +269,8 @@ impl CatalogService {
                 let result = with_transaction(db, move |tx| {
                     SQLiteCatalogRepository::insert_company_in_tx(tx, &entity)?;
                     Ok(entity)
-                }).await?;
+                })
+                .await?;
                 Ok(result)
             }
         }
@@ -252,7 +287,9 @@ impl CatalogService {
     pub async fn update_company(&self, id: &str, dto: UpdateCompanyDto) -> AppResult<Company> {
         if let Some(name) = &dto.name {
             if name.trim().is_empty() {
-                return Err(AppError::Validation("Company name cannot be empty".to_string()));
+                return Err(AppError::Validation(
+                    "Company name cannot be empty".to_string(),
+                ));
             }
         }
         self.repo.update_company(id, &dto).await
@@ -270,9 +307,15 @@ impl CatalogService {
         match &self.repo {
             CatalogRepository::Postgres(_) => self.repo.create_quality(&id, &dto).await,
             CatalogRepository::SQLite(_) => {
-                let db = self.db.as_ref().expect("SQLite database connection required");
+                let db = self
+                    .db
+                    .as_ref()
+                    .expect("SQLite database connection required");
                 let now = chrono::Utc::now().to_rfc3339();
-                let code = dto.code.as_deref().unwrap_or(&dto.name)
+                let code = dto
+                    .code
+                    .as_deref()
+                    .unwrap_or(&dto.name)
                     .trim()
                     .to_uppercase()
                     .replace(|c: char| !c.is_alphanumeric(), "_");
@@ -289,7 +332,8 @@ impl CatalogService {
                 let result = with_transaction(db, move |tx| {
                     SQLiteCatalogRepository::insert_quality_in_tx(tx, &entity)?;
                     Ok(entity)
-                }).await?;
+                })
+                .await?;
                 Ok(result)
             }
         }
@@ -306,7 +350,9 @@ impl CatalogService {
     pub async fn update_quality(&self, id: &str, dto: UpdateQualityDto) -> AppResult<Quality> {
         if let Some(name) = &dto.name {
             if name.trim().is_empty() {
-                return Err(AppError::Validation("Quality name cannot be empty".to_string()));
+                return Err(AppError::Validation(
+                    "Quality name cannot be empty".to_string(),
+                ));
             }
         }
         self.repo.update_quality(id, &dto).await
@@ -324,9 +370,15 @@ impl CatalogService {
         match &self.repo {
             CatalogRepository::Postgres(_) => self.repo.create_color(&id, &dto).await,
             CatalogRepository::SQLite(_) => {
-                let db = self.db.as_ref().expect("SQLite database connection required");
+                let db = self
+                    .db
+                    .as_ref()
+                    .expect("SQLite database connection required");
                 let now = chrono::Utc::now().to_rfc3339();
-                let code = dto.code.as_deref().unwrap_or(&dto.name)
+                let code = dto
+                    .code
+                    .as_deref()
+                    .unwrap_or(&dto.name)
                     .trim()
                     .to_uppercase()
                     .replace(|c: char| !c.is_alphanumeric(), "_");
@@ -343,7 +395,8 @@ impl CatalogService {
                 let result = with_transaction(db, move |tx| {
                     SQLiteCatalogRepository::insert_color_in_tx(tx, &entity)?;
                     Ok(entity)
-                }).await?;
+                })
+                .await?;
                 Ok(result)
             }
         }
@@ -360,7 +413,9 @@ impl CatalogService {
     pub async fn update_color(&self, id: &str, dto: UpdateColorDto) -> AppResult<Color> {
         if let Some(name) = &dto.name {
             if name.trim().is_empty() {
-                return Err(AppError::Validation("Color name cannot be empty".to_string()));
+                return Err(AppError::Validation(
+                    "Color name cannot be empty".to_string(),
+                ));
             }
         }
         self.repo.update_color(id, &dto).await
@@ -485,13 +540,22 @@ mod tests {
         let service = setup_test_service().await;
 
         // 1. Initial seeded master entries
-        let companies = service.list_companies().await.expect("List companies should succeed");
+        let companies = service
+            .list_companies()
+            .await
+            .expect("List companies should succeed");
         assert!(companies.len() >= 4, "Seeded companies should be present");
 
-        let qualities = service.list_qualities().await.expect("List qualities should succeed");
+        let qualities = service
+            .list_qualities()
+            .await
+            .expect("List qualities should succeed");
         assert!(qualities.len() >= 5, "Seeded qualities should be present");
 
-        let colors = service.list_colors().await.expect("List colors should succeed");
+        let colors = service
+            .list_colors()
+            .await
+            .expect("List colors should succeed");
         assert!(colors.len() >= 8, "Seeded colors should be present");
 
         // 2. Create custom Company

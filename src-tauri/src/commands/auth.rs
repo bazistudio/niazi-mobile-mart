@@ -38,7 +38,8 @@ pub async fn auth_login(
     username: String,
     login_key: String,
 ) -> AppResult<AuthResponse> {
-    let sanitized_user = AuthService::login(&state.user_repo, &state, &username, &login_key).await?;
+    let sanitized_user =
+        AuthService::login(&state.user_repo, &state, &username, &login_key).await?;
     let session = state.get_session().await;
 
     Ok(AuthResponse {
@@ -46,31 +47,6 @@ pub async fn auth_login(
         session,
     })
 }
-
-/// Staff login command using local SQLite authentication snapshot
-#[tauri::command]
-pub async fn auth_login_snapshot(
-    state: State<'_, AppState>,
-    username: String,
-    credential: String,
-) -> AppResult<SessionContext> {
-    let snapshot_repo = state
-        .auth_snapshot_repo()
-        .ok_or_else(|| crate::errors::AppError::Internal("Auth snapshot repository unavailable".to_string()))?;
-    AuthService::login_with_snapshot(&snapshot_repo, &state, &username, &credential).await
-}
-
-
-/// Bootstraps native authentication snapshots from the Central Server
-/// using a recently verified Central API Bearer JWT token.
-#[tauri::command]
-pub async fn auth_bootstrap_central_snapshots(
-    state: State<'_, AppState>,
-    token: String,
-) -> AppResult<()> {
-    AuthService::bootstrap_snapshots_from_central(&state, &token).await
-}
-
 
 /// Synchronizes native SessionContext from a verified Central API Bearer JWT token
 #[tauri::command]
@@ -86,7 +62,6 @@ pub async fn auth_sync_session(
 pub async fn auth_logout(state: State<'_, AppState>) -> AppResult<()> {
     AuthService::logout(&state).await
 }
-
 
 /// Normal password change for authenticated user
 #[tauri::command]
@@ -136,9 +111,7 @@ pub async fn auth_get_current_session(state: State<'_, AppState>) -> AppResult<S
 
 /// Retrieves current authenticated user record (sanitized)
 #[tauri::command]
-pub async fn auth_get_current_user(
-    state: State<'_, AppState>,
-) -> AppResult<Option<SanitizedUser>> {
+pub async fn auth_get_current_user(state: State<'_, AppState>) -> AppResult<Option<SanitizedUser>> {
     let session = state.get_session().await;
     if let Some(user_id) = &session.user_id {
         let user = state.user_repo.find_by_id(user_id).await?;
@@ -155,12 +128,7 @@ pub async fn auth_check_permission(
     page: Option<String>,
     action: Option<String>,
 ) -> AppResult<bool> {
-    AuthService::require_permission(
-        &state,
-        page.as_deref(),
-        action.as_deref(),
-    )
-    .await?;
+    AuthService::require_permission(&state, page.as_deref(), action.as_deref()).await?;
     Ok(true)
 }
 
@@ -210,7 +178,8 @@ pub async fn admin_reset_staff_password(
     user_id: String,
     temporary_password: String,
 ) -> AppResult<()> {
-    AdminService::reset_staff_password(&state.user_repo, &state, &user_id, &temporary_password).await
+    AdminService::reset_staff_password(&state.user_repo, &state, &user_id, &temporary_password)
+        .await
 }
 
 /// Creates a new staff member (admin only)
@@ -247,26 +216,20 @@ pub async fn admin_recover_access(
     recovery_token: String,
     new_login_key: String,
 ) -> AppResult<()> {
-    AdminService::recover_admin_access(&state.user_repo, &state, &recovery_token, &new_login_key).await
+    AdminService::recover_admin_access(&state.user_repo, &state, &recovery_token, &new_login_key)
+        .await
 }
 
 /// Verifies the current session administrator's own login password (admin only).
 /// Used as the authorization gate before a destructive action such as permanent user deletion.
 #[tauri::command]
-pub async fn admin_verify_password(
-    state: State<'_, AppState>,
-    password: String,
-) -> AppResult<()> {
+pub async fn admin_verify_password(state: State<'_, AppState>, password: String) -> AppResult<()> {
     AdminService::verify_admin_password(&state.user_repo, &state, &password).await
 }
 
 /// Permanently deletes a user account (admin only).
 /// The administrator cannot delete their own account.
 #[tauri::command]
-pub async fn admin_delete_user(
-    state: State<'_, AppState>,
-    user_id: String,
-) -> AppResult<()> {
+pub async fn admin_delete_user(state: State<'_, AppState>, user_id: String) -> AppResult<()> {
     AdminService::delete_user(&state.user_repo, &state, &user_id).await
 }
-

@@ -41,17 +41,23 @@ impl SupplierService {
     pub async fn create_supplier(&self, dto: CreateSupplierDto) -> AppResult<Supplier> {
         let name = dto.name.trim();
         if name.is_empty() {
-            return Err(AppError::Validation("Supplier name cannot be empty".to_string()));
+            return Err(AppError::Validation(
+                "Supplier name cannot be empty".to_string(),
+            ));
         }
 
         let phone = dto.phone.trim();
         if phone.is_empty() {
-            return Err(AppError::Validation("Supplier phone number cannot be empty".to_string()));
+            return Err(AppError::Validation(
+                "Supplier phone number cannot be empty".to_string(),
+            ));
         }
 
         let credit_limit = dto.credit_limit.unwrap_or(0);
         if credit_limit < 0 {
-            return Err(AppError::Validation("Credit limit cannot be negative".to_string()));
+            return Err(AppError::Validation(
+                "Credit limit cannot be negative".to_string(),
+            ));
         }
 
         let id = Uuid::new_v4().to_string();
@@ -61,7 +67,10 @@ impl SupplierService {
         let supplier_code = match &self.supplier_repo {
             SupplierRepository::Postgres(_) => format!("SUP-{:08}", Uuid::new_v4().simple()),
             SupplierRepository::SQLite(_) => {
-                let db = self.db.as_ref().expect("SQLite database connection required");
+                let db = self
+                    .db
+                    .as_ref()
+                    .expect("SQLite database connection required");
                 with_transaction(db, |tx| {
                     SQLiteSupplierRepository::next_supplier_code_in_tx(tx)
                 })
@@ -74,10 +83,22 @@ impl SupplierService {
             supplier_code,
             name: name.to_string(),
             phone: phone.to_string(),
-            alternate_phone: dto.alternate_phone.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()),
-            email: dto.email.map(|e| e.trim().to_string()).filter(|e| !e.is_empty()),
-            address: dto.address.map(|a| a.trim().to_string()).filter(|a| !a.is_empty()),
-            notes: dto.notes.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+            alternate_phone: dto
+                .alternate_phone
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty()),
+            email: dto
+                .email
+                .map(|e| e.trim().to_string())
+                .filter(|e| !e.is_empty()),
+            address: dto
+                .address
+                .map(|a| a.trim().to_string())
+                .filter(|a| !a.is_empty()),
+            notes: dto
+                .notes
+                .map(|n| n.trim().to_string())
+                .filter(|n| !n.is_empty()),
             credit_limit,
             is_active: true,
             created_at: now.clone(),
@@ -86,7 +107,10 @@ impl SupplierService {
 
         match &self.supplier_repo {
             SupplierRepository::SQLite(_) => {
-                let db = self.db.as_ref().expect("SQLite database connection required");
+                let db = self
+                    .db
+                    .as_ref()
+                    .expect("SQLite database connection required");
                 let supplier_cloned = supplier.clone();
 
                 with_transaction(db, move |tx| {
@@ -116,11 +140,16 @@ impl SupplierService {
     pub async fn get_supplier_by_code(&self, code: &str) -> AppResult<Option<Supplier>> {
         match &self.supplier_repo {
             SupplierRepository::SQLite(r) => r.get_by_code(code).await,
-            SupplierRepository::Postgres(_) => Err(AppError::Internal("Postgres get_by_code not implemented".into())),
+            SupplierRepository::Postgres(_) => Err(AppError::Internal(
+                "Postgres get_by_code not implemented".into(),
+            )),
         }
     }
 
-    pub async fn list_suppliers(&self, filter: Option<SupplierFilter>) -> AppResult<Vec<SupplierSummaryDto>> {
+    pub async fn list_suppliers(
+        &self,
+        filter: Option<SupplierFilter>,
+    ) -> AppResult<Vec<SupplierSummaryDto>> {
         self.supplier_repo.list(filter).await
     }
 
@@ -131,17 +160,23 @@ impl SupplierService {
     pub async fn update_supplier(&self, id: &str, dto: UpdateSupplierDto) -> AppResult<Supplier> {
         if let Some(ref name) = dto.name {
             if name.trim().is_empty() {
-                return Err(AppError::Validation("Supplier name cannot be empty".to_string()));
+                return Err(AppError::Validation(
+                    "Supplier name cannot be empty".to_string(),
+                ));
             }
         }
         if let Some(ref phone) = dto.phone {
             if phone.trim().is_empty() {
-                return Err(AppError::Validation("Supplier phone cannot be empty".to_string()));
+                return Err(AppError::Validation(
+                    "Supplier phone cannot be empty".to_string(),
+                ));
             }
         }
         if let Some(limit) = dto.credit_limit {
             if limit < 0 {
-                return Err(AppError::Validation("Credit limit cannot be negative".to_string()));
+                return Err(AppError::Validation(
+                    "Credit limit cannot be negative".to_string(),
+                ));
             }
         }
 
@@ -151,7 +186,9 @@ impl SupplierService {
             let dto_clone = dto.clone();
 
             let updated = with_transaction(db, move |tx| {
-                let supp = crate::repositories::SQLiteSupplierRepository::update_supplier_in_tx(tx, &id_clone, &dto_clone)?;
+                let supp = crate::repositories::SQLiteSupplierRepository::update_supplier_in_tx(
+                    tx, &id_clone, &dto_clone,
+                )?;
                 crate::repositories::SQLitePartyRepository::link_role_and_build_payloads_in_tx(
                     tx,
                     &supp,
@@ -159,7 +196,8 @@ impl SupplierService {
                     true,
                 )?;
                 Ok(supp)
-            }).await?;
+            })
+            .await?;
             Ok(updated)
         } else {
             self.supplier_repo.update(id, &dto).await
@@ -182,7 +220,11 @@ impl SupplierService {
                     credit_limit: None,
                     is_active: Some(false),
                 };
-                let supp = crate::repositories::SQLiteSupplierRepository::update_supplier_in_tx(tx, &id_clone, &update_dto)?;
+                let supp = crate::repositories::SQLiteSupplierRepository::update_supplier_in_tx(
+                    tx,
+                    &id_clone,
+                    &update_dto,
+                )?;
 
                 crate::repositories::SQLitePartyRepository::link_role_and_build_payloads_in_tx(
                     tx,
@@ -191,7 +233,8 @@ impl SupplierService {
                     true,
                 )?;
                 Ok(())
-            }).await?;
+            })
+            .await?;
             Ok(())
         } else {
             self.supplier_repo.deactivate(id).await
@@ -199,7 +242,9 @@ impl SupplierService {
     }
 
     pub async fn get_outstanding_balance(&self, supplier_id: &str) -> AppResult<i64> {
-        self.supplier_repo.get_outstanding_balance(supplier_id).await
+        self.supplier_repo
+            .get_outstanding_balance(supplier_id)
+            .await
     }
 
     pub async fn get_ledger(
@@ -208,7 +253,9 @@ impl SupplierService {
         limit: Option<i64>,
         offset: Option<i64>,
     ) -> AppResult<Vec<crate::domain::supplier::SupplierLedgerEntry>> {
-        self.supplier_repo.get_ledger(supplier_id, limit, offset).await
+        self.supplier_repo
+            .get_ledger(supplier_id, limit, offset)
+            .await
     }
 
     pub async fn get_statement(&self, supplier_id: &str) -> AppResult<SupplierStatementDto> {
@@ -316,7 +363,10 @@ pub mod tests {
             .unwrap();
         }
         let remaining = service.get_outstanding_balance(&sup.id).await.unwrap();
-        assert_eq!(remaining, 6000, "Remaining payable = purchase 10,000 - payment 4,000 = 6,000");
+        assert_eq!(
+            remaining, 6000,
+            "Remaining payable = purchase 10,000 - payment 4,000 = 6,000"
+        );
 
         // 3. Statement reflects both entries with correct running balance
         let stmt = service.get_statement(&sup.id).await.unwrap();

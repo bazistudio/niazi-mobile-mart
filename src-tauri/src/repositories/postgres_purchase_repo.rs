@@ -4,7 +4,8 @@ use uuid::Uuid;
 
 use crate::domain::organization::DEFAULT_MAIN_BRANCH_ID;
 use crate::domain::purchases::{
-    CompletePurchaseDto, Purchase, PurchaseFilterDto, PurchaseLine, PurchasePaymentStatus, PurchaseResultDto, PurchaseStatus,
+    CompletePurchaseDto, Purchase, PurchaseFilterDto, PurchaseLine, PurchasePaymentStatus,
+    PurchaseResultDto, PurchaseStatus,
 };
 use crate::errors::{AppError, AppResult};
 
@@ -23,9 +24,15 @@ impl PostgresPurchaseRepository {
         dto: &CompletePurchaseDto,
         user_id: Option<&str>,
     ) -> AppResult<PurchaseResultDto> {
-        let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
         let res = Self::complete_purchase_tx(&mut tx, dto, user_id, None).await?;
-        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(res)
     }
 
@@ -171,29 +178,33 @@ impl PostgresPurchaseRepository {
     }
 
     pub async fn complete_purchase_tx(
-
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         dto: &CompletePurchaseDto,
         user_id: Option<&str>,
         purchase_id_override: Option<&str>,
     ) -> AppResult<PurchaseResultDto> {
         if dto.items.is_empty() {
-            return Err(AppError::Validation("Cannot complete purchase with empty items".to_string()));
+            return Err(AppError::Validation(
+                "Cannot complete purchase with empty items".to_string(),
+            ));
         }
 
         // Validate supplier
-        let supplier_row = sqlx::query("SELECT id, name, credit_limit, is_active FROM suppliers WHERE id = $1")
-            .bind(&dto.supplier_id)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let supplier_row =
+            sqlx::query("SELECT id, name, credit_limit, is_active FROM suppliers WHERE id = $1")
+                .bind(&dto.supplier_id)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
 
         let (supplier_id, _supplier_name, _credit_limit) = match supplier_row {
             Some(row) => {
                 let is_active_int: i32 = row.try_get(3).unwrap_or(1);
                 if is_active_int != 1 {
                     let name: String = row.try_get(1).unwrap_or_default();
-                    return Err(AppError::Validation(format!("Supplier '{name}' is inactive.")));
+                    return Err(AppError::Validation(format!(
+                        "Supplier '{name}' is inactive."
+                    )));
                 }
                 (
                     row.try_get::<String, _>(0).unwrap(),
@@ -201,10 +212,20 @@ impl PostgresPurchaseRepository {
                     row.try_get::<i64, _>(2).unwrap_or(0),
                 )
             }
-            None => return Err(AppError::NotFound(format!("Supplier '{}' not found", dto.supplier_id))),
+            None => {
+                return Err(AppError::NotFound(format!(
+                    "Supplier '{}' not found",
+                    dto.supplier_id
+                )))
+            }
         };
 
-        let branch_id = match dto.branch_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let branch_id = match dto
+            .branch_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             Some(bid) => bid.to_string(),
             None => DEFAULT_MAIN_BRANCH_ID.to_string(),
         };
@@ -227,24 +248,34 @@ impl PostgresPurchaseRepository {
             }
             let unit_cost = item.unit_cost.unwrap_or(0);
             if unit_cost < 0 {
-                return Err(AppError::Validation("Unit cost cannot be negative".to_string()));
+                return Err(AppError::Validation(
+                    "Unit cost cannot be negative".to_string(),
+                ));
             }
 
-            let prod_row = sqlx::query("SELECT id, name, sku, is_active FROM products WHERE id = $1")
-                .bind(&item.product_id)
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(|e| AppError::Database(e.to_string()))?;
+            let prod_row =
+                sqlx::query("SELECT id, name, sku, is_active FROM products WHERE id = $1")
+                    .bind(&item.product_id)
+                    .fetch_optional(&mut **tx)
+                    .await
+                    .map_err(|e| AppError::Database(e.to_string()))?;
 
             let prod = match prod_row {
                 Some(r) => r,
-                None => return Err(AppError::NotFound(format!("Product '{}' not found", item.product_id))),
+                None => {
+                    return Err(AppError::NotFound(format!(
+                        "Product '{}' not found",
+                        item.product_id
+                    )))
+                }
             };
 
             let is_active_int: i32 = prod.try_get(3).unwrap_or(1);
             if is_active_int != 1 {
                 let name: String = prod.try_get(1).unwrap_or_default();
-                return Err(AppError::Validation(format!("Product '{name}' is inactive.")));
+                return Err(AppError::Validation(format!(
+                    "Product '{name}' is inactive."
+                )));
             }
 
             let disc = item.discount.unwrap_or(0).max(0);
@@ -280,10 +311,11 @@ impl PostgresPurchaseRepository {
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
-        let pur_val: (i64,) = sqlx::query_as("SELECT value FROM counters WHERE name = 'purchase_number'")
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let pur_val: (i64,) =
+            sqlx::query_as("SELECT value FROM counters WHERE name = 'purchase_number'")
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
 
         let purchase_number = format!("PUR-{:06}", pur_val.0);
         let purchase_id = purchase_id_override
@@ -373,13 +405,15 @@ impl PostgresPurchaseRepository {
             .map_err(|e| AppError::Database(e.to_string()))?;
 
             // Add stock
-            let current_stock: (i64,) = sqlx::query_as("SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2")
-                .bind(&line.product_id)
-                .bind(&branch_id)
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(|e| AppError::Database(e.to_string()))?
-                .unwrap_or((0,));
+            let current_stock: (i64,) = sqlx::query_as(
+                "SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2",
+            )
+            .bind(&line.product_id)
+            .bind(&branch_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .unwrap_or((0,));
 
             let new_stock = current_stock.0 + line.quantity;
 
@@ -535,16 +569,36 @@ impl PostgresPurchaseRepository {
         let mut list = Vec::with_capacity(rows.len());
         for row in rows {
             list.push(PurchaseLine {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                purchase_id: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                product_id: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
-                product_name_snapshot: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
-                sku_snapshot: row.try_get(4).map_err(|e| AppError::Database(e.to_string()))?,
-                quantity: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                unit_cost: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
-                discount: row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?,
-                line_total: row.try_get(8).map_err(|e| AppError::Database(e.to_string()))?,
-                created_at: row.try_get(9).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                purchase_id: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                product_id: row
+                    .try_get(2)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                product_name_snapshot: row
+                    .try_get(3)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                sku_snapshot: row
+                    .try_get(4)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                quantity: row
+                    .try_get(5)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                unit_cost: row
+                    .try_get(6)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                discount: row
+                    .try_get(7)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                line_total: row
+                    .try_get(8)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: row
+                    .try_get(9)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
         Ok(list)
@@ -561,7 +615,10 @@ impl PostgresPurchaseRepository {
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         if supplier_row.is_none() {
-            return Err(AppError::NotFound(format!("Supplier '{}' not found", dto.supplier_id)));
+            return Err(AppError::NotFound(format!(
+                "Supplier '{}' not found",
+                dto.supplier_id
+            )));
         }
 
         // Apply allocations
@@ -592,7 +649,9 @@ impl PostgresPurchaseRepository {
         let desc = format!(
             "Payment to supplier ({}) Ref: {}",
             dto.payment_method,
-            dto.reference_number.as_deref().unwrap_or(&dto.receipt_number)
+            dto.reference_number
+                .as_deref()
+                .unwrap_or(&dto.receipt_number)
         );
 
         sqlx::query(
@@ -678,28 +737,54 @@ impl PostgresPurchaseRepository {
     }
 
     fn map_purchase_row(row: &sqlx::postgres::PgRow) -> AppResult<Purchase> {
-        let p_status_str: String = row.try_get(9).map_err(|e| AppError::Database(e.to_string()))?;
-        let payment_status = PurchasePaymentStatus::from_str(&p_status_str)
-            .unwrap_or(PurchasePaymentStatus::Unpaid);
-        let status_str: String = row.try_get(10).map_err(|e| AppError::Database(e.to_string()))?;
+        let p_status_str: String = row
+            .try_get(9)
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let payment_status =
+            PurchasePaymentStatus::from_str(&p_status_str).unwrap_or(PurchasePaymentStatus::Unpaid);
+        let status_str: String = row
+            .try_get(10)
+            .map_err(|e| AppError::Database(e.to_string()))?;
         let status = PurchaseStatus::from_str(&status_str).unwrap_or(PurchaseStatus::Completed);
 
         Ok(Purchase {
-            id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-            purchase_number: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-            supplier_id: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
-            branch_id: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
-            subtotal: row.try_get(4).map_err(|e| AppError::Database(e.to_string()))?,
-            discount: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-            total_amount: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
-            paid_amount: row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?,
-            credit_amount: row.try_get(8).map_err(|e| AppError::Database(e.to_string()))?,
+            id: row
+                .try_get(0)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            purchase_number: row
+                .try_get(1)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            supplier_id: row
+                .try_get(2)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            branch_id: row
+                .try_get(3)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            subtotal: row
+                .try_get(4)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            discount: row
+                .try_get(5)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            total_amount: row
+                .try_get(6)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            paid_amount: row
+                .try_get(7)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            credit_amount: row
+                .try_get(8)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             payment_status,
             status,
             notes: row.try_get(11).unwrap_or(None),
             performed_by: row.try_get(12).unwrap_or(None),
-            created_at: row.try_get(13).map_err(|e| AppError::Database(e.to_string()))?,
-            updated_at: row.try_get(14).map_err(|e| AppError::Database(e.to_string()))?,
+            created_at: row
+                .try_get(13)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            updated_at: row
+                .try_get(14)
+                .map_err(|e| AppError::Database(e.to_string()))?,
         })
     }
 }

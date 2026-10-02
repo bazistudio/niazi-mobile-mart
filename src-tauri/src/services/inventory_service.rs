@@ -43,9 +43,15 @@ impl InventoryService {
     }
 
     /// Atomically increases stock and records an IN movement ledger entry
-    pub async fn increase_stock(&self, dto: IncreaseStockDto, user_id: Option<&str>) -> AppResult<i64> {
+    pub async fn increase_stock(
+        &self,
+        dto: IncreaseStockDto,
+        user_id: Option<&str>,
+    ) -> AppResult<i64> {
         if dto.quantity <= 0 {
-            return Err(AppError::Validation("Quantity must be greater than 0".to_string()));
+            return Err(AppError::Validation(
+                "Quantity must be greater than 0".to_string(),
+            ));
         }
 
         if let InventoryRepository::Postgres(pg_repo) = &self.repo {
@@ -55,7 +61,10 @@ impl InventoryService {
         // Verify product exists
         let product = self.product_repo.get_product_by_id(&dto.product_id).await?;
         if !product.is_active {
-            return Err(AppError::Validation(format!("Product '{}' is inactive", product.name)));
+            return Err(AppError::Validation(format!(
+                "Product '{}' is inactive",
+                product.name
+            )));
         }
 
         let now = Utc::now().to_rfc3339();
@@ -63,7 +72,10 @@ impl InventoryService {
         let bid = dto.branch_id.clone();
         let uid = user_id.map(|s| s.to_string());
 
-        let db = self.db.as_ref().expect("SQLite database connection required");
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
 
         let operation_id = Uuid::new_v4().to_string();
 
@@ -73,7 +85,8 @@ impl InventoryService {
 
             SQLiteInventoryRepository::set_stock_in_tx(tx, &pid, &bid, new_qty, &now)?;
 
-            let valid_performed_by = SQLiteUserRepository::sanitize_performed_by_in_tx(tx, uid.as_deref())?;
+            let valid_performed_by =
+                SQLiteUserRepository::sanitize_performed_by_in_tx(tx, uid.as_deref())?;
 
             let movement = StockMovement {
                 id: Uuid::new_v4().to_string(),
@@ -99,9 +112,15 @@ impl InventoryService {
 
     /// Atomically decreases stock and records an OUT movement ledger entry.
     /// Strictly rejects negative stock and rolls back without state changes.
-    pub async fn decrease_stock(&self, dto: DecreaseStockDto, user_id: Option<&str>) -> AppResult<i64> {
+    pub async fn decrease_stock(
+        &self,
+        dto: DecreaseStockDto,
+        user_id: Option<&str>,
+    ) -> AppResult<i64> {
         if dto.quantity <= 0 {
-            return Err(AppError::Validation("Quantity must be greater than 0".to_string()));
+            return Err(AppError::Validation(
+                "Quantity must be greater than 0".to_string(),
+            ));
         }
 
         if let InventoryRepository::Postgres(pg_repo) = &self.repo {
@@ -116,7 +135,10 @@ impl InventoryService {
         let bid = dto.branch_id.clone();
         let uid = user_id.map(|s| s.to_string());
 
-        let db = self.db.as_ref().expect("SQLite database connection required");
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
 
         let operation_id = Uuid::new_v4().to_string();
 
@@ -160,10 +182,14 @@ impl InventoryService {
     /// Strictly rejects zero-effect (no-op) adjustments.
     pub async fn adjust_stock(&self, dto: AdjustStockDto, user_id: Option<&str>) -> AppResult<i64> {
         if dto.target_quantity < 0 {
-            return Err(AppError::Validation("Target stock quantity cannot be negative".to_string()));
+            return Err(AppError::Validation(
+                "Target stock quantity cannot be negative".to_string(),
+            ));
         }
         if dto.reason.trim().is_empty() {
-            return Err(AppError::Validation("Reason is required for stock adjustment".to_string()));
+            return Err(AppError::Validation(
+                "Reason is required for stock adjustment".to_string(),
+            ));
         }
 
         if let InventoryRepository::Postgres(pg_repo) = &self.repo {
@@ -177,7 +203,10 @@ impl InventoryService {
         let bid = dto.branch_id.clone();
         let uid = user_id.map(|s| s.to_string());
 
-        let db = self.db.as_ref().expect("SQLite database connection required");
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
 
         let operation_id = Uuid::new_v4().to_string();
 
@@ -220,12 +249,20 @@ impl InventoryService {
     }
 
     /// Atomically transfers stock from one controlled branch to another.
-    pub async fn transfer_stock(&self, dto: TransferStockDto, user_id: Option<&str>) -> AppResult<()> {
+    pub async fn transfer_stock(
+        &self,
+        dto: TransferStockDto,
+        user_id: Option<&str>,
+    ) -> AppResult<()> {
         if dto.from_branch_id == dto.to_branch_id {
-            return Err(AppError::Validation("Source and destination branch cannot be the same".to_string()));
+            return Err(AppError::Validation(
+                "Source and destination branch cannot be the same".to_string(),
+            ));
         }
         if dto.quantity <= 0 {
-            return Err(AppError::Validation("Transfer quantity must be greater than 0".to_string()));
+            return Err(AppError::Validation(
+                "Transfer quantity must be greater than 0".to_string(),
+            ));
         }
 
         if let InventoryRepository::Postgres(pg_repo) = &self.repo {
@@ -241,9 +278,14 @@ impl InventoryService {
         let uid = user_id.map(|s| s.to_string());
         // transfer_ref ties TRANSFER_OUT and TRANSFER_IN movements together.
         // We also use operation_id as the stable idempotency key for the sync event.
-        let transfer_ref = dto.reference_id.unwrap_or_else(|| format!("TRF-{}", Uuid::new_v4()));
+        let transfer_ref = dto
+            .reference_id
+            .unwrap_or_else(|| format!("TRF-{}", Uuid::new_v4()));
 
-        let db = self.db.as_ref().expect("SQLite database connection required");
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
 
         let operation_id = Uuid::new_v4().to_string();
 
@@ -311,7 +353,10 @@ impl InventoryService {
         self.repo.get_stock(product_id, branch_id).await
     }
 
-    pub async fn get_stock_map(&self, branch_id: &str) -> AppResult<std::collections::HashMap<String, i64>> {
+    pub async fn get_stock_map(
+        &self,
+        branch_id: &str,
+    ) -> AppResult<std::collections::HashMap<String, i64>> {
         self.repo.get_stock_map(branch_id).await
     }
 
@@ -334,11 +379,14 @@ mod tests {
     use super::*;
     use crate::db::migrations::MigrationRunner;
     use crate::domain::catalog::{CreateCategoryDto, CreateUnitDto};
-    use crate::domain::inventory::{AdjustStockDto, DecreaseStockDto, IncreaseStockDto, TransferStockDto};
+    use crate::domain::inventory::{
+        AdjustStockDto, DecreaseStockDto, IncreaseStockDto, TransferStockDto,
+    };
     use crate::domain::product::CreateProductDto;
     use crate::services::{CatalogService, ProductService};
 
-    async fn setup_inventory_test() -> (DatabaseConnection, InventoryService, String, String, String) {
+    async fn setup_inventory_test() -> (DatabaseConnection, InventoryService, String, String, String)
+    {
         let db = DatabaseConnection::open_in_memory().unwrap();
         {
             let conn_arc = db.inner();
@@ -392,7 +440,7 @@ mod tests {
                     color_id: None,
                     purchase_price: 1500, // Rs 1,500
                     average_cost: None,
-                    sale_price: 2000,     // Rs 2,000
+                    sale_price: 2000, // Rs 2,000
                     low_stock_threshold: Some(5),
                     description: None,
                     initial_quantity: None,
@@ -409,10 +457,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_inventory_increase_decrease_and_negative_stock_rejection() {
-        let (_db, inv_service, prod_id, main_branch_id, _branch_b_id) = setup_inventory_test().await;
+        let (_db, inv_service, prod_id, main_branch_id, _branch_b_id) =
+            setup_inventory_test().await;
 
         // 1. Initial stock is 0
-        let initial_stock = inv_service.get_stock(&prod_id, &main_branch_id).await.unwrap();
+        let initial_stock = inv_service
+            .get_stock(&prod_id, &main_branch_id)
+            .await
+            .unwrap();
         assert_eq!(initial_stock, 0);
 
         // 2. Increase stock: +10
@@ -460,11 +512,20 @@ mod tests {
                 None,
             )
             .await;
-        assert!(neg_attempt.is_err(), "Decrease beyond available stock must be rejected");
+        assert!(
+            neg_attempt.is_err(),
+            "Decrease beyond available stock must be rejected"
+        );
 
         // Verify stock remains exactly 7
-        let current_stock = inv_service.get_stock(&prod_id, &main_branch_id).await.unwrap();
-        assert_eq!(current_stock, 7, "Stock must not change upon failed decrease");
+        let current_stock = inv_service
+            .get_stock(&prod_id, &main_branch_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            current_stock, 7,
+            "Stock must not change upon failed decrease"
+        );
 
         // Verify movement ledger contains 2 records (IN 10, OUT 3)
         let movements = inv_service
@@ -480,7 +541,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_inventory_adjustment_semantics() {
-        let (_db, inv_service, prod_id, main_branch_id, _branch_b_id) = setup_inventory_test().await;
+        let (_db, inv_service, prod_id, main_branch_id, _branch_b_id) =
+            setup_inventory_test().await;
 
         // Increase initial to 20
         inv_service
@@ -570,7 +632,10 @@ mod tests {
                 None,
             )
             .await;
-        assert!(same_branch.is_err(), "Same-branch transfer must be rejected");
+        assert!(
+            same_branch.is_err(),
+            "Same-branch transfer must be rejected"
+        );
 
         // 2. Insufficient source stock transfer rejection
         let over_transfer = inv_service
@@ -586,7 +651,10 @@ mod tests {
                 None,
             )
             .await;
-        assert!(over_transfer.is_err(), "Transfer exceeding available stock must be rejected");
+        assert!(
+            over_transfer.is_err(),
+            "Transfer exceeding available stock must be rejected"
+        );
 
         // 3. Valid atomic transfer: 4 from Main to Branch B
         inv_service
@@ -604,7 +672,10 @@ mod tests {
             .await
             .expect("Transfer should succeed");
 
-        let main_stock = inv_service.get_stock(&prod_id, &main_branch_id).await.unwrap();
+        let main_stock = inv_service
+            .get_stock(&prod_id, &main_branch_id)
+            .await
+            .unwrap();
         let branch_b_stock = inv_service.get_stock(&prod_id, &branch_b_id).await.unwrap();
 
         assert_eq!(main_stock, 16, "Main branch must decrease from 20 to 16");

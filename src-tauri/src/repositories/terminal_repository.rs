@@ -1,6 +1,6 @@
+use chrono::Utc;
 use rusqlite::params;
 use sqlx::PgPool;
-use chrono::Utc;
 use uuid::Uuid;
 
 use crate::db::connection::DatabaseConnection;
@@ -45,7 +45,9 @@ impl SQLiteTerminalRepository {
             .map(Some)
             .or_else(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                other => Err(AppError::Database(format!("Error querying terminal: {other}"))),
+                other => Err(AppError::Database(format!(
+                    "Error querying terminal: {other}"
+                ))),
             })?;
 
         Ok(term_opt)
@@ -77,7 +79,9 @@ impl SQLiteTerminalRepository {
             .map(Some)
             .or_else(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                other => Err(AppError::Database(format!("Error querying current terminal: {other}"))),
+                other => Err(AppError::Database(format!(
+                    "Error querying current terminal: {other}"
+                ))),
             })?;
 
         if let Some(t) = existing {
@@ -188,7 +192,9 @@ impl PostgresTerminalRepository {
                 organization_id: r.get("organization_id"),
                 branch_id: r.get("branch_id"),
                 device_name: r.get("device_name"),
-                code: r.get::<Option<String>, _>("code").unwrap_or_else(|| "T1".to_string()),
+                code: r
+                    .get::<Option<String>, _>("code")
+                    .unwrap_or_else(|| "T1".to_string()),
                 is_active: r.get::<i32, _>("is_active") == 1,
                 is_offline_terminal: r.get::<i32, _>("is_offline_terminal") == 1,
                 registered_centrally: r.get::<i32, _>("registered_centrally") == 1,

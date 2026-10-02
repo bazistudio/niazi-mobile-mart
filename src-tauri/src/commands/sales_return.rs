@@ -13,7 +13,10 @@ pub async fn sales_return_get_returnable(
     sale_id: String,
 ) -> AppResult<SaleReturnableInfoDto> {
     AuthService::require_permission(&state, Some("sales"), None).await?;
-    let info = state.sales_return_service.get_sale_returnable_info(&sale_id).await?;
+    let info = state
+        .sales_return_service
+        .get_sale_returnable_info(&sale_id)
+        .await?;
     AuthService::require_branch_access(&state, Some(&info.branch_id)).await?;
     Ok(info)
 }
@@ -24,7 +27,10 @@ pub async fn sales_return_create(
     dto: CreateSalesReturnDto,
 ) -> AppResult<SalesReturnDetailDto> {
     AuthService::require_permission(&state, Some("sales"), Some("pos:refund")).await?;
-    let info = state.sales_return_service.get_sale_returnable_info(&dto.sale_id).await?;
+    let info = state
+        .sales_return_service
+        .get_sale_returnable_info(&dto.sale_id)
+        .await?;
     AuthService::require_branch_access(&state, Some(&info.branch_id)).await?;
     let user_id = { state.session.read().await.user_id.clone() };
     state
@@ -60,7 +66,10 @@ pub async fn sales_return_list(
         let session = state.get_session().await;
         let is_org_admin = match session.role {
             Some(crate::domain::user::UserRole::Admin) => true,
-            _ => session.access_profile.as_ref().map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+            _ => session
+                .access_profile
+                .as_ref()
+                .map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
         };
         if !is_org_admin {
             Some(authorized_branch)
@@ -80,7 +89,10 @@ pub async fn sales_return_get_by_sale(
     sale_id: String,
 ) -> AppResult<Vec<SalesReturnDetailDto>> {
     AuthService::require_permission(&state, Some("sales"), None).await?;
-    let info = state.sales_return_service.get_sale_returnable_info(&sale_id).await?;
+    let info = state
+        .sales_return_service
+        .get_sale_returnable_info(&sale_id)
+        .await?;
     AuthService::require_branch_access(&state, Some(&info.branch_id)).await?;
     state
         .sales_return_service

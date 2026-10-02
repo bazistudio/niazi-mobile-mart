@@ -1,5 +1,5 @@
-use rusqlite::params;
 use chrono::Utc;
+use rusqlite::params;
 use uuid::Uuid;
 
 use crate::db::connection::DatabaseConnection;
@@ -53,38 +53,46 @@ impl SQLiteSyncQueueRepository {
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14);
         ";
 
-        guard.execute(
-            sql,
-            params![
-                &item.id,
-                &item.client_event_id,
-                &item.terminal_id,
-                &item.organization_id,
-                &item.branch_id,
-                &item.event_type,
-                &item.payload,
-                item.status.as_str(),
-                item.attempt_count,
-                &item.last_error,
-                &item.last_attempt_at,
-                &item.server_event_id,
-                &item.created_at,
-                &item.updated_at,
-            ],
-        ).map_err(|e| {
-            if let rusqlite::Error::SqliteFailure(code, _) = &e {
-                if code.code == rusqlite::ErrorCode::ConstraintViolation {
-                    return AppError::Conflict(format!("Duplicate client_event_id '{}'", client_event_id));
+        guard
+            .execute(
+                sql,
+                params![
+                    &item.id,
+                    &item.client_event_id,
+                    &item.terminal_id,
+                    &item.organization_id,
+                    &item.branch_id,
+                    &item.event_type,
+                    &item.payload,
+                    item.status.as_str(),
+                    item.attempt_count,
+                    &item.last_error,
+                    &item.last_attempt_at,
+                    &item.server_event_id,
+                    &item.created_at,
+                    &item.updated_at,
+                ],
+            )
+            .map_err(|e| {
+                if let rusqlite::Error::SqliteFailure(code, _) = &e {
+                    if code.code == rusqlite::ErrorCode::ConstraintViolation {
+                        return AppError::Conflict(format!(
+                            "Duplicate client_event_id '{}'",
+                            client_event_id
+                        ));
+                    }
                 }
-            }
-            AppError::Database(format!("Failed to enqueue offline event: {e}"))
-        })?;
+                AppError::Database(format!("Failed to enqueue offline event: {e}"))
+            })?;
 
         Ok(item)
     }
 
     /// Enqueues a new offline event directly within an existing SQLite transaction
-    pub fn enqueue_in_tx(tx: &rusqlite::Transaction, dto: EnqueueOfflineEventDto) -> crate::db::errors::DbResult<SyncQueueItem> {
+    pub fn enqueue_in_tx(
+        tx: &rusqlite::Transaction,
+        dto: EnqueueOfflineEventDto,
+    ) -> crate::db::errors::DbResult<SyncQueueItem> {
         let id = Uuid::new_v4().to_string();
         let client_event_id = dto
             .client_event_id
@@ -140,7 +148,10 @@ impl SQLiteSyncQueueRepository {
     }
 
     /// Finds a queue item by unique client_event_id
-    pub async fn get_by_client_event_id(&self, client_event_id: &str) -> AppResult<Option<SyncQueueItem>> {
+    pub async fn get_by_client_event_id(
+        &self,
+        client_event_id: &str,
+    ) -> AppResult<Option<SyncQueueItem>> {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
 
@@ -157,7 +168,9 @@ impl SQLiteSyncQueueRepository {
             .map(Some)
             .or_else(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                other => Err(AppError::Database(format!("Error querying sync queue item: {other}"))),
+                other => Err(AppError::Database(format!(
+                    "Error querying sync queue item: {other}"
+                ))),
             })?;
 
         Ok(item_opt)
@@ -191,7 +204,8 @@ impl SQLiteSyncQueueRepository {
         let now = Utc::now();
         let mut items = Vec::new();
         for r in rows {
-            let item = r.map_err(|e| AppError::Database(format!("Error mapping sync queue item: {e}")))?;
+            let item =
+                r.map_err(|e| AppError::Database(format!("Error mapping sync queue item: {e}")))?;
             if item.is_eligible_for_retry(now) {
                 items.push(item);
                 if items.len() >= limit {
@@ -232,7 +246,9 @@ impl SQLiteSyncQueueRepository {
         };
         let mut final_status = status;
 
-        if final_status == SyncQueueStatus::Pending && new_attempt_count >= crate::domain::sync_queue::MAX_RETRIES {
+        if final_status == SyncQueueStatus::Pending
+            && new_attempt_count >= crate::domain::sync_queue::MAX_RETRIES
+        {
             final_status = SyncQueueStatus::FailedPermanent;
         }
 
@@ -260,7 +276,9 @@ impl SQLiteSyncQueueRepository {
                     client_event_id,
                 ],
             )
-            .map_err(|e| AppError::Database(format!("Failed to update sync queue item status: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to update sync queue item status: {e}"))
+            })?;
 
         Ok(())
     }
@@ -273,7 +291,8 @@ impl SQLiteSyncQueueRepository {
         error: Option<&str>,
         server_event_id: Option<&str>,
     ) -> AppResult<()> {
-        self.update_status_ext(client_event_id, status, error, server_event_id, true).await
+        self.update_status_ext(client_event_id, status, error, server_event_id, true)
+            .await
     }
 
     /// Returns total count of eligible pending items in queue
@@ -341,9 +360,9 @@ impl SQLiteSyncQueueRepository {
             LIMIT ?1;
         ";
 
-        let mut stmt = guard
-            .prepare(sql)
-            .map_err(|e| AppError::Database(format!("Failed to prepare list_conflicts query: {e}")))?;
+        let mut stmt = guard.prepare(sql).map_err(|e| {
+            AppError::Database(format!("Failed to prepare list_conflicts query: {e}"))
+        })?;
 
         let rows = stmt
             .query_map(params![fetch_limit as i64], Self::map_row)
@@ -351,7 +370,8 @@ impl SQLiteSyncQueueRepository {
 
         let mut items = Vec::new();
         for r in rows {
-            let item = r.map_err(|e| AppError::Database(format!("Error mapping sync queue item: {e}")))?;
+            let item =
+                r.map_err(|e| AppError::Database(format!("Error mapping sync queue item: {e}")))?;
             items.push(item);
         }
 
@@ -375,17 +395,22 @@ impl SQLiteSyncQueueRepository {
             LIMIT ?1;
         ";
 
-        let mut stmt = guard
-            .prepare(sql)
-            .map_err(|e| AppError::Database(format!("Failed to prepare list_failed_permanent query: {e}")))?;
+        let mut stmt = guard.prepare(sql).map_err(|e| {
+            AppError::Database(format!(
+                "Failed to prepare list_failed_permanent query: {e}"
+            ))
+        })?;
 
         let rows = stmt
             .query_map(params![fetch_limit as i64], Self::map_row)
-            .map_err(|e| AppError::Database(format!("Query failed permanent sync items failed: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Query failed permanent sync items failed: {e}"))
+            })?;
 
         let mut items = Vec::new();
         for r in rows {
-            let item = r.map_err(|e| AppError::Database(format!("Error mapping sync queue item: {e}")))?;
+            let item =
+                r.map_err(|e| AppError::Database(format!("Error mapping sync queue item: {e}")))?;
             items.push(item);
         }
 
@@ -413,9 +438,9 @@ impl SQLiteSyncQueueRepository {
         let item = guard
             .query_row(sql_select, params![client_event_id], Self::map_row)
             .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    AppError::NotFound(format!("Sync queue item with client_event_id '{client_event_id}' not found"))
-                }
+                rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!(
+                    "Sync queue item with client_event_id '{client_event_id}' not found"
+                )),
                 other => AppError::Database(format!("Error querying sync queue item: {other}")),
             })?;
 
@@ -429,7 +454,8 @@ impl SQLiteSyncQueueRepository {
         // 3. Verify status is exactly FAILED_PERMANENT (or FAILED / max attempt PENDING)
         let is_failed_perm = item.status == SyncQueueStatus::FailedPermanent
             || item.status == SyncQueueStatus::Failed
-            || (item.status == SyncQueueStatus::Pending && item.attempt_count >= crate::domain::sync_queue::MAX_RETRIES);
+            || (item.status == SyncQueueStatus::Pending
+                && item.attempt_count >= crate::domain::sync_queue::MAX_RETRIES);
 
         if !is_failed_perm {
             return Err(AppError::Validation(format!(
@@ -452,12 +478,16 @@ impl SQLiteSyncQueueRepository {
 
         guard
             .execute(sql_update, params![&now, client_event_id, organization_id])
-            .map_err(|e| AppError::Database(format!("Failed to reset sync queue item for retry: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to reset sync queue item for retry: {e}"))
+            })?;
 
         // 5. Query and return updated item
         let updated_item = guard
             .query_row(sql_select, params![client_event_id], Self::map_row)
-            .map_err(|e| AppError::Database(format!("Failed to fetch updated sync queue item: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to fetch updated sync queue item: {e}"))
+            })?;
 
         Ok(updated_item)
     }
@@ -496,11 +526,14 @@ impl PostgresSyncAuditRepository {
 
     /// Checks if a client_event_id has already been processed centrally
     pub async fn find_existing_event_id(&self, client_event_id: &str) -> AppResult<Option<String>> {
-        let row: Option<(String,)> = sqlx::query_as("SELECT id FROM sync_audit WHERE client_event_id = $1")
-            .bind(client_event_id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| AppError::Database(format!("Postgres sync audit query failed: {e}")))?;
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT id FROM sync_audit WHERE client_event_id = $1")
+                .bind(client_event_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| {
+                    AppError::Database(format!("Postgres sync audit query failed: {e}"))
+                })?;
 
         Ok(row.map(|r| r.0))
     }
@@ -510,11 +543,14 @@ impl PostgresSyncAuditRepository {
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         client_event_id: &str,
     ) -> AppResult<Option<String>> {
-        let row: Option<(String,)> = sqlx::query_as("SELECT id FROM sync_audit WHERE client_event_id = $1")
-            .bind(client_event_id)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(|e| AppError::Database(format!("Postgres sync audit tx query failed: {e}")))?;
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT id FROM sync_audit WHERE client_event_id = $1")
+                .bind(client_event_id)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|e| {
+                    AppError::Database(format!("Postgres sync audit tx query failed: {e}"))
+                })?;
 
         Ok(row.map(|r| r.0))
     }
@@ -591,7 +627,10 @@ mod tests {
         };
 
         // 1. Enqueue event
-        let item = repo.enqueue(dto.clone()).await.expect("Enqueue should succeed");
+        let item = repo
+            .enqueue(dto.clone())
+            .await
+            .expect("Enqueue should succeed");
         assert_eq!(item.client_event_id, client_event_id);
         assert_eq!(item.status, SyncQueueStatus::Pending);
         assert_eq!(item.attempt_count, 0);
@@ -603,16 +642,36 @@ mod tests {
 
         // 3. Attempt to insert duplicate client_event_id -> MUST BE REJECTED
         let duplicate_res = repo.enqueue(dto).await;
-        assert!(duplicate_res.is_err(), "Duplicate client_event_id must be rejected");
+        assert!(
+            duplicate_res.is_err(),
+            "Duplicate client_event_id must be rejected"
+        );
 
         // 4. Update status to SYNCING then SYNCED
-        repo.update_status(&client_event_id, SyncQueueStatus::Syncing, None, None).await.unwrap();
-        let item_syncing = repo.get_by_client_event_id(&client_event_id).await.unwrap().unwrap();
+        repo.update_status(&client_event_id, SyncQueueStatus::Syncing, None, None)
+            .await
+            .unwrap();
+        let item_syncing = repo
+            .get_by_client_event_id(&client_event_id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(item_syncing.status, SyncQueueStatus::Syncing);
         assert_eq!(item_syncing.attempt_count, 1);
 
-        repo.update_status(&client_event_id, SyncQueueStatus::Synced, None, Some("SRV-EVT-999")).await.unwrap();
-        let item_synced = repo.get_by_client_event_id(&client_event_id).await.unwrap().unwrap();
+        repo.update_status(
+            &client_event_id,
+            SyncQueueStatus::Synced,
+            None,
+            Some("SRV-EVT-999"),
+        )
+        .await
+        .unwrap();
+        let item_synced = repo
+            .get_by_client_event_id(&client_event_id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(item_synced.status, SyncQueueStatus::Synced);
         assert_eq!(item_synced.server_event_id, Some("SRV-EVT-999".to_string()));
 
@@ -646,35 +705,51 @@ mod tests {
         let id_b = Uuid::new_v4().to_string();
         let id_c = Uuid::new_v4().to_string();
 
-        let evt_a = repo.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(id_a.clone()),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "SALE_CREATED".to_string(),
-            payload: r#"{"id":"A"}"#.to_string(),
-        }).await.unwrap();
+        let evt_a = repo
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(id_a.clone()),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "SALE_CREATED".to_string(),
+                payload: r#"{"id":"A"}"#.to_string(),
+            })
+            .await
+            .unwrap();
 
-        let evt_b = repo.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(id_b.clone()),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "SALE_CREATED".to_string(),
-            payload: r#"{"id":"B"}"#.to_string(),
-        }).await.unwrap();
+        let evt_b = repo
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(id_b.clone()),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "SALE_CREATED".to_string(),
+                payload: r#"{"id":"B"}"#.to_string(),
+            })
+            .await
+            .unwrap();
 
-        let _evt_c = repo.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(id_c.clone()),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "SALE_CREATED".to_string(),
-            payload: r#"{"id":"C"}"#.to_string(),
-        }).await.unwrap();
+        let _evt_c = repo
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(id_c.clone()),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "SALE_CREATED".to_string(),
+                payload: r#"{"id":"C"}"#.to_string(),
+            })
+            .await
+            .unwrap();
 
         // Mark A as CONFLICT
-        repo.update_status(&evt_a.client_event_id, SyncQueueStatus::Conflict, Some("409 Conflict"), None).await.unwrap();
+        repo.update_status(
+            &evt_a.client_event_id,
+            SyncQueueStatus::Conflict,
+            Some("409 Conflict"),
+            None,
+        )
+        .await
+        .unwrap();
 
         // Query pending items -> Must skip A and return B and C
         let pending = repo.get_pending(10).await.unwrap();
@@ -683,7 +758,14 @@ mod tests {
         assert_eq!(pending[1].client_event_id, id_c);
 
         // Mark B as FAILED_PERMANENT
-        repo.update_status(&evt_b.client_event_id, SyncQueueStatus::FailedPermanent, Some("422 Invalid"), None).await.unwrap();
+        repo.update_status(
+            &evt_b.client_event_id,
+            SyncQueueStatus::FailedPermanent,
+            Some("422 Invalid"),
+            None,
+        )
+        .await
+        .unwrap();
 
         // Query pending items -> Must return only C
         let pending_after_b_fail = repo.get_pending(10).await.unwrap();
@@ -713,26 +795,51 @@ mod tests {
         }
 
         let evt_id = Uuid::new_v4().to_string();
-        let evt = repo.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(evt_id.clone()),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "SALE_CREATED".to_string(),
-            payload: r#"{"id":"L"}"#.to_string(),
-        }).await.unwrap();
+        let evt = repo
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(evt_id.clone()),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "SALE_CREATED".to_string(),
+                payload: r#"{"id":"L"}"#.to_string(),
+            })
+            .await
+            .unwrap();
 
         // Update status 9 times with PENDING (simulating 9 failed attempts)
         for i in 1..=9 {
-            repo.update_status(&evt.client_event_id, SyncQueueStatus::Pending, Some("500 Server Error"), None).await.unwrap();
-            let item = repo.get_by_client_event_id(&evt.client_event_id).await.unwrap().unwrap();
+            repo.update_status(
+                &evt.client_event_id,
+                SyncQueueStatus::Pending,
+                Some("500 Server Error"),
+                None,
+            )
+            .await
+            .unwrap();
+            let item = repo
+                .get_by_client_event_id(&evt.client_event_id)
+                .await
+                .unwrap()
+                .unwrap();
             assert_eq!(item.attempt_count, i);
             assert_eq!(item.status, SyncQueueStatus::Pending);
         }
 
         // 10th attempt update -> must transition to FailedPermanent
-        repo.update_status(&evt.client_event_id, SyncQueueStatus::Pending, Some("500 Server Error"), None).await.unwrap();
-        let item_10 = repo.get_by_client_event_id(&evt.client_event_id).await.unwrap().unwrap();
+        repo.update_status(
+            &evt.client_event_id,
+            SyncQueueStatus::Pending,
+            Some("500 Server Error"),
+            None,
+        )
+        .await
+        .unwrap();
+        let item_10 = repo
+            .get_by_client_event_id(&evt.client_event_id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(item_10.attempt_count, 10);
         assert_eq!(item_10.status, SyncQueueStatus::FailedPermanent);
 
@@ -764,17 +871,31 @@ mod tests {
 
         let raw_payload = r#"{"product_id":"prod_100","price":25.50,"items":["a","b"]}"#;
         let evt_id = Uuid::new_v4().to_string();
-        let evt = repo.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(evt_id),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "PRODUCT_CREATED".to_string(),
-            payload: raw_payload.to_string(),
-        }).await.unwrap();
+        let evt = repo
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(evt_id),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "PRODUCT_CREATED".to_string(),
+                payload: raw_payload.to_string(),
+            })
+            .await
+            .unwrap();
 
-        repo.update_status(&evt.client_event_id, SyncQueueStatus::Conflict, Some("409 Conflict"), None).await.unwrap();
-        let fetched = repo.get_by_client_event_id(&evt.client_event_id).await.unwrap().unwrap();
+        repo.update_status(
+            &evt.client_event_id,
+            SyncQueueStatus::Conflict,
+            Some("409 Conflict"),
+            None,
+        )
+        .await
+        .unwrap();
+        let fetched = repo
+            .get_by_client_event_id(&evt.client_event_id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(fetched.payload, raw_payload);
     }
 
@@ -800,20 +921,35 @@ mod tests {
         }
 
         let evt_id = Uuid::new_v4().to_string();
-        let evt = repo1.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(evt_id.clone()),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "EXPENSE_CREATED".to_string(),
-            payload: r#"{"amount":500}"#.to_string(),
-        }).await.unwrap();
+        let evt = repo1
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(evt_id.clone()),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "EXPENSE_CREATED".to_string(),
+                payload: r#"{"amount":500}"#.to_string(),
+            })
+            .await
+            .unwrap();
 
-        repo1.update_status(&evt.client_event_id, SyncQueueStatus::FailedPermanent, Some("403 Forbidden"), None).await.unwrap();
+        repo1
+            .update_status(
+                &evt.client_event_id,
+                SyncQueueStatus::FailedPermanent,
+                Some("403 Forbidden"),
+                None,
+            )
+            .await
+            .unwrap();
 
         // Simulate repository reload by creating a new repository handle to same DB
         let repo2 = SQLiteSyncQueueRepository::new(db.clone());
-        let item = repo2.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
+        let item = repo2
+            .get_by_client_event_id(&evt_id)
+            .await
+            .unwrap()
+            .unwrap();
 
         assert_eq!(item.status, SyncQueueStatus::FailedPermanent);
         assert_eq!(item.attempt_count, 1);
@@ -845,35 +981,58 @@ mod tests {
         let id_failed = Uuid::new_v4().to_string();
         let id_pending = Uuid::new_v4().to_string();
 
-        let _evt_a = repo.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(id_conflict.clone()),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "SALE_CREATED".to_string(),
-            payload: r#"{"id":"CONFLICT"}"#.to_string(),
-        }).await.unwrap();
+        let _evt_a = repo
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(id_conflict.clone()),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "SALE_CREATED".to_string(),
+                payload: r#"{"id":"CONFLICT"}"#.to_string(),
+            })
+            .await
+            .unwrap();
 
-        let _evt_b = repo.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(id_failed.clone()),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "SALE_CREATED".to_string(),
-            payload: r#"{"id":"FAILED"}"#.to_string(),
-        }).await.unwrap();
+        let _evt_b = repo
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(id_failed.clone()),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "SALE_CREATED".to_string(),
+                payload: r#"{"id":"FAILED"}"#.to_string(),
+            })
+            .await
+            .unwrap();
 
-        let _evt_c = repo.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(id_pending.clone()),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "SALE_CREATED".to_string(),
-            payload: r#"{"id":"PENDING"}"#.to_string(),
-        }).await.unwrap();
+        let _evt_c = repo
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(id_pending.clone()),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "SALE_CREATED".to_string(),
+                payload: r#"{"id":"PENDING"}"#.to_string(),
+            })
+            .await
+            .unwrap();
 
-        repo.update_status(&id_conflict, SyncQueueStatus::Conflict, Some("409 Conflict"), None).await.unwrap();
-        repo.update_status(&id_failed, SyncQueueStatus::FailedPermanent, Some("400 Bad Request"), None).await.unwrap();
+        repo.update_status(
+            &id_conflict,
+            SyncQueueStatus::Conflict,
+            Some("409 Conflict"),
+            None,
+        )
+        .await
+        .unwrap();
+        repo.update_status(
+            &id_failed,
+            SyncQueueStatus::FailedPermanent,
+            Some("400 Bad Request"),
+            None,
+        )
+        .await
+        .unwrap();
 
         let conflicts = repo.list_conflicts(10).await.unwrap();
         assert_eq!(conflicts.len(), 1);
@@ -907,16 +1066,26 @@ mod tests {
 
         let evt_id = Uuid::new_v4().to_string();
         let original_payload = r#"{"product_id":"prod_xyz","price":500}"#;
-        let evt = repo.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(evt_id.clone()),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "PRODUCT_CREATED".to_string(),
-            payload: original_payload.to_string(),
-        }).await.unwrap();
+        let evt = repo
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(evt_id.clone()),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "PRODUCT_CREATED".to_string(),
+                payload: original_payload.to_string(),
+            })
+            .await
+            .unwrap();
 
-        repo.update_status(&evt.client_event_id, SyncQueueStatus::FailedPermanent, Some("422 Invalid Payload"), None).await.unwrap();
+        repo.update_status(
+            &evt.client_event_id,
+            SyncQueueStatus::FailedPermanent,
+            Some("422 Invalid Payload"),
+            None,
+        )
+        .await
+        .unwrap();
         let failed_item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
         assert_eq!(failed_item.status, SyncQueueStatus::FailedPermanent);
         assert_eq!(failed_item.attempt_count, 1);
@@ -968,50 +1137,83 @@ mod tests {
         let id_conflict = Uuid::new_v4().to_string();
         let id_synced = Uuid::new_v4().to_string();
 
-        let _evt_p = repo.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(id_pending.clone()),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "SALE_CREATED".to_string(),
-            payload: r#"{}"#.to_string(),
-        }).await.unwrap();
+        let _evt_p = repo
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(id_pending.clone()),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "SALE_CREATED".to_string(),
+                payload: r#"{}"#.to_string(),
+            })
+            .await
+            .unwrap();
 
-        let _evt_c = repo.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(id_conflict.clone()),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "SALE_CREATED".to_string(),
-            payload: r#"{}"#.to_string(),
-        }).await.unwrap();
+        let _evt_c = repo
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(id_conflict.clone()),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "SALE_CREATED".to_string(),
+                payload: r#"{}"#.to_string(),
+            })
+            .await
+            .unwrap();
 
-        let _evt_s = repo.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(id_synced.clone()),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "SALE_CREATED".to_string(),
-            payload: r#"{}"#.to_string(),
-        }).await.unwrap();
+        let _evt_s = repo
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(id_synced.clone()),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "SALE_CREATED".to_string(),
+                payload: r#"{}"#.to_string(),
+            })
+            .await
+            .unwrap();
 
-        repo.update_status(&id_conflict, SyncQueueStatus::Conflict, Some("409 Conflict"), None).await.unwrap();
-        repo.update_status(&id_synced, SyncQueueStatus::Synced, None, Some("SRV-1")).await.unwrap();
+        repo.update_status(
+            &id_conflict,
+            SyncQueueStatus::Conflict,
+            Some("409 Conflict"),
+            None,
+        )
+        .await
+        .unwrap();
+        repo.update_status(&id_synced, SyncQueueStatus::Synced, None, Some("SRV-1"))
+            .await
+            .unwrap();
 
         // 1. Retry PENDING -> Must be rejected
-        let res_p = repo.reset_failed_permanent_for_retry(&id_pending, NIAZI_ORGANIZATION_ID).await;
+        let res_p = repo
+            .reset_failed_permanent_for_retry(&id_pending, NIAZI_ORGANIZATION_ID)
+            .await;
         assert!(res_p.is_err());
-        assert!(res_p.unwrap_err().to_string().contains("is not FAILED_PERMANENT"));
+        assert!(res_p
+            .unwrap_err()
+            .to_string()
+            .contains("is not FAILED_PERMANENT"));
 
         // 2. Retry CONFLICT -> Must be rejected
-        let res_c = repo.reset_failed_permanent_for_retry(&id_conflict, NIAZI_ORGANIZATION_ID).await;
+        let res_c = repo
+            .reset_failed_permanent_for_retry(&id_conflict, NIAZI_ORGANIZATION_ID)
+            .await;
         assert!(res_c.is_err());
-        assert!(res_c.unwrap_err().to_string().contains("is not FAILED_PERMANENT"));
+        assert!(res_c
+            .unwrap_err()
+            .to_string()
+            .contains("is not FAILED_PERMANENT"));
 
         // 3. Retry SYNCED -> Must be rejected
-        let res_s = repo.reset_failed_permanent_for_retry(&id_synced, NIAZI_ORGANIZATION_ID).await;
+        let res_s = repo
+            .reset_failed_permanent_for_retry(&id_synced, NIAZI_ORGANIZATION_ID)
+            .await;
         assert!(res_s.is_err());
-        assert!(res_s.unwrap_err().to_string().contains("is not FAILED_PERMANENT"));
+        assert!(res_s
+            .unwrap_err()
+            .to_string()
+            .contains("is not FAILED_PERMANENT"));
     }
 
     #[tokio::test]
@@ -1036,21 +1238,36 @@ mod tests {
         }
 
         let evt_id = Uuid::new_v4().to_string();
-        let _evt = repo.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(evt_id.clone()),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "SALE_CREATED".to_string(),
-            payload: r#"{}"#.to_string(),
-        }).await.unwrap();
+        let _evt = repo
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(evt_id.clone()),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "SALE_CREATED".to_string(),
+                payload: r#"{}"#.to_string(),
+            })
+            .await
+            .unwrap();
 
-        repo.update_status(&evt_id, SyncQueueStatus::FailedPermanent, Some("403 Forbidden"), None).await.unwrap();
+        repo.update_status(
+            &evt_id,
+            SyncQueueStatus::FailedPermanent,
+            Some("403 Forbidden"),
+            None,
+        )
+        .await
+        .unwrap();
 
         // Cross-org retry attempt must be rejected with Forbidden error
-        let res_other_org = repo.reset_failed_permanent_for_retry(&evt_id, "other_org_uuid").await;
+        let res_other_org = repo
+            .reset_failed_permanent_for_retry(&evt_id, "other_org_uuid")
+            .await;
         assert!(res_other_org.is_err());
-        assert!(res_other_org.unwrap_err().to_string().contains("Cross-organization retry prohibited"));
+        assert!(res_other_org
+            .unwrap_err()
+            .to_string()
+            .contains("Cross-organization retry prohibited"));
     }
 
     /// SYNC-H6 regression: dependency failures must consume the retry budget.
@@ -1079,26 +1296,48 @@ mod tests {
         }
 
         let evt_id = Uuid::new_v4().to_string();
-        let _evt = repo.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(evt_id.clone()),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "SALE_CREATED".to_string(),
-            payload: r#"{"id":"SALE_DEP_WAIT"}"#.to_string(),
-        }).await.unwrap();
+        let _evt = repo
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(evt_id.clone()),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "SALE_CREATED".to_string(),
+                payload: r#"{"id":"SALE_DEP_WAIT"}"#.to_string(),
+            })
+            .await
+            .unwrap();
 
         // SYNC-H6 fix: dependency failures now pass increment_attempt=true.
         // Each call increments attempt_count; at crate::domain::sync_queue::MAX_RETRIES the item becomes
         // FailedPermanent automatically inside update_status_ext.
         for attempt in 1..=crate::domain::sync_queue::MAX_RETRIES {
-            repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some("422 DEPENDENCY_NOT_FOUND"), None, true).await.unwrap();
+            repo.update_status_ext(
+                &evt_id,
+                SyncQueueStatus::Pending,
+                Some("422 DEPENDENCY_NOT_FOUND"),
+                None,
+                true,
+            )
+            .await
+            .unwrap();
             let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
-            assert_eq!(item.attempt_count, attempt, "attempt_count should be {attempt} after {attempt} dependency failures");
+            assert_eq!(
+                item.attempt_count, attempt,
+                "attempt_count should be {attempt} after {attempt} dependency failures"
+            );
             if attempt < crate::domain::sync_queue::MAX_RETRIES {
-                assert_eq!(item.status, SyncQueueStatus::Pending, "should remain Pending before limit");
+                assert_eq!(
+                    item.status,
+                    SyncQueueStatus::Pending,
+                    "should remain Pending before limit"
+                );
             } else {
-                assert_eq!(item.status, SyncQueueStatus::FailedPermanent, "should become FailedPermanent at limit");
+                assert_eq!(
+                    item.status,
+                    SyncQueueStatus::FailedPermanent,
+                    "should become FailedPermanent at limit"
+                );
             }
         }
 
@@ -1128,19 +1367,30 @@ mod tests {
         }
 
         let evt_id = Uuid::new_v4().to_string();
-        let _evt = repo.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(evt_id.clone()),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "SALE_CREATED".to_string(),
-            payload: r#"{"id":"SALE_RESOLVED"}"#.to_string(),
-        }).await.unwrap();
+        let _evt = repo
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(evt_id.clone()),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "SALE_CREATED".to_string(),
+                payload: r#"{"id":"SALE_RESOLVED"}"#.to_string(),
+            })
+            .await
+            .unwrap();
 
         // SYNC-H6 fix: dependency failures now increment attempt_count.
         // 5 dependency retries (well below crate::domain::sync_queue::MAX_RETRIES=10) all remain Pending.
         for attempt in 1..=5 {
-            repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some("422 DEPENDENCY_NOT_FOUND"), None, true).await.unwrap();
+            repo.update_status_ext(
+                &evt_id,
+                SyncQueueStatus::Pending,
+                Some("422 DEPENDENCY_NOT_FOUND"),
+                None,
+                true,
+            )
+            .await
+            .unwrap();
             let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
             assert_eq!(item.attempt_count, attempt);
             assert_eq!(item.status, SyncQueueStatus::Pending);
@@ -1148,10 +1398,21 @@ mod tests {
 
         // Dependency resolves before limit — sale syncs successfully.
         // Synced writes increment_attempt=false; attempt_count stays at 5.
-        repo.update_status_ext(&evt_id, SyncQueueStatus::Synced, None, Some("SRV-999"), false).await.unwrap();
+        repo.update_status_ext(
+            &evt_id,
+            SyncQueueStatus::Synced,
+            None,
+            Some("SRV-999"),
+            false,
+        )
+        .await
+        .unwrap();
         let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
         assert_eq!(item.status, SyncQueueStatus::Synced);
-        assert_eq!(item.attempt_count, 5, "attempt_count reflects dependency retries consumed");
+        assert_eq!(
+            item.attempt_count, 5,
+            "attempt_count reflects dependency retries consumed"
+        );
         assert_eq!(item.server_event_id, Some("SRV-999".to_string()));
     }
 
@@ -1182,27 +1443,54 @@ mod tests {
         }
 
         let evt_id = Uuid::new_v4().to_string();
-        let _evt = repo.enqueue(EnqueueOfflineEventDto {
-            client_event_id: Some(evt_id.clone()),
-            terminal_id: terminal_id.clone(),
-            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-            event_type: "SALE_CREATED".to_string(),
-            payload: r#"{"id":"SALE_OFFLINE"}"#.to_string(),
-        }).await.unwrap();
+        let _evt = repo
+            .enqueue(EnqueueOfflineEventDto {
+                client_event_id: Some(evt_id.clone()),
+                terminal_id: terminal_id.clone(),
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                event_type: "SALE_CREATED".to_string(),
+                payload: r#"{"id":"SALE_OFFLINE"}"#.to_string(),
+            })
+            .await
+            .unwrap();
 
         // SYNC-H7 fix: network failures now pass increment_attempt=true.
         // First crate::domain::sync_queue::MAX_RETRIES-1 failures stay Pending; the crate::domain::sync_queue::MAX_RETRIES-th becomes FailedPermanent.
         for attempt in 1..=crate::domain::sync_queue::MAX_RETRIES {
-            repo.update_status_ext(&evt_id, SyncQueueStatus::Pending, Some("Server unreachable: connection refused"), None, true).await.unwrap();
+            repo.update_status_ext(
+                &evt_id,
+                SyncQueueStatus::Pending,
+                Some("Server unreachable: connection refused"),
+                None,
+                true,
+            )
+            .await
+            .unwrap();
             let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
-            assert_eq!(item.attempt_count, attempt, "attempt_count should be {attempt} after {attempt} network failures");
+            assert_eq!(
+                item.attempt_count, attempt,
+                "attempt_count should be {attempt} after {attempt} network failures"
+            );
             if attempt < crate::domain::sync_queue::MAX_RETRIES {
-                assert_eq!(item.status, SyncQueueStatus::Pending, "should remain Pending before limit");
+                assert_eq!(
+                    item.status,
+                    SyncQueueStatus::Pending,
+                    "should remain Pending before limit"
+                );
             } else {
-                assert_eq!(item.status, SyncQueueStatus::FailedPermanent, "should become FailedPermanent at limit");
-                assert!(item.last_error.as_deref().unwrap_or("").contains("Server unreachable"),
-                    "error text must identify this as a network failure");
+                assert_eq!(
+                    item.status,
+                    SyncQueueStatus::FailedPermanent,
+                    "should become FailedPermanent at limit"
+                );
+                assert!(
+                    item.last_error
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("Server unreachable"),
+                    "error text must identify this as a network failure"
+                );
             }
         }
 
@@ -1237,7 +1525,11 @@ mod tests {
         (repo, terminal_id)
     }
 
-    async fn enqueue_event(repo: &SQLiteSyncQueueRepository, terminal_id: &str, event_type: &str) -> String {
+    async fn enqueue_event(
+        repo: &SQLiteSyncQueueRepository,
+        terminal_id: &str,
+        event_type: &str,
+    ) -> String {
         let id = Uuid::new_v4().to_string();
         repo.enqueue(EnqueueOfflineEventDto {
             client_event_id: Some(id.clone()),
@@ -1246,7 +1538,9 @@ mod tests {
             branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
             event_type: event_type.to_string(),
             payload: r#"{"test":true}"#.to_string(),
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
         id
     }
 
@@ -1264,12 +1558,19 @@ mod tests {
             .unwrap();
 
         let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
-        assert_eq!(item.status, SyncQueueStatus::Pending,
-            "M4-T01: HTTP 409 must NOT mark event as Conflict — must remain Pending");
-        assert_eq!(item.attempt_count, 1,
-            "M4-T01: attempt_count must be incremented for retry tracking");
-        assert!(item.last_error.as_deref().unwrap_or("").contains("409"),
-            "M4-T01: error note must reference 409");
+        assert_eq!(
+            item.status,
+            SyncQueueStatus::Pending,
+            "M4-T01: HTTP 409 must NOT mark event as Conflict — must remain Pending"
+        );
+        assert_eq!(
+            item.attempt_count, 1,
+            "M4-T01: attempt_count must be incremented for retry tracking"
+        );
+        assert!(
+            item.last_error.as_deref().unwrap_or("").contains("409"),
+            "M4-T01: error note must reference 409"
+        );
     }
 
     /// M4-T02: Multiple events in one batch receive HTTP 409.
@@ -1290,10 +1591,17 @@ mod tests {
 
         for (label, id) in &[("A", &evt_a), ("B", &evt_b), ("C", &evt_c)] {
             let item = repo.get_by_client_event_id(id).await.unwrap().unwrap();
-            assert_eq!(item.status, SyncQueueStatus::Pending,
-                "M4-T02: event {} must NOT be Conflict after batch HTTP 409", label);
-            assert_eq!(item.attempt_count, 1,
-                "M4-T02: event {} attempt_count must be 1", label);
+            assert_eq!(
+                item.status,
+                SyncQueueStatus::Pending,
+                "M4-T02: event {} must NOT be Conflict after batch HTTP 409",
+                label
+            );
+            assert_eq!(
+                item.attempt_count, 1,
+                "M4-T02: event {} attempt_count must be 1",
+                label
+            );
         }
 
         // All three must still be fetchable as pending in the database (though subject to backoff)
@@ -1301,10 +1609,18 @@ mod tests {
         {
             let conn_arc = repo.db.inner();
             let guard = conn_arc.lock().await;
-            total_pending_in_db = guard.query_row("SELECT COUNT(*) FROM offline_sync_queue WHERE status = 'PENDING'", [], |r| r.get(0)).unwrap();
+            total_pending_in_db = guard
+                .query_row(
+                    "SELECT COUNT(*) FROM offline_sync_queue WHERE status = 'PENDING'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
         }
-        assert_eq!(total_pending_in_db, 3,
-            "M4-T02: all 3 events must remain in the pending retry queue");
+        assert_eq!(
+            total_pending_in_db, 3,
+            "M4-T02: all 3 events must remain in the pending retry queue"
+        );
     }
 
     /// M4-T03: Repeated HTTP 409 exhausts bounded retry budget.
@@ -1322,8 +1638,12 @@ mod tests {
                 .await
                 .unwrap();
             let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
-            assert_eq!(item.status, SyncQueueStatus::Pending,
-                "M4-T03: event must remain Pending after {} attempts", i);
+            assert_eq!(
+                item.status,
+                SyncQueueStatus::Pending,
+                "M4-T03: event must remain Pending after {} attempts",
+                i
+            );
         }
 
         // The MAX_RETRIES-th increment must promote to FailedPermanent
@@ -1331,13 +1651,18 @@ mod tests {
             .await
             .unwrap();
         let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
-        assert_eq!(item.status, SyncQueueStatus::FailedPermanent,
-            "M4-T03: event must be FailedPermanent after MAX_RETRIES 409 responses");
+        assert_eq!(
+            item.status,
+            SyncQueueStatus::FailedPermanent,
+            "M4-T03: event must be FailedPermanent after MAX_RETRIES 409 responses"
+        );
 
         // Must no longer appear in the pending queue
         let pending = repo.get_pending(50).await.unwrap();
-        assert!(pending.is_empty(),
-            "M4-T03: exhausted event must not appear in pending queue");
+        assert!(
+            pending.is_empty(),
+            "M4-T03: exhausted event must not appear in pending queue"
+        );
     }
 
     /// M4-T04: Per-event CONFLICT from a normal HTTP 200 results array must
@@ -1349,19 +1674,29 @@ mod tests {
         let evt_id = enqueue_event(&repo, &terminal_id, "PRODUCT_CREATED").await;
 
         // Simulate the HTTP 200 per-event CONFLICT path (unchanged by M4 fix)
-        repo.update_status_ext(&evt_id, SyncQueueStatus::Conflict, Some("CONFLICT: newer version exists"), None, false)
-            .await
-            .unwrap();
+        repo.update_status_ext(
+            &evt_id,
+            SyncQueueStatus::Conflict,
+            Some("CONFLICT: newer version exists"),
+            None,
+            false,
+        )
+        .await
+        .unwrap();
 
         let item = repo.get_by_client_event_id(&evt_id).await.unwrap().unwrap();
         assert_eq!(item.status, SyncQueueStatus::Conflict,
             "M4-T04: per-event CONFLICT from HTTP 200 results must remain SyncQueueStatus::Conflict");
-        assert_eq!(item.attempt_count, 0,
-            "M4-T04: per-event CONFLICT must not increment attempt_count (increment_attempt=false)");
+        assert_eq!(
+            item.attempt_count, 0,
+            "M4-T04: per-event CONFLICT must not increment attempt_count (increment_attempt=false)"
+        );
 
         // Must NOT appear in pending queue (Conflict is not Pending)
         let pending = repo.get_pending(50).await.unwrap();
-        assert!(pending.is_empty(),
-            "M4-T04: Conflict status event must not be in pending retry queue");
+        assert!(
+            pending.is_empty(),
+            "M4-T04: Conflict status event must not be in pending retry queue"
+        );
     }
 }

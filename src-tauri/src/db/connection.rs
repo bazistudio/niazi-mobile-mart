@@ -1,7 +1,7 @@
+use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use rusqlite::Connection;
 use tokio::sync::Mutex;
 use tracing::info;
 
@@ -19,8 +19,9 @@ impl DatabaseConnection {
     pub fn open_file(path: impl AsRef<Path>) -> DbResult<Self> {
         let path_ref = path.as_ref();
         if let Some(parent) = path_ref.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| DbError::ConnectionError(format!("Failed to create database directory: {e}")))?;
+            std::fs::create_dir_all(parent).map_err(|e| {
+                DbError::ConnectionError(format!("Failed to create database directory: {e}"))
+            })?;
         }
 
         let mut attempts = 0;
@@ -115,7 +116,10 @@ impl DatabaseConnection {
 
             if !canonical_path.exists() {
                 // Check legacy paths to preserve existing user databases without data loss
-                let legacy_path_1 = app_data.join("bazistudio.niazimobilemart").join("data").join("niazi_local.db");
+                let legacy_path_1 = app_data
+                    .join("bazistudio.niazimobilemart")
+                    .join("data")
+                    .join("niazi_local.db");
                 let legacy_path_2 = PathBuf::from("./niazi_local.db");
 
                 let legacy_to_migrate = if legacy_path_1.exists() {
@@ -129,10 +133,19 @@ impl DatabaseConnection {
                 if let Some(legacy_path) = legacy_to_migrate {
                     if std::fs::create_dir_all(&canonical_dir).is_ok() {
                         if let Err(e) = std::fs::copy(&legacy_path, &canonical_path) {
-                            info!("Failed to copy legacy database from {} to {}: {}", legacy_path.display(), canonical_path.display(), e);
+                            info!(
+                                "Failed to copy legacy database from {} to {}: {}",
+                                legacy_path.display(),
+                                canonical_path.display(),
+                                e
+                            );
                             return legacy_path;
                         } else {
-                            info!("Successfully migrated legacy database from {} to {}", legacy_path.display(), canonical_path.display());
+                            info!(
+                                "Successfully migrated legacy database from {} to {}",
+                                legacy_path.display(),
+                                canonical_path.display()
+                            );
                         }
                     }
                 }
@@ -168,10 +181,14 @@ mod tests {
         let conn = db.inner();
         let guard = conn.lock().await;
 
-        let fk: i64 = guard.query_row("PRAGMA foreign_keys;", [], |r| r.get(0)).unwrap();
+        let fk: i64 = guard
+            .query_row("PRAGMA foreign_keys;", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(fk, 1, "Foreign keys must be enabled");
 
-        let busy: i64 = guard.query_row("PRAGMA busy_timeout;", [], |r| r.get(0)).unwrap();
+        let busy: i64 = guard
+            .query_row("PRAGMA busy_timeout;", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(busy, 5000, "Busy timeout must be 5000ms");
     }
 }

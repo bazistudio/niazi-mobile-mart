@@ -39,7 +39,9 @@ impl SaleService {
             sale_repo: SaleRepository::SQLite(SQLiteSaleRepository::new(db.clone())),
             customer_repo: CustomerRepository::SQLite(SQLiteCustomerRepository::new(db.clone())),
             product_repo: ProductRepository::SQLite(SQLiteProductRepository::new(db.clone())),
-            branch_repo: BranchRepository::SQLite(crate::repositories::SQLiteBranchRepository::new(db.clone())),
+            branch_repo: BranchRepository::SQLite(
+                crate::repositories::SQLiteBranchRepository::new(db.clone()),
+            ),
             db: Some(db),
         }
     }
@@ -47,7 +49,9 @@ impl SaleService {
     pub fn new_postgres(pool: sqlx::PgPool) -> Self {
         Self {
             sale_repo: SaleRepository::Postgres(PostgresSaleRepository::new(pool.clone())),
-            customer_repo: CustomerRepository::Postgres(PostgresCustomerRepository::new(pool.clone())),
+            customer_repo: CustomerRepository::Postgres(PostgresCustomerRepository::new(
+                pool.clone(),
+            )),
             product_repo: ProductRepository::Postgres(PostgresProductRepository::new(pool.clone())),
             branch_repo: BranchRepository::Postgres(PostgresBranchRepository::new(pool)),
             db: None,
@@ -61,7 +65,9 @@ impl SaleService {
         dto: CompleteSaleDto,
     ) -> AppResult<SaleResultDto> {
         if dto.items.is_empty() {
-            return Err(AppError::Validation("Cannot complete sale with empty cart".to_string()));
+            return Err(AppError::Validation(
+                "Cannot complete sale with empty cart".to_string(),
+            ));
         }
 
         if let SaleRepository::Postgres(pg_repo) = &self.sale_repo {
@@ -71,7 +77,11 @@ impl SaleService {
         // 1. Resolve Branch ID and Branch Code
         // branch_code is used in invoice number generation (B07 collision fix).
         let (branch_id, branch_code) = {
-            let raw_bid = dto.branch_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            let raw_bid = dto
+                .branch_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
             match raw_bid {
                 Some(bid) => {
                     // Branch ID provided — look it up to get the code
@@ -99,8 +109,13 @@ impl SaleService {
         if let Some(ref cid) = dto.customer_id {
             let cid_trim = cid.trim();
             if !cid_trim.is_empty() && cid_trim != "walk-in" {
-                let customer = self.customer_repo.get_customer_by_id(cid_trim).await?
-                    .ok_or_else(|| AppError::NotFound(format!("Customer '{cid_trim}' not found")))?;
+                let customer = self
+                    .customer_repo
+                    .get_customer_by_id(cid_trim)
+                    .await?
+                    .ok_or_else(|| {
+                        AppError::NotFound(format!("Customer '{cid_trim}' not found"))
+                    })?;
 
                 if !customer.is_active {
                     return Err(AppError::Validation(format!(
@@ -128,10 +143,15 @@ impl SaleService {
 
         for item in &dto.items {
             if item.quantity <= 0 {
-                return Err(AppError::Validation("Item quantity must be greater than 0".to_string()));
+                return Err(AppError::Validation(
+                    "Item quantity must be greater than 0".to_string(),
+                ));
             }
 
-            let product = self.product_repo.get_product_by_id(&item.product_id).await?;
+            let product = self
+                .product_repo
+                .get_product_by_id(&item.product_id)
+                .await?;
             if !product.is_active {
                 return Err(AppError::Validation(format!(
                     "Product '{}' is inactive. Cannot complete sale.",
@@ -194,7 +214,8 @@ impl SaleService {
 
         if tender_inputs.is_empty() {
             let legacy_amount = dto.paid_amount.unwrap_or(total_amount).max(0);
-            let legacy_method = normalize_payment_method(dto.payment_method.as_deref().unwrap_or("CASH"));
+            let legacy_method =
+                normalize_payment_method(dto.payment_method.as_deref().unwrap_or("CASH"));
             if legacy_method != "CREDIT" && legacy_amount > 0 {
                 tender_inputs.push(TenderInput {
                     method: legacy_method,
@@ -207,18 +228,19 @@ impl SaleService {
 
         let total_tendered: i64 = tender_inputs.iter().map(|t| t.amount).sum();
 
-        let (recorded_paid, change_amount, credit_amount, payment_status) = if total_tendered >= total_amount {
-            let change = total_tendered - total_amount;
-            (total_amount, change, 0, PaymentStatus::Paid)
-        } else {
-            let credit = total_amount - total_tendered;
-            let status = if total_tendered > 0 {
-                PaymentStatus::PartiallyPaid
+        let (recorded_paid, change_amount, credit_amount, payment_status) =
+            if total_tendered >= total_amount {
+                let change = total_tendered - total_amount;
+                (total_amount, change, 0, PaymentStatus::Paid)
             } else {
-                PaymentStatus::Unpaid
+                let credit = total_amount - total_tendered;
+                let status = if total_tendered > 0 {
+                    PaymentStatus::PartiallyPaid
+                } else {
+                    PaymentStatus::Unpaid
+                };
+                (total_tendered, 0, credit, status)
             };
-            (total_tendered, 0, credit, status)
-        };
 
         // 5. Enforce credit sale constraint: Credit sales MUST have a registered active customer
         if credit_amount > 0 && customer_opt.is_none() {
@@ -235,7 +257,8 @@ impl SaleService {
         let uid = user_id.map(|s| s.to_string());
         let notes_cloned = dto.notes.clone();
 
-        let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(self.db.as_ref().unwrap().clone());
+        let terminal_repo =
+            crate::repositories::SQLiteTerminalRepository::new(self.db.as_ref().unwrap().clone());
         let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
         let terminal_id = current_terminal.id.clone();
         let terminal_code = current_terminal.code.clone();
@@ -249,7 +272,10 @@ impl SaleService {
         };
 
         // 6. Execute Atomic SQLite Checkout Transaction
-        let db = self.db.as_ref().expect("SQLite database connection required");
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
         let result = with_transaction(db, move |tx| {
             // A. Validate stock availability for all lines
             for line in &prepared_lines {
@@ -499,7 +525,13 @@ mod tests {
     use crate::services::inventory_service::InventoryService;
     use crate::services::product_service::ProductService;
 
-    async fn setup_test_environment() -> (DatabaseConnection, SaleService, CustomerService, ProductService, InventoryService) {
+    async fn setup_test_environment() -> (
+        DatabaseConnection,
+        SaleService,
+        CustomerService,
+        ProductService,
+        InventoryService,
+    ) {
         let db = DatabaseConnection::open_in_memory().expect("in-memory db");
         {
             let conn_arc = db.inner();
@@ -518,7 +550,13 @@ mod tests {
         let product_service = ProductService::new(db.clone());
         let inventory_service = InventoryService::new(db.clone());
 
-        (db, sale_service, customer_service, product_service, inventory_service)
+        (
+            db,
+            sale_service,
+            customer_service,
+            product_service,
+            inventory_service,
+        )
     }
 
     async fn seed_test_catalog_and_stock(
@@ -572,7 +610,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_walkin_cash_sale_full_flow() {
-        let (db, sale_service, _, product_service, inventory_service) = setup_test_environment().await;
+        let (db, sale_service, _, product_service, inventory_service) =
+            setup_test_environment().await;
         let product_id = seed_test_catalog_and_stock(&db, &product_service).await;
 
         // Walk-in customer buys 2 chargers for Rs 2,000 cash
@@ -601,12 +640,26 @@ mod tests {
         // The billing month is dynamic (Asia/Karachi time), so we assert on structure.
         let inv = &sale_res.sale.invoice_number;
         let parts: Vec<&str> = inv.splitn(4, '-').collect();
-        assert_eq!(parts.len(), 4, "B07 invoice must have 4 dash-separated parts: {inv}");
+        assert_eq!(
+            parts.len(),
+            4,
+            "B07 invoice must have 4 dash-separated parts: {inv}"
+        );
         assert_eq!(parts[0], "MAIN", "Branch code must be MAIN: {inv}");
         assert_eq!(parts[1], "T1", "Terminal code must be T1: {inv}");
-        assert_eq!(parts[2].len(), 6, "Billing month must be 6 digits (YYYYMM): {inv}");
-        assert!(parts[2].parse::<u32>().is_ok(), "Billing month must be numeric: {inv}");
-        assert_eq!(parts[3], "000001", "First invoice sequence must be 000001: {inv}");
+        assert_eq!(
+            parts[2].len(),
+            6,
+            "Billing month must be 6 digits (YYYYMM): {inv}"
+        );
+        assert!(
+            parts[2].parse::<u32>().is_ok(),
+            "Billing month must be numeric: {inv}"
+        );
+        assert_eq!(
+            parts[3], "000001",
+            "First invoice sequence must be 000001: {inv}"
+        );
         assert_eq!(sale_res.sale.customer_id, None);
         assert_eq!(sale_res.sale.customer_name_snapshot, None);
         assert_eq!(sale_res.sale.total_amount, 2000);
@@ -626,15 +679,21 @@ mod tests {
             let conn_arc = db.inner();
             let guard = conn_arc.lock().await;
             let ledger_count: i64 = guard
-                .query_row("SELECT count(*) FROM customer_ledger_entries", [], |r| r.get(0))
+                .query_row("SELECT count(*) FROM customer_ledger_entries", [], |r| {
+                    r.get(0)
+                })
                 .unwrap();
-            assert_eq!(ledger_count, 0, "Walk-in cash sale must produce zero customer ledger entries");
+            assert_eq!(
+                ledger_count, 0,
+                "Walk-in cash sale must produce zero customer ledger entries"
+            );
         }
     }
 
     #[tokio::test]
     async fn test_registered_customer_cash_sale() {
-        let (db, sale_service, customer_service, product_service, inventory_service) = setup_test_environment().await;
+        let (db, sale_service, customer_service, product_service, inventory_service) =
+            setup_test_environment().await;
         let product_id = seed_test_catalog_and_stock(&db, &product_service).await;
 
         let customer = customer_service
@@ -673,7 +732,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(sale_res.sale.customer_id, Some(customer.id.clone()));
-        assert_eq!(sale_res.sale.customer_name_snapshot, Some("Zahid Qureshi".to_string()));
+        assert_eq!(
+            sale_res.sale.customer_name_snapshot,
+            Some("Zahid Qureshi".to_string())
+        );
         assert_eq!(sale_res.sale.payment_status, PaymentStatus::Paid);
         assert_eq!(sale_res.credit_amount, 0);
 
@@ -691,7 +753,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_credit_sale_and_credit_limit_enforcement() {
-        let (db, sale_service, customer_service, product_service, inventory_service) = setup_test_environment().await;
+        let (db, sale_service, customer_service, product_service, inventory_service) =
+            setup_test_environment().await;
         let product_id = seed_test_catalog_and_stock(&db, &product_service).await;
 
         // Customer with credit limit of Rs 10,000
@@ -770,7 +833,10 @@ mod tests {
             )
             .await;
 
-        assert!(exceed_err.is_err(), "Sale exceeding credit limit must be rejected");
+        assert!(
+            exceed_err.is_err(),
+            "Sale exceeding credit limit must be rejected"
+        );
 
         // Verify complete rollback: stock is STILL 10, balance is STILL 6,000
         let stock_after_rollback = inventory_service
@@ -802,7 +868,10 @@ mod tests {
                 },
             )
             .await;
-        assert!(walkin_credit_err.is_err(), "Credit sale for walk-in customer must be rejected");
+        assert!(
+            walkin_credit_err.is_err(),
+            "Credit sale for walk-in customer must be rejected"
+        );
 
         // 4. Reject sale with insufficient stock
         let stock_err = sale_service
@@ -824,12 +893,16 @@ mod tests {
                 },
             )
             .await;
-        assert!(stock_err.is_err(), "Sale with insufficient stock must be rejected");
+        assert!(
+            stock_err.is_err(),
+            "Sale with insufficient stock must be rejected"
+        );
     }
 
     #[tokio::test]
     async fn test_customer_payment_allocation_across_multiple_sales() {
-        let (db, sale_service, customer_service, product_service, _) = setup_test_environment().await;
+        let (db, sale_service, customer_service, product_service, _) =
+            setup_test_environment().await;
         let product_id = seed_test_catalog_and_stock(&db, &product_service).await;
 
         let customer = customer_service
@@ -924,11 +997,19 @@ mod tests {
         assert_eq!(pay_res.allocated_sales[1].payment_status, "PARTIALLY_PAID");
 
         // Verify sales in DB
-        let s1_updated = sale_service.get_sale_by_id(&s1.sale.id).await.unwrap().unwrap();
+        let s1_updated = sale_service
+            .get_sale_by_id(&s1.sale.id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(s1_updated.paid_amount, 5000);
         assert_eq!(s1_updated.payment_status, PaymentStatus::Paid);
 
-        let s2_updated = sale_service.get_sale_by_id(&s2.sale.id).await.unwrap().unwrap();
+        let s2_updated = sale_service
+            .get_sale_by_id(&s2.sale.id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(s2_updated.paid_amount, 1000);
         assert_eq!(s2_updated.payment_status, PaymentStatus::PartiallyPaid);
 
@@ -939,7 +1020,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_target_3_multi_payment_contract_and_accounting() {
-        let (db, sale_service, customer_service, product_service, _) = setup_test_environment().await;
+        let (db, sale_service, customer_service, product_service, _) =
+            setup_test_environment().await;
         let product_id = seed_test_catalog_and_stock(&db, &product_service).await;
 
         let customer = customer_service
@@ -962,13 +1044,20 @@ mod tests {
                 CompleteSaleDto {
                     branch_id: None,
                     customer_id: None,
-                    items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 1, discount: None }],
+                    items: vec![SaleItemDto {
+                        product_id: product_id.clone(),
+                        quantity: 1,
+                        discount: None,
+                    }],
                     discount: None,
                     paid_amount: None,
                     payment_method: None,
-                    payments: Some(vec![
-                        crate::domain::sales::SalePaymentInputDto { method: "cash".to_string(), amount: 1000, reference_number: None, notes: None }
-                    ]),
+                    payments: Some(vec![crate::domain::sales::SalePaymentInputDto {
+                        method: "cash".to_string(),
+                        amount: 1000,
+                        reference_number: None,
+                        notes: None,
+                    }]),
                     notes: None,
                 },
             )
@@ -986,7 +1075,11 @@ mod tests {
             let conn_arc = db.inner();
             let guard = conn_arc.lock().await;
             let cash_mv_amt: i64 = guard
-                .query_row("SELECT amount FROM cash_movements WHERE reference_id = ?1", rusqlite::params![s1.sale.id], |r| r.get(0))
+                .query_row(
+                    "SELECT amount FROM cash_movements WHERE reference_id = ?1",
+                    rusqlite::params![s1.sale.id],
+                    |r| r.get(0),
+                )
                 .unwrap();
             assert_eq!(cash_mv_amt, 1000);
         }
@@ -998,13 +1091,20 @@ mod tests {
                 CompleteSaleDto {
                     branch_id: None,
                     customer_id: None,
-                    items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 1, discount: None }],
+                    items: vec![SaleItemDto {
+                        product_id: product_id.clone(),
+                        quantity: 1,
+                        discount: None,
+                    }],
                     discount: None,
                     paid_amount: None,
                     payment_method: None,
-                    payments: Some(vec![
-                        crate::domain::sales::SalePaymentInputDto { method: "card".to_string(), amount: 1000, reference_number: Some("REF123".to_string()), notes: None }
-                    ]),
+                    payments: Some(vec![crate::domain::sales::SalePaymentInputDto {
+                        method: "card".to_string(),
+                        amount: 1000,
+                        reference_number: Some("REF123".to_string()),
+                        notes: None,
+                    }]),
                     notes: None,
                 },
             )
@@ -1020,7 +1120,11 @@ mod tests {
             let conn_arc = db.inner();
             let guard = conn_arc.lock().await;
             let count: i64 = guard
-                .query_row("SELECT count(*) FROM cash_movements WHERE reference_id = ?1", rusqlite::params![s2.sale.id], |r| r.get(0))
+                .query_row(
+                    "SELECT count(*) FROM cash_movements WHERE reference_id = ?1",
+                    rusqlite::params![s2.sale.id],
+                    |r| r.get(0),
+                )
                 .unwrap();
             assert_eq!(count, 0);
         }
@@ -1032,14 +1136,33 @@ mod tests {
                 CompleteSaleDto {
                     branch_id: None,
                     customer_id: None,
-                    items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 3, discount: None }], // 3000 total
+                    items: vec![SaleItemDto {
+                        product_id: product_id.clone(),
+                        quantity: 3,
+                        discount: None,
+                    }], // 3000 total
                     discount: None,
                     paid_amount: None,
                     payment_method: None,
                     payments: Some(vec![
-                        crate::domain::sales::SalePaymentInputDto { method: "bank".to_string(), amount: 1000, reference_number: None, notes: None },
-                        crate::domain::sales::SalePaymentInputDto { method: "easypaisa".to_string(), amount: 1000, reference_number: None, notes: None },
-                        crate::domain::sales::SalePaymentInputDto { method: "jazzcash".to_string(), amount: 1000, reference_number: None, notes: None },
+                        crate::domain::sales::SalePaymentInputDto {
+                            method: "bank".to_string(),
+                            amount: 1000,
+                            reference_number: None,
+                            notes: None,
+                        },
+                        crate::domain::sales::SalePaymentInputDto {
+                            method: "easypaisa".to_string(),
+                            amount: 1000,
+                            reference_number: None,
+                            notes: None,
+                        },
+                        crate::domain::sales::SalePaymentInputDto {
+                            method: "jazzcash".to_string(),
+                            amount: 1000,
+                            reference_number: None,
+                            notes: None,
+                        },
                     ]),
                     notes: None,
                 },
@@ -1058,13 +1181,20 @@ mod tests {
                 CompleteSaleDto {
                     branch_id: None,
                     customer_id: Some(customer.id.clone()),
-                    items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 2, discount: None }], // 2000 total
+                    items: vec![SaleItemDto {
+                        product_id: product_id.clone(),
+                        quantity: 2,
+                        discount: None,
+                    }], // 2000 total
                     discount: None,
                     paid_amount: None,
                     payment_method: None,
-                    payments: Some(vec![
-                        crate::domain::sales::SalePaymentInputDto { method: "cash".to_string(), amount: 800, reference_number: None, notes: None }
-                    ]),
+                    payments: Some(vec![crate::domain::sales::SalePaymentInputDto {
+                        method: "cash".to_string(),
+                        amount: 800,
+                        reference_number: None,
+                        notes: None,
+                    }]),
                     notes: None,
                 },
             )
@@ -1075,14 +1205,21 @@ mod tests {
         assert_eq!(s_cash_credit.payments[0].amount, 800);
         assert_eq!(s_cash_credit.sale.paid_amount, 800);
         assert_eq!(s_cash_credit.credit_amount, 1200);
-        assert_eq!(s_cash_credit.sale.payment_status, PaymentStatus::PartiallyPaid);
+        assert_eq!(
+            s_cash_credit.sale.payment_status,
+            PaymentStatus::PartiallyPaid
+        );
 
         // Customer ledger must record debit = 1200
         {
             let conn_arc = db.inner();
             let guard = conn_arc.lock().await;
             let debit: i64 = guard
-                .query_row("SELECT debit FROM customer_ledger_entries WHERE reference_id = ?1", rusqlite::params![s_cash_credit.sale.id], |r| r.get(0))
+                .query_row(
+                    "SELECT debit FROM customer_ledger_entries WHERE reference_id = ?1",
+                    rusqlite::params![s_cash_credit.sale.id],
+                    |r| r.get(0),
+                )
                 .unwrap();
             assert_eq!(debit, 1200);
         }
@@ -1094,13 +1231,27 @@ mod tests {
                 CompleteSaleDto {
                     branch_id: None,
                     customer_id: None,
-                    items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 2, discount: None }], // 2000 total
+                    items: vec![SaleItemDto {
+                        product_id: product_id.clone(),
+                        quantity: 2,
+                        discount: None,
+                    }], // 2000 total
                     discount: None,
                     paid_amount: None,
                     payment_method: None,
                     payments: Some(vec![
-                        crate::domain::sales::SalePaymentInputDto { method: "cash".to_string(), amount: 800, reference_number: None, notes: None },
-                        crate::domain::sales::SalePaymentInputDto { method: "bank".to_string(), amount: 1200, reference_number: None, notes: None },
+                        crate::domain::sales::SalePaymentInputDto {
+                            method: "cash".to_string(),
+                            amount: 800,
+                            reference_number: None,
+                            notes: None,
+                        },
+                        crate::domain::sales::SalePaymentInputDto {
+                            method: "bank".to_string(),
+                            amount: 1200,
+                            reference_number: None,
+                            notes: None,
+                        },
                     ]),
                     notes: None,
                 },
@@ -1118,7 +1269,11 @@ mod tests {
             let conn_arc = db.inner();
             let guard = conn_arc.lock().await;
             let cash_mv_amt: i64 = guard
-                .query_row("SELECT amount FROM cash_movements WHERE reference_id = ?1", rusqlite::params![s_cash_bank.sale.id], |r| r.get(0))
+                .query_row(
+                    "SELECT amount FROM cash_movements WHERE reference_id = ?1",
+                    rusqlite::params![s_cash_bank.sale.id],
+                    |r| r.get(0),
+                )
                 .unwrap();
             assert_eq!(cash_mv_amt, 800);
         }
@@ -1130,13 +1285,20 @@ mod tests {
                 CompleteSaleDto {
                     branch_id: None,
                     customer_id: None,
-                    items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 1, discount: None }], // 1000 total
+                    items: vec![SaleItemDto {
+                        product_id: product_id.clone(),
+                        quantity: 1,
+                        discount: None,
+                    }], // 1000 total
                     discount: None,
                     paid_amount: None,
                     payment_method: None,
-                    payments: Some(vec![
-                        crate::domain::sales::SalePaymentInputDto { method: "cash".to_string(), amount: 1500, reference_number: None, notes: None }
-                    ]),
+                    payments: Some(vec![crate::domain::sales::SalePaymentInputDto {
+                        method: "cash".to_string(),
+                        amount: 1500,
+                        reference_number: None,
+                        notes: None,
+                    }]),
                     notes: None,
                 },
             )
@@ -1152,7 +1314,11 @@ mod tests {
             let conn_arc = db.inner();
             let guard = conn_arc.lock().await;
             let cash_mv_amt: i64 = guard
-                .query_row("SELECT amount FROM cash_movements WHERE reference_id = ?1", rusqlite::params![s_overpay.sale.id], |r| r.get(0))
+                .query_row(
+                    "SELECT amount FROM cash_movements WHERE reference_id = ?1",
+                    rusqlite::params![s_overpay.sale.id],
+                    |r| r.get(0),
+                )
                 .unwrap();
             assert_eq!(cash_mv_amt, 1000); // Capped at sale allocation 1000!
         }
@@ -1167,7 +1333,11 @@ mod tests {
                 CompleteSaleDto {
                     branch_id: None,
                     customer_id: None,
-                    items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 1, discount: None }], // 1000 total
+                    items: vec![SaleItemDto {
+                        product_id: product_id.clone(),
+                        quantity: 1,
+                        discount: None,
+                    }], // 1000 total
                     discount: None,
                     paid_amount: Some(1000),
                     payment_method: Some("card".to_string()),

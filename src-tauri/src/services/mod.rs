@@ -38,4 +38,3 @@ pub use sale_service::SaleService;
 pub use sales_return_service::SalesReturnService;
 pub use supplier_service::SupplierService;
 pub use terminal_service::TerminalService;
-

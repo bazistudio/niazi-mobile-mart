@@ -46,7 +46,9 @@ impl SalesRefundMethod {
     pub fn from_str(s: &str) -> Result<Self, String> {
         match s.to_uppercase().as_str() {
             "CASH" => Ok(SalesRefundMethod::Cash),
-            "CUSTOMER_CREDIT" | "CUSTOMER_ACCOUNT" | "CREDIT" => Ok(SalesRefundMethod::CustomerCredit),
+            "CUSTOMER_CREDIT" | "CUSTOMER_ACCOUNT" | "CREDIT" => {
+                Ok(SalesRefundMethod::CustomerCredit)
+            }
             other => Err(format!("Unknown sales refund method: {other}")),
         }
     }

@@ -25,11 +25,14 @@ impl SQLiteSyncCursorRepository {
         let guard = conn_arc.lock().await;
 
         let sql = "SELECT last_applied_sequence FROM sync_cursors WHERE stream_name = ?1 AND organization_id = ?2";
-        let seq: Result<i64, _> = guard.query_row(sql, params![stream_name, organization_id], |r| r.get(0));
+        let seq: Result<i64, _> =
+            guard.query_row(sql, params![stream_name, organization_id], |r| r.get(0));
         match seq {
             Ok(s) => Ok(s),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0),
-            Err(e) => Err(AppError::Database(format!("Failed to get sync cursor: {e}"))),
+            Err(e) => Err(AppError::Database(format!(
+                "Failed to get sync cursor: {e}"
+            ))),
         }
     }
 

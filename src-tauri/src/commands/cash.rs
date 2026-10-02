@@ -14,10 +14,14 @@ pub async fn cash_session_open(
     mut dto: OpenCashSessionDto,
 ) -> AppResult<CashSession> {
     AuthService::require_permission(&state, Some("cash_management"), None).await?;
-    let authorized_branch = AuthService::require_branch_access(&state, dto.branch_id.as_deref()).await?;
+    let authorized_branch =
+        AuthService::require_branch_access(&state, dto.branch_id.as_deref()).await?;
     dto.branch_id = Some(authorized_branch);
     let session = state.get_session().await;
-    state.cash_service.open_session(session.user_id.as_deref(), dto).await
+    state
+        .cash_service
+        .open_session(session.user_id.as_deref(), dto)
+        .await
 }
 
 #[tauri::command]
@@ -26,8 +30,12 @@ pub async fn cash_session_get_current(
     branch_id: Option<String>,
 ) -> AppResult<Option<CashSession>> {
     AuthService::require_permission(&state, Some("cash_management"), None).await?;
-    let authorized_branch = AuthService::require_branch_access(&state, branch_id.as_deref()).await?;
-    state.cash_service.get_current_session(Some(&authorized_branch)).await
+    let authorized_branch =
+        AuthService::require_branch_access(&state, branch_id.as_deref()).await?;
+    state
+        .cash_service
+        .get_current_session(Some(&authorized_branch))
+        .await
 }
 
 #[tauri::command]
@@ -49,8 +57,12 @@ pub async fn cash_session_list(
     offset: Option<i64>,
 ) -> AppResult<Vec<CashSession>> {
     AuthService::require_permission(&state, Some("cash_management"), None).await?;
-    let authorized_branch = AuthService::require_branch_access(&state, branch_id.as_deref()).await?;
-    state.cash_service.list_sessions(Some(&authorized_branch), limit, offset).await
+    let authorized_branch =
+        AuthService::require_branch_access(&state, branch_id.as_deref()).await?;
+    state
+        .cash_service
+        .list_sessions(Some(&authorized_branch), limit, offset)
+        .await
 }
 
 #[tauri::command]
@@ -59,10 +71,16 @@ pub async fn cash_session_close(
     dto: CloseCashSessionDto,
 ) -> AppResult<CashSession> {
     AuthService::require_permission(&state, Some("cash_management"), None).await?;
-    let cash_session = state.cash_service.get_session_by_id(&dto.session_id).await?;
+    let cash_session = state
+        .cash_service
+        .get_session_by_id(&dto.session_id)
+        .await?;
     AuthService::require_branch_access(&state, Some(&cash_session.branch_id)).await?;
     let session = state.get_session().await;
-    state.cash_service.close_session(session.user_id.as_deref(), dto).await
+    state
+        .cash_service
+        .close_session(session.user_id.as_deref(), dto)
+        .await
 }
 
 #[tauri::command]
@@ -71,10 +89,14 @@ pub async fn cash_adjustment_create(
     mut dto: CreateCashAdjustmentDto,
 ) -> AppResult<CashMovement> {
     AuthService::require_permission(&state, Some("cash_management"), None).await?;
-    let authorized_branch = AuthService::require_branch_access(&state, dto.branch_id.as_deref()).await?;
+    let authorized_branch =
+        AuthService::require_branch_access(&state, dto.branch_id.as_deref()).await?;
     dto.branch_id = Some(authorized_branch);
     let session = state.get_session().await;
-    state.cash_service.create_adjustment(session.user_id.as_deref(), dto).await
+    state
+        .cash_service
+        .create_adjustment(session.user_id.as_deref(), dto)
+        .await
 }
 
 #[tauri::command]
@@ -91,7 +113,10 @@ pub async fn cash_movement_list(
             let session = state.get_session().await;
             let is_org_admin = match session.role {
                 Some(crate::domain::user::UserRole::Admin) => true,
-                _ => session.access_profile.as_ref().map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+                _ => session
+                    .access_profile
+                    .as_ref()
+                    .map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
             };
             if !is_org_admin {
                 f.branch_id = Some(authorized_branch);
@@ -108,6 +133,10 @@ pub async fn cash_get_daily_summary(
     date: Option<String>,
 ) -> AppResult<DailyCashSummaryDto> {
     AuthService::require_permission(&state, Some("cash_management"), None).await?;
-    let authorized_branch = AuthService::require_branch_access(&state, branch_id.as_deref()).await?;
-    state.cash_service.get_daily_summary(Some(&authorized_branch), date.as_deref()).await
+    let authorized_branch =
+        AuthService::require_branch_access(&state, branch_id.as_deref()).await?;
+    state
+        .cash_service
+        .get_daily_summary(Some(&authorized_branch), date.as_deref())
+        .await
 }

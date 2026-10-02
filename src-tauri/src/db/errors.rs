@@ -1,5 +1,5 @@
-use thiserror::Error;
 use crate::errors::AppError;
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum DbError {
@@ -37,15 +37,21 @@ impl From<rusqlite::Error> for DbError {
                 let details = msg.as_deref().unwrap_or("no details");
 
                 // SQLITE_BUSY = 5, SQLITE_LOCKED = 6
-                if code == rusqlite::ErrorCode::DatabaseBusy || code == rusqlite::ErrorCode::DatabaseLocked {
+                if code == rusqlite::ErrorCode::DatabaseBusy
+                    || code == rusqlite::ErrorCode::DatabaseLocked
+                {
                     DbError::DatabaseLocked(format!("Database busy ({extended}): {details}"))
                 } else if code == rusqlite::ErrorCode::ConstraintViolation {
-                    DbError::ConstraintViolation(format!("Constraint violation ({extended}): {details}"))
+                    DbError::ConstraintViolation(format!(
+                        "Constraint violation ({extended}): {details}"
+                    ))
                 } else {
                     DbError::QueryError(format!("SQLite error ({code:?}/{extended}): {details}"))
                 }
             }
-            rusqlite::Error::QueryReturnedNoRows => DbError::NotFound("No rows returned".to_string()),
+            rusqlite::Error::QueryReturnedNoRows => {
+                DbError::NotFound("No rows returned".to_string())
+            }
             _ => DbError::QueryError(err.to_string()),
         }
     }

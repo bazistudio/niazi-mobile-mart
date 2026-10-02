@@ -1,4 +1,3 @@
-pub mod auth_snapshot_repo;
 pub mod branch_repository;
 pub mod cash_repository;
 pub mod catalog_repository;
@@ -13,8 +12,8 @@ pub mod purchase_return_repository;
 pub mod sale_repository;
 pub mod sales_return_repository;
 pub mod sqlite_user_repo;
-pub mod sync_queue_repository;
 pub mod supplier_repository;
+pub mod sync_queue_repository;
 pub mod terminal_repository;
 pub mod user_repository;
 
@@ -37,13 +36,16 @@ pub mod postgres_user_repo;
 pub mod postgres_change_log_repo;
 pub mod sqlite_sync_cursor_repo;
 
-pub use auth_snapshot_repo::SQLiteAuthSnapshotRepository;
 pub use postgres_change_log_repo::PostgresChangeLogRepository;
 pub use sqlite_sync_cursor_repo::SQLiteSyncCursorRepository;
 pub use sync_queue_repository::{PostgresSyncAuditRepository, SQLiteSyncQueueRepository};
-pub use terminal_repository::{PostgresTerminalRepository, SQLiteTerminalRepository, TerminalRepository};
+pub use terminal_repository::{
+    PostgresTerminalRepository, SQLiteTerminalRepository, TerminalRepository,
+};
 
-pub use branch_repository::{BranchRepository as SQLiteBranchRepository, OrganizationDashboardStats};
+pub use branch_repository::{
+    BranchRepository as SQLiteBranchRepository, OrganizationDashboardStats,
+};
 pub use cash_repository::SQLiteCashRepository;
 pub use catalog_repository::SQLiteCatalogRepository;
 pub use customer_repository::SQLiteCustomerRepository;
@@ -76,17 +78,15 @@ pub use postgres_sales_return_repo::PostgresSalesReturnRepository;
 pub use postgres_supplier_repo::PostgresSupplierRepository;
 pub use postgres_user_repo::PostgresUserRepository;
 
-use crate::domain::cash::{
-    CloseCashSessionDto, CreateCashAdjustmentDto, OpenCashSessionDto,
-};
+use crate::domain::cash::{CloseCashSessionDto, CreateCashAdjustmentDto, OpenCashSessionDto};
 use crate::domain::catalog::{
     Brand, Category, Color, Company, CreateBrandDto, CreateCategoryDto, CreateColorDto,
     CreateCompanyDto, CreateQualityDto, CreateUnitDto, Quality, Unit, UpdateBrandDto,
     UpdateCategoryDto, UpdateColorDto, UpdateCompanyDto, UpdateQualityDto, UpdateUnitDto,
 };
 use crate::domain::customer::{
-    Customer, CustomerDetailDto, CustomerFilter, CustomerLedgerEntry,
-    CustomerStatementDto, CustomerSummaryDto, UpdateCustomerDto,
+    Customer, CustomerDetailDto, CustomerFilter, CustomerLedgerEntry, CustomerStatementDto,
+    CustomerSummaryDto, UpdateCustomerDto,
 };
 use crate::domain::expense::{
     CreateExpenseCategoryDto, CreateExpenseDto, Expense, ExpenseCategory, ExpenseFilterDto,
@@ -98,18 +98,14 @@ use crate::domain::inventory::{
 use crate::domain::organization::Branch;
 use crate::domain::product::{CreateProductDto, Product, ProductFilter, UpdateProductDto};
 use crate::domain::profit::DashboardProfitSummaryDto;
+use crate::domain::purchase_return::{CreatePurchaseReturnDto, PurchaseReturnDetailDto};
 use crate::domain::purchases::{
     CompletePurchaseDto, Purchase, PurchaseFilterDto, PurchaseLine, PurchaseResultDto,
-};
-use crate::domain::purchase_return::{
-    CreatePurchaseReturnDto, PurchaseReturnDetailDto,
 };
 use crate::domain::sales::{
     CompleteSaleDto, Sale, SaleFilterDto, SaleLine, SalePayment, SaleResultDto,
 };
-use crate::domain::sales_return::{
-    CreateSalesReturnDto, SalesReturnDetailDto,
-};
+use crate::domain::sales_return::{CreateSalesReturnDto, SalesReturnDetailDto};
 use crate::domain::supplier::{
     Supplier, SupplierDetailDto, SupplierFilter, SupplierLedgerEntry, SupplierSummaryDto,
     UpdateSupplierDto,
@@ -188,8 +184,14 @@ impl UserRepository {
         new_login_key_hash: &str,
     ) -> AppResult<()> {
         match self {
-            Self::SQLite(r) => r.consume_recovery_key_and_reset_password(user_id, new_login_key_hash).await,
-            Self::Postgres(r) => r.consume_recovery_key_and_reset_password(user_id, new_login_key_hash).await,
+            Self::SQLite(r) => {
+                r.consume_recovery_key_and_reset_password(user_id, new_login_key_hash)
+                    .await
+            }
+            Self::Postgres(r) => {
+                r.consume_recovery_key_and_reset_password(user_id, new_login_key_hash)
+                    .await
+            }
         }
     }
 
@@ -243,7 +245,9 @@ impl BranchRepository {
         }
     }
 
-    pub async fn get_dashboard_balances(&self) -> AppResult<crate::domain::organization::DashboardBalancesDto> {
+    pub async fn get_dashboard_balances(
+        &self,
+    ) -> AppResult<crate::domain::organization::DashboardBalancesDto> {
         match self {
             Self::SQLite(r) => r.get_dashboard_balances().await,
             Self::Postgres(r) => r.get_dashboard_balances().await,
@@ -534,7 +538,9 @@ impl InventoryRepository {
         user_id: Option<&str>,
     ) -> AppResult<i64> {
         match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite uses db transaction in service".into())),
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
+                "SQLite uses db transaction in service".into(),
+            )),
             Self::Postgres(r) => r.increase_stock(dto, user_id).await,
         }
     }
@@ -545,7 +551,9 @@ impl InventoryRepository {
         user_id: Option<&str>,
     ) -> AppResult<i64> {
         match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite uses db transaction in service".into())),
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
+                "SQLite uses db transaction in service".into(),
+            )),
             Self::Postgres(r) => r.decrease_stock(dto, user_id).await,
         }
     }
@@ -556,7 +564,9 @@ impl InventoryRepository {
         user_id: Option<&str>,
     ) -> AppResult<i64> {
         match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite uses db transaction in service".into())),
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
+                "SQLite uses db transaction in service".into(),
+            )),
             Self::Postgres(r) => r.adjust_stock(dto, user_id).await,
         }
     }
@@ -567,7 +577,9 @@ impl InventoryRepository {
         user_id: Option<&str>,
     ) -> AppResult<()> {
         match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite uses db transaction in service".into())),
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
+                "SQLite uses db transaction in service".into(),
+            )),
             Self::Postgres(r) => r.transfer_stock(dto, user_id).await,
         }
     }
@@ -694,7 +706,9 @@ pub enum SupplierRepository {
 impl SupplierRepository {
     pub async fn create_supplier(&self, supplier: &Supplier) -> AppResult<Supplier> {
         match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite create_supplier handled via transaction".into())),
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
+                "SQLite create_supplier handled via transaction".into(),
+            )),
             Self::Postgres(r) => r.create_supplier(supplier).await,
         }
     }
@@ -720,10 +734,7 @@ impl SupplierRepository {
         }
     }
 
-    pub async fn list(
-        &self,
-        filter: Option<SupplierFilter>,
-    ) -> AppResult<Vec<SupplierSummaryDto>> {
+    pub async fn list(&self, filter: Option<SupplierFilter>) -> AppResult<Vec<SupplierSummaryDto>> {
         match self {
             Self::SQLite(r) => r.list(filter).await,
             Self::Postgres(r) => r.list_suppliers(&filter.unwrap_or_default()).await,
@@ -756,10 +767,15 @@ impl SupplierRepository {
         }
     }
 
-    pub async fn get_statement(&self, supplier_id: &str) -> AppResult<crate::domain::supplier::SupplierStatementDto> {
+    pub async fn get_statement(
+        &self,
+        supplier_id: &str,
+    ) -> AppResult<crate::domain::supplier::SupplierStatementDto> {
         match self {
             Self::SQLite(r) => r.get_statement(supplier_id).await,
-            Self::Postgres(_) => Err(crate::errors::AppError::Internal("Postgres supplier statement not implemented".into())),
+            Self::Postgres(_) => Err(crate::errors::AppError::Internal(
+                "Postgres supplier statement not implemented".into(),
+            )),
         }
     }
 
@@ -784,7 +800,9 @@ impl SaleRepository {
         user_id: Option<&str>,
     ) -> AppResult<SaleResultDto> {
         match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite uses db transaction in service".into())),
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
+                "SQLite uses db transaction in service".into(),
+            )),
             Self::Postgres(r) => r.complete_sale(dto, user_id).await,
         }
     }
@@ -838,7 +856,9 @@ impl PurchaseRepository {
         user_id: Option<&str>,
     ) -> AppResult<PurchaseResultDto> {
         match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite uses db transaction in service".into())),
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
+                "SQLite uses db transaction in service".into(),
+            )),
             Self::Postgres(r) => r.complete_purchase(dto, user_id).await,
         }
     }
@@ -885,7 +905,9 @@ impl CashRepository {
         user_id: Option<&str>,
     ) -> AppResult<crate::domain::cash::CashSession> {
         match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite open_session handled in CashService transaction".into())),
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
+                "SQLite open_session handled in CashService transaction".into(),
+            )),
             Self::Postgres(r) => r.open_session(dto, user_id).await,
         }
     }
@@ -896,19 +918,27 @@ impl CashRepository {
         user_id: Option<&str>,
     ) -> AppResult<crate::domain::cash::CashSession> {
         match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite close_session handled in CashService transaction".into())),
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
+                "SQLite close_session handled in CashService transaction".into(),
+            )),
             Self::Postgres(r) => r.close_session(dto, user_id).await,
         }
     }
 
-    pub async fn get_open_session(&self, branch_id: &str) -> AppResult<Option<crate::domain::cash::CashSession>> {
+    pub async fn get_open_session(
+        &self,
+        branch_id: &str,
+    ) -> AppResult<Option<crate::domain::cash::CashSession>> {
         match self {
             Self::SQLite(r) => r.get_open_session(branch_id).await,
             Self::Postgres(r) => r.get_open_session(branch_id).await,
         }
     }
 
-    pub async fn get_session_by_id(&self, id: &str) -> AppResult<Option<crate::domain::cash::CashSession>> {
+    pub async fn get_session_by_id(
+        &self,
+        id: &str,
+    ) -> AppResult<Option<crate::domain::cash::CashSession>> {
         match self {
             Self::SQLite(r) => r.get_session_by_id(id).await,
             Self::Postgres(r) => r.get_session_by_id(id).await,
@@ -921,7 +951,9 @@ impl CashRepository {
         user_id: Option<&str>,
     ) -> AppResult<crate::domain::cash::CashMovement> {
         match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite record_movement handled in CashService transaction".into())),
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
+                "SQLite record_movement handled in CashService transaction".into(),
+            )),
             Self::Postgres(r) => r.record_movement(dto, user_id).await,
         }
     }
@@ -933,14 +965,18 @@ impl CashRepository {
         limit: Option<i64>,
     ) -> AppResult<Vec<crate::domain::cash::CashMovement>> {
         match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite get_movements handled via list_movements".into())),
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
+                "SQLite get_movements handled via list_movements".into(),
+            )),
             Self::Postgres(r) => r.get_movements(branch_id, session_id, limit).await,
         }
     }
 
     pub async fn calculate_branch_balance(&self, branch_id: &str) -> AppResult<i64> {
         match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite calculate_branch_balance not applicable".into())),
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
+                "SQLite calculate_branch_balance not applicable".into(),
+            )),
             Self::Postgres(r) => r.calculate_branch_balance(branch_id).await,
         }
     }
@@ -958,7 +994,9 @@ impl ExpenseRepository {
         dto: &CreateExpenseCategoryDto,
     ) -> AppResult<ExpenseCategory> {
         match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite create_category requires ExpenseCategory entity".into())),
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
+                "SQLite create_category requires ExpenseCategory entity".into(),
+            )),
             Self::Postgres(r) => r.create_category(dto).await,
         }
     }
@@ -976,7 +1014,9 @@ impl ExpenseRepository {
         user_id: Option<&str>,
     ) -> AppResult<Expense> {
         match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite uses db transaction in service".into())),
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
+                "SQLite uses db transaction in service".into(),
+            )),
             Self::Postgres(r) => r.create_expense(dto, user_id).await,
         }
     }
@@ -1009,7 +1049,9 @@ impl SalesReturnRepository {
         user_id: Option<&str>,
     ) -> AppResult<SalesReturnDetailDto> {
         match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite uses db transaction in service".into())),
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
+                "SQLite uses db transaction in service".into(),
+            )),
             Self::Postgres(r) => r.process_return(dto, user_id).await,
         }
     }
@@ -1017,7 +1059,9 @@ impl SalesReturnRepository {
     pub async fn get_by_id(&self, id: &str) -> AppResult<Option<SalesReturnDetailDto>> {
         match self {
             Self::SQLite(r) => r.get_by_id(id).await,
-            Self::Postgres(_) => Err(crate::errors::AppError::Internal("Postgres get_by_id not implemented".into())),
+            Self::Postgres(_) => Err(crate::errors::AppError::Internal(
+                "Postgres get_by_id not implemented".into(),
+            )),
         }
     }
 
@@ -1028,7 +1072,9 @@ impl SalesReturnRepository {
     ) -> AppResult<Vec<SalesReturnDetailDto>> {
         match self {
             Self::SQLite(r) => r.list_sales_returns(branch_id, limit).await,
-            Self::Postgres(_) => Err(crate::errors::AppError::Internal("Postgres list_sales_returns not implemented".into())),
+            Self::Postgres(_) => Err(crate::errors::AppError::Internal(
+                "Postgres list_sales_returns not implemented".into(),
+            )),
         }
     }
 }
@@ -1046,7 +1092,9 @@ impl PurchaseReturnRepository {
         user_id: Option<&str>,
     ) -> AppResult<PurchaseReturnDetailDto> {
         match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite uses db transaction in service".into())),
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
+                "SQLite uses db transaction in service".into(),
+            )),
             Self::Postgres(r) => r.process_return(dto, user_id).await,
         }
     }
@@ -1054,7 +1102,9 @@ impl PurchaseReturnRepository {
     pub async fn get_by_id(&self, id: &str) -> AppResult<Option<PurchaseReturnDetailDto>> {
         match self {
             Self::SQLite(r) => r.get_by_id(id).await,
-            Self::Postgres(_) => Err(crate::errors::AppError::Internal("Postgres get_by_id not implemented".into())),
+            Self::Postgres(_) => Err(crate::errors::AppError::Internal(
+                "Postgres get_by_id not implemented".into(),
+            )),
         }
     }
 
@@ -1065,7 +1115,9 @@ impl PurchaseReturnRepository {
     ) -> AppResult<Vec<PurchaseReturnDetailDto>> {
         match self {
             Self::SQLite(r) => r.list_purchase_returns(branch_id, limit).await,
-            Self::Postgres(_) => Err(crate::errors::AppError::Internal("Postgres list_purchase_returns not implemented".into())),
+            Self::Postgres(_) => Err(crate::errors::AppError::Internal(
+                "Postgres list_purchase_returns not implemented".into(),
+            )),
         }
     }
 }

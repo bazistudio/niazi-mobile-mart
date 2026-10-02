@@ -13,7 +13,8 @@ pub async fn sale_complete(
     mut dto: CompleteSaleDto,
 ) -> AppResult<SaleResultDto> {
     AuthService::require_permission(&state, Some("pos"), Some("pos:sale")).await?;
-    let authorized_branch = AuthService::require_branch_access(&state, dto.branch_id.as_deref()).await?;
+    let authorized_branch =
+        AuthService::require_branch_access(&state, dto.branch_id.as_deref()).await?;
     dto.branch_id = Some(authorized_branch);
     let session = state.get_session().await;
     state
@@ -23,10 +24,7 @@ pub async fn sale_complete(
 }
 
 #[tauri::command]
-pub async fn sale_get_by_id(
-    state: State<'_, AppState>,
-    id: String,
-) -> AppResult<Option<Sale>> {
+pub async fn sale_get_by_id(state: State<'_, AppState>, id: String) -> AppResult<Option<Sale>> {
     AuthService::require_permission(&state, Some("pos"), None).await?;
     let sale = state.sale_service.get_sale_by_id(&id).await?;
     if let Some(ref s) = sale {
@@ -41,7 +39,10 @@ pub async fn sale_get_by_invoice(
     invoice_number: String,
 ) -> AppResult<Option<Sale>> {
     AuthService::require_permission(&state, Some("pos"), None).await?;
-    let sale = state.sale_service.get_sale_by_invoice(&invoice_number).await?;
+    let sale = state
+        .sale_service
+        .get_sale_by_invoice(&invoice_number)
+        .await?;
     if let Some(ref s) = sale {
         AuthService::require_branch_access(&state, Some(&s.branch_id)).await?;
     }
@@ -63,16 +64,16 @@ pub async fn sale_list(
         let session = state.get_session().await;
         let is_org_admin = match session.role {
             Some(crate::domain::user::UserRole::Admin) => true,
-            _ => session.access_profile.as_ref().map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
+            _ => session
+                .access_profile
+                .as_ref()
+                .map_or(false, |p| p.allowed_pages.iter().any(|pg| pg == "*")),
         };
         if !is_org_admin {
             f.branch_id = Some(authorized_branch);
         }
     }
-    state
-        .sale_service
-        .list_sales(f)
-        .await
+    state.sale_service.list_sales(f).await
 }
 
 #[tauri::command]

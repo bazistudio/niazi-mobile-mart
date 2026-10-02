@@ -95,7 +95,10 @@ impl PurchaseService {
 
         let user_id_owned = user_id.map(str::to_string);
 
-        let db = self.db.as_ref().expect("SQLite database connection required");
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
 
         let result = with_transaction(db, move |tx| {
             let now = Utc::now().to_rfc3339();
@@ -471,7 +474,10 @@ impl PurchaseService {
 
         let user_id_owned = user_id.map(str::to_string);
 
-        let db = self.db.as_ref().expect("SQLite database connection required");
+        let db = self
+            .db
+            .as_ref()
+            .expect("SQLite database connection required");
 
         let result = with_transaction(db, move |tx| {
             let now = Utc::now().to_rfc3339();
@@ -583,7 +589,8 @@ impl PurchaseService {
 
             // 6. If payment method is CASH, record authoritative Cash Movement OUT
             if dto.payment_method.trim().to_uppercase() == "CASH" {
-                let open_session_id = SQLiteCashRepository::get_open_session_id_in_tx(tx, DEFAULT_MAIN_BRANCH_ID)?;
+                let open_session_id =
+                    SQLiteCashRepository::get_open_session_id_in_tx(tx, DEFAULT_MAIN_BRANCH_ID)?;
                 let cash_movement = CashMovement {
                     id: Uuid::new_v4().to_string(),
                     session_id: open_session_id,
@@ -629,7 +636,10 @@ impl PurchaseService {
         self.purchase_repo.get_lines(purchase_id).await
     }
 
-    pub async fn list_purchases(&self, filter: Option<PurchaseFilterDto>) -> AppResult<Vec<Purchase>> {
+    pub async fn list_purchases(
+        &self,
+        filter: Option<PurchaseFilterDto>,
+    ) -> AppResult<Vec<Purchase>> {
         self.purchase_repo.list(filter).await
     }
 }
@@ -643,7 +653,13 @@ pub mod tests {
     use crate::domain::supplier::CreateSupplierDto;
     use crate::services::supplier_service::SupplierService;
 
-    async fn setup_test_context() -> (DatabaseConnection, PurchaseService, SupplierService, String, String) {
+    async fn setup_test_context() -> (
+        DatabaseConnection,
+        PurchaseService,
+        SupplierService,
+        String,
+        String,
+    ) {
         let db = DatabaseConnection::open_in_memory().unwrap();
         {
             let conn_arc = db.inner();
@@ -718,7 +734,7 @@ pub mod tests {
                         unit_cost: Some(30000), // 10 * 30000 = 300,000
                         discount: None,
                     }],
-                    discount: Some(10000), // Total = 290,000
+                    discount: Some(10000),     // Total = 290,000
                     paid_amount: Some(290000), // Fully paid cash purchase
                     payment_method: Some("CASH".to_string()),
                     notes: Some("Cash shipment".to_string()),
@@ -759,7 +775,10 @@ pub mod tests {
         drop(conn);
 
         // Verify supplier payable is 0
-        let payable = supplier_svc.get_outstanding_balance(&supplier.id).await.unwrap();
+        let payable = supplier_svc
+            .get_outstanding_balance(&supplier.id)
+            .await
+            .unwrap();
         assert_eq!(payable, 0);
     }
 
@@ -802,11 +821,17 @@ pub mod tests {
             .await
             .unwrap();
 
-        assert_eq!(res.purchase.payment_status, PurchasePaymentStatus::PartiallyPaid);
+        assert_eq!(
+            res.purchase.payment_status,
+            PurchasePaymentStatus::PartiallyPaid
+        );
         assert_eq!(res.credit_amount, 30000);
         assert_eq!(res.supplier_balance_after, 30000);
 
-        let payable = supplier_svc.get_outstanding_balance(&supplier.id).await.unwrap();
+        let payable = supplier_svc
+            .get_outstanding_balance(&supplier.id)
+            .await
+            .unwrap();
         assert_eq!(payable, 30000);
 
         // 2. Purchase exceeding credit limit (outstanding 30k + new credit 80k = 110k > 100k limit)
@@ -830,10 +855,16 @@ pub mod tests {
             )
             .await;
 
-        assert!(limit_err.is_err(), "Must reject purchase exceeding supplier credit limit");
+        assert!(
+            limit_err.is_err(),
+            "Must reject purchase exceeding supplier credit limit"
+        );
 
         // Verify balance remained 30,000 and was not mutated
-        let payable_after_err = supplier_svc.get_outstanding_balance(&supplier.id).await.unwrap();
+        let payable_after_err = supplier_svc
+            .get_outstanding_balance(&supplier.id)
+            .await
+            .unwrap();
         assert_eq!(payable_after_err, 30000);
     }
 
@@ -898,7 +929,10 @@ pub mod tests {
             .await
             .unwrap();
 
-        let total_outstanding = supplier_svc.get_outstanding_balance(&supplier.id).await.unwrap();
+        let total_outstanding = supplier_svc
+            .get_outstanding_balance(&supplier.id)
+            .await
+            .unwrap();
         assert_eq!(total_outstanding, 65000); // 40k + 25k
 
         // Payment: 50,000
@@ -930,7 +964,10 @@ pub mod tests {
 
         assert_eq!(pay_res.allocated_purchases[1].purchase_id, pur2.purchase.id);
         assert_eq!(pay_res.allocated_purchases[1].amount_allocated, 10000);
-        assert_eq!(pay_res.allocated_purchases[1].payment_status, "PARTIALLY_PAID");
+        assert_eq!(
+            pay_res.allocated_purchases[1].payment_status,
+            "PARTIALLY_PAID"
+        );
 
         // Overpayment test: attempt to pay 20,000 when only 15,000 outstanding -> rejected!
         let overpay_err = purchase_svc
@@ -947,7 +984,10 @@ pub mod tests {
             .await;
 
         assert!(overpay_err.is_err(), "Must reject overpayment");
-        let balance_final = supplier_svc.get_outstanding_balance(&supplier.id).await.unwrap();
+        let balance_final = supplier_svc
+            .get_outstanding_balance(&supplier.id)
+            .await
+            .unwrap();
         assert_eq!(balance_final, 15000);
     }
 
@@ -994,13 +1034,21 @@ pub mod tests {
         // Verify 0 purchases exist
         let conn_arc = db.inner();
         let conn = conn_arc.lock().await;
-        let count: i64 = conn.query_row("SELECT count(*) FROM purchases", [], |r| r.get(0)).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM purchases", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(count, 0);
 
-        let stock_count: i64 = conn.query_row("SELECT count(*) FROM stock_movements", [], |r| r.get(0)).unwrap();
+        let stock_count: i64 = conn
+            .query_row("SELECT count(*) FROM stock_movements", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(stock_count, 0);
 
-        let ledger_count: i64 = conn.query_row("SELECT count(*) FROM supplier_ledger_entries", [], |r| r.get(0)).unwrap();
+        let ledger_count: i64 = conn
+            .query_row("SELECT count(*) FROM supplier_ledger_entries", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(ledger_count, 0);
     }
 
@@ -1028,8 +1076,10 @@ pub mod tests {
             conn.execute(
                 "UPDATE products SET average_cost = 0, purchase_price = 0 WHERE id = ?1",
                 params![prod_id],
-            ).unwrap();
-            conn.execute("DELETE FROM stock WHERE product_id = ?1", params![prod_id]).unwrap();
+            )
+            .unwrap();
+            conn.execute("DELETE FROM stock WHERE product_id = ?1", params![prod_id])
+                .unwrap();
         }
 
         // Test 1 — First Purchase (Zero stock case):
@@ -1074,7 +1124,10 @@ pub mod tests {
                 )
                 .unwrap();
 
-            assert_eq!(avg, 100, "Test 1: First purchase must set average_cost = incoming unit_cost");
+            assert_eq!(
+                avg, 100,
+                "Test 1: First purchase must set average_cost = incoming unit_cost"
+            );
             assert_eq!(last_purch, 100, "Test 1: Last purchase cost must be 100");
             assert_eq!(stock, 10, "Test 1: Stock must be 10");
         }
@@ -1131,11 +1184,17 @@ pub mod tests {
         // Test 3 & 4 — Unequal Quantity and Deterministic Rounding:
         // Verification of helper formula directly:
         // 10 @ 100 + 20 @ 105 = 3100 / 30 = 103.333 -> 103 (remainder 10 * 2 = 20 < 30 -> round down)
-        assert_eq!(PurchaseService::calculate_weighted_average_cost(10, 100, 20, 105), 103);
+        assert_eq!(
+            PurchaseService::calculate_weighted_average_cost(10, 100, 20, 105),
+            103
+        );
 
         // Rounding up case:
         // 10 @ 100 + 10 @ 105 = 2050 / 20 = 102 remainder 10 (10 * 2 >= 20 -> 103)
-        assert_eq!(PurchaseService::calculate_weighted_average_cost(10, 100, 10, 105), 103);
+        assert_eq!(
+            PurchaseService::calculate_weighted_average_cost(10, 100, 10, 105),
+            103
+        );
 
         // Test 5 — Multiple Purchases Evolving Cost:
         // From existing state: stock 20 @ 103
@@ -1197,7 +1256,10 @@ pub mod tests {
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .unwrap();
-            assert_ne!(avg, last_purch, "Test 6: Average Cost (105) and Last Purchase Cost (110) must be independent");
+            assert_ne!(
+                avg, last_purch,
+                "Test 6: Average Cost (105) and Last Purchase Cost (110) must be independent"
+            );
         }
 
         // Test 8 — Purchase Rollback preserves cost:
@@ -1242,7 +1304,10 @@ pub mod tests {
                 .unwrap();
 
             assert_eq!(avg, 105, "Test 8: Average cost unchanged on rollback");
-            assert_eq!(last_purch, 110, "Test 8: Last purchase price unchanged on rollback");
+            assert_eq!(
+                last_purch, 110,
+                "Test 8: Last purchase price unchanged on rollback"
+            );
             assert_eq!(stock, 30, "Test 8: Stock unchanged on rollback");
         }
 
@@ -1267,7 +1332,10 @@ pub mod tests {
             )
             .await;
 
-        assert!(credit_fail_attempt.is_err(), "Exceeding credit limit must fail");
+        assert!(
+            credit_fail_attempt.is_err(),
+            "Exceeding credit limit must fail"
+        );
         {
             let conn_arc = db.inner();
             let conn = conn_arc.lock().await;
@@ -1286,9 +1354,18 @@ pub mod tests {
                 )
                 .unwrap();
 
-            assert_eq!(avg, 105, "Test 11: Average cost unchanged on credit limit failure");
-            assert_eq!(last_purch, 110, "Test 11: Last purchase price unchanged on credit limit failure");
-            assert_eq!(stock, 30, "Test 11: Stock unchanged on credit limit failure");
+            assert_eq!(
+                avg, 105,
+                "Test 11: Average cost unchanged on credit limit failure"
+            );
+            assert_eq!(
+                last_purch, 110,
+                "Test 11: Last purchase price unchanged on credit limit failure"
+            );
+            assert_eq!(
+                stock, 30,
+                "Test 11: Stock unchanged on credit limit failure"
+            );
         }
     }
 }

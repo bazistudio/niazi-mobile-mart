@@ -39,36 +39,64 @@ impl PostgresPartyRepository {
     }
 
     fn map_party(row: &sqlx::postgres::PgRow) -> AppResult<Party> {
-        let is_active: i32 = row.try_get("is_active").map_err(|e| db_err("party.is_active", e))?;
+        let is_active: i32 = row
+            .try_get("is_active")
+            .map_err(|e| db_err("party.is_active", e))?;
         Ok(Party {
             id: row.try_get("id").map_err(|e| db_err("party.id", e))?,
-            display_name: row.try_get("display_name").map_err(|e| db_err("party.display_name", e))?,
-            company_name: row.try_get("company_name").map_err(|e| db_err("party.company_name", e))?,
+            display_name: row
+                .try_get("display_name")
+                .map_err(|e| db_err("party.display_name", e))?,
+            company_name: row
+                .try_get("company_name")
+                .map_err(|e| db_err("party.company_name", e))?,
             phone: row.try_get("phone").map_err(|e| db_err("party.phone", e))?,
-            alternate_phone: row.try_get("alternate_phone").map_err(|e| db_err("party.alternate_phone", e))?,
+            alternate_phone: row
+                .try_get("alternate_phone")
+                .map_err(|e| db_err("party.alternate_phone", e))?,
             email: row.try_get("email").map_err(|e| db_err("party.email", e))?,
-            address: row.try_get("address").map_err(|e| db_err("party.address", e))?,
+            address: row
+                .try_get("address")
+                .map_err(|e| db_err("party.address", e))?,
             notes: row.try_get("notes").map_err(|e| db_err("party.notes", e))?,
             is_active: is_active == 1,
-            created_at: row.try_get("created_at").map_err(|e| db_err("party.created_at", e))?,
-            updated_at: row.try_get("updated_at").map_err(|e| db_err("party.updated_at", e))?,
+            created_at: row
+                .try_get("created_at")
+                .map_err(|e| db_err("party.created_at", e))?,
+            updated_at: row
+                .try_get("updated_at")
+                .map_err(|e| db_err("party.updated_at", e))?,
         })
     }
 
     fn map_summary(row: &sqlx::postgres::PgRow) -> AppResult<PartySummaryDto> {
         let party = Self::map_party(row)?;
-        let customer_id: Option<String> = row.try_get("customer_id").map_err(|e| db_err("customer_id", e))?;
-        let supplier_id: Option<String> = row.try_get("supplier_id").map_err(|e| db_err("supplier_id", e))?;
+        let customer_id: Option<String> = row
+            .try_get("customer_id")
+            .map_err(|e| db_err("customer_id", e))?;
+        let supplier_id: Option<String> = row
+            .try_get("supplier_id")
+            .map_err(|e| db_err("supplier_id", e))?;
         Ok(PartySummaryDto {
             party,
             party_type: PartyType::from_roles(customer_id.is_some(), supplier_id.is_some()),
             customer_id,
-            customer_code: row.try_get("customer_code").map_err(|e| db_err("customer_code", e))?,
-            customer_credit_limit: row.try_get("customer_credit_limit").map_err(|e| db_err("customer_credit_limit", e))?,
+            customer_code: row
+                .try_get("customer_code")
+                .map_err(|e| db_err("customer_code", e))?,
+            customer_credit_limit: row
+                .try_get("customer_credit_limit")
+                .map_err(|e| db_err("customer_credit_limit", e))?,
             supplier_id,
-            supplier_code: row.try_get("supplier_code").map_err(|e| db_err("supplier_code", e))?,
-            customer_receivable: row.try_get("customer_receivable").map_err(|e| db_err("customer_receivable", e))?,
-            supplier_payable: row.try_get("supplier_payable").map_err(|e| db_err("supplier_payable", e))?,
+            supplier_code: row
+                .try_get("supplier_code")
+                .map_err(|e| db_err("supplier_code", e))?,
+            customer_receivable: row
+                .try_get("customer_receivable")
+                .map_err(|e| db_err("customer_receivable", e))?,
+            supplier_payable: row
+                .try_get("supplier_payable")
+                .map_err(|e| db_err("supplier_payable", e))?,
         })
     }
 
@@ -236,10 +264,20 @@ impl PostgresPartyRepository {
     }
 
     /// Links a role created through the legacy REST path (outside the sync pipeline).
-    pub async fn ensure_party_for_role(&self, contact: &PartyRoleContact, party_id: &str) -> AppResult<Option<String>> {
-        let mut tx = self.pool.begin().await.map_err(|e| db_err("Failed to begin party transaction", e))?;
+    pub async fn ensure_party_for_role(
+        &self,
+        contact: &PartyRoleContact,
+        party_id: &str,
+    ) -> AppResult<Option<String>> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| db_err("Failed to begin party transaction", e))?;
         let effective = Self::ensure_party_for_role_tx(&mut tx, contact, party_id).await?;
-        tx.commit().await.map_err(|e| db_err("Failed to commit party transaction", e))?;
+        tx.commit()
+            .await
+            .map_err(|e| db_err("Failed to commit party transaction", e))?;
         Ok(effective)
     }
 
@@ -302,7 +340,12 @@ impl PostgresPartyRepository {
             q = q.bind(p.clone());
         }
         q = q
-            .bind(filter.limit.unwrap_or(MAX_PARTY_PAGE).clamp(1, MAX_PARTY_PAGE))
+            .bind(
+                filter
+                    .limit
+                    .unwrap_or(MAX_PARTY_PAGE)
+                    .clamp(1, MAX_PARTY_PAGE),
+            )
             .bind(filter.offset.unwrap_or(0).max(0));
 
         let rows = q

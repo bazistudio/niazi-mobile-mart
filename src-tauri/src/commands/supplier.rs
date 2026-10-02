@@ -14,8 +14,12 @@ pub async fn supplier_create(
     state: State<'_, AppState>,
     dto: CreateSupplierDto,
 ) -> AppResult<Supplier> {
-    if AuthService::require_permission(&state, Some("suppliers"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("purchases"), None).await.is_err()
+    if AuthService::require_permission(&state, Some("suppliers"), None)
+        .await
+        .is_err()
+        && AuthService::require_permission(&state, Some("purchases"), None)
+            .await
+            .is_err()
     {
         AuthService::require_permission(&state, Some("inventory"), None).await?;
     }
@@ -28,8 +32,12 @@ pub async fn supplier_update(
     id: String,
     dto: UpdateSupplierDto,
 ) -> AppResult<Supplier> {
-    if AuthService::require_permission(&state, Some("suppliers"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("purchases"), None).await.is_err()
+    if AuthService::require_permission(&state, Some("suppliers"), None)
+        .await
+        .is_err()
+        && AuthService::require_permission(&state, Some("purchases"), None)
+            .await
+            .is_err()
     {
         AuthService::require_permission(&state, Some("inventory"), None).await?;
     }
@@ -41,8 +49,12 @@ pub async fn supplier_get_by_id(
     state: State<'_, AppState>,
     id: String,
 ) -> AppResult<Option<Supplier>> {
-    if AuthService::require_permission(&state, Some("suppliers"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("purchases"), None).await.is_err()
+    if AuthService::require_permission(&state, Some("suppliers"), None)
+        .await
+        .is_err()
+        && AuthService::require_permission(&state, Some("purchases"), None)
+            .await
+            .is_err()
     {
         AuthService::require_permission(&state, Some("inventory"), None).await?;
     }
@@ -54,8 +66,12 @@ pub async fn supplier_get_detail(
     state: State<'_, AppState>,
     id: String,
 ) -> AppResult<SupplierDetailDto> {
-    if AuthService::require_permission(&state, Some("suppliers"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("purchases"), None).await.is_err()
+    if AuthService::require_permission(&state, Some("suppliers"), None)
+        .await
+        .is_err()
+        && AuthService::require_permission(&state, Some("purchases"), None)
+            .await
+            .is_err()
     {
         AuthService::require_permission(&state, Some("inventory"), None).await?;
     }
@@ -67,8 +83,12 @@ pub async fn supplier_list(
     state: State<'_, AppState>,
     filter: Option<SupplierFilter>,
 ) -> AppResult<Vec<SupplierSummaryDto>> {
-    if AuthService::require_permission(&state, Some("suppliers"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("purchases"), None).await.is_err()
+    if AuthService::require_permission(&state, Some("suppliers"), None)
+        .await
+        .is_err()
+        && AuthService::require_permission(&state, Some("purchases"), None)
+            .await
+            .is_err()
     {
         AuthService::require_permission(&state, Some("inventory"), None).await?;
     }
@@ -80,8 +100,12 @@ pub async fn supplier_search(
     state: State<'_, AppState>,
     query: String,
 ) -> AppResult<Vec<SupplierSummaryDto>> {
-    if AuthService::require_permission(&state, Some("suppliers"), None).await.is_err()
-        && AuthService::require_permission(&state, Some("purchases"), None).await.is_err()
+    if AuthService::require_permission(&state, Some("suppliers"), None)
+        .await
+        .is_err()
+        && AuthService::require_permission(&state, Some("purchases"), None)
+            .await
+            .is_err()
     {
         AuthService::require_permission(&state, Some("inventory"), None).await?;
     }
@@ -117,7 +141,10 @@ pub async fn supplier_get_balance(
     supplier_id: String,
 ) -> AppResult<i64> {
     AuthService::require_permission(&state, Some("suppliers"), None).await?;
-    state.supplier_service.get_outstanding_balance(&supplier_id).await
+    state
+        .supplier_service
+        .get_outstanding_balance(&supplier_id)
+        .await
 }
 
 #[tauri::command]
@@ -134,10 +161,7 @@ pub async fn supplier_record_payment(
 }
 
 #[tauri::command]
-pub async fn supplier_deactivate(
-    state: State<'_, AppState>,
-    id: String,
-) -> AppResult<()> {
+pub async fn supplier_deactivate(state: State<'_, AppState>, id: String) -> AppResult<()> {
     AuthService::require_permission(&state, Some("suppliers"), None).await?;
     state.supplier_service.deactivate_supplier(&id).await
 }

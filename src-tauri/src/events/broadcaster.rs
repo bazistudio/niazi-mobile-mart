@@ -9,7 +9,11 @@ pub mod event_names {
 }
 
 /// Dispatches a structured domain event across the Tauri WebView event bus
-pub fn emit_domain_event<T>(app: &AppHandle, event_name: &str, payload: &T) -> Result<(), tauri::Error>
+pub fn emit_domain_event<T>(
+    app: &AppHandle,
+    event_name: &str,
+    payload: &T,
+) -> Result<(), tauri::Error>
 where
     T: Serialize + Clone,
 {

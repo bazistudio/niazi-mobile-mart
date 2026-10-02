@@ -80,9 +80,9 @@ pub struct CreateProductDto {
     pub quality_id: Option<String>,
     pub color_id: Option<String>,
     pub unit_id: Option<String>,
-    pub purchase_price: i64, // Whole PKR (Last Purchase Cost)
+    pub purchase_price: i64,       // Whole PKR (Last Purchase Cost)
     pub average_cost: Option<i64>, // Optional initial average cost; defaults to purchase_price
-    pub sale_price: i64,     // Whole PKR
+    pub sale_price: i64,           // Whole PKR
     pub low_stock_threshold: Option<i64>,
     pub description: Option<String>,
     /// Optional opening stock quantity for the branch where created
@@ -132,7 +132,10 @@ mod tests {
             normalize_product_name(" SAMSUNG    GALAXY   A15 "),
             "samsung galaxy a15"
         );
-        assert_eq!(normalize_product_name("  Samsung   Galaxy   A15  "), "samsung galaxy a15");
+        assert_eq!(
+            normalize_product_name("  Samsung   Galaxy   A15  "),
+            "samsung galaxy a15"
+        );
     }
 
     #[test]
@@ -195,7 +198,10 @@ mod tests {
         assert_eq!(purchase_price, 1800, "1 stored integer = 1 PKR (Rs 1,800)");
         assert_eq!(sale_price, 2000, "1 stored integer = 1 PKR (Rs 2,000)");
         assert_eq!(discount, 20, "Fixed PKR discount = Rs 20");
-        assert_eq!(final_price, 1980, "Final price = Rs 1,980 (2000 - 20 = 1980)");
+        assert_eq!(
+            final_price, 1980,
+            "Final price = Rs 1,980 (2000 - 20 = 1980)"
+        );
 
         // Explicit test cases from Section 34 of prompt:
         // 1000 - 20 = 980

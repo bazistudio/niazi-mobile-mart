@@ -2,7 +2,8 @@ use chrono::Utc;
 use sqlx::{PgPool, Row};
 
 use crate::domain::customer::{
-    Customer, CustomerDetailDto, CustomerFilter, CustomerLedgerEntry, CustomerLedgerEntryType, CustomerStatementDto, CustomerStatementRowDto, CustomerSummaryDto, UpdateCustomerDto,
+    Customer, CustomerDetailDto, CustomerFilter, CustomerLedgerEntry, CustomerLedgerEntryType,
+    CustomerStatementDto, CustomerStatementRowDto, CustomerSummaryDto, UpdateCustomerDto,
 };
 use crate::errors::{AppError, AppResult};
 
@@ -303,14 +304,26 @@ impl PostgresCustomerRepository {
         for row in rows {
             let is_active_int: i32 = row.try_get(6).unwrap_or(1);
             result.push(CustomerSummaryDto {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                customer_code: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                name: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
-                phone: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
-                credit_limit: row.try_get(4).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                customer_code: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                name: row
+                    .try_get(2)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                phone: row
+                    .try_get(3)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                credit_limit: row
+                    .try_get(4)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 outstanding_balance: row.try_get(5).unwrap_or(0),
                 is_active: is_active_int == 1,
-                created_at: row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: row
+                    .try_get(7)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
 
@@ -366,22 +379,38 @@ impl PostgresCustomerRepository {
 
         let mut list = Vec::with_capacity(rows.len());
         for row in rows {
-            let type_str: String = row.try_get(4).map_err(|e| AppError::Database(e.to_string()))?;
+            let type_str: String = row
+                .try_get(4)
+                .map_err(|e| AppError::Database(e.to_string()))?;
             let entry_type = CustomerLedgerEntryType::from_str(&type_str)
                 .unwrap_or(CustomerLedgerEntryType::Sale);
 
             list.push(CustomerLedgerEntry {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                customer_id: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                customer_id: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 reference_id: row.try_get(2).unwrap_or(None),
                 reference_number: row.try_get(3).unwrap_or(None),
                 entry_type,
-                debit: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                credit: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
-                balance_after: row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?,
-                description: row.try_get(8).map_err(|e| AppError::Database(e.to_string()))?,
+                debit: row
+                    .try_get(5)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                credit: row
+                    .try_get(6)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                balance_after: row
+                    .try_get(7)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                description: row
+                    .try_get(8)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 performed_by: row.try_get(9).unwrap_or(None),
-                created_at: row.try_get(10).map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: row
+                    .try_get(10)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
 
@@ -410,16 +439,30 @@ impl PostgresCustomerRepository {
         let mut entries = Vec::with_capacity(rows.len());
         let mut current_bal = 0;
         for row in rows {
-            let bal: i64 = row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?;
+            let bal: i64 = row
+                .try_get(7)
+                .map_err(|e| AppError::Database(e.to_string()))?;
             current_bal = bal;
             entries.push(CustomerStatementRowDto {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                date: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                date: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 reference_number: row.try_get(2).unwrap_or(None),
-                description: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
-                entry_type: row.try_get(4).map_err(|e| AppError::Database(e.to_string()))?,
-                debit: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                credit: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                description: row
+                    .try_get(3)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                entry_type: row
+                    .try_get(4)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                debit: row
+                    .try_get(5)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                credit: row
+                    .try_get(6)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 balance: bal,
             });
         }
@@ -553,18 +596,30 @@ impl PostgresCustomerRepository {
     fn map_customer_row(row: &sqlx::postgres::PgRow) -> AppResult<Customer> {
         let is_active_int: i32 = row.try_get(9).unwrap_or(1);
         Ok(Customer {
-            id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-            customer_code: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-            name: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
-            phone: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
+            id: row
+                .try_get(0)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            customer_code: row
+                .try_get(1)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            name: row
+                .try_get(2)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            phone: row
+                .try_get(3)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             alternate_phone: row.try_get(4).unwrap_or(None),
             email: row.try_get(5).unwrap_or(None),
             address: row.try_get(6).unwrap_or(None),
             notes: row.try_get(7).unwrap_or(None),
             credit_limit: row.try_get(8).unwrap_or(0),
             is_active: is_active_int == 1,
-            created_at: row.try_get(10).map_err(|e| AppError::Database(e.to_string()))?,
-            updated_at: row.try_get(11).map_err(|e| AppError::Database(e.to_string()))?,
+            created_at: row
+                .try_get(10)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            updated_at: row
+                .try_get(11)
+                .map_err(|e| AppError::Database(e.to_string()))?,
         })
     }
 }

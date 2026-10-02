@@ -68,13 +68,23 @@ impl PostgresCatalogRepository {
             Some(row) => {
                 let is_active_int: i32 = row.try_get(4).unwrap_or(1);
                 Ok(Category {
-                    id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                    name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                    code: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                    id: row
+                        .try_get(0)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    name: row
+                        .try_get(1)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    code: row
+                        .try_get(2)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
                     description: row.try_get(3).unwrap_or(None),
                     is_active: is_active_int == 1,
-                    created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                    updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                    created_at: row
+                        .try_get(5)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    updated_at: row
+                        .try_get(6)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
                 })
             }
             None => Err(AppError::NotFound(format!("Category '{id}' not found"))),
@@ -91,13 +101,23 @@ impl PostgresCatalogRepository {
         for row in rows {
             let is_active_int: i32 = row.try_get(4).unwrap_or(1);
             categories.push(Category {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                code: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                name: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                code: row
+                    .try_get(2)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 description: row.try_get(3).unwrap_or(None),
                 is_active: is_active_int == 1,
-                created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: row
+                    .try_get(5)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                updated_at: row
+                    .try_get(6)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
         Ok(categories)
@@ -108,7 +128,10 @@ impl PostgresCatalogRepository {
         let now = Utc::now().to_rfc3339();
 
         let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
-        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_desc = dto
+            .description
+            .as_deref()
+            .or(current.description.as_deref());
         let new_active = dto.is_active.unwrap_or(current.is_active);
 
         sqlx::query("UPDATE categories SET name = $1, description = $2, is_active = $3, updated_at = $4 WHERE id = $5")
@@ -182,13 +205,23 @@ impl PostgresCatalogRepository {
             Some(row) => {
                 let is_active_int: i32 = row.try_get(4).unwrap_or(1);
                 Ok(Brand {
-                    id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                    name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                    code: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                    id: row
+                        .try_get(0)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    name: row
+                        .try_get(1)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    code: row
+                        .try_get(2)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
                     description: row.try_get(3).unwrap_or(None),
                     is_active: is_active_int == 1,
-                    created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                    updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                    created_at: row
+                        .try_get(5)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    updated_at: row
+                        .try_get(6)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
                 })
             }
             None => Err(AppError::NotFound(format!("Brand '{id}' not found"))),
@@ -205,13 +238,23 @@ impl PostgresCatalogRepository {
         for row in rows {
             let is_active_int: i32 = row.try_get(4).unwrap_or(1);
             brands.push(Brand {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                code: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                name: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                code: row
+                    .try_get(2)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 description: row.try_get(3).unwrap_or(None),
                 is_active: is_active_int == 1,
-                created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: row
+                    .try_get(5)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                updated_at: row
+                    .try_get(6)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
         Ok(brands)
@@ -222,7 +265,10 @@ impl PostgresCatalogRepository {
         let now = Utc::now().to_rfc3339();
 
         let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
-        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_desc = dto
+            .description
+            .as_deref()
+            .or(current.description.as_deref());
         let new_active = dto.is_active.unwrap_or(current.is_active);
 
         sqlx::query("UPDATE brands SET name = $1, description = $2, is_active = $3, updated_at = $4 WHERE id = $5")
@@ -251,7 +297,9 @@ impl PostgresCatalogRepository {
     pub async fn create_unit(&self, id: &str, dto: &CreateUnitDto) -> AppResult<Unit> {
         let factor = dto.conversion_factor.unwrap_or(1);
         if factor < 1 {
-            return Err(AppError::Validation("Unit conversion factor must be at least 1".to_string()));
+            return Err(AppError::Validation(
+                "Unit conversion factor must be at least 1".to_string(),
+            ));
         }
 
         let now = Utc::now().to_rfc3339();
@@ -293,13 +341,21 @@ impl PostgresCatalogRepository {
             Some(row) => {
                 let is_active_int: i32 = row.try_get(4).unwrap_or(1);
                 Ok(Unit {
-                    id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                    name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+                    id: row
+                        .try_get(0)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    name: row
+                        .try_get(1)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
                     symbol: row.try_get(2).unwrap_or(None),
                     conversion_factor: row.try_get(3).unwrap_or(1),
                     is_active: is_active_int == 1,
-                    created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                    updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                    created_at: row
+                        .try_get(5)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    updated_at: row
+                        .try_get(6)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
                 })
             }
             None => Err(AppError::NotFound(format!("Unit '{id}' not found"))),
@@ -316,13 +372,21 @@ impl PostgresCatalogRepository {
         for row in rows {
             let is_active_int: i32 = row.try_get(4).unwrap_or(1);
             units.push(Unit {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                name: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 symbol: row.try_get(2).unwrap_or(None),
                 conversion_factor: row.try_get(3).unwrap_or(1),
                 is_active: is_active_int == 1,
-                created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: row
+                    .try_get(5)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                updated_at: row
+                    .try_get(6)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
         Ok(units)
@@ -336,7 +400,9 @@ impl PostgresCatalogRepository {
         let new_sym = dto.symbol.as_deref().or(current.symbol.as_deref());
         let new_factor = dto.conversion_factor.unwrap_or(current.conversion_factor);
         if new_factor < 1 {
-            return Err(AppError::Validation("Unit conversion factor must be >= 1".to_string()));
+            return Err(AppError::Validation(
+                "Unit conversion factor must be >= 1".to_string(),
+            ));
         }
         let new_active = dto.is_active.unwrap_or(current.is_active);
 
@@ -418,13 +484,23 @@ impl PostgresCatalogRepository {
             Some(row) => {
                 let is_active_int: i32 = row.try_get(4).unwrap_or(1);
                 Ok(Company {
-                    id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                    name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                    code: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                    id: row
+                        .try_get(0)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    name: row
+                        .try_get(1)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    code: row
+                        .try_get(2)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
                     description: row.try_get(3).unwrap_or(None),
                     is_active: is_active_int == 1,
-                    created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                    updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                    created_at: row
+                        .try_get(5)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    updated_at: row
+                        .try_get(6)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
                 })
             }
             None => Err(AppError::NotFound(format!("Company '{id}' not found"))),
@@ -441,13 +517,23 @@ impl PostgresCatalogRepository {
         for row in rows {
             let is_active_int: i32 = row.try_get(4).unwrap_or(1);
             companies.push(Company {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                code: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                name: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                code: row
+                    .try_get(2)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 description: row.try_get(3).unwrap_or(None),
                 is_active: is_active_int == 1,
-                created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: row
+                    .try_get(5)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                updated_at: row
+                    .try_get(6)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
         Ok(companies)
@@ -458,7 +544,10 @@ impl PostgresCatalogRepository {
         let now = Utc::now().to_rfc3339();
 
         let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
-        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_desc = dto
+            .description
+            .as_deref()
+            .or(current.description.as_deref());
         let new_active = dto.is_active.unwrap_or(current.is_active);
 
         sqlx::query("UPDATE companies SET name = $1, description = $2, is_active = $3, updated_at = $4 WHERE id = $5")
@@ -538,13 +627,23 @@ impl PostgresCatalogRepository {
             Some(row) => {
                 let is_active_int: i32 = row.try_get(4).unwrap_or(1);
                 Ok(Quality {
-                    id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                    name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                    code: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                    id: row
+                        .try_get(0)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    name: row
+                        .try_get(1)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    code: row
+                        .try_get(2)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
                     description: row.try_get(3).unwrap_or(None),
                     is_active: is_active_int == 1,
-                    created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                    updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                    created_at: row
+                        .try_get(5)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    updated_at: row
+                        .try_get(6)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
                 })
             }
             None => Err(AppError::NotFound(format!("Quality '{id}' not found"))),
@@ -561,13 +660,23 @@ impl PostgresCatalogRepository {
         for row in rows {
             let is_active_int: i32 = row.try_get(4).unwrap_or(1);
             qualities.push(Quality {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                code: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                name: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                code: row
+                    .try_get(2)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 description: row.try_get(3).unwrap_or(None),
                 is_active: is_active_int == 1,
-                created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: row
+                    .try_get(5)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                updated_at: row
+                    .try_get(6)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
         Ok(qualities)
@@ -578,7 +687,10 @@ impl PostgresCatalogRepository {
         let now = Utc::now().to_rfc3339();
 
         let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
-        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_desc = dto
+            .description
+            .as_deref()
+            .or(current.description.as_deref());
         let new_active = dto.is_active.unwrap_or(current.is_active);
 
         sqlx::query("UPDATE qualities SET name = $1, description = $2, is_active = $3, updated_at = $4 WHERE id = $5")
@@ -658,13 +770,23 @@ impl PostgresCatalogRepository {
             Some(row) => {
                 let is_active_int: i32 = row.try_get(4).unwrap_or(1);
                 Ok(Color {
-                    id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                    name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                    code: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                    id: row
+                        .try_get(0)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    name: row
+                        .try_get(1)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    code: row
+                        .try_get(2)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
                     description: row.try_get(3).unwrap_or(None),
                     is_active: is_active_int == 1,
-                    created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                    updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                    created_at: row
+                        .try_get(5)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
+                    updated_at: row
+                        .try_get(6)
+                        .map_err(|e| AppError::Database(e.to_string()))?,
                 })
             }
             None => Err(AppError::NotFound(format!("Color '{id}' not found"))),
@@ -681,13 +803,23 @@ impl PostgresCatalogRepository {
         for row in rows {
             let is_active_int: i32 = row.try_get(4).unwrap_or(1);
             colors.push(Color {
-                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-                name: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-                code: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                id: row
+                    .try_get(0)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                name: row
+                    .try_get(1)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                code: row
+                    .try_get(2)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
                 description: row.try_get(3).unwrap_or(None),
                 is_active: is_active_int == 1,
-                created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
-                updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                created_at: row
+                    .try_get(5)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
+                updated_at: row
+                    .try_get(6)
+                    .map_err(|e| AppError::Database(e.to_string()))?,
             });
         }
         Ok(colors)
@@ -698,7 +830,10 @@ impl PostgresCatalogRepository {
         let now = Utc::now().to_rfc3339();
 
         let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
-        let new_desc = dto.description.as_deref().or(current.description.as_deref());
+        let new_desc = dto
+            .description
+            .as_deref()
+            .or(current.description.as_deref());
         let new_active = dto.is_active.unwrap_or(current.is_active);
 
         sqlx::query("UPDATE colors SET name = $1, description = $2, is_active = $3, updated_at = $4 WHERE id = $5")

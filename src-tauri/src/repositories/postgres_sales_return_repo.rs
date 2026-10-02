@@ -3,8 +3,8 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::domain::sales_return::{
-    CreateSalesReturnDto, SalesReturn, SalesReturnFilterDto, SalesReturnLine,
-    SalesReturnDetailDto, SalesRefundMethod, SalesReturnStatus, SalesReturnSyncEventDto,
+    CreateSalesReturnDto, SalesRefundMethod, SalesReturn, SalesReturnDetailDto,
+    SalesReturnFilterDto, SalesReturnLine, SalesReturnStatus, SalesReturnSyncEventDto,
 };
 use crate::errors::{AppError, AppResult};
 
@@ -22,33 +22,42 @@ impl PostgresSalesReturnRepository {
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         dto: &SalesReturnSyncEventDto,
     ) -> AppResult<()> {
-        let exists: Option<(String,)> = sqlx::query_as("SELECT id FROM sales_returns WHERE id = $1")
-            .bind(&dto.sales_return.id)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let exists: Option<(String,)> =
+            sqlx::query_as("SELECT id FROM sales_returns WHERE id = $1")
+                .bind(&dto.sales_return.id)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
 
         if exists.is_some() {
             return Ok(());
         }
 
-        let sale_row: Option<(String, String)> = sqlx::query_as("SELECT id, branch_id FROM sales WHERE id = $1")
-            .bind(&dto.sales_return.sale_id)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let sale_row: Option<(String, String)> =
+            sqlx::query_as("SELECT id, branch_id FROM sales WHERE id = $1")
+                .bind(&dto.sales_return.sale_id)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
 
         if sale_row.is_none() {
-            return Err(AppError::NotFound(format!("Sale '{}' not found for sales return", dto.sales_return.sale_id)));
+            return Err(AppError::NotFound(format!(
+                "Sale '{}' not found for sales return",
+                dto.sales_return.sale_id
+            )));
         }
 
-        let branch_exists: Option<(String,)> = sqlx::query_as("SELECT id FROM branches WHERE id = $1")
-            .bind(&dto.sales_return.branch_id)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let branch_exists: Option<(String,)> =
+            sqlx::query_as("SELECT id FROM branches WHERE id = $1")
+                .bind(&dto.sales_return.branch_id)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
         if branch_exists.is_none() {
-            return Err(AppError::NotFound(format!("Branch '{}' not found", dto.sales_return.branch_id)));
+            return Err(AppError::NotFound(format!(
+                "Branch '{}' not found",
+                dto.sales_return.branch_id
+            )));
         }
 
         let ret = &dto.sales_return;
@@ -81,7 +90,7 @@ impl PostgresSalesReturnRepository {
                 "INSERT INTO sales_return_lines (
                     id, return_id, sale_line_id, product_id, product_name_snapshot, sku_snapshot,
                     unit_price, quantity, return_amount, created_at
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
             )
             .bind(&line.id)
             .bind(&line.return_id)
@@ -99,12 +108,14 @@ impl PostgresSalesReturnRepository {
         }
 
         for movement in &dto.stock_movements {
-            let current_stock: Option<(i64,)> = sqlx::query_as("SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2")
-                .bind(&movement.product_id)
-                .bind(&movement.branch_id)
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(|e| AppError::Database(e.to_string()))?;
+            let current_stock: Option<(i64,)> = sqlx::query_as(
+                "SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2",
+            )
+            .bind(&movement.product_id)
+            .bind(&movement.branch_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
             if let Some(stk) = current_stock {
                 let new_stock = stk.0 + movement.quantity;
@@ -151,11 +162,12 @@ impl PostgresSalesReturnRepository {
 
         if let Some(cash_movement) = &dto.cash_movement {
             let session_id_valid = if let Some(ref sid) = cash_movement.session_id {
-                let sess: Option<(String,)> = sqlx::query_as("SELECT id FROM cash_sessions WHERE id = $1")
-                    .bind(sid)
-                    .fetch_optional(&mut **tx)
-                    .await
-                    .map_err(|e| AppError::Database(e.to_string()))?;
+                let sess: Option<(String,)> =
+                    sqlx::query_as("SELECT id FROM cash_sessions WHERE id = $1")
+                        .bind(sid)
+                        .fetch_optional(&mut **tx)
+                        .await
+                        .map_err(|e| AppError::Database(e.to_string()))?;
                 sess.map(|s| s.0)
             } else {
                 None
@@ -221,10 +233,16 @@ impl PostgresSalesReturnRepository {
         user_id: Option<&str>,
     ) -> AppResult<SalesReturnDetailDto> {
         if dto.lines.is_empty() {
-            return Err(AppError::Validation("Return cart cannot be empty".to_string()));
+            return Err(AppError::Validation(
+                "Return cart cannot be empty".to_string(),
+            ));
         }
 
-        let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
         // Validate original sale
         let sale_row = sqlx::query("SELECT id, invoice_number, branch_id, customer_id, customer_name_snapshot, sale_status FROM sales WHERE id = $1")
@@ -233,22 +251,30 @@ impl PostgresSalesReturnRepository {
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
-        let (sale_id, invoice_number, branch_id, customer_id, customer_name_snapshot) = match sale_row {
-            Some(row) => {
-                let status: String = row.try_get(5).unwrap_or_default();
-                if status != "COMPLETED" {
-                    return Err(AppError::Validation(format!("Cannot return items from sale with status '{status}'")));
+        let (sale_id, invoice_number, branch_id, customer_id, customer_name_snapshot) =
+            match sale_row {
+                Some(row) => {
+                    let status: String = row.try_get(5).unwrap_or_default();
+                    if status != "COMPLETED" {
+                        return Err(AppError::Validation(format!(
+                            "Cannot return items from sale with status '{status}'"
+                        )));
+                    }
+                    (
+                        row.try_get::<String, _>(0).unwrap(),
+                        row.try_get::<String, _>(1).unwrap(),
+                        row.try_get::<String, _>(2).unwrap(),
+                        row.try_get::<Option<String>, _>(3).unwrap_or(None),
+                        row.try_get::<Option<String>, _>(4).unwrap_or(None),
+                    )
                 }
-                (
-                    row.try_get::<String, _>(0).unwrap(),
-                    row.try_get::<String, _>(1).unwrap(),
-                    row.try_get::<String, _>(2).unwrap(),
-                    row.try_get::<Option<String>, _>(3).unwrap_or(None),
-                    row.try_get::<Option<String>, _>(4).unwrap_or(None),
-                )
-            }
-            None => return Err(AppError::NotFound(format!("Original sale '{}' not found", dto.sale_id))),
-        };
+                None => {
+                    return Err(AppError::NotFound(format!(
+                        "Original sale '{}' not found",
+                        dto.sale_id
+                    )))
+                }
+            };
 
         struct PreparedReturnLine {
             sale_line_id: String,
@@ -264,7 +290,9 @@ impl PostgresSalesReturnRepository {
 
         for item in &dto.lines {
             if item.quantity <= 0 {
-                return Err(AppError::Validation("Return quantity must be > 0".to_string()));
+                return Err(AppError::Validation(
+                    "Return quantity must be > 0".to_string(),
+                ));
             }
 
             let line_row = sqlx::query("SELECT id, product_id, product_name_snapshot, sku_snapshot, unit_price, quantity FROM sale_lines WHERE id = $1 AND sale_id = $2")
@@ -276,7 +304,12 @@ impl PostgresSalesReturnRepository {
 
             let line = match line_row {
                 Some(r) => r,
-                None => return Err(AppError::NotFound(format!("Sale line '{}' not found for sale", item.sale_line_id))),
+                None => {
+                    return Err(AppError::NotFound(format!(
+                        "Sale line '{}' not found for sale",
+                        item.sale_line_id
+                    )))
+                }
             };
 
             let orig_qty: i64 = line.try_get(5).unwrap();
@@ -292,7 +325,9 @@ impl PostgresSalesReturnRepository {
             if item.quantity > max_returnable {
                 return Err(AppError::Validation(format!(
                     "Cannot return {} units of product '{}'. Maximum returnable is {}",
-                    item.quantity, line.try_get::<String, _>(2).unwrap(), max_returnable
+                    item.quantity,
+                    line.try_get::<String, _>(2).unwrap(),
+                    max_returnable
                 )));
             }
 
@@ -311,11 +346,13 @@ impl PostgresSalesReturnRepository {
         }
 
         let total_return_amount: i64 = prepared_lines.iter().map(|l| l.return_amount).sum();
-        let refund_method = SalesRefundMethod::from_str(&dto.refund_method)
-            .map_err(|e| AppError::Validation(e))?;
+        let refund_method =
+            SalesRefundMethod::from_str(&dto.refund_method).map_err(|e| AppError::Validation(e))?;
 
         if refund_method == SalesRefundMethod::CustomerCredit && customer_id.is_none() {
-            return Err(AppError::Validation("Customer credit refund requires a registered customer.".to_string()));
+            return Err(AppError::Validation(
+                "Customer credit refund requires a registered customer.".to_string(),
+            ));
         }
 
         sqlx::query("UPDATE counters SET value = value + 1 WHERE name = 'sales_return_number'")
@@ -323,10 +360,11 @@ impl PostgresSalesReturnRepository {
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
-        let ret_val: (i64,) = sqlx::query_as("SELECT value FROM counters WHERE name = 'sales_return_number'")
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let ret_val: (i64,) =
+            sqlx::query_as("SELECT value FROM counters WHERE name = 'sales_return_number'")
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
 
         let return_number = format!("SR-{:06}", ret_val.0);
         let return_id = Uuid::new_v4().to_string();
@@ -408,13 +446,15 @@ impl PostgresSalesReturnRepository {
             .map_err(|e| AppError::Database(e.to_string()))?;
 
             // Restock inventory
-            let current_stock: (i64,) = sqlx::query_as("SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2")
-                .bind(&line.product_id)
-                .bind(&branch_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(|e| AppError::Database(e.to_string()))?
-                .unwrap_or((0,));
+            let current_stock: (i64,) = sqlx::query_as(
+                "SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2",
+            )
+            .bind(&line.product_id)
+            .bind(&branch_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .unwrap_or((0,));
 
             let new_stock = current_stock.0 + line.return_quantity;
 
@@ -520,9 +560,15 @@ impl PostgresSalesReturnRepository {
             .map_err(|e| AppError::Database(e.to_string()))?;
         }
 
-        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
-        let cash_refunded = if sales_return.refund_method == SalesRefundMethod::Cash { Some(total_return_amount) } else { None };
+        let cash_refunded = if sales_return.refund_method == SalesRefundMethod::Cash {
+            Some(total_return_amount)
+        } else {
+            None
+        };
 
         Ok(SalesReturnDetailDto {
             sales_return,
@@ -602,17 +648,31 @@ impl PostgresSalesReturnRepository {
     }
 
     fn map_return_row(row: &sqlx::postgres::PgRow) -> AppResult<SalesReturn> {
-        let refund_method_str: String = row.try_get(7).map_err(|e| AppError::Database(e.to_string()))?;
-        let status_str: String = row.try_get(8).map_err(|e| AppError::Database(e.to_string()))?;
+        let refund_method_str: String = row
+            .try_get(7)
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let status_str: String = row
+            .try_get(8)
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok(SalesReturn {
-            id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
-            return_number: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
-            sale_id: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
-            branch_id: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
+            id: row
+                .try_get(0)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            return_number: row
+                .try_get(1)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            sale_id: row
+                .try_get(2)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            branch_id: row
+                .try_get(3)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             customer_id: row.try_get(4).unwrap_or(None),
             customer_name_snapshot: row.try_get(5).unwrap_or(None),
-            total_amount: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+            total_amount: row
+                .try_get(6)
+                .map_err(|e| AppError::Database(e.to_string()))?,
             refund_method: SalesRefundMethod::from_str(&refund_method_str)
                 .map_err(|e| AppError::Database(e.to_string()))?,
             status: SalesReturnStatus::from_str(&status_str)
@@ -620,8 +680,12 @@ impl PostgresSalesReturnRepository {
             reason: row.try_get(9).unwrap_or(None),
             notes: row.try_get(10).unwrap_or(None),
             performed_by: row.try_get(11).unwrap_or(None),
-            created_at: row.try_get(12).map_err(|e| AppError::Database(e.to_string()))?,
-            updated_at: row.try_get(13).map_err(|e| AppError::Database(e.to_string()))?,
+            created_at: row
+                .try_get(12)
+                .map_err(|e| AppError::Database(e.to_string()))?,
+            updated_at: row
+                .try_get(13)
+                .map_err(|e| AppError::Database(e.to_string()))?,
         })
     }
 }
