@@ -381,7 +381,7 @@ impl AuthService {
         };
 
         let server_url = std::env::var("CENTRAL_SERVER_URL")
-            .unwrap_or_else(|_| crate::services::sync_worker::DEFAULT_CENTRAL_SERVER_URL.to_string());
+            .unwrap_or_else(|_| "https://niazi-server-860232188829.asia-south1.run.app".to_string());
 
         let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).build()
             .map_err(|e| AppError::Internal(format!("HTTP client error: {}", e)))?;

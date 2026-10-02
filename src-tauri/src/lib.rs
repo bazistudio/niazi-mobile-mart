@@ -104,7 +104,6 @@ pub fn run() {
             return;
         }
     };
-    let app_state_for_setup = app_state.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -153,18 +152,7 @@ pub fn run() {
             let menu = Menu::with_items(handle, &[&file_menu, &help_menu])?;
             app.set_menu(menu)?;
 
-            // Start Rust background SyncWorkerDaemon for offline outbox processing (single shared instance, non-blocking startup)
-            let sync_worker = std::sync::Arc::new(services::SyncWorkerDaemon::new(
-                std::sync::Arc::new(app_state_for_setup.clone())
-            ));
-            {
-                let sync_worker_ref = sync_worker.clone();
-                let app_state_ref = app_state_for_setup.clone();
-                tauri::async_runtime::spawn(async move {
-                    *app_state_ref.sync_worker.write().await = Some(sync_worker_ref.clone());
-                    sync_worker_ref.start();
-                });
-            }
+
 
             if let Some(window) = app.get_webview_window("main") {
                 #[cfg(debug_assertions)]
