@@ -3,10 +3,7 @@ use tauri::State;
 
 use crate::domain::user::SanitizedUser;
 use crate::errors::AppResult;
-use crate::services::admin_service::{
-    AdminService, BootstrapAdminPayload, BootstrapAdminResponse, CreateUserPayload,
-    RegisterStaffPayload, ResetCredentialsPayload, UpdateUserPayload,
-};
+use crate::services::admin_service::{AdminService, BootstrapAdminPayload, BootstrapAdminResponse};
 use crate::services::auth_service::AuthService;
 use crate::state::{AppState, SessionContext};
 
@@ -82,15 +79,6 @@ pub async fn auth_forced_change_password(
     AuthService::forced_change_password(&state.user_repo, &state, &new_password).await
 }
 
-/// Public self-service staff signup (creates account in PENDING status)
-#[tauri::command]
-pub async fn auth_register_staff(
-    state: State<'_, AppState>,
-    payload: RegisterStaffPayload,
-) -> AppResult<SanitizedUser> {
-    AdminService::register_staff(&state.user_repo, payload).await
-}
-
 /// Locks the current terminal session
 #[tauri::command]
 pub async fn auth_lock(state: State<'_, AppState>) -> AppResult<SessionContext> {
@@ -142,94 +130,3 @@ pub async fn auth_check_discount_limit(
     Ok(true)
 }
 
-// ─────────────────────────────────────────────────────────────
-// Administrative Staff Management Commands
-// ─────────────────────────────────────────────────────────────
-
-/// Lists all staff accounts (admin only)
-#[tauri::command]
-pub async fn admin_list_users(state: State<'_, AppState>) -> AppResult<Vec<SanitizedUser>> {
-    AdminService::list_users(&state.user_repo, &state).await
-}
-
-/// Approves a pending staff member account (admin only)
-#[tauri::command]
-pub async fn admin_approve_staff(
-    state: State<'_, AppState>,
-    user_id: String,
-) -> AppResult<SanitizedUser> {
-    AdminService::approve_staff(&state.user_repo, &state, &user_id).await
-}
-
-/// Rejects a staff member account (admin only)
-#[tauri::command]
-pub async fn admin_reject_staff(
-    state: State<'_, AppState>,
-    user_id: String,
-) -> AppResult<SanitizedUser> {
-    AdminService::reject_staff(&state.user_repo, &state, &user_id).await
-}
-
-/// Administrator resets a staff member's password to a temporary password,
-/// setting must_change_password = true (admin only)
-#[tauri::command]
-pub async fn admin_reset_staff_password(
-    state: State<'_, AppState>,
-    user_id: String,
-    temporary_password: String,
-) -> AppResult<()> {
-    AdminService::reset_staff_password(&state.user_repo, &state, &user_id, &temporary_password)
-        .await
-}
-
-/// Creates a new staff member (admin only)
-#[tauri::command]
-pub async fn admin_create_user(
-    state: State<'_, AppState>,
-    payload: CreateUserPayload,
-) -> AppResult<SanitizedUser> {
-    AdminService::create_user(&state.user_repo, &state, payload).await
-}
-
-/// Updates staff member properties (admin only)
-#[tauri::command]
-pub async fn admin_update_user(
-    state: State<'_, AppState>,
-    payload: UpdateUserPayload,
-) -> AppResult<SanitizedUser> {
-    AdminService::update_user(&state.user_repo, &state, payload).await
-}
-
-/// Resets staff login key or PIN (admin only)
-#[tauri::command]
-pub async fn admin_reset_credentials(
-    state: State<'_, AppState>,
-    payload: ResetCredentialsPayload,
-) -> AppResult<()> {
-    AdminService::reset_credentials(&state.user_repo, &state, payload).await
-}
-
-/// Emergency Administrator access recovery
-#[tauri::command]
-pub async fn admin_recover_access(
-    state: State<'_, AppState>,
-    recovery_token: String,
-    new_login_key: String,
-) -> AppResult<()> {
-    AdminService::recover_admin_access(&state.user_repo, &state, &recovery_token, &new_login_key)
-        .await
-}
-
-/// Verifies the current session administrator's own login password (admin only).
-/// Used as the authorization gate before a destructive action such as permanent user deletion.
-#[tauri::command]
-pub async fn admin_verify_password(state: State<'_, AppState>, password: String) -> AppResult<()> {
-    AdminService::verify_admin_password(&state.user_repo, &state, &password).await
-}
-
-/// Permanently deletes a user account (admin only).
-/// The administrator cannot delete their own account.
-#[tauri::command]
-pub async fn admin_delete_user(state: State<'_, AppState>, user_id: String) -> AppResult<()> {
-    AdminService::delete_user(&state.user_repo, &state, &user_id).await
-}

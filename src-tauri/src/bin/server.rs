@@ -193,6 +193,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/v1/auth/verify-password",
             axum::routing::post(verify_password_handler),
         )
+        .route(
+            "/api/v1/auth/register-staff",
+            axum::routing::post(register_staff_handler),
+        )
+        .route(
+            "/api/v1/auth/recover-access",
+            axum::routing::post(recover_access_handler),
+        )
         // ── Admin Users ───────────────────────────────────────────────────────
         .route(
             "/api/users",
@@ -1580,6 +1588,61 @@ async fn verify_password_handler(
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "SERVER_ERROR", "message": e.to_string()})),
+        ),
+    }
+}
+
+/// POST /api/v1/auth/register-staff — Public self-service staff signup (creates PENDING account)
+async fn register_staff_handler(
+    State(state): State<ServerState>,
+    Json(payload): Json<niazi_mobile_mart_lib::services::admin_service::RegisterStaffPayload>,
+) -> impl IntoResponse {
+    use niazi_mobile_mart_lib::services::AdminService;
+    match AdminService::register_staff(&state.app_state.user_repo, payload).await {
+        Ok(user) => (StatusCode::CREATED, Json(json!(user))),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "REGISTER_STAFF_FAILED", "message": e.to_string()})),
+        ),
+    }
+}
+
+/// POST /api/v1/auth/recover-access — Emergency admin access recovery via recovery token
+async fn recover_access_handler(
+    State(state): State<ServerState>,
+    Json(payload): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    use niazi_mobile_mart_lib::services::AdminService;
+    let recovery_token = match payload.get("recovery_token").and_then(|v| v.as_str()) {
+        Some(t) => t.to_string(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "VALIDATION", "message": "recovery_token is required"})),
+            )
+        }
+    };
+    let new_login_key = match payload.get("new_login_key").and_then(|v| v.as_str()) {
+        Some(k) => k.to_string(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "VALIDATION", "message": "new_login_key is required"})),
+            )
+        }
+    };
+    match AdminService::recover_admin_access(
+        &state.app_state.user_repo,
+        &state.app_state,
+        &recovery_token,
+        &new_login_key,
+    )
+    .await
+    {
+        Ok(()) => (StatusCode::OK, Json(json!({"message": "Access recovered successfully"}))),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "RECOVER_ACCESS_FAILED", "message": e.to_string()})),
         ),
     }
 }

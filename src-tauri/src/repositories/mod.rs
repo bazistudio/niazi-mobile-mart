@@ -1,16 +1,6 @@
 pub mod branch_repository;
-pub mod cash_repository;
-pub mod catalog_repository;
 pub mod customer_repository;
-pub mod expense_repository;
-pub mod inventory_repository;
 pub mod party_repository;
-pub mod product_repository;
-pub mod profit_repository;
-pub mod purchase_repository;
-pub mod purchase_return_repository;
-pub mod sale_repository;
-pub mod sales_return_repository;
 pub mod sqlite_user_repo;
 pub mod supplier_repository;
 pub mod sync_queue_repository;
@@ -46,18 +36,8 @@ pub use terminal_repository::{
 pub use branch_repository::{
     BranchRepository as SQLiteBranchRepository, OrganizationDashboardStats,
 };
-pub use cash_repository::SQLiteCashRepository;
-pub use catalog_repository::SQLiteCatalogRepository;
 pub use customer_repository::SQLiteCustomerRepository;
-pub use expense_repository::SQLiteExpenseRepository;
-pub use inventory_repository::SQLiteInventoryRepository;
 pub use party_repository::SQLitePartyRepository;
-pub use product_repository::SQLiteProductRepository;
-pub use profit_repository::SQLiteProfitRepository;
-pub use purchase_repository::SQLitePurchaseRepository;
-pub use purchase_return_repository::SQLitePurchaseReturnRepository;
-pub use sale_repository::SQLiteSaleRepository;
-pub use sales_return_repository::SQLiteSalesReturnRepository;
 pub use sqlite_user_repo::SQLiteUserRepository;
 pub use supplier_repository::SQLiteSupplierRepository;
 pub use user_repository::InMemoryUserRepository;
@@ -113,7 +93,7 @@ use crate::domain::supplier::{
 use crate::domain::user::User;
 use crate::errors::AppResult;
 
-// â”€â”€ Unified Repository Enums satisfying the dual persistence boundary â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Unified Repository Enums satisfying the dual persistence boundary ────────
 
 #[derive(Clone)]
 pub enum UserRepository {
@@ -255,194 +235,123 @@ impl BranchRepository {
     }
 }
 
+// ── Postgres-only business repository structs ────────────────────────────────
+
 #[derive(Clone)]
-pub enum CatalogRepository {
-    SQLite(SQLiteCatalogRepository),
-    Postgres(PostgresCatalogRepository),
-}
+pub struct CatalogRepository(PostgresCatalogRepository);
 
 impl CatalogRepository {
+    pub fn new(repo: PostgresCatalogRepository) -> Self {
+        Self(repo)
+    }
+
     pub async fn create_category(&self, id: &str, dto: &CreateCategoryDto) -> AppResult<Category> {
-        match self {
-            Self::SQLite(r) => r.create_category(id, dto).await,
-            Self::Postgres(r) => r.create_category(id, dto).await,
-        }
+        self.0.create_category(id, dto).await
     }
 
     pub async fn get_category_by_id(&self, id: &str) -> AppResult<Category> {
-        match self {
-            Self::SQLite(r) => r.get_category_by_id(id).await,
-            Self::Postgres(r) => r.get_category_by_id(id).await,
-        }
+        self.0.get_category_by_id(id).await
     }
 
     pub async fn list_categories(&self) -> AppResult<Vec<Category>> {
-        match self {
-            Self::SQLite(r) => r.list_categories().await,
-            Self::Postgres(r) => r.list_categories().await,
-        }
+        self.0.list_categories().await
     }
 
     pub async fn update_category(&self, id: &str, dto: &UpdateCategoryDto) -> AppResult<Category> {
-        match self {
-            Self::SQLite(r) => r.update_category(id, dto).await,
-            Self::Postgres(r) => r.update_category(id, dto).await,
-        }
+        self.0.update_category(id, dto).await
     }
 
     pub async fn create_brand(&self, id: &str, dto: &CreateBrandDto) -> AppResult<Brand> {
-        match self {
-            Self::SQLite(r) => r.create_brand(id, dto).await,
-            Self::Postgres(r) => r.create_brand(id, dto).await,
-        }
+        self.0.create_brand(id, dto).await
     }
 
     pub async fn get_brand_by_id(&self, id: &str) -> AppResult<Brand> {
-        match self {
-            Self::SQLite(r) => r.get_brand_by_id(id).await,
-            Self::Postgres(r) => r.get_brand_by_id(id).await,
-        }
+        self.0.get_brand_by_id(id).await
     }
 
     pub async fn list_brands(&self) -> AppResult<Vec<Brand>> {
-        match self {
-            Self::SQLite(r) => r.list_brands().await,
-            Self::Postgres(r) => r.list_brands().await,
-        }
+        self.0.list_brands().await
     }
 
     pub async fn update_brand(&self, id: &str, dto: &UpdateBrandDto) -> AppResult<Brand> {
-        match self {
-            Self::SQLite(r) => r.update_brand(id, dto).await,
-            Self::Postgres(r) => r.update_brand(id, dto).await,
-        }
+        self.0.update_brand(id, dto).await
     }
 
     pub async fn create_unit(&self, id: &str, dto: &CreateUnitDto) -> AppResult<Unit> {
-        match self {
-            Self::SQLite(r) => r.create_unit(id, dto).await,
-            Self::Postgres(r) => r.create_unit(id, dto).await,
-        }
+        self.0.create_unit(id, dto).await
     }
 
     pub async fn get_unit_by_id(&self, id: &str) -> AppResult<Unit> {
-        match self {
-            Self::SQLite(r) => r.get_unit_by_id(id).await,
-            Self::Postgres(r) => r.get_unit_by_id(id).await,
-        }
+        self.0.get_unit_by_id(id).await
     }
 
     pub async fn list_units(&self) -> AppResult<Vec<Unit>> {
-        match self {
-            Self::SQLite(r) => r.list_units().await,
-            Self::Postgres(r) => r.list_units().await,
-        }
+        self.0.list_units().await
     }
 
     pub async fn update_unit(&self, id: &str, dto: &UpdateUnitDto) -> AppResult<Unit> {
-        match self {
-            Self::SQLite(r) => r.update_unit(id, dto).await,
-            Self::Postgres(r) => r.update_unit(id, dto).await,
-        }
+        self.0.update_unit(id, dto).await
     }
 
     pub async fn create_company(&self, id: &str, dto: &CreateCompanyDto) -> AppResult<Company> {
-        match self {
-            Self::SQLite(r) => r.create_company(id, dto).await,
-            Self::Postgres(r) => r.create_company(id, dto).await,
-        }
+        self.0.create_company(id, dto).await
     }
 
     pub async fn get_company_by_id(&self, id: &str) -> AppResult<Company> {
-        match self {
-            Self::SQLite(r) => r.get_company_by_id(id).await,
-            Self::Postgres(r) => r.get_company_by_id(id).await,
-        }
+        self.0.get_company_by_id(id).await
     }
 
     pub async fn list_companies(&self) -> AppResult<Vec<Company>> {
-        match self {
-            Self::SQLite(r) => r.list_companies().await,
-            Self::Postgres(r) => r.list_companies().await,
-        }
+        self.0.list_companies().await
     }
 
     pub async fn update_company(&self, id: &str, dto: &UpdateCompanyDto) -> AppResult<Company> {
-        match self {
-            Self::SQLite(r) => r.update_company(id, dto).await,
-            Self::Postgres(r) => r.update_company(id, dto).await,
-        }
+        self.0.update_company(id, dto).await
     }
 
     pub async fn create_quality(&self, id: &str, dto: &CreateQualityDto) -> AppResult<Quality> {
-        match self {
-            Self::SQLite(r) => r.create_quality(id, dto).await,
-            Self::Postgres(r) => r.create_quality(id, dto).await,
-        }
+        self.0.create_quality(id, dto).await
     }
 
     pub async fn get_quality_by_id(&self, id: &str) -> AppResult<Quality> {
-        match self {
-            Self::SQLite(r) => r.get_quality_by_id(id).await,
-            Self::Postgres(r) => r.get_quality_by_id(id).await,
-        }
+        self.0.get_quality_by_id(id).await
     }
 
     pub async fn list_qualities(&self) -> AppResult<Vec<Quality>> {
-        match self {
-            Self::SQLite(r) => r.list_qualities().await,
-            Self::Postgres(r) => r.list_qualities().await,
-        }
+        self.0.list_qualities().await
     }
 
     pub async fn update_quality(&self, id: &str, dto: &UpdateQualityDto) -> AppResult<Quality> {
-        match self {
-            Self::SQLite(r) => r.update_quality(id, dto).await,
-            Self::Postgres(r) => r.update_quality(id, dto).await,
-        }
+        self.0.update_quality(id, dto).await
     }
 
     pub async fn create_color(&self, id: &str, dto: &CreateColorDto) -> AppResult<Color> {
-        match self {
-            Self::SQLite(r) => r.create_color(id, dto).await,
-            Self::Postgres(r) => r.create_color(id, dto).await,
-        }
+        self.0.create_color(id, dto).await
     }
 
     pub async fn get_color_by_id(&self, id: &str) -> AppResult<Color> {
-        match self {
-            Self::SQLite(r) => r.get_color_by_id(id).await,
-            Self::Postgres(r) => r.get_color_by_id(id).await,
-        }
+        self.0.get_color_by_id(id).await
     }
 
     pub async fn list_colors(&self) -> AppResult<Vec<Color>> {
-        match self {
-            Self::SQLite(r) => r.list_colors().await,
-            Self::Postgres(r) => r.list_colors().await,
-        }
+        self.0.list_colors().await
     }
 
     pub async fn update_color(&self, id: &str, dto: &UpdateColorDto) -> AppResult<Color> {
-        match self {
-            Self::SQLite(r) => r.update_color(id, dto).await,
-            Self::Postgres(r) => r.update_color(id, dto).await,
-        }
+        self.0.update_color(id, dto).await
     }
 }
 
 #[derive(Clone)]
-pub enum ProductRepository {
-    SQLite(SQLiteProductRepository),
-    Postgres(PostgresProductRepository),
-}
+pub struct ProductRepository(PostgresProductRepository);
 
 impl ProductRepository {
+    pub fn new(repo: PostgresProductRepository) -> Self {
+        Self(repo)
+    }
+
     pub async fn create_product(&self, id: &str, dto: &CreateProductDto) -> AppResult<Product> {
-        match self {
-            Self::SQLite(r) => r.create_product(id, dto).await,
-            Self::Postgres(r) => r.create_product(id, dto).await,
-        }
+        self.0.create_product(id, dto).await
     }
 
     pub async fn create_product_with_initial_stock(
@@ -451,85 +360,51 @@ impl ProductRepository {
         dto: &CreateProductDto,
         user_id: Option<&str>,
     ) -> AppResult<Product> {
-        match self {
-            Self::SQLite(r) => {
-                let prod = r.create_product(id, dto).await?;
-                if let (Some(qty), Some(_branch_id)) = (dto.initial_quantity, &dto.branch_id) {
-                    if qty > 0 {
-                        // SQLite initial stock handle
-                    }
-                }
-                Ok(prod)
-            }
-            Self::Postgres(r) => r.create_product_with_initial_stock(id, dto, user_id).await,
-        }
+        self.0.create_product_with_initial_stock(id, dto, user_id).await
     }
 
     pub async fn get_product_by_id(&self, id: &str) -> AppResult<Product> {
-        match self {
-            Self::SQLite(r) => r.get_product_by_id(id).await,
-            Self::Postgres(r) => r.get_product_by_id(id).await,
-        }
+        self.0.get_product_by_id(id).await
     }
 
     pub async fn get_product_by_sku(&self, sku: &str) -> AppResult<Product> {
-        match self {
-            Self::SQLite(r) => r.get_product_by_sku(sku).await,
-            Self::Postgres(r) => r.get_product_by_sku(sku).await,
-        }
+        self.0.get_product_by_sku(sku).await
     }
 
     pub async fn get_product_by_barcode(&self, barcode: &str) -> AppResult<Product> {
-        match self {
-            Self::SQLite(r) => r.get_product_by_barcode(barcode).await,
-            Self::Postgres(r) => r.get_product_by_barcode(barcode).await,
-        }
+        self.0.get_product_by_barcode(barcode).await
     }
 
     pub async fn list_products(&self, filter: &ProductFilter) -> AppResult<Vec<Product>> {
-        match self {
-            Self::SQLite(r) => r.list_products(filter).await,
-            Self::Postgres(r) => r.list_products(filter).await,
-        }
+        self.0.list_products(filter).await
     }
 
     pub async fn update_product(&self, id: &str, dto: &UpdateProductDto) -> AppResult<Product> {
-        match self {
-            Self::SQLite(r) => r.update_product(id, dto).await,
-            Self::Postgres(r) => r.update_product(id, dto).await,
-        }
+        self.0.update_product(id, dto).await
     }
 
     pub async fn deactivate_product(&self, id: &str) -> AppResult<()> {
-        match self {
-            Self::SQLite(r) => r.deactivate_product(id).await,
-            Self::Postgres(r) => r.deactivate_product(id).await,
-        }
+        self.0.deactivate_product(id).await
     }
 }
 
 #[derive(Clone)]
-pub enum InventoryRepository {
-    SQLite(SQLiteInventoryRepository),
-    Postgres(PostgresInventoryRepository),
-}
+pub struct InventoryRepository(PostgresInventoryRepository);
 
 impl InventoryRepository {
+    pub fn new(repo: PostgresInventoryRepository) -> Self {
+        Self(repo)
+    }
+
     pub async fn get_stock(&self, product_id: &str, branch_id: &str) -> AppResult<i64> {
-        match self {
-            Self::SQLite(r) => r.get_stock(product_id, branch_id).await,
-            Self::Postgres(r) => r.get_stock(product_id, branch_id).await,
-        }
+        self.0.get_stock(product_id, branch_id).await
     }
 
     pub async fn get_stock_map(
         &self,
         branch_id: &str,
     ) -> AppResult<std::collections::HashMap<String, i64>> {
-        match self {
-            Self::SQLite(r) => r.get_stock_map(branch_id).await,
-            Self::Postgres(r) => r.get_stock_map(branch_id).await,
-        }
+        self.0.get_stock_map(branch_id).await
     }
 
     pub async fn increase_stock(
@@ -537,12 +412,7 @@ impl InventoryRepository {
         dto: &IncreaseStockDto,
         user_id: Option<&str>,
     ) -> AppResult<i64> {
-        match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
-                "SQLite uses db transaction in service".into(),
-            )),
-            Self::Postgres(r) => r.increase_stock(dto, user_id).await,
-        }
+        self.0.increase_stock(dto, user_id).await
     }
 
     pub async fn decrease_stock(
@@ -550,12 +420,7 @@ impl InventoryRepository {
         dto: &DecreaseStockDto,
         user_id: Option<&str>,
     ) -> AppResult<i64> {
-        match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
-                "SQLite uses db transaction in service".into(),
-            )),
-            Self::Postgres(r) => r.decrease_stock(dto, user_id).await,
-        }
+        self.0.decrease_stock(dto, user_id).await
     }
 
     pub async fn adjust_stock(
@@ -563,12 +428,7 @@ impl InventoryRepository {
         dto: &AdjustStockDto,
         user_id: Option<&str>,
     ) -> AppResult<i64> {
-        match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
-                "SQLite uses db transaction in service".into(),
-            )),
-            Self::Postgres(r) => r.adjust_stock(dto, user_id).await,
-        }
+        self.0.adjust_stock(dto, user_id).await
     }
 
     pub async fn transfer_stock(
@@ -576,12 +436,7 @@ impl InventoryRepository {
         dto: &TransferStockDto,
         user_id: Option<&str>,
     ) -> AppResult<()> {
-        match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
-                "SQLite uses db transaction in service".into(),
-            )),
-            Self::Postgres(r) => r.transfer_stock(dto, user_id).await,
-        }
+        self.0.transfer_stock(dto, user_id).await
     }
 
     pub async fn list_movements(
@@ -590,84 +445,55 @@ impl InventoryRepository {
         branch_id: Option<&str>,
         limit: u32,
     ) -> AppResult<Vec<StockMovement>> {
-        match self {
-            Self::SQLite(r) => r.list_movements(product_id, branch_id, limit).await,
-            Self::Postgres(r) => r.list_movements(product_id, branch_id, limit).await,
-        }
+        self.0.list_movements(product_id, branch_id, limit).await
     }
 
     pub async fn list_low_stock(&self, branch_id: &str) -> AppResult<Vec<LowStockItemDto>> {
-        match self {
-            Self::SQLite(r) => r.list_low_stock(branch_id).await,
-            Self::Postgres(r) => r.list_low_stock(branch_id).await,
-        }
+        self.0.list_low_stock(branch_id).await
     }
 }
 
 #[derive(Clone)]
-pub enum CustomerRepository {
-    SQLite(SQLiteCustomerRepository),
-    Postgres(PostgresCustomerRepository),
-}
+pub struct CustomerRepository(PostgresCustomerRepository);
 
 impl CustomerRepository {
+    pub fn new(repo: PostgresCustomerRepository) -> Self {
+        Self(repo)
+    }
+
     pub async fn create_customer(&self, customer: &Customer) -> AppResult<Customer> {
-        match self {
-            Self::SQLite(r) => r.create_customer(customer).await,
-            Self::Postgres(r) => r.create_customer(customer).await,
-        }
+        self.0.create_customer(customer).await
     }
 
     pub async fn update_customer(&self, id: &str, dto: &UpdateCustomerDto) -> AppResult<Customer> {
-        match self {
-            Self::SQLite(r) => r.update_customer(id, dto).await,
-            Self::Postgres(r) => r.update_customer(id, dto).await,
-        }
+        self.0.update_customer(id, dto).await
     }
 
     pub async fn get_customer_by_id(&self, id: &str) -> AppResult<Option<Customer>> {
-        match self {
-            Self::SQLite(r) => r.get_customer_by_id(id).await,
-            Self::Postgres(r) => r.get_customer_by_id(id).await,
-        }
+        self.0.get_customer_by_id(id).await
     }
 
     pub async fn get_customer_by_phone(&self, phone: &str) -> AppResult<Option<Customer>> {
-        match self {
-            Self::SQLite(r) => r.get_customer_by_phone(phone).await,
-            Self::Postgres(r) => r.get_customer_by_phone(phone).await,
-        }
+        self.0.get_customer_by_phone(phone).await
     }
 
     pub async fn get_customer_detail(&self, id: &str) -> AppResult<CustomerDetailDto> {
-        match self {
-            Self::SQLite(r) => r.get_customer_detail(id).await,
-            Self::Postgres(r) => r.get_customer_detail(id).await,
-        }
+        self.0.get_customer_detail(id).await
     }
 
     pub async fn list_customers(
         &self,
         filter: &CustomerFilter,
     ) -> AppResult<Vec<CustomerSummaryDto>> {
-        match self {
-            Self::SQLite(r) => r.list_customers(filter).await,
-            Self::Postgres(r) => r.list_customers(filter).await,
-        }
+        self.0.list_customers(filter).await
     }
 
     pub async fn search_customers(&self, query: &str) -> AppResult<Vec<CustomerSummaryDto>> {
-        match self {
-            Self::SQLite(r) => r.search_customers(query).await,
-            Self::Postgres(r) => r.search_customers(query).await,
-        }
+        self.0.search_customers(query).await
     }
 
     pub async fn get_outstanding_balance(&self, customer_id: &str) -> AppResult<i64> {
-        match self {
-            Self::SQLite(r) => r.get_outstanding_balance(customer_id).await,
-            Self::Postgres(r) => r.calculate_outstanding_balance(customer_id).await,
-        }
+        self.0.calculate_outstanding_balance(customer_id).await
     }
 
     pub async fn get_ledger(
@@ -676,83 +502,52 @@ impl CustomerRepository {
         limit: Option<i64>,
         offset: Option<i64>,
     ) -> AppResult<Vec<CustomerLedgerEntry>> {
-        match self {
-            Self::SQLite(r) => r.get_ledger(customer_id, limit, offset).await,
-            Self::Postgres(r) => r.get_ledger(customer_id, limit, offset).await,
-        }
+        self.0.get_ledger(customer_id, limit, offset).await
     }
 
     pub async fn get_statement(&self, customer_id: &str) -> AppResult<CustomerStatementDto> {
-        match self {
-            Self::SQLite(r) => r.get_statement(customer_id).await,
-            Self::Postgres(r) => r.get_statement(customer_id).await,
-        }
+        self.0.get_statement(customer_id).await
     }
 
     pub async fn deactivate_customer(&self, id: &str) -> AppResult<()> {
-        match self {
-            Self::SQLite(r) => r.deactivate_customer(id).await,
-            Self::Postgres(r) => r.deactivate_customer(id).await,
-        }
+        self.0.deactivate_customer(id).await
     }
 }
 
 #[derive(Clone)]
-pub enum SupplierRepository {
-    SQLite(SQLiteSupplierRepository),
-    Postgres(PostgresSupplierRepository),
-}
+pub struct SupplierRepository(PostgresSupplierRepository);
 
 impl SupplierRepository {
+    pub fn new(repo: PostgresSupplierRepository) -> Self {
+        Self(repo)
+    }
+
     pub async fn create_supplier(&self, supplier: &Supplier) -> AppResult<Supplier> {
-        match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
-                "SQLite create_supplier handled via transaction".into(),
-            )),
-            Self::Postgres(r) => r.create_supplier(supplier).await,
-        }
+        self.0.create_supplier(supplier).await
     }
 
     pub async fn update(&self, id: &str, dto: &UpdateSupplierDto) -> AppResult<Supplier> {
-        match self {
-            Self::SQLite(r) => r.update(id, dto).await,
-            Self::Postgres(r) => r.update_supplier(id, dto).await,
-        }
+        self.0.update_supplier(id, dto).await
     }
 
     pub async fn get_supplier_by_id(&self, id: &str) -> AppResult<Option<Supplier>> {
-        match self {
-            Self::SQLite(r) => r.get_by_id(id).await,
-            Self::Postgres(r) => r.get_supplier_by_id(id).await,
-        }
+        self.0.get_supplier_by_id(id).await
     }
 
     pub async fn get_detail(&self, id: &str) -> AppResult<SupplierDetailDto> {
-        match self {
-            Self::SQLite(r) => r.get_detail(id).await,
-            Self::Postgres(r) => r.get_supplier_detail(id).await,
-        }
+        self.0.get_supplier_detail(id).await
     }
 
     pub async fn list(&self, filter: Option<SupplierFilter>) -> AppResult<Vec<SupplierSummaryDto>> {
-        match self {
-            Self::SQLite(r) => r.list(filter).await,
-            Self::Postgres(r) => r.list_suppliers(&filter.unwrap_or_default()).await,
-        }
+        self.0.list_suppliers(&filter.unwrap_or_default()).await
     }
 
     pub async fn search(&self, query: &str) -> AppResult<Vec<SupplierSummaryDto>> {
-        match self {
-            Self::SQLite(r) => r.search(query).await,
-            Self::Postgres(r) => r.search_suppliers(query).await,
-        }
+        self.0.search_suppliers(query).await
     }
 
     pub async fn get_outstanding_balance(&self, supplier_id: &str) -> AppResult<i64> {
-        match self {
-            Self::SQLite(r) => r.get_outstanding_balance(supplier_id).await,
-            Self::Postgres(r) => r.calculate_outstanding_balance(supplier_id).await,
-        }
+        self.0.calculate_outstanding_balance(supplier_id).await
     }
 
     pub async fn get_ledger(
@@ -761,155 +556,107 @@ impl SupplierRepository {
         limit: Option<i64>,
         offset: Option<i64>,
     ) -> AppResult<Vec<SupplierLedgerEntry>> {
-        match self {
-            Self::SQLite(r) => r.get_ledger_entries(supplier_id, limit, offset).await,
-            Self::Postgres(r) => r.get_ledger(supplier_id, limit, offset).await,
-        }
+        self.0.get_ledger(supplier_id, limit, offset).await
     }
 
     pub async fn get_statement(
         &self,
-        supplier_id: &str,
+        _supplier_id: &str,
     ) -> AppResult<crate::domain::supplier::SupplierStatementDto> {
-        match self {
-            Self::SQLite(r) => r.get_statement(supplier_id).await,
-            Self::Postgres(_) => Err(crate::errors::AppError::Internal(
-                "Postgres supplier statement not implemented".into(),
-            )),
-        }
+        Err(crate::errors::AppError::Internal(
+            "Postgres supplier statement not implemented".into(),
+        ))
     }
 
     pub async fn deactivate(&self, id: &str) -> AppResult<()> {
-        match self {
-            Self::SQLite(r) => r.deactivate(id).await,
-            Self::Postgres(r) => r.deactivate_supplier(id).await,
-        }
+        self.0.deactivate_supplier(id).await
     }
 }
 
 #[derive(Clone)]
-pub enum SaleRepository {
-    SQLite(SQLiteSaleRepository),
-    Postgres(PostgresSaleRepository),
-}
+pub struct SaleRepository(PostgresSaleRepository);
 
 impl SaleRepository {
+    pub fn new(repo: PostgresSaleRepository) -> Self {
+        Self(repo)
+    }
+
     pub async fn complete_sale(
         &self,
         dto: &CompleteSaleDto,
         user_id: Option<&str>,
     ) -> AppResult<SaleResultDto> {
-        match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
-                "SQLite uses db transaction in service".into(),
-            )),
-            Self::Postgres(r) => r.complete_sale(dto, user_id).await,
-        }
+        self.0.complete_sale(dto, user_id).await
     }
 
     pub async fn get_sale_by_id(&self, id: &str) -> AppResult<Option<Sale>> {
-        match self {
-            Self::SQLite(r) => r.get_sale_by_id(id).await,
-            Self::Postgres(r) => r.get_sale_by_id(id).await,
-        }
+        self.0.get_sale_by_id(id).await
     }
 
     pub async fn get_sale_by_invoice(&self, invoice_number: &str) -> AppResult<Option<Sale>> {
-        match self {
-            Self::SQLite(r) => r.get_sale_by_invoice(invoice_number).await,
-            Self::Postgres(r) => r.get_sale_by_invoice(invoice_number).await,
-        }
+        self.0.get_sale_by_invoice(invoice_number).await
     }
 
     pub async fn get_sale_lines(&self, sale_id: &str) -> AppResult<Vec<SaleLine>> {
-        match self {
-            Self::SQLite(r) => r.get_sale_lines(sale_id).await,
-            Self::Postgres(r) => r.get_sale_lines(sale_id).await,
-        }
+        self.0.get_sale_lines(sale_id).await
     }
 
     pub async fn get_sale_payments(&self, sale_id: &str) -> AppResult<Vec<SalePayment>> {
-        match self {
-            Self::SQLite(r) => r.get_sale_payments(sale_id).await,
-            Self::Postgres(r) => r.get_sale_payments(sale_id).await,
-        }
+        self.0.get_sale_payments(sale_id).await
     }
 
     pub async fn list_sales(&self, filter: &SaleFilterDto) -> AppResult<Vec<Sale>> {
-        match self {
-            Self::SQLite(r) => r.list_sales(filter).await,
-            Self::Postgres(r) => r.list_sales(&Some(filter.clone())).await,
-        }
+        self.0.list_sales(&Some(filter.clone())).await
     }
 }
 
 #[derive(Clone)]
-pub enum PurchaseRepository {
-    SQLite(SQLitePurchaseRepository),
-    Postgres(PostgresPurchaseRepository),
-}
+pub struct PurchaseRepository(PostgresPurchaseRepository);
 
 impl PurchaseRepository {
+    pub fn new(repo: PostgresPurchaseRepository) -> Self {
+        Self(repo)
+    }
+
     pub async fn complete_purchase(
         &self,
         dto: &CompletePurchaseDto,
         user_id: Option<&str>,
     ) -> AppResult<PurchaseResultDto> {
-        match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
-                "SQLite uses db transaction in service".into(),
-            )),
-            Self::Postgres(r) => r.complete_purchase(dto, user_id).await,
-        }
+        self.0.complete_purchase(dto, user_id).await
     }
 
     pub async fn get_by_id(&self, id: &str) -> AppResult<Option<Purchase>> {
-        match self {
-            Self::SQLite(r) => r.get_by_id(id).await,
-            Self::Postgres(r) => r.get_purchase_by_id(id).await,
-        }
+        self.0.get_purchase_by_id(id).await
     }
 
     pub async fn get_by_number(&self, number: &str) -> AppResult<Option<Purchase>> {
-        match self {
-            Self::SQLite(r) => r.get_by_number(number).await,
-            Self::Postgres(r) => r.get_purchase_by_number(number).await,
-        }
+        self.0.get_purchase_by_number(number).await
     }
 
     pub async fn get_lines(&self, purchase_id: &str) -> AppResult<Vec<PurchaseLine>> {
-        match self {
-            Self::SQLite(r) => r.get_lines(purchase_id).await,
-            Self::Postgres(r) => r.get_purchase_lines(purchase_id).await,
-        }
+        self.0.get_purchase_lines(purchase_id).await
     }
 
     pub async fn list(&self, filter: Option<PurchaseFilterDto>) -> AppResult<Vec<Purchase>> {
-        match self {
-            Self::SQLite(r) => r.list(filter).await,
-            Self::Postgres(r) => r.list_purchases(&filter).await,
-        }
+        self.0.list_purchases(&filter).await
     }
 }
 
 #[derive(Clone)]
-pub enum CashRepository {
-    SQLite(SQLiteCashRepository),
-    Postgres(PostgresCashRepository),
-}
+pub struct CashRepository(PostgresCashRepository);
 
 impl CashRepository {
+    pub fn new(repo: PostgresCashRepository) -> Self {
+        Self(repo)
+    }
+
     pub async fn open_session(
         &self,
         dto: &OpenCashSessionDto,
         user_id: Option<&str>,
     ) -> AppResult<crate::domain::cash::CashSession> {
-        match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
-                "SQLite open_session handled in CashService transaction".into(),
-            )),
-            Self::Postgres(r) => r.open_session(dto, user_id).await,
-        }
+        self.0.open_session(dto, user_id).await
     }
 
     pub async fn close_session(
@@ -917,32 +664,21 @@ impl CashRepository {
         dto: &CloseCashSessionDto,
         user_id: Option<&str>,
     ) -> AppResult<crate::domain::cash::CashSession> {
-        match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
-                "SQLite close_session handled in CashService transaction".into(),
-            )),
-            Self::Postgres(r) => r.close_session(dto, user_id).await,
-        }
+        self.0.close_session(dto, user_id).await
     }
 
     pub async fn get_open_session(
         &self,
         branch_id: &str,
     ) -> AppResult<Option<crate::domain::cash::CashSession>> {
-        match self {
-            Self::SQLite(r) => r.get_open_session(branch_id).await,
-            Self::Postgres(r) => r.get_open_session(branch_id).await,
-        }
+        self.0.get_open_session(branch_id).await
     }
 
     pub async fn get_session_by_id(
         &self,
         id: &str,
     ) -> AppResult<Option<crate::domain::cash::CashSession>> {
-        match self {
-            Self::SQLite(r) => r.get_session_by_id(id).await,
-            Self::Postgres(r) => r.get_session_by_id(id).await,
-        }
+        self.0.get_session_by_id(id).await
     }
 
     pub async fn record_movement(
@@ -950,12 +686,7 @@ impl CashRepository {
         dto: &CreateCashAdjustmentDto,
         user_id: Option<&str>,
     ) -> AppResult<crate::domain::cash::CashMovement> {
-        match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
-                "SQLite record_movement handled in CashService transaction".into(),
-            )),
-            Self::Postgres(r) => r.record_movement(dto, user_id).await,
-        }
+        self.0.record_movement(dto, user_id).await
     }
 
     pub async fn get_movements(
@@ -964,48 +695,31 @@ impl CashRepository {
         session_id: Option<&str>,
         limit: Option<i64>,
     ) -> AppResult<Vec<crate::domain::cash::CashMovement>> {
-        match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
-                "SQLite get_movements handled via list_movements".into(),
-            )),
-            Self::Postgres(r) => r.get_movements(branch_id, session_id, limit).await,
-        }
+        self.0.get_movements(branch_id, session_id, limit).await
     }
 
     pub async fn calculate_branch_balance(&self, branch_id: &str) -> AppResult<i64> {
-        match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
-                "SQLite calculate_branch_balance not applicable".into(),
-            )),
-            Self::Postgres(r) => r.calculate_branch_balance(branch_id).await,
-        }
+        self.0.calculate_branch_balance(branch_id).await
     }
 }
 
 #[derive(Clone)]
-pub enum ExpenseRepository {
-    SQLite(SQLiteExpenseRepository),
-    Postgres(PostgresExpenseRepository),
-}
+pub struct ExpenseRepository(PostgresExpenseRepository);
 
 impl ExpenseRepository {
+    pub fn new(repo: PostgresExpenseRepository) -> Self {
+        Self(repo)
+    }
+
     pub async fn create_category(
         &self,
         dto: &CreateExpenseCategoryDto,
     ) -> AppResult<ExpenseCategory> {
-        match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
-                "SQLite create_category requires ExpenseCategory entity".into(),
-            )),
-            Self::Postgres(r) => r.create_category(dto).await,
-        }
+        self.0.create_category(dto).await
     }
 
     pub async fn list_categories(&self) -> AppResult<Vec<ExpenseCategory>> {
-        match self {
-            Self::SQLite(r) => r.list_categories(false).await,
-            Self::Postgres(r) => r.list_categories().await,
-        }
+        self.0.list_categories().await
     }
 
     pub async fn create_expense(
@@ -1013,131 +727,98 @@ impl ExpenseRepository {
         dto: &CreateExpenseDto,
         user_id: Option<&str>,
     ) -> AppResult<Expense> {
-        match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
-                "SQLite uses db transaction in service".into(),
-            )),
-            Self::Postgres(r) => r.create_expense(dto, user_id).await,
-        }
+        self.0.create_expense(dto, user_id).await
     }
 
     pub async fn get_expense_by_id(&self, id: &str) -> AppResult<Option<Expense>> {
-        match self {
-            Self::SQLite(r) => r.get_expense_by_id(id).await,
-            Self::Postgres(r) => r.get_expense_by_id(id).await,
-        }
+        self.0.get_expense_by_id(id).await
     }
 
     pub async fn list_expenses(&self, filter: &ExpenseFilterDto) -> AppResult<Vec<Expense>> {
-        match self {
-            Self::SQLite(r) => r.list_expenses(filter).await,
-            Self::Postgres(r) => r.list_expenses(&Some(filter.clone())).await,
-        }
+        self.0.list_expenses(&Some(filter.clone())).await
     }
 }
 
 #[derive(Clone)]
-pub enum SalesReturnRepository {
-    SQLite(SQLiteSalesReturnRepository),
-    Postgres(PostgresSalesReturnRepository),
-}
+pub struct SalesReturnRepository(PostgresSalesReturnRepository);
 
 impl SalesReturnRepository {
+    pub fn new(repo: PostgresSalesReturnRepository) -> Self {
+        Self(repo)
+    }
+
     pub async fn process_return(
         &self,
         dto: &CreateSalesReturnDto,
         user_id: Option<&str>,
     ) -> AppResult<SalesReturnDetailDto> {
-        match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
-                "SQLite uses db transaction in service".into(),
-            )),
-            Self::Postgres(r) => r.process_return(dto, user_id).await,
-        }
+        self.0.process_return(dto, user_id).await
     }
 
-    pub async fn get_by_id(&self, id: &str) -> AppResult<Option<SalesReturnDetailDto>> {
-        match self {
-            Self::SQLite(r) => r.get_by_id(id).await,
-            Self::Postgres(_) => Err(crate::errors::AppError::Internal(
-                "Postgres get_by_id not implemented".into(),
-            )),
-        }
+    pub async fn get_by_id(&self, _id: &str) -> AppResult<Option<SalesReturnDetailDto>> {
+        Err(crate::errors::AppError::Internal(
+            "Postgres get_by_id not implemented".into(),
+        ))
     }
 
     pub async fn list_sales_returns(
         &self,
-        branch_id: Option<&str>,
-        limit: Option<i64>,
+        _branch_id: Option<&str>,
+        _limit: Option<i64>,
     ) -> AppResult<Vec<SalesReturnDetailDto>> {
-        match self {
-            Self::SQLite(r) => r.list_sales_returns(branch_id, limit).await,
-            Self::Postgres(_) => Err(crate::errors::AppError::Internal(
-                "Postgres list_sales_returns not implemented".into(),
-            )),
-        }
+        Err(crate::errors::AppError::Internal(
+            "Postgres list_sales_returns not implemented".into(),
+        ))
     }
 }
 
 #[derive(Clone)]
-pub enum PurchaseReturnRepository {
-    SQLite(SQLitePurchaseReturnRepository),
-    Postgres(PostgresPurchaseReturnRepository),
-}
+pub struct PurchaseReturnRepository(PostgresPurchaseReturnRepository);
 
 impl PurchaseReturnRepository {
+    pub fn new(repo: PostgresPurchaseReturnRepository) -> Self {
+        Self(repo)
+    }
+
     pub async fn process_return(
         &self,
         dto: &CreatePurchaseReturnDto,
         user_id: Option<&str>,
     ) -> AppResult<PurchaseReturnDetailDto> {
-        match self {
-            Self::SQLite(_) => Err(crate::errors::AppError::Internal(
-                "SQLite uses db transaction in service".into(),
-            )),
-            Self::Postgres(r) => r.process_return(dto, user_id).await,
-        }
+        self.0.process_return(dto, user_id).await
     }
 
-    pub async fn get_by_id(&self, id: &str) -> AppResult<Option<PurchaseReturnDetailDto>> {
-        match self {
-            Self::SQLite(r) => r.get_by_id(id).await,
-            Self::Postgres(_) => Err(crate::errors::AppError::Internal(
-                "Postgres get_by_id not implemented".into(),
-            )),
-        }
+    pub async fn get_by_id(&self, _id: &str) -> AppResult<Option<PurchaseReturnDetailDto>> {
+        Err(crate::errors::AppError::Internal(
+            "Postgres get_by_id not implemented".into(),
+        ))
     }
 
     pub async fn list_purchase_returns(
         &self,
-        branch_id: Option<&str>,
-        limit: Option<i64>,
+        _branch_id: Option<&str>,
+        _limit: Option<i64>,
     ) -> AppResult<Vec<PurchaseReturnDetailDto>> {
-        match self {
-            Self::SQLite(r) => r.list_purchase_returns(branch_id, limit).await,
-            Self::Postgres(_) => Err(crate::errors::AppError::Internal(
-                "Postgres list_purchase_returns not implemented".into(),
-            )),
-        }
+        Err(crate::errors::AppError::Internal(
+            "Postgres list_purchase_returns not implemented".into(),
+        ))
     }
 }
 
 #[derive(Clone)]
-pub enum ProfitRepository {
-    SQLite(SQLiteProfitRepository),
-    Postgres(PostgresProfitRepository),
-}
+pub struct ProfitRepository(PostgresProfitRepository);
 
 impl ProfitRepository {
+    pub fn new(repo: PostgresProfitRepository) -> Self {
+        Self(repo)
+    }
+
     pub async fn get_profit_summary(
         &self,
         branch_id: Option<&str>,
         start_date: Option<&str>,
         end_date: Option<&str>,
     ) -> AppResult<DashboardProfitSummaryDto> {
-        match self {
-            Self::SQLite(r) => r.get_dashboard_profit_summary(branch_id).await,
-            Self::Postgres(r) => r.get_profit_summary(branch_id, start_date, end_date).await,
-        }
+        self.0.get_profit_summary(branch_id, start_date, end_date).await
     }
 }

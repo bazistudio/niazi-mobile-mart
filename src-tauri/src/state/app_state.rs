@@ -7,8 +7,8 @@ use crate::db::connection::DatabaseConnection;
 use crate::domain::access_control::StaffAccessProfile;
 use crate::domain::user::{User, UserRole};
 use crate::repositories::{
-    BranchRepository, PostgresTerminalRepository, SQLiteSyncQueueRepository,
-    SQLiteTerminalRepository, SQLiteUserRepository, TerminalRepository, UserRepository,
+    BranchRepository, PostgresTerminalRepository, SQLiteTerminalRepository, SQLiteUserRepository,
+    TerminalRepository, UserRepository,
 };
 use crate::services::{
     CashService, CatalogService, CustomerService, ExpenseService, InventoryService, PartyService,
@@ -57,7 +57,6 @@ pub struct AppState {
     pub user_repo: UserRepository,
     pub branch_repo: BranchRepository,
     pub terminal_repo: TerminalRepository,
-    pub sync_queue_repo: Option<SQLiteSyncQueueRepository>,
     pub catalog_service: CatalogService,
     pub product_service: ProductService,
     pub inventory_service: InventoryService,
@@ -83,20 +82,22 @@ impl AppState {
         let branch_repo =
             BranchRepository::SQLite(crate::repositories::SQLiteBranchRepository::new(db.clone()));
         let terminal_repo = TerminalRepository::SQLite(SQLiteTerminalRepository::new(db.clone()));
-        let sync_queue_repo = Some(SQLiteSyncQueueRepository::new(db.clone()));
-        let catalog_service = CatalogService::new_sqlite(db.clone());
-        let product_service = ProductService::new_sqlite(db.clone());
-        let inventory_service = InventoryService::new_sqlite(db.clone());
-        let customer_service = CustomerService::new_sqlite(db.clone());
+        let placeholder_pool =
+            sqlx::PgPool::connect_lazy("postgres://localhost/placeholder")
+                .expect("connect_lazy should not fail");
+        let catalog_service = CatalogService::new_postgres(placeholder_pool.clone());
+        let product_service = ProductService::new_postgres(placeholder_pool.clone());
+        let inventory_service = InventoryService::new_postgres(placeholder_pool.clone());
+        let customer_service = CustomerService::new_postgres(placeholder_pool.clone());
         let party_service = PartyService::new_sqlite(db.clone());
-        let sale_service = SaleService::new_sqlite(db.clone());
-        let supplier_service = SupplierService::new_sqlite(db.clone());
-        let purchase_service = PurchaseService::new_sqlite(db.clone());
-        let expense_service = ExpenseService::new_sqlite(db.clone());
-        let cash_service = CashService::new_sqlite(db.clone());
-        let sales_return_service = SalesReturnService::new_sqlite(db.clone());
-        let purchase_return_service = PurchaseReturnService::new_sqlite(db.clone());
-        let profit_service = ProfitService::new_sqlite(db.clone());
+        let sale_service = SaleService::new_postgres(placeholder_pool.clone());
+        let supplier_service = SupplierService::new_postgres(placeholder_pool.clone());
+        let purchase_service = PurchaseService::new_postgres(placeholder_pool.clone());
+        let expense_service = ExpenseService::new_postgres(placeholder_pool.clone());
+        let cash_service = CashService::new_postgres(placeholder_pool.clone());
+        let sales_return_service = SalesReturnService::new_postgres(placeholder_pool.clone());
+        let purchase_return_service = PurchaseReturnService::new_postgres(placeholder_pool.clone());
+        let profit_service = ProfitService::new_postgres(placeholder_pool);
 
         Self {
             app_version: app_version.into(),
@@ -106,7 +107,6 @@ impl AppState {
             user_repo,
             branch_repo,
             terminal_repo,
-            sync_queue_repo,
             catalog_service,
             product_service,
             inventory_service,
@@ -159,7 +159,6 @@ impl AppState {
             user_repo,
             branch_repo,
             terminal_repo,
-            sync_queue_repo: None,
             catalog_service,
             product_service,
             inventory_service,
@@ -272,8 +271,6 @@ impl AppState {
             active_token: Some(token),
         };
     }
-
-
 
     /// Updates active_token on the current session if authenticated
     pub async fn set_active_token(&self, token: Option<String>) {

@@ -445,11 +445,10 @@ export const tauriClient = {
   },
 
   async authRegisterStaff(payload: RegisterStaffPayload): Promise<SanitizedUser> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SanitizedUser>('auth_register_staff', { payload });
-    }
-    throw new Error('Native Tauri environment required for staff registration');
+    return await httpFetch<SanitizedUser>('/api/v1/auth/register-staff', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   },
 
   // ── Staff Access Management (Admin) ───────────────────────────────────────
@@ -458,27 +457,14 @@ export const tauriClient = {
   },
 
   async adminApproveStaff(userId: string): Promise<SanitizedUser> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SanitizedUser>('admin_approve_staff', { userId });
-    }
     return await httpFetch<SanitizedUser>(`/api/v1/users/${userId}/approve`, { method: 'POST' });
   },
 
   async adminRejectStaff(userId: string): Promise<SanitizedUser> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SanitizedUser>('admin_reject_staff', { userId });
-    }
     return await httpFetch<SanitizedUser>(`/api/v1/users/${userId}/reject`, { method: 'POST' });
   },
 
   async adminResetStaffPassword(userId: string, temporaryPassword: string): Promise<void> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('admin_reset_staff_password', { userId, temporaryPassword });
-      return;
-    }
     await httpFetch<void>(`/api/v1/users/${userId}/reset-password`, {
       method: 'POST',
       body: JSON.stringify({ temporary_password: temporaryPassword }),
@@ -486,12 +472,10 @@ export const tauriClient = {
   },
 
   async adminRecoverAccess(recoveryToken: string, newLoginKey: string): Promise<void> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('admin_recover_access', { recoveryToken, newLoginKey });
-      return;
-    }
-    throw new Error('Native Tauri environment required for emergency recovery');
+    await httpFetch<void>('/api/v1/auth/recover-access', {
+      method: 'POST',
+      body: JSON.stringify({ recovery_token: recoveryToken, new_login_key: newLoginKey }),
+    });
   },
 
   async adminCreateUser(payload: {
@@ -519,10 +503,6 @@ export const tauriClient = {
     access_profile?: StaffAccessProfile;
   }): Promise<SanitizedUser> {
     const { user_id, ...rest } = payload;
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SanitizedUser>('admin_update_user', { payload });
-    }
     return await httpFetch<SanitizedUser>(`/api/v1/users/${user_id}`, {
       method: 'PUT',
       body: JSON.stringify(rest),
@@ -534,11 +514,6 @@ export const tauriClient = {
     new_login_key?: string;
     new_pin?: string;
   }): Promise<void> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('admin_reset_credentials', { payload });
-      return;
-    }
     const { user_id, ...rest } = payload;
     await httpFetch<void>(`/api/v1/users/${user_id}/reset-credentials`, {
       method: 'POST',
@@ -547,11 +522,6 @@ export const tauriClient = {
   },
 
   async adminVerifyPassword(password: string): Promise<void> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('admin_verify_password', { password });
-      return;
-    }
     await httpFetch<void>('/api/v1/auth/verify-password', {
       method: 'POST',
       body: JSON.stringify({ password }),
@@ -559,11 +529,6 @@ export const tauriClient = {
   },
 
   async adminDeleteUser(userId: string): Promise<void> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('admin_delete_user', { userId });
-      return;
-    }
     await httpFetch<void>(`/api/v1/users/${userId}`, { method: 'DELETE' });
   },
 
@@ -744,10 +709,6 @@ export const tauriClient = {
   },
 
   async inventoryGetStockMap(branchId: string): Promise<Record<string, number>> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Record<string, number>>('inventory_get_stock_map', { branchId });
-    }
     return await httpFetch<Record<string, number>>(`/api/v1/inventory/stock-map?branch_id=${branchId}`);
   },
 

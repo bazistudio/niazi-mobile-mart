@@ -20,8 +20,6 @@ pub mod sync_queue;
 pub mod terminal;
 pub mod user;
 
-
-
 pub use change_log::{ChangeLogEntry, DeltaPullQuery, DeltaPullResponseDto, SyncCursor};
 pub use sync_queue::{EnqueueOfflineEventDto, SyncQueueItem, SyncQueueStatus};
 pub use terminal::{RegisterTerminalDto, Terminal};
