@@ -415,17 +415,10 @@ export const tauriClient = {
   },
 
   async authBootstrapFirstAdmin(payload: BootstrapAdminPayload): Promise<BootstrapAdminResponse> {
-    if (getApiBaseUrl()) {
-      return await httpFetch<BootstrapAdminResponse>('/api/v1/auth/bootstrap-first-admin', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-    }
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<BootstrapAdminResponse>('auth_bootstrap_first_admin', { payload });
-    }
-    throw new Error('API Base URL or Native Tauri environment required for administrator bootstrap');
+    return await httpFetch<BootstrapAdminResponse>('/api/v1/auth/bootstrap-first-admin', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   },
 
   async authChangePassword(currentPassword: string, newPassword: string): Promise<void> {
@@ -434,6 +427,10 @@ export const tauriClient = {
       await invoke('auth_change_password', { currentPassword, newPassword });
       return;
     }
+    await httpFetch<void>('/api/v1/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ old_password: currentPassword, new_password: newPassword }),
+    });
   },
 
   async authForcedChangePassword(newPassword: string): Promise<void> {
@@ -442,6 +439,10 @@ export const tauriClient = {
       await invoke('auth_forced_change_password', { newPassword });
       return;
     }
+    await httpFetch<void>('/api/v1/auth/forced-change-password', {
+      method: 'POST',
+      body: JSON.stringify({ new_password: newPassword }),
+    });
   },
 
   async authRegisterStaff(payload: RegisterStaffPayload): Promise<SanitizedUser> {

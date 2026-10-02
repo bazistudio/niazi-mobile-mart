@@ -190,6 +190,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             axum::routing::post(change_password_handler),
         )
         .route(
+            "/api/v1/auth/forced-change-password",
+            axum::routing::post(forced_change_password_handler),
+        )
+        .route(
             "/api/v1/auth/verify-password",
             axum::routing::post(verify_password_handler),
         )
@@ -1529,6 +1533,48 @@ async fn change_password_handler(
     }
 
     // Reset password for this user
+    let reset_payload = niazi_mobile_mart_lib::services::admin_service::ResetCredentialsPayload {
+        user_id: auth.0.user_id.clone(),
+        new_login_key: None,
+        new_pin: None,
+        new_password: Some(new_password),
+    };
+    match AdminService::reset_credentials(
+        &state.app_state.user_repo,
+        &state.app_state,
+        reset_payload,
+    )
+    .await
+    {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(json!({"message": "Password changed successfully"})),
+        ),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "CHANGE_FAILED", "message": e.to_string()})),
+        ),
+    }
+}
+
+/// POST /api/v1/auth/forced-change-password — Change authenticated user's own password without verifying old password
+/// Used for post-login forced password change flows (e.g. temporary password issued by admin)
+async fn forced_change_password_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let new_password = match payload.get("new_password").and_then(|v| v.as_str()) {
+        Some(p) => p.to_string(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "VALIDATION", "message": "new_password is required"})),
+            )
+        }
+    };
+
+    use niazi_mobile_mart_lib::services::AdminService;
     let reset_payload = niazi_mobile_mart_lib::services::admin_service::ResetCredentialsPayload {
         user_id: auth.0.user_id.clone(),
         new_login_key: None,
