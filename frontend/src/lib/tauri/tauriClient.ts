@@ -971,43 +971,10 @@ export const tauriClient = {
 
   // ── Product Domain (Phase 7 Domain 1 — Typed Storage Bridge) ───────────────
   async productCreate(dto: CreateProductDto): Promise<Product> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('storage_product_create', { dto });
-    }
-    const products = getStoredWebProducts();
-    const now = new Date().toISOString();
-    const newProduct: Product = {
-      id: `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      name: dto.name,
-      sku: dto.sku,
-      barcode: dto.barcode || null,
-      category_id: dto.category_id,
-      brand_id: dto.brand_id || null,
-      company_id: dto.company_id || null,
-      color_id: dto.color_id || null,
-      quality_id: dto.quality_id || null,
-      unit_id: dto.unit_id || null,
-      purchase_price: Math.round(Number(dto.purchase_price) || 0),
-      average_cost: Math.round(Number(dto.average_cost ?? dto.purchase_price) || 0),
-      sale_price: Math.round(Number(dto.sale_price) || 0),
-      low_stock_threshold: Number(dto.low_stock_threshold) || 5,
-      is_active: true,
-      description: dto.description || null,
-      created_at: now,
-      updated_at: now,
-    };
-    products.unshift(newProduct);
-    saveStoredWebProducts(products);
-
-    const qty = dto.initial_quantity || 0;
-    if (qty > 0) {
-      const stockMap = getStoredWebStockMap();
-      stockMap[newProduct.id] = (stockMap[newProduct.id] || 0) + qty;
-      saveStoredWebStockMap(stockMap);
-    }
-
-    return newProduct;
+    return await httpFetch<Product>('/api/products', {
+      method: 'POST',
+      body: JSON.stringify(dto),
+    });
   },
 
   async productUpdate(id: string, dto: UpdateProductDto): Promise<Product> {
@@ -1196,15 +1163,12 @@ export const tauriClient = {
   },
 
   async inventoryGetStock(productId: string, branchId: string): Promise<number> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('storage_inventory_get_stock', {
-        productId,
-        branchId,
-      });
+    const stockList = await httpFetch<any[]>(`/api/inventory?product_id=${encodeURIComponent(productId)}&branch_id=${encodeURIComponent(branchId)}`).catch(() => []);
+    if (Array.isArray(stockList)) {
+      const record = stockList.find((r: any) => r.product_id === productId);
+      return record ? (record.quantity || 0) : 0;
     }
-    const stockMap = getStoredWebStockMap();
-    return stockMap[productId] || 0;
+    return 0;
   },
 
   async inventoryGetStockMap(branchId: string): Promise<Record<string, number>> {
@@ -1279,29 +1243,15 @@ export const tauriClient = {
   },
 
   async organizationGetDashboardStats(): Promise<OrganizationDashboardStats> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<OrganizationDashboardStats>('organization_get_dashboard_stats');
-    }
-    const prods = getStoredWebProducts();
-    const lowStockCount = prods.filter((p: any) => (p.quantity ?? 0) <= ((p.min_stock_level ?? p.low_stock_threshold) || 5)).length;
-    let activeStaffCount = 6;
-    try {
-      const raw = typeof window !== 'undefined' ? localStorage.getItem('nmm_browser_staff_users') : null;
-      if (raw) {
-        const staff = JSON.parse(raw);
-        if (Array.isArray(staff)) {
-          activeStaffCount = Math.max(1, staff.filter((u: any) => u.status === 'active').length);
-        }
-      }
-    } catch {}
+    const products = await httpFetch<any[]>('/api/products').catch(() => []);
+    const users = await httpFetch<any[]>('/api/users').catch(() => []);
+    const lowStockCount = products.filter((p) => (p.quantity || 0) <= (p.low_stock_threshold || 5)).length;
+    const activeStaffCount = users.filter((u) => u.status === 'active' || u.is_active).length;
 
     return {
-      product_count: prods.length,
-      category_count: 0,
-      active_staff_count: activeStaffCount,
-      low_stock_count: lowStockCount,
-      active_branch_count: 1,
+      total_products: products.length,
+      active_staff: activeStaffCount || 1,
+      low_stock_items: lowStockCount,
     };
   },
 
@@ -1720,110 +1670,10 @@ export const tauriClient = {
 
   // ── Sales & Checkout Domain (Phase 4B Typed Storage Bridge) ───────────────
   async saleComplete(dto: CompleteSaleDto): Promise<SaleResultDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SaleResultDto>('storage_sale_complete', { dto });
-    }
-    const now = new Date().toISOString();
-    const invoiceNum = `INV-${Math.floor(100000 + Math.random() * 900000)}`;
-    const saleId = `sale_${Date.now()}`;
-
-    let subtotal = 0;
-    const lines: SaleLine[] = [];
-    const products = getStoredWebProducts();
-    const stockMap = getStoredWebStockMap();
-
-    (dto.items || []).forEach((item, idx) => {
-      const prod = products.find((p) => p.id === item.product_id);
-      const unitPrice = (item as any).unit_price ?? (item as any).price ?? (prod ? prod.sale_price : 1000);
-      const costPrice = prod ? (prod.purchase_price || prod.average_cost || 800) : 800;
-      const lineDisc = item.discount || 0;
-      const lineTotal = Math.max(0, unitPrice * item.quantity - lineDisc);
-      subtotal += lineTotal;
-
-      lines.push({
-        id: `line_${saleId}_${idx + 1}`,
-        sale_id: saleId,
-        product_id: item.product_id,
-        product_name_snapshot: prod ? prod.name : `Product ${item.product_id}`,
-        sku_snapshot: prod ? prod.sku : `SKU-${idx + 1}`,
-        unit_price: unitPrice,
-        cost_price_snapshot: costPrice,
-        quantity: item.quantity,
-        discount: lineDisc,
-        line_total: lineTotal,
-        created_at: now,
-      });
-
-      if (stockMap[item.product_id] !== undefined) {
-        stockMap[item.product_id] = Math.max(0, (stockMap[item.product_id] || 0) - item.quantity);
-      }
+    return await httpFetch<SaleResultDto>('/api/sales', {
+      method: 'POST',
+      body: JSON.stringify(dto),
     });
-
-    saveStoredWebStockMap(stockMap);
-
-    const extraDisc = dto.discount || 0;
-    const totalAmount = Math.max(0, subtotal - extraDisc);
-    const paidAmount = dto.paid_amount !== null && dto.paid_amount !== undefined ? dto.paid_amount : totalAmount;
-    const changeAmount = Math.max(0, paidAmount - totalAmount);
-
-    let paymentStatus: PaymentStatus = 'PAID';
-    if (paidAmount === 0 && totalAmount > 0) {
-      paymentStatus = 'UNPAID';
-    } else if (paidAmount < totalAmount) {
-      paymentStatus = 'PARTIALLY_PAID';
-    }
-
-    const saleRecord: Sale = {
-      id: saleId,
-      invoice_number: invoiceNum,
-      branch_id: dto.branch_id || '00000000-0000-0000-0000-000000000002',
-      customer_id: dto.customer_id || null,
-      customer_name_snapshot: dto.customer_id ? 'Customer' : 'Walk-in Customer',
-      subtotal,
-      discount: extraDisc,
-      tax_amount: 0,
-      total_amount: totalAmount,
-      paid_amount: paidAmount,
-      change_amount: changeAmount,
-      payment_status: paymentStatus,
-      sale_status: 'COMPLETED',
-      performed_by: 'Cashier',
-      notes: dto.notes || null,
-      created_at: now,
-      updated_at: now,
-    };
-
-    const payments: SalePayment[] = [
-      {
-        id: `pay_${saleId}_1`,
-        sale_id: saleId,
-        amount: paidAmount,
-        payment_method: dto.payment_method || 'cash',
-        reference_number: null,
-        notes: null,
-        created_at: now,
-      },
-    ];
-
-    const cogs = lines.reduce((acc, l) => acc + l.cost_price_snapshot * l.quantity, 0);
-    const grossProfit = totalAmount - cogs;
-    const grossMargin = totalAmount > 0 ? (grossProfit / totalAmount) * 100 : 0;
-
-    const storedSales = getStoredWebSales();
-    storedSales.unshift({ sale: saleRecord, lines, payments });
-    saveStoredWebSales(storedSales);
-
-    return {
-      sale: saleRecord,
-      lines,
-      payments,
-      credit_amount: paymentStatus === 'UNPAID' || paymentStatus === 'PARTIALLY_PAID' ? totalAmount - paidAmount : 0,
-      customer_balance_after: null,
-      cogs,
-      gross_profit: grossProfit,
-      gross_margin: grossMargin,
-    };
   },
 
   async saleGetById(id: string): Promise<Sale | null> {
@@ -2244,55 +2094,11 @@ export const tauriClient = {
   },
 
   async profitGetDashboardSummary(branchId?: string | null): Promise<DashboardProfitSummaryDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<DashboardProfitSummaryDto>('profit_get_dashboard_summary', {
-        branchId: branchId || null,
-      });
+    let url = '/api/reports/profit';
+    if (branchId) {
+      url += `?branch_id=${encodeURIComponent(branchId)}`;
     }
-    const sales = getStoredWebSales();
-    const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const thisMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-
-    const calcMetrics = (filterFn: (s: StoredWebSale) => boolean): ProfitMetricsDto => {
-      const matches = sales.filter((s) => s.sale && s.sale.sale_status === 'COMPLETED' && filterFn(s));
-      let gross_revenue = 0;
-      let discounts = 0;
-      let net_revenue = 0;
-      let cogs = 0;
-
-      for (const item of matches) {
-        const s = item.sale;
-        gross_revenue += s.subtotal || 0;
-        discounts += s.discount || 0;
-        net_revenue += s.total_amount || 0;
-        if (item.lines && item.lines.length > 0) {
-          for (const line of item.lines) {
-            cogs += (line.cost_price_snapshot || 0) * (line.quantity || 1);
-          }
-        }
-      }
-
-      const gross_profit = net_revenue - cogs;
-      const gross_margin = net_revenue > 0 ? (gross_profit / net_revenue) * 100 : 0;
-
-      return {
-        gross_revenue,
-        discounts,
-        net_revenue,
-        cogs,
-        gross_profit,
-        gross_margin,
-        orders_count: matches.length,
-      };
-    };
-
-    return {
-      today: calcMetrics((s) => (s.sale.created_at || '').startsWith(todayStr)),
-      this_month: calcMetrics((s) => (s.sale.created_at || '').startsWith(thisMonthStr)),
-      total: calcMetrics(() => true),
-    };
+    return await httpFetch<DashboardProfitSummaryDto>(url);
   },
 
   // ── Sync Engine Commands ───────────────────────────────────────────────────
