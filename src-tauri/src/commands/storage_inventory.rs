@@ -327,34 +327,41 @@ mod tests {
     }
 }
 
+#[allow(dead_code)]
 async fn storage_inventory_get_stock_impl(state: &AppState, product_id: String, branch_id: String) -> AppResult<i64> {
     state.inventory_service.get_stock(&product_id, &branch_id).await
 }
 
+#[allow(dead_code)]
 async fn storage_inventory_increase_impl(state: &AppState, dto: IncreaseStockDto) -> AppResult<i64> {
     validate_increase_stock_dto(&dto)?;
     state.inventory_service.increase_stock(dto, None).await
 }
 
+#[allow(dead_code)]
 async fn storage_inventory_decrease_impl(state: &AppState, dto: DecreaseStockDto) -> AppResult<i64> {
     validate_decrease_stock_dto(&dto)?;
     state.inventory_service.decrease_stock(dto, None).await
 }
 
+#[allow(dead_code)]
 async fn storage_inventory_adjust_impl(state: &AppState, dto: AdjustStockDto) -> AppResult<i64> {
     validate_adjust_stock_dto(&dto)?;
     state.inventory_service.adjust_stock(dto, None).await
 }
 
+#[allow(dead_code)]
 async fn storage_inventory_transfer_impl(state: &AppState, dto: TransferStockDto) -> AppResult<()> {
     validate_transfer_stock_dto(&dto)?;
     state.inventory_service.transfer_stock(dto, None).await
 }
 
+#[allow(dead_code)]
 async fn storage_inventory_get_stock_map_impl(state: &AppState, branch_id: String) -> AppResult<HashMap<String, i64>> {
     state.inventory_service.get_stock_map(&branch_id).await
 }
 
+#[allow(dead_code)]
 async fn storage_inventory_get_movements_impl(state: &AppState, product_id: Option<String>, branch_id: Option<String>, limit: Option<u32>) -> AppResult<Vec<StockMovement>> {
     state.inventory_service.list_movements(product_id.as_deref(), branch_id.as_deref(), limit.unwrap_or(50)).await
 }

@@ -1,11 +1,8 @@
 use chrono::Utc;
 use sqlx::{PgPool, Row};
 
-use crate::domain::cash::{CashMovement, CashMovementDirection, CashMovementType};
 use crate::domain::customer::{
-    Customer, CustomerDetailDto, CustomerFilter, CustomerLedgerEntry, CustomerLedgerEntryType,
-    CustomerPaymentResultDto, CustomerStatementDto, CustomerStatementRowDto, CustomerSummaryDto,
-    RecordCustomerPaymentDto, UpdateCustomerDto,
+    Customer, CustomerDetailDto, CustomerFilter, CustomerLedgerEntry, CustomerLedgerEntryType, CustomerStatementDto, CustomerStatementRowDto, CustomerSummaryDto, UpdateCustomerDto,
 };
 use crate::errors::{AppError, AppResult};
 
@@ -270,7 +267,7 @@ impl PostgresCustomerRepository {
             let s_trim = s.trim();
             if !s_trim.is_empty() {
                 query.push_str(&format!(" AND (c.name ILIKE ${param_index} OR c.phone ILIKE ${param_index} OR c.customer_code ILIKE ${param_index})"));
-                param_index += 1;
+                // param_index += 1;
             }
         }
 

@@ -1,5 +1,4 @@
 use tauri::State;
-use uuid::Uuid;
 
 use crate::db::errors::DbError;
 use crate::domain::product::{CreateProductDto, Product, ProductFilter, UpdateProductDto};

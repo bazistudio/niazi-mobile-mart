@@ -1297,7 +1297,7 @@ mod tests {
         }
 
         // All three must still be fetchable as pending in the database (though subject to backoff)
-        let mut total_pending_in_db: i32 = 0;
+        let total_pending_in_db: i32;
         {
             let conn_arc = repo.db.inner();
             let guard = conn_arc.lock().await;

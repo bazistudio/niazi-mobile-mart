@@ -67,7 +67,7 @@ impl ProductService {
                 let db = self.db.as_ref().expect("SQLite database connection required");
                 let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
                 let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
-                let terminal_id = current_terminal.id;
+                let _terminal_id = current_terminal.id;
 
                 let target_branch = dto.branch_id.clone().unwrap_or_else(|| DEFAULT_MAIN_BRANCH_ID.to_string());
                 let uid = user_id.map(|s| s.to_string());
@@ -157,7 +157,7 @@ impl ProductService {
                 let db = self.db.as_ref().expect("SQLite database connection required");
                 let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
                 let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
-                let terminal_id = current_terminal.id;
+                let _terminal_id = current_terminal.id;
 
                 let id_owned = id.to_string();
 
@@ -215,7 +215,7 @@ impl ProductService {
                 let db = self.db.as_ref().expect("SQLite database connection required");
                 let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
                 let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
-                let terminal_id = current_terminal.id;
+                let _terminal_id = current_terminal.id;
 
                 let id_owned = id.to_string();
 

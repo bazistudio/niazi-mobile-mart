@@ -2,7 +2,6 @@ use chrono::Utc;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use crate::domain::inventory::{StockMovement, StockMovementType};
 use crate::domain::product::{CreateProductDto, Product, ProductFilter, UpdateProductDto};
 use crate::errors::{AppError, AppResult};
 

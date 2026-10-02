@@ -2,9 +2,6 @@ use chrono::Utc;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use crate::domain::cash::{CashMovement, CashMovementDirection, CashMovementType};
-use crate::domain::customer::{CustomerLedgerEntry, CustomerLedgerEntryType};
-use crate::domain::inventory::{StockMovement, StockMovementType};
 use crate::domain::organization::DEFAULT_MAIN_BRANCH_ID;
 use crate::domain::sales::{
     normalize_payment_method, CompleteSaleDto, PaymentStatus, Sale, SaleFilterDto, SaleLine,
@@ -865,7 +862,7 @@ impl PostgresSaleRepository {
             }
             if f.end_date.is_some() {
                 query.push_str(&format!(" AND created_at <= ${param_index}"));
-                param_index += 1;
+                // param_index += 1;
             }
         }
 

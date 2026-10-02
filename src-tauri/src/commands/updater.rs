@@ -157,9 +157,10 @@ pub async fn download_and_install_update(app_handle: AppHandle) -> AppResult<()>
 
 /// Relaunches the desktop application after a successful update installation
 #[tauri::command]
+#[allow(unreachable_code)]
 pub async fn relaunch_app(app_handle: AppHandle) -> AppResult<()> {
     app_handle.restart();
-    Ok(())
+    unreachable!("restart() diverged but returned")
 }
 
 /// Opens an external web URL using the desktop system opener

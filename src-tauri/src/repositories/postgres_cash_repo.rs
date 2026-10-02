@@ -241,11 +241,11 @@ impl PostgresCashRepository {
         limit: Option<i64>,
     ) -> AppResult<Vec<CashMovement>> {
         let mut query = String::from("SELECT id, session_id, branch_id, movement_type, direction, amount, reference_id, reference_number, payment_method, description, performed_by, created_at FROM cash_movements WHERE branch_id = $1");
-        let mut param_index = 2;
+        let param_index = 2;
 
         if session_id.is_some() {
             query.push_str(&format!(" AND session_id = ${param_index}"));
-            param_index += 1;
+            // param_index += 1;
         }
 
         query.push_str(" ORDER BY created_at DESC, id DESC");

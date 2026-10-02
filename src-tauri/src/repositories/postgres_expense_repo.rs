@@ -231,7 +231,7 @@ impl PostgresExpenseRepository {
             }
             if f.end_date.is_some() {
                 query.push_str(&format!(" AND expense_date <= ${param_index}"));
-                param_index += 1;
+                // param_index += 1;
             }
         }
 

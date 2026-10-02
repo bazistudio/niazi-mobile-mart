@@ -250,7 +250,7 @@ impl PostgresSupplierRepository {
             let s_trim = search_str.trim();
             if !s_trim.is_empty() {
                 query.push_str(&format!(" AND (s.name ILIKE ${param_index} OR s.phone ILIKE ${param_index} OR s.supplier_code ILIKE ${param_index})"));
-                param_index += 1;
+                // param_index += 1;
             }
         }
 

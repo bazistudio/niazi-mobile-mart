@@ -77,7 +77,7 @@ pub use postgres_supplier_repo::PostgresSupplierRepository;
 pub use postgres_user_repo::PostgresUserRepository;
 
 use crate::domain::cash::{
-    CashMovement, CashSession, CloseCashSessionDto, CreateCashAdjustmentDto, OpenCashSessionDto,
+    CloseCashSessionDto, CreateCashAdjustmentDto, OpenCashSessionDto,
 };
 use crate::domain::catalog::{
     Brand, Category, Color, Company, CreateBrandDto, CreateCategoryDto, CreateColorDto,
@@ -85,8 +85,8 @@ use crate::domain::catalog::{
     UpdateCategoryDto, UpdateColorDto, UpdateCompanyDto, UpdateQualityDto, UpdateUnitDto,
 };
 use crate::domain::customer::{
-    Customer, CustomerDetailDto, CustomerFilter, CustomerLedgerEntry, CustomerPaymentResultDto,
-    CustomerStatementDto, CustomerSummaryDto, RecordCustomerPaymentDto, UpdateCustomerDto,
+    Customer, CustomerDetailDto, CustomerFilter, CustomerLedgerEntry,
+    CustomerStatementDto, CustomerSummaryDto, UpdateCustomerDto,
 };
 use crate::domain::expense::{
     CreateExpenseCategoryDto, CreateExpenseDto, Expense, ExpenseCategory, ExpenseFilterDto,
@@ -102,13 +102,13 @@ use crate::domain::purchases::{
     CompletePurchaseDto, Purchase, PurchaseFilterDto, PurchaseLine, PurchaseResultDto,
 };
 use crate::domain::purchase_return::{
-    CreatePurchaseReturnDto, PurchaseReturn, PurchaseReturnFilterDto, PurchaseReturnDetailDto,
+    CreatePurchaseReturnDto, PurchaseReturnDetailDto,
 };
 use crate::domain::sales::{
     CompleteSaleDto, Sale, SaleFilterDto, SaleLine, SalePayment, SaleResultDto,
 };
 use crate::domain::sales_return::{
-    CreateSalesReturnDto, SalesReturn, SalesReturnFilterDto, SalesReturnDetailDto,
+    CreateSalesReturnDto, SalesReturnDetailDto,
 };
 use crate::domain::supplier::{
     Supplier, SupplierDetailDto, SupplierFilter, SupplierLedgerEntry, SupplierSummaryDto,
@@ -450,7 +450,7 @@ impl ProductRepository {
         match self {
             Self::SQLite(r) => {
                 let prod = r.create_product(id, dto).await?;
-                if let (Some(qty), Some(ref branch_id)) = (dto.initial_quantity, &dto.branch_id) {
+                if let (Some(qty), Some(_branch_id)) = (dto.initial_quantity, &dto.branch_id) {
                     if qty > 0 {
                         // SQLite initial stock handle
                     }

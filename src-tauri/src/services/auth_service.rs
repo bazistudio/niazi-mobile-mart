@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::domain::access_control::StaffAccessProfile;
 use crate::domain::user::{SanitizedUser, UserStatus};
 use crate::errors::{AppError, AppResult};
-use crate::repositories::{SQLiteAuthSnapshotRepository, SQLiteUserRepository, UserRepository};
+use crate::repositories::{SQLiteAuthSnapshotRepository, UserRepository};
 use crate::services::hasher::verify_credential;
 use crate::state::{AppState, SessionContext};
 

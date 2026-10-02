@@ -267,27 +267,33 @@ mod tests {
     }
 }
 
+#[allow(dead_code)]
 async fn storage_sale_complete_impl(state: &AppState, dto: CompleteSaleDto) -> AppResult<SaleResultDto> {
     validate_complete_sale_dto(&dto)?;
     state.sale_service.complete_sale(None, dto).await
 }
 
+#[allow(dead_code)]
 async fn storage_sale_get_by_id_impl(state: &AppState, id: String) -> AppResult<Option<Sale>> {
     state.sale_service.get_sale_by_id(&id).await
 }
 
+#[allow(dead_code)]
 async fn storage_sale_get_by_invoice_impl(state: &AppState, invoice_number: String) -> AppResult<Option<Sale>> {
     state.sale_service.get_sale_by_invoice(&invoice_number).await
 }
 
+#[allow(dead_code)]
 async fn storage_sale_list_impl(state: &AppState, filter: Option<SaleFilterDto>) -> AppResult<Vec<Sale>> {
     state.sale_service.list_sales(filter.unwrap_or_default()).await
 }
 
+#[allow(dead_code)]
 async fn storage_sale_get_lines_impl(state: &AppState, sale_id: String) -> AppResult<Vec<SaleLine>> {
     state.sale_service.get_sale_lines(&sale_id).await
 }
 
+#[allow(dead_code)]
 async fn storage_sale_get_payments_impl(state: &AppState, sale_id: String) -> AppResult<Vec<SalePayment>> {
     state.sale_service.get_sale_payments(&sale_id).await
 }

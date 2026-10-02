@@ -1,7 +1,6 @@
-use std::sync::Arc;
 
 use crate::domain::profit::{
-    DailyProfitabilityDto, DashboardProfitSummaryDto, PeriodProfitabilityDto, ProductProfitabilityDto,
+    DashboardProfitSummaryDto, PeriodProfitabilityDto, ProductProfitabilityDto,
     SaleProfitabilityDto,
 };
 use crate::errors::{AppError, AppResult};

@@ -502,7 +502,7 @@ impl PostgresPurchaseReturnRepository {
             }
             if f.supplier_id.is_some() {
                 query.push_str(&format!(" AND supplier_id = ${param_index}"));
-                param_index += 1;
+                // param_index += 1;
             }
         }
 

@@ -6,7 +6,6 @@ use crate::domain::organization::DEFAULT_MAIN_BRANCH_ID;
 use crate::domain::purchases::{
     CompletePurchaseDto, Purchase, PurchaseFilterDto, PurchaseLine, PurchasePaymentStatus, PurchaseResultDto, PurchaseStatus,
 };
-use crate::domain::sales::PaymentStatus;
 use crate::errors::{AppError, AppResult};
 
 #[derive(Clone)]
@@ -189,7 +188,7 @@ impl PostgresPurchaseRepository {
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
 
-        let (supplier_id, supplier_name, _credit_limit) = match supplier_row {
+        let (supplier_id, _supplier_name, _credit_limit) = match supplier_row {
             Some(row) => {
                 let is_active_int: i32 = row.try_get(3).unwrap_or(1);
                 if is_active_int != 1 {
@@ -638,7 +637,7 @@ impl PostgresPurchaseRepository {
             }
             if f.payment_status.is_some() {
                 query.push_str(&format!(" AND payment_status = ${param_index}"));
-                param_index += 1;
+                // param_index += 1;
             }
         }
 

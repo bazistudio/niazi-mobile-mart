@@ -1,7 +1,7 @@
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 
 use crate::domain::profit::DashboardProfitSummaryDto;
-use crate::errors::{AppError, AppResult};
+use crate::errors::AppResult;
 
 #[derive(Clone)]
 pub struct PostgresProfitRepository {
@@ -95,7 +95,7 @@ impl PostgresProfitRepository {
             .fetch_one(&self.pool)
             .await
             .unwrap_or((0,));
-        let total_purchases = pur_row.0;
+        let _total_purchases = pur_row.0;
 
         let sales_count: (i64,) = sqlx::query_as(&format!("SELECT COUNT(*) FROM sales {sale_where}"))
             .fetch_one(&self.pool)

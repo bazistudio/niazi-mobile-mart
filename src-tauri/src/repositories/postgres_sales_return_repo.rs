@@ -565,7 +565,7 @@ impl PostgresSalesReturnRepository {
             }
             if f.customer_id.is_some() {
                 query.push_str(&format!(" AND customer_id = ${param_index}"));
-                param_index += 1;
+                // param_index += 1;
             }
         }
 
