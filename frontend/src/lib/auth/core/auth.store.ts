@@ -5,7 +5,6 @@ import { AuthUser } from "@/types/auth/auth";
 import { AuthSession } from "@/types/auth/session";
 import { setSession, clearSession } from "@/lib/auth/core/auth.session";
 import { getQueryClient } from "@/components/providers/ReactQueryProvider";
-import { isTauriEnvironment, tauriClient } from "@/lib/tauri/tauriClient";
 
 interface AuthState {
   user: AuthUser | null;
@@ -47,9 +46,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   // LOGOUT (sync — for interceptor hard-logout)
   // -------------------------
   logout: () => {
-    if (isTauriEnvironment()) {
-      tauriClient.authLogout().catch(console.error);
-    }
+
     clearSession();
     getQueryClient().clear();
     set({ user: null, session: null, isAuthenticated: false, isHydrated: true });
@@ -59,13 +56,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   // LOGOUT ASYNC — for UI logout button
   // -------------------------
   logoutAsync: async () => {
-    if (isTauriEnvironment()) {
-      try {
-        await tauriClient.authLogout();
-      } catch (err) {
-        console.warn("[Tauri authLogout error]", err);
-      }
-    }
+
     clearSession();
     getQueryClient().clear();
     set({ user: null, session: null, isAuthenticated: false });

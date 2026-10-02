@@ -209,20 +209,7 @@ pub fn run() {
             // Diagnostics
             commands::health_check::health_check,
             commands::health_check::ping,
-            // Native Session & Auth Commands
-            commands::auth::auth_check_bootstrap_status,
-            commands::auth::auth_bootstrap_first_admin,
-            commands::auth::auth_login,
-            commands::auth::auth_sync_session,
-            commands::auth::auth_logout,
-            commands::auth::auth_change_password,
-            commands::auth::auth_forced_change_password,
-            commands::auth::auth_lock,
-            commands::auth::auth_unlock,
-            commands::auth::auth_get_current_session,
-            commands::auth::auth_get_current_user,
-            commands::auth::auth_check_permission,
-            commands::auth::auth_check_discount_limit,
+
             // Terminal Commands
             commands::terminal::terminal_get_current,
             commands::terminal::terminal_register,

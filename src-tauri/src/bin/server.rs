@@ -186,14 +186,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/auth/me", get(me_handler))
         .route("/api/v1/auth/me", get(me_handler))
         .route(
-            "/api/v1/auth/change-password",
-            axum::routing::post(change_password_handler),
-        )
-        .route(
-            "/api/v1/auth/forced-change-password",
-            axum::routing::post(forced_change_password_handler),
-        )
-        .route(
             "/api/v1/auth/verify-password",
             axum::routing::post(verify_password_handler),
         )
@@ -213,10 +205,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/api/v1/users",
             get(list_users_handler).post(create_user_handler),
-        )
-        .route(
-            "/api/v1/users/credential-snapshots",
-            get(credential_snapshots_handler),
         )
         .route(
             "/api/v1/users/:id",
@@ -331,10 +319,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             axum::routing::post(inventory_transfer_handler),
         )
         .route("/api/v1/inventory/stock", get(inventory_get_stock_handler))
-        .route(
-            "/api/v1/inventory/stock-map",
-            get(inventory_get_stock_map_handler),
-        )
+
         .route(
             "/api/v1/inventory/movements",
             get(inventory_get_movements_handler),
@@ -808,66 +793,6 @@ async fn list_users_handler(
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "SERVER_ERROR", "message": e.to_string()})),
-        ),
-    }
-}
-
-/// GET /api/v1/users/credential-snapshots — Return user authentication snapshots (Admin only)
-async fn credential_snapshots_handler(
-    State(state): State<ServerState>,
-    auth: AuthenticatedUser,
-) -> impl IntoResponse {
-    use niazi_mobile_mart_lib::domain::user::UserRole;
-
-    // Internal staff authority required
-    if auth.0.role.is_public() {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "error": "FORBIDDEN",
-                "message": "Access denied: Internal staff authority required for credential snapshots"
-            })),
-        );
-    }
-
-    match state.app_state.user_repo.list_all().await {
-        Ok(users) => {
-            let now = chrono::Utc::now().to_rfc3339();
-            let snapshots: Vec<niazi_mobile_mart_lib::domain::auth_snapshot::AuthSnapshot> = users
-                .into_iter()
-                .filter(|u| auth.0.role == UserRole::Admin || u.id == auth.0.user_id)
-                .map(|u| {
-                    let profile_json = serde_json::to_string(&u.access_profile)
-                        .unwrap_or_else(|_| "{}".to_string());
-                    niazi_mobile_mart_lib::domain::auth_snapshot::AuthSnapshot {
-                        user_id: u.id,
-                        username: u.username,
-                        organization_id: auth.0.organization_id.clone(),
-                        branch_id: None,
-                        role: u.role,
-                        credential_hash: format!(
-                            "{}|{}",
-                            u.login_key_hash,
-                            u.pin_hash.unwrap_or_default()
-                        ),
-                        access_profile_json: profile_json,
-                        credential_version: 1,
-                        status: u.status,
-                        synced_at: now.clone(),
-                        created_at: u.created_at,
-                        updated_at: u.updated_at,
-                    }
-                })
-                .collect();
-
-            (StatusCode::OK, Json(json!(snapshots)))
-        }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "error": "SERVER_ERROR",
-                "message": e.to_string()
-            })),
         ),
     }
 }
@@ -1480,124 +1405,8 @@ async fn profit_report_handler(
 }
 
 // ---------------------------------------------------------------------------
-// Auth — change password & verify password
+// Auth — verify password
 // ---------------------------------------------------------------------------
-
-/// POST /api/v1/auth/change-password — Change authenticated user's own password
-async fn change_password_handler(
-    State(state): State<ServerState>,
-    auth: AuthenticatedUser,
-    Json(payload): Json<serde_json::Value>,
-) -> impl IntoResponse {
-    let old_password = match payload.get("old_password").and_then(|v| v.as_str()) {
-        Some(p) => p.to_string(),
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "VALIDATION", "message": "old_password is required"})),
-            )
-        }
-    };
-    let new_password = match payload.get("new_password").and_then(|v| v.as_str()) {
-        Some(p) => p.to_string(),
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "VALIDATION", "message": "new_password is required"})),
-            )
-        }
-    };
-
-    // Verify old password first
-    use niazi_mobile_mart_lib::services::AdminService;
-    match AdminService::verify_admin_password(
-        &state.app_state.user_repo,
-        &state.app_state,
-        &old_password,
-    )
-    .await
-    {
-        Ok(true) => {}
-        Ok(false) => {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(json!({"error": "FORBIDDEN", "message": "Current password is incorrect"})),
-            )
-        }
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "SERVER_ERROR", "message": e.to_string()})),
-            )
-        }
-    }
-
-    // Reset password for this user
-    let reset_payload = niazi_mobile_mart_lib::services::admin_service::ResetCredentialsPayload {
-        user_id: auth.0.user_id.clone(),
-        new_login_key: None,
-        new_pin: None,
-        new_password: Some(new_password),
-    };
-    match AdminService::reset_credentials(
-        &state.app_state.user_repo,
-        &state.app_state,
-        reset_payload,
-    )
-    .await
-    {
-        Ok(_) => (
-            StatusCode::OK,
-            Json(json!({"message": "Password changed successfully"})),
-        ),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "CHANGE_FAILED", "message": e.to_string()})),
-        ),
-    }
-}
-
-/// POST /api/v1/auth/forced-change-password — Change authenticated user's own password without verifying old password
-/// Used for post-login forced password change flows (e.g. temporary password issued by admin)
-async fn forced_change_password_handler(
-    State(state): State<ServerState>,
-    auth: AuthenticatedUser,
-    Json(payload): Json<serde_json::Value>,
-) -> impl IntoResponse {
-    let new_password = match payload.get("new_password").and_then(|v| v.as_str()) {
-        Some(p) => p.to_string(),
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "VALIDATION", "message": "new_password is required"})),
-            )
-        }
-    };
-
-    use niazi_mobile_mart_lib::services::AdminService;
-    let reset_payload = niazi_mobile_mart_lib::services::admin_service::ResetCredentialsPayload {
-        user_id: auth.0.user_id.clone(),
-        new_login_key: None,
-        new_pin: None,
-        new_password: Some(new_password),
-    };
-    match AdminService::reset_credentials(
-        &state.app_state.user_repo,
-        &state.app_state,
-        reset_payload,
-    )
-    .await
-    {
-        Ok(_) => (
-            StatusCode::OK,
-            Json(json!({"message": "Password changed successfully"})),
-        ),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "CHANGE_FAILED", "message": e.to_string()})),
-        ),
-    }
-}
 
 /// POST /api/v1/auth/verify-password — Verify admin password for protected operations
 async fn verify_password_handler(
@@ -1738,7 +1547,7 @@ async fn update_user_handler(
     payload.user_id = id;
     use niazi_mobile_mart_lib::services::AdminService;
     match AdminService::update_user(&state.app_state.user_repo, &state.app_state, payload).await {
-        Ok(user) => (StatusCode::OK, Json(json!(user.sanitize()))),
+        Ok(user) => (StatusCode::OK, Json(json!(user))),
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "UPDATE_FAILED", "message": e.to_string()})),
@@ -1782,7 +1591,7 @@ async fn approve_staff_handler(
     }
     use niazi_mobile_mart_lib::services::AdminService;
     match AdminService::approve_staff(&state.app_state.user_repo, &state.app_state, &id).await {
-        Ok(user) => (StatusCode::OK, Json(json!(user.sanitize()))),
+        Ok(user) => (StatusCode::OK, Json(json!(user))),
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "APPROVE_FAILED", "message": e.to_string()})),
@@ -1804,7 +1613,7 @@ async fn reject_staff_handler(
     }
     use niazi_mobile_mart_lib::services::AdminService;
     match AdminService::reject_staff(&state.app_state.user_repo, &state.app_state, &id).await {
-        Ok(user) => (StatusCode::OK, Json(json!(user.sanitize()))),
+        Ok(user) => (StatusCode::OK, Json(json!(user))),
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "REJECT_FAILED", "message": e.to_string()})),
@@ -1843,7 +1652,7 @@ async fn reset_staff_password_handler(
     )
     .await
     {
-        Ok(user) => (StatusCode::OK, Json(json!(user.sanitize()))),
+        Ok(_) => (StatusCode::OK, Json(json!({"message": "Password reset successfully"}))),
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "RESET_FAILED", "message": e.to_string()})),
@@ -1871,7 +1680,7 @@ async fn reset_credentials_handler(
     match AdminService::reset_credentials(&state.app_state.user_repo, &state.app_state, payload)
         .await
     {
-        Ok(user) => (StatusCode::OK, Json(json!(user.sanitize()))),
+        Ok(_) => (StatusCode::OK, Json(json!({"message": "Credentials reset successfully"}))),
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "RESET_FAILED", "message": e.to_string()})),
@@ -2779,7 +2588,7 @@ async fn inventory_get_movements_handler(
     match state
         .app_state
         .inventory_service
-        .list_movements(product_id.as_deref(), &effective_branch, limit)
+        .list_movements(product_id.as_deref(), Some(&effective_branch), limit)
         .await
     {
         Ok(movements) => (StatusCode::OK, Json(json!(movements))),
@@ -3932,7 +3741,7 @@ async fn cash_daily_summary_handler(
     match state
         .app_state
         .cash_service
-        .get_daily_summary(&effective_branch, date.as_deref())
+        .get_daily_summary(Some(&effective_branch), date.as_deref())
         .await
     {
         Ok(summary) => (StatusCode::OK, Json(json!(summary))),
@@ -4358,7 +4167,7 @@ async fn profit_product_handler(
     match state
         .app_state
         .profit_service
-        .get_product_profitability(&product_id, start_date, end_date, Some(effective_branch))
+        .get_product_profitability(&product_id, start_date, end_date, Some(effective_branch.clone()))
         .await
     {
         Ok(result) => (StatusCode::OK, Json(json!(result))),
@@ -4431,6 +4240,11 @@ async fn profit_sale_handler(
             Json(json!({"error": "SERVER_ERROR", "message": e.to_string()})),
         ),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct SyncPushPayload {
+    events: Vec<niazi_mobile_mart_lib::domain::sync_queue::SyncQueueItem>,
 }
 
 /// POST /api/v1/sync/push â€” Central Outbox Event Ingestion & Deduplication Handler

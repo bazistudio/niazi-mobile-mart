@@ -78,25 +78,31 @@ impl AuthService {
             }
         }
 
-        // Verify Argon2id hash against password OR terminal PIN
-        let password_valid = verify_credential(login_key, &user.login_key_hash);
-        let pin_valid = user
-            .pin_hash
-            .as_deref()
-            .map(|h| verify_credential(login_key, h))
-            .unwrap_or(false);
+        // Verify credential based on role
+        let is_admin = matches!(user.role, crate::domain::user::UserRole::Admin);
+        
+        let valid_credential = if is_admin {
+            verify_credential(login_key, &user.login_key_hash)
+        } else {
+            user.pin_hash
+                .as_deref()
+                .map(|h| verify_credential(login_key, h))
+                .unwrap_or(false)
+        };
 
-        if !password_valid && !pin_valid {
+        if !valid_credential {
             user.failed_login_attempts += 1;
             if user.failed_login_attempts >= 5 {
                 // 15 minute temporary lockout
                 user.login_locked_until_ms = Some(now + (15 * 60 * 1000));
             }
             repo.save(user).await?;
-            return Err(AppError::Unauthorized(
-                "Invalid credentials. Please verify your username and login key or PIN."
-                    .to_string(),
-            ));
+            let msg = if is_admin {
+                "Invalid credentials. Please verify your username and password."
+            } else {
+                "Invalid credentials. Please verify your username and 4-digit PIN."
+            };
+            return Err(AppError::Unauthorized(msg.to_string()));
         }
 
         // Login succeeded: reset counters
@@ -125,231 +131,6 @@ impl AuthService {
         Ok(sanitized)
     }
 
-    /// Changes password for the currently authenticated user
-    pub async fn change_password(
-        repo: &UserRepository,
-        app_state: &AppState,
-        current_password: &str,
-        new_password: &str,
-    ) -> AppResult<()> {
-        let session = app_state.get_session().await;
-        if !session.is_authenticated {
-            return Err(AppError::Unauthorized(
-                "Authentication required to change password".to_string(),
-            ));
-        }
-
-        let user_id = session
-            .user_id
-            .as_deref()
-            .ok_or_else(|| AppError::Unauthorized("No user ID in active session".to_string()))?;
-
-        let mut user = repo
-            .find_by_id(user_id)
-            .await?
-            .ok_or_else(|| AppError::NotFound("User record not found".to_string()))?;
-
-        if !verify_credential(current_password, &user.login_key_hash) {
-            return Err(AppError::Unauthorized(
-                "Current password is incorrect".to_string(),
-            ));
-        }
-
-        if new_password.trim().len() < 6 {
-            return Err(AppError::Validation(
-                "New password must be at least 6 characters long".to_string(),
-            ));
-        }
-
-        user.login_key_hash = crate::services::hasher::hash_credential(new_password.trim())?;
-        user.must_change_password = false;
-        user.failed_login_attempts = 0;
-        user.login_locked_until_ms = None;
-        user.updated_at = chrono::Utc::now().to_rfc3339();
-
-        repo.save(user).await?;
-        Ok(())
-    }
-
-    /// Forced password change when must_change_password is true
-    pub async fn forced_change_password(
-        repo: &UserRepository,
-        app_state: &AppState,
-        new_password: &str,
-    ) -> AppResult<()> {
-        let session = app_state.get_session().await;
-        if !session.is_authenticated {
-            return Err(AppError::Unauthorized(
-                "Authentication required to change password".to_string(),
-            ));
-        }
-
-        let user_id = session
-            .user_id
-            .as_deref()
-            .ok_or_else(|| AppError::Unauthorized("No user ID in active session".to_string()))?;
-
-        let mut user = repo
-            .find_by_id(user_id)
-            .await?
-            .ok_or_else(|| AppError::NotFound("User record not found".to_string()))?;
-
-        if new_password.trim().len() < 6 {
-            return Err(AppError::Validation(
-                "New password must be at least 6 characters long".to_string(),
-            ));
-        }
-
-        user.login_key_hash = crate::services::hasher::hash_credential(new_password.trim())?;
-        user.must_change_password = false;
-        user.failed_login_attempts = 0;
-        user.login_locked_until_ms = None;
-        user.updated_at = chrono::Utc::now().to_rfc3339();
-
-        repo.save(user).await?;
-        Ok(())
-    }
-
-    /// Unlocks a locked terminal using the active staff member's 4-digit PIN
-    pub async fn unlock(
-        repo: &UserRepository,
-        app_state: &AppState,
-        pin: &str,
-    ) -> AppResult<SessionContext> {
-        let clean_pin = pin.trim();
-        if clean_pin.is_empty() {
-            return Err(AppError::Validation("PIN cannot be empty".to_string()));
-        }
-
-        let session = app_state.get_session().await;
-        if !session.is_authenticated {
-            return Err(AppError::Unauthorized(
-                "No active authenticated session found".to_string(),
-            ));
-        }
-
-        if !session.is_locked {
-            return Ok(session);
-        }
-
-        let user_id = session.user_id.as_deref().unwrap_or_default();
-        let mut user = match repo.find_by_id(user_id).await? {
-            Some(u) => u,
-            None => {
-                return Err(AppError::NotFound(
-                    "Active session user record not found".to_string(),
-                ))
-            }
-        };
-
-        let now = current_time_ms();
-
-        // Check PIN lockout
-        if let Some(locked_until) = user.pin_locked_until_ms {
-            if now < locked_until {
-                let remaining_secs = (locked_until - now) / 1000;
-                return Err(AppError::Locked(format!(
-                    "Terminal unlock is locked due to repeated incorrect attempts. Please wait {} seconds.",
-                    remaining_secs
-                )));
-            } else {
-                user.pin_locked_until_ms = None;
-                user.failed_pin_attempts = 0;
-            }
-        }
-
-        let pin_hash = match &user.pin_hash {
-            Some(h) => h.clone(),
-            None => {
-                return Err(AppError::Validation(
-                    "No PIN is configured for this account. Contact your administrator."
-                        .to_string(),
-                ))
-            }
-        };
-
-        if !verify_credential(clean_pin, &pin_hash) {
-            user.failed_pin_attempts += 1;
-            if user.failed_pin_attempts >= 5 {
-                // 5 minute temporary lockout
-                user.pin_locked_until_ms = Some(now + (5 * 60 * 1000));
-            }
-            repo.save(user).await?;
-            return Err(AppError::Unauthorized(
-                "Incorrect PIN. Please try again.".to_string(),
-            ));
-        }
-
-        // Unlock succeeded
-        user.failed_pin_attempts = 0;
-        user.pin_locked_until_ms = None;
-        repo.save(user).await?;
-
-        app_state.unlock_session().await;
-        Ok(app_state.get_session().await)
-    }
-
-    /// Locks the active terminal session
-    pub async fn lock(app_state: &AppState) -> AppResult<SessionContext> {
-        let session = app_state.get_session().await;
-        if !session.is_authenticated {
-            return Err(AppError::Unauthorized(
-                "Cannot lock unauthenticated session".to_string(),
-            ));
-        }
-
-        app_state.lock_session().await;
-        Ok(app_state.get_session().await)
-    }
-
-    /// Synchronizes native SessionContext from a verified Central API Bearer JWT token
-    pub async fn sync_session_from_token(
-        app_state: &AppState,
-        token: &str,
-    ) -> AppResult<SessionContext> {
-        let clean_token = token.trim().strip_prefix("Bearer ").unwrap_or(token).trim();
-        if clean_token.is_empty() {
-            return Err(AppError::Unauthorized(
-                "Missing or empty authorization token".to_string(),
-            ));
-        }
-
-        let session = app_state.get_session().await;
-
-        if clean_token == "native-tauri-session" {
-            if session.is_authenticated {
-                return Ok(session);
-            }
-        }
-
-        // If active native session is ALREADY authenticated authoritatively in Rust
-        // (via authLogin or authLoginSnapshot), attach the provided token (e.g. Central API Bearer JWT)
-        // as active_token for downstream sync operations without requiring desktop to possess Central Server's secret.
-        if session.is_authenticated {
-            app_state
-                .set_active_token(Some(clean_token.to_string()))
-                .await;
-            return Ok(app_state.get_session().await);
-        }
-
-        // If native session is unauthenticated, resolve token using local TokenManager
-        let identity = app_state
-            .token_manager
-            .resolve_identity(clean_token)
-            .await?;
-
-        app_state
-            .set_authenticated_from_identity(identity, clean_token.to_string())
-            .await;
-
-        Ok(app_state.get_session().await)
-    }
-
-    /// Logs out and destroys the active session
-    pub async fn logout(app_state: &AppState) -> AppResult<()> {
-        app_state.clear_session().await;
-        Ok(())
-    }
 
     /// Checks if the active session has Organization Admin authority
     pub async fn is_org_admin(app_state: &AppState) -> bool {

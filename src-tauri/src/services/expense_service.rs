@@ -31,7 +31,7 @@ impl ExpenseService {
                 "Category name cannot be empty".to_string(),
             ));
         }
-        self.expense_repo.create_category_dto(&dto).await
+        self.expense_repo.create_category(&dto).await
     }
 
     pub async fn update_category(
