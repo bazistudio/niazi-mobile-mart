@@ -136,10 +136,6 @@ impl SalesReturnService {
         let notes_cloned = dto.notes.clone();
         let requested_lines = dto.lines.clone();
 
-        let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(self.db.as_ref().unwrap().clone());
-        let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
-        let terminal_id = current_terminal.id;
-
         let db = self.db.as_ref().expect("SQLite database connection required");
         let detail = with_transaction(db, move |tx| {
             // 1. Validate sale exists and is completed
@@ -342,28 +338,7 @@ impl SalesReturnService {
             SQLiteSalesReturnRepository::insert_sales_return_lines_in_tx(tx, &domain_lines)?;
 
             // 9. Check if entire sale is 100% returned; if so, update status to REFUNDED
-            let is_fully_refunded = check_and_update_sale_refunded_status(tx, &sale.id, &now)?;
-
-            // 10. Enqueue SALES_RETURN_CREATED into offline_sync_queue in SQLite transaction
-            let sync_event_payload = crate::domain::sales_return::SalesReturnSyncEventDto {
-                sales_return: sales_return.clone(),
-                lines: domain_lines.clone(),
-                stock_movements: final_stock_movements,
-                cash_movement: final_cash_movement,
-                customer_ledger_entry: final_customer_ledger_entry,
-                is_fully_refunded,
-            };
-            let sync_payload_json = serde_json::to_string(&sync_event_payload).unwrap_or_default();
-
-            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
-                client_event_id: Some(return_id.clone()),
-                terminal_id,
-                organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
-                branch_id: sale.branch_id.clone(),
-                event_type: "SALES_RETURN_CREATED".to_string(),
-                payload: sync_payload_json,
-            };
-            crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+            check_and_update_sale_refunded_status(tx, &sale.id, &now)?;
 
             Ok(SalesReturnDetailDto {
                 sales_return,
@@ -823,7 +798,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sales_return_outbox_event_creation_and_canonical_dto_integrity() {
+    async fn test_sales_return_full_refund_marks_sale_refunded() {
         let (db, sr_svc, sale_svc, cash_svc, _, prod_id) = setup_test_db().await;
 
         cash_svc
@@ -860,7 +835,7 @@ mod tests {
             .await
             .unwrap();
 
-        let return_res = sr_svc
+        let _return_res = sr_svc
             .create_sales_return(
                 CreateSalesReturnDto {
                     sale_id: sale_res.sale.id.clone(),
@@ -877,27 +852,9 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify outbox queue item
+        // Verify sale status updated to REFUNDED
         let conn_arc = db.inner();
         let guard = conn_arc.lock().await;
-
-        let (event_type, payload): (String, String) = guard.query_row(
-            "SELECT event_type, payload FROM offline_sync_queue WHERE client_event_id = ?1",
-            rusqlite::params![return_res.sales_return.id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        ).unwrap();
-
-        assert_eq!(event_type, "SALES_RETURN_CREATED");
-
-        let sync_dto: crate::domain::sales_return::SalesReturnSyncEventDto = serde_json::from_str(&payload).unwrap();
-        assert_eq!(sync_dto.sales_return.id, return_res.sales_return.id);
-        assert_eq!(sync_dto.lines.len(), 1);
-        assert_eq!(sync_dto.lines[0].id, return_res.lines[0].id);
-        assert_eq!(sync_dto.stock_movements.len(), 1);
-        assert!(sync_dto.cash_movement.is_some());
-        assert!(sync_dto.is_fully_refunded);
-
-        // Verify sale status updated to REFUNDED
         let sale_status: String = guard.query_row(
             "SELECT sale_status FROM sales WHERE id = ?1",
             rusqlite::params![sale_res.sale.id],

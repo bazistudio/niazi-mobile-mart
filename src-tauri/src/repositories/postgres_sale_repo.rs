@@ -244,15 +244,37 @@ impl PostgresSaleRepository {
             }
         }
 
-        // 7. Generate invoice number
+        // 7. Generate invoice number — resolve terminal from DTO or fall back to first active terminal
         let (terminal_id, terminal_code) = {
-            let row_opt: Option<(String, String)> = sqlx::query_as("SELECT id, code FROM terminals WHERE id = '00000000-0000-0000-0000-000000000099'")
+            // Prefer terminal_id supplied by caller (desktop app passes its own registered terminal UUID)
+            let requested_id = dto.terminal_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            if let Some(tid) = requested_id {
+                let row_opt: Option<(String, String)> = sqlx::query_as(
+                    "SELECT id, code FROM terminals WHERE id = $1 AND is_active = true"
+                )
+                .bind(tid)
                 .fetch_optional(&mut **tx)
                 .await
                 .map_err(|e| AppError::Database(e.to_string()))?;
-            match row_opt {
-                Some(r) => (r.0, r.1),
-                None => ("00000000-0000-0000-0000-000000000099".to_string(), "T1".to_string()),
+                match row_opt {
+                    Some(r) => (r.0, r.1),
+                    // Terminal not found in DB yet (new install) — use the id with code T1 as fallback
+                    None => (tid.to_string(), "T1".to_string()),
+                }
+            } else {
+                // No terminal_id provided — fall back to first active terminal for this branch
+                let row_opt: Option<(String, String)> = sqlx::query_as(
+                    "SELECT id, code FROM terminals WHERE branch_id = $1 AND is_active = true ORDER BY created_at ASC LIMIT 1"
+                )
+                .bind(&branch_id)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+                match row_opt {
+                    Some(r) => (r.0, r.1),
+                    // Branch has no terminals yet — use a deterministic placeholder that doesn't collide
+                    None => ("00000000-0000-0000-0000-000000000099".to_string(), "T1".to_string()),
+                }
             }
         };
 

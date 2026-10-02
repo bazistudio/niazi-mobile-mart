@@ -311,7 +311,7 @@ export function FirstAdminBootstrapPage() {
                   Save Your One-Time Recovery Key
                 </h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  Niazi Mobile Mart is offline-first. This key is your only recovery mechanism.
+                  This key is your only recovery mechanism if you lose your administrator password.
                 </p>
               </div>
 

@@ -96,30 +96,16 @@ impl CustomerService {
         let db_opt = self.db.as_ref();
         if let (CustomerRepository::SQLite(_), Some(db)) = (&self.customer_repo, db_opt) {
             let customer_clone = customer.clone();
-            let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
-            let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
-            let terminal_id = current_terminal.id;
-            
             with_transaction(db, move |tx| {
                 crate::repositories::SQLiteCustomerRepository::insert_customer_in_tx(tx, &customer_clone)?;
 
                 // Phase 1.1: every customer role is linked to a canonical party (party.id = customer.id).
-                let payloads = crate::repositories::SQLitePartyRepository::link_role_and_build_payloads_in_tx(
+                crate::repositories::SQLitePartyRepository::link_role_and_build_payloads_in_tx(
                     tx,
                     &customer_clone,
                     &crate::domain::party::PartyRoleContact::from(&customer_clone),
                     false,
                 )?;
-                let payload = payloads.role_payload;
-                let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
-                    client_event_id: Some(customer_clone.id.clone()),
-                    terminal_id,
-                    organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
-                    branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(), // Or could use active branch
-                    event_type: "CUSTOMER_CREATED".to_string(),
-                    payload,
-                };
-                crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
                 Ok(())
             }).await?;
             Ok(customer)
@@ -148,44 +134,17 @@ impl CustomerService {
 
         let db_opt = self.db.as_ref();
         if let (CustomerRepository::SQLite(_), Some(db)) = (&self.customer_repo, db_opt) {
-            let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
-            let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
-            let terminal_id = current_terminal.id;
             let id_clone = id.to_string();
             let dto_clone = dto.clone();
-            
             let updated = with_transaction(db, move |tx| {
                 let cust = crate::repositories::SQLiteCustomerRepository::update_customer_in_tx(tx, &id_clone, &dto_clone)?;
                 // Phase 1.1: keep the canonical party linked; a single-role party mirrors this edit.
-                let payloads = crate::repositories::SQLitePartyRepository::link_role_and_build_payloads_in_tx(
+                crate::repositories::SQLitePartyRepository::link_role_and_build_payloads_in_tx(
                     tx,
                     &cust,
                     &crate::domain::party::PartyRoleContact::from(&cust),
                     true,
                 )?;
-                let payload = payloads.role_payload;
-                let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
-                    client_event_id: Some(Uuid::new_v4().to_string()), // Must use a new UUID for the event
-                    terminal_id: terminal_id.clone(),
-                    organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
-                    branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-                    event_type: "CUSTOMER_UPDATED".to_string(),
-                    payload,
-                };
-                crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
-                if let Some(party_payload) = payloads.party_payload {
-                    crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(
-                        tx,
-                        crate::domain::sync_queue::EnqueueOfflineEventDto {
-                            client_event_id: Some(Uuid::new_v4().to_string()),
-                            terminal_id,
-                            organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
-                            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-                            event_type: crate::domain::party::PARTY_UPSERTED_EVENT.to_string(),
-                            payload: party_payload,
-                        },
-                    )?;
-                }
                 Ok(cust)
             }).await?;
             Ok(updated)
@@ -304,11 +263,6 @@ impl CustomerService {
 
         let db = self.db.as_ref().expect("SQLite database connection required");
 
-        // Fetch terminal_id BEFORE the sync closure (async; cannot call inside sync tx).
-        let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
-        let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
-        let terminal_id = current_terminal.id;
-
         let result = with_transaction(db, move |tx| {
             // 1. Authoritative current outstanding balance
             let current_balance = SQLiteCustomerRepository::calculate_outstanding_balance_in_tx(tx, &cid)?;
@@ -413,32 +367,6 @@ impl CustomerService {
                 };
                 SQLiteCashRepository::insert_movement_in_tx(tx, &cash_movement)?;
             }
-
-            // 7. SYNC-B2: Enqueue CUSTOMER_PAYMENT_RECORDED inside the same SQLite
-            //    transaction so atomicity is guaranteed — if the transaction rolls
-            //    back, the sync event is never inserted; if it commits, both exist.
-            let sync_payload = crate::domain::customer::CustomerPaymentSyncEventDto {
-                payment_id: payment_id.clone(),
-                receipt_number: receipt_number.clone(),
-                customer_id: cid.clone(),
-                amount_paid: amount,
-                payment_method: p_method.clone(),
-                reference_number: ref_num_input.clone(),
-                notes: notes.clone(),
-                performed_by: uid.clone(),
-                created_at: now.clone(),
-                allocated_sales: allocated_sales.clone(),
-            };
-            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
-                client_event_id: Some(Uuid::new_v4().to_string()),
-                terminal_id,
-                organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
-                branch_id: crate::domain::organization::DEFAULT_MAIN_BRANCH_ID.to_string(),
-                event_type: "CUSTOMER_PAYMENT_RECORDED".to_string(),
-                payload: serde_json::to_string(&sync_payload)
-                    .map_err(|e| DbError::QueryError(format!("Failed to serialise sync payload: {e}")))?,
-            };
-            crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
 
             Ok(CustomerPaymentResultDto {
                 payment_id,

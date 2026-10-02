@@ -96,9 +96,6 @@ impl PurchaseService {
         let user_id_owned = user_id.map(str::to_string);
 
         let db = self.db.as_ref().expect("SQLite database connection required");
-        let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
-        let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
-        let terminal_id = current_terminal.id;
 
         let result = with_transaction(db, move |tx| {
             let now = Utc::now().to_rfc3339();
@@ -443,30 +440,6 @@ impl PurchaseService {
                 current_outstanding
             };
 
-            let sync_event = crate::domain::purchases::PurchaseSyncEventDto {
-                purchase: purchase.clone(),
-                lines: domain_lines.clone(),
-                stock_movements,
-                supplier_ledger_entry: opt_ledger_entry,
-                cash_movement: opt_cash_movement,
-                product_cost_updates,
-            };
-
-            // Atomically enqueue PURCHASE_CREATED event into offline_sync_queue in SQLite transaction
-            let dto_payload_json = serde_json::to_string(&sync_event).map_err(|e| {
-                DbError::ValidationError(format!("Failed to serialize purchase sync event: {e}"))
-            })?;
-
-            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
-                client_event_id: Some(purchase_id.clone()),
-                terminal_id: terminal_id.clone(),
-                organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
-                branch_id: branch_id.clone(),
-                event_type: "PURCHASE_CREATED".to_string(),
-                payload: dto_payload_json,
-            };
-            crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
-
             Ok(PurchaseResultDto {
                 purchase,
                 lines: domain_lines,
@@ -499,10 +472,6 @@ impl PurchaseService {
         let user_id_owned = user_id.map(str::to_string);
 
         let db = self.db.as_ref().expect("SQLite database connection required");
-
-        let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
-        let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
-        let terminal_id = current_terminal.id;
 
         let result = with_transaction(db, move |tx| {
             let now = Utc::now().to_rfc3339();
@@ -632,29 +601,6 @@ impl PurchaseService {
                 };
                 SQLiteCashRepository::insert_movement_in_tx(tx, &cash_movement)?;
             }
-
-            let sync_payload = crate::domain::supplier::SupplierPaymentSyncEventDto {
-                payment_id: payment_id.clone(),
-                receipt_number: receipt_number.clone(),
-                supplier_id: supplier.id.clone(),
-                amount_paid: dto.amount,
-                payment_method: dto.payment_method,
-                reference_number: dto.reference_number,
-                notes: dto.notes,
-                performed_by: user_id_owned,
-                created_at: now.clone(),
-                allocated_purchases: allocated_purchases.clone(),
-            };
-
-            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
-                client_event_id: Some(Uuid::new_v4().to_string()),
-                terminal_id,
-                organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
-                branch_id: crate::domain::organization::DEFAULT_MAIN_BRANCH_ID.to_string(),
-                event_type: "SUPPLIER_PAYMENT_RECORDED".to_string(),
-                payload: serde_json::to_string(&sync_payload).unwrap(),
-            };
-            crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
 
             Ok(SupplierPaymentResultDto {
                 payment_id,

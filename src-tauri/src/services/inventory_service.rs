@@ -5,14 +5,13 @@ use crate::db::connection::DatabaseConnection;
 use crate::db::errors::DbError;
 use crate::db::transaction::with_transaction;
 use crate::domain::inventory::{
-    AdjustStockDto, DecreaseStockDto, IncreaseStockDto, InventoryOperationSyncEventDto,
-    LowStockItemDto, StockMovement, StockMovementType, TransferStockDto,
+    AdjustStockDto, DecreaseStockDto, IncreaseStockDto, LowStockItemDto, StockMovement,
+    StockMovementType, TransferStockDto,
 };
 use crate::errors::{AppError, AppResult};
 use crate::repositories::{
     InventoryRepository, PostgresInventoryRepository, PostgresProductRepository, ProductRepository,
-    SQLiteInventoryRepository, SQLiteProductRepository, SQLiteTerminalRepository,
-    SQLiteUserRepository,
+    SQLiteInventoryRepository, SQLiteProductRepository, SQLiteUserRepository,
 };
 
 #[derive(Clone)]
@@ -66,11 +65,6 @@ impl InventoryService {
 
         let db = self.db.as_ref().expect("SQLite database connection required");
 
-        // SYNC-H1: fetch terminal_id BEFORE the transaction closure (async; cannot call inside sync tx).
-        let terminal_repo = SQLiteTerminalRepository::new(db.clone());
-        let terminal_id = terminal_repo.get_or_create_current_terminal().await?.id;
-
-        // SYNC-H1: stable operation_id generated once at the producer site.
         let operation_id = Uuid::new_v4().to_string();
 
         let resulting = with_transaction(db, move |tx| {
@@ -95,32 +89,6 @@ impl InventoryService {
                 created_at: now.clone(),
             };
             SQLiteInventoryRepository::insert_movement_in_tx(tx, &movement)?;
-
-            // SYNC-H1: Enqueue INVENTORY_OPERATION_RECORDED inside the same SQLite
-            // transaction so atomicity is guaranteed — if the transaction rolls back,
-            // the sync event is never inserted; if it commits, both exist.
-            let sync_payload = InventoryOperationSyncEventDto {
-                operation_id: operation_id.clone(),
-                operation_type: "INCREASE".to_string(),
-                product_id: pid.clone(),
-                branch_id: bid.clone(),
-                to_branch_id: None,
-                quantity: dto.quantity,
-                target_quantity: None,
-                reason: dto.reason.clone(),
-                performed_by: valid_performed_by,
-                created_at: now.clone(),
-            };
-            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
-                client_event_id: Some(Uuid::new_v4().to_string()),
-                terminal_id,
-                organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
-                branch_id: bid,
-                event_type: "INVENTORY_OPERATION_RECORDED".to_string(),
-                payload: serde_json::to_string(&sync_payload)
-                    .map_err(|e| DbError::QueryError(format!("Failed to serialise sync payload: {e}")))?,
-            };
-            crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
 
             Ok(new_qty)
         })
@@ -150,11 +118,6 @@ impl InventoryService {
 
         let db = self.db.as_ref().expect("SQLite database connection required");
 
-        // SYNC-H1: fetch terminal_id BEFORE the transaction closure (async; cannot call inside sync tx).
-        let terminal_repo = SQLiteTerminalRepository::new(db.clone());
-        let terminal_id = terminal_repo.get_or_create_current_terminal().await?.id;
-
-        // SYNC-H1: stable operation_id generated once at the producer site.
         let operation_id = Uuid::new_v4().to_string();
 
         let resulting = with_transaction(db, move |tx| {
@@ -186,31 +149,6 @@ impl InventoryService {
             };
             SQLiteInventoryRepository::insert_movement_in_tx(tx, &movement)?;
 
-            // SYNC-H1: Enqueue INVENTORY_OPERATION_RECORDED inside the same SQLite
-            // transaction so atomicity is guaranteed.
-            let sync_payload = InventoryOperationSyncEventDto {
-                operation_id: operation_id.clone(),
-                operation_type: "DECREASE".to_string(),
-                product_id: pid.clone(),
-                branch_id: bid.clone(),
-                to_branch_id: None,
-                quantity: dto.quantity,
-                target_quantity: None,
-                reason: dto.reason.clone(),
-                performed_by: valid_performed_by,
-                created_at: now.clone(),
-            };
-            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
-                client_event_id: Some(Uuid::new_v4().to_string()),
-                terminal_id,
-                organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
-                branch_id: bid,
-                event_type: "INVENTORY_OPERATION_RECORDED".to_string(),
-                payload: serde_json::to_string(&sync_payload)
-                    .map_err(|e| DbError::QueryError(format!("Failed to serialise sync payload: {e}")))?,
-            };
-            crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
-
             Ok(new_qty)
         })
         .await?;
@@ -241,11 +179,6 @@ impl InventoryService {
 
         let db = self.db.as_ref().expect("SQLite database connection required");
 
-        // SYNC-H1: fetch terminal_id BEFORE the transaction closure (async; cannot call inside sync tx).
-        let terminal_repo = SQLiteTerminalRepository::new(db.clone());
-        let terminal_id = terminal_repo.get_or_create_current_terminal().await?.id;
-
-        // SYNC-H1: stable operation_id generated once at the producer site.
         let operation_id = Uuid::new_v4().to_string();
 
         let resulting = with_transaction(db, move |tx| {
@@ -278,32 +211,6 @@ impl InventoryService {
                 created_at: now.clone(),
             };
             SQLiteInventoryRepository::insert_movement_in_tx(tx, &movement)?;
-
-            // SYNC-H1: Enqueue INVENTORY_OPERATION_RECORDED inside the same SQLite
-            // transaction so atomicity is guaranteed.
-            // For ADJUST, `quantity` = absolute delta and `target_quantity` = authoritative result.
-            let sync_payload = InventoryOperationSyncEventDto {
-                operation_id: operation_id.clone(),
-                operation_type: "ADJUST".to_string(),
-                product_id: pid.clone(),
-                branch_id: bid.clone(),
-                to_branch_id: None,
-                quantity: delta,
-                target_quantity: Some(dto.target_quantity),
-                reason: Some(dto.reason.clone()),
-                performed_by: valid_performed_by,
-                created_at: now.clone(),
-            };
-            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
-                client_event_id: Some(Uuid::new_v4().to_string()),
-                terminal_id,
-                organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
-                branch_id: bid,
-                event_type: "INVENTORY_OPERATION_RECORDED".to_string(),
-                payload: serde_json::to_string(&sync_payload)
-                    .map_err(|e| DbError::QueryError(format!("Failed to serialise sync payload: {e}")))?,
-            };
-            crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
 
             Ok(dto.target_quantity)
         })
@@ -338,11 +245,6 @@ impl InventoryService {
 
         let db = self.db.as_ref().expect("SQLite database connection required");
 
-        // SYNC-H1: fetch terminal_id BEFORE the transaction closure (async; cannot call inside sync tx).
-        let terminal_repo = SQLiteTerminalRepository::new(db.clone());
-        let terminal_id = terminal_repo.get_or_create_current_terminal().await?.id;
-
-        // SYNC-H1: stable operation_id generated once at the producer site.
         let operation_id = Uuid::new_v4().to_string();
 
         with_transaction(db, move |tx| {
@@ -397,33 +299,6 @@ impl InventoryService {
                 created_at: now.clone(),
             };
             SQLiteInventoryRepository::insert_movement_in_tx(tx, &in_movement)?;
-
-            // SYNC-H1: Enqueue INVENTORY_OPERATION_RECORDED inside the same SQLite
-            // transaction so atomicity is guaranteed.
-            // For TRANSFER: branch_id = source, to_branch_id = destination.
-            // Both sides are applied atomically on the server and downstream nodes.
-            let sync_payload = InventoryOperationSyncEventDto {
-                operation_id: operation_id.clone(),
-                operation_type: "TRANSFER".to_string(),
-                product_id: pid.clone(),
-                branch_id: from_bid.clone(),
-                to_branch_id: Some(to_bid.clone()),
-                quantity: dto.quantity,
-                target_quantity: None,
-                reason: dto.reason.clone(),
-                performed_by: valid_performed_by,
-                created_at: now.clone(),
-            };
-            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
-                client_event_id: Some(Uuid::new_v4().to_string()),
-                terminal_id,
-                organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
-                branch_id: from_bid,
-                event_type: "INVENTORY_OPERATION_RECORDED".to_string(),
-                payload: serde_json::to_string(&sync_payload)
-                    .map_err(|e| DbError::QueryError(format!("Failed to serialise sync payload: {e}")))?,
-            };
-            crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
 
             Ok(())
         })

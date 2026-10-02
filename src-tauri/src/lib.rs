@@ -75,12 +75,20 @@ pub fn run() {
         log_dir.join("app.log")
     );
 
-    let app_state = match AppState::try_open_default(env!("CARGO_PKG_VERSION")) {
-        Ok(state) => state,
+    // Online-only PostgreSQL startup — no SQLite initialization.
+    // The desktop application communicates exclusively with the central Axum server over HTTPS.
+    // All business operations go through the HTTP API; Tauri is infrastructure-only (printing, updater, OS).
+    // AppState is built with a lazy PgPool that is never actually exercised by the desktop process —
+    // it exists only so that Tauri commands that delegate to the HTTP layer have a typed state to bind against.
+    let pg_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://localhost/niazi_placeholder".to_string());
+
+    let pool = match sqlx::PgPool::connect_lazy(&pg_url) {
+        Ok(p) => p,
         Err(err) => {
-            tracing::error!("[run] Critical database initialization failure: {err}");
+            tracing::error!("[run] Failed to construct PostgreSQL pool: {err}");
             use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-            let err_msg = err.clone();
+            let err_msg = err.to_string();
             let _ = tauri::Builder::default()
                 .plugin(tauri_plugin_dialog::init())
                 .setup(move |app| {
@@ -89,10 +97,10 @@ pub fn run() {
                         handle
                             .dialog()
                             .message(format!(
-                                "Niazi Mobile Mart failed to initialize the local database:\n\n{}\n\nPlease check file permissions or close other running instances.",
+                                "Niazi Mobile Mart failed to initialize:\n\n{}\n\nPlease verify your network connection and try again.",
                                 err_msg
                             ))
-                            .title("Database Initialization Failure")
+                            .title("Initialization Failure")
                             .kind(MessageDialogKind::Error)
                             .show(|_| {
                                 std::process::exit(1);
@@ -104,6 +112,8 @@ pub fn run() {
             return;
         }
     };
+
+    let app_state = AppState::new_postgres(env!("CARGO_PKG_VERSION"), pool);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -203,8 +213,6 @@ pub fn run() {
             commands::auth::auth_check_bootstrap_status,
             commands::auth::auth_bootstrap_first_admin,
             commands::auth::auth_login,
-            commands::auth::auth_login_snapshot,
-            commands::auth::auth_bootstrap_central_snapshots,
             commands::auth::auth_sync_session,
             commands::auth::auth_logout,
             commands::auth::auth_change_password,
@@ -267,65 +275,6 @@ pub fn run() {
             commands::product::product_get_by_barcode,
             commands::product::product_list,
             commands::product::product_deactivate,
-            // Typed Storage Commands (Products Pilot Boundary)
-            commands::storage_product::storage_product_create,
-            commands::storage_product::storage_product_update,
-            commands::storage_product::storage_product_get,
-            commands::storage_product::storage_product_get_by_sku,
-            commands::storage_product::storage_product_get_by_barcode,
-            commands::storage_product::storage_product_list,
-            commands::storage_product::storage_product_deactivate,
-            // Typed Storage Commands (Inventory Domain Boundary)
-            commands::storage_inventory::storage_inventory_increase,
-            commands::storage_inventory::storage_inventory_decrease,
-            commands::storage_inventory::storage_inventory_adjust,
-            commands::storage_inventory::storage_inventory_transfer,
-            commands::storage_inventory::storage_inventory_get_stock,
-            commands::storage_inventory::storage_inventory_get_stock_map,
-            commands::storage_inventory::storage_inventory_get_movements,
-            commands::storage_inventory::storage_inventory_get_low_stock,
-            // Typed Storage Commands (Sales / POS Domain Boundary)
-            commands::storage_sale::storage_sale_complete,
-            commands::storage_sale::storage_sale_get_by_id,
-            commands::storage_sale::storage_sale_get_by_invoice,
-            commands::storage_sale::storage_sale_list,
-            commands::storage_sale::storage_sale_get_lines,
-            commands::storage_sale::storage_sale_get_payments,
-            // Typed Storage Commands (Customer / Customer Ledger Domain Boundary)
-            commands::storage_customer::storage_customer_create,
-            commands::storage_customer::storage_customer_update,
-            commands::storage_customer::storage_customer_get_by_id,
-            commands::storage_customer::storage_customer_get_detail,
-            commands::storage_customer::storage_customer_list,
-            commands::storage_customer::storage_customer_search,
-            commands::storage_customer::storage_customer_get_ledger,
-            commands::storage_customer::storage_customer_get_statement,
-            commands::storage_customer::storage_customer_get_balance,
-            commands::storage_customer::storage_customer_record_payment,
-            commands::storage_customer::storage_customer_deactivate,
-            // Typed Storage Commands (Party Domain Boundary, Phase 1.1)
-            commands::storage_party::storage_party_list,
-            commands::storage_party::storage_party_get,
-            commands::storage_party::storage_party_create,
-            commands::storage_party::storage_party_update,
-            // Typed Storage Commands (Supplier / Supplier Ledger Domain Boundary)
-            commands::storage_supplier::storage_supplier_create,
-            commands::storage_supplier::storage_supplier_update,
-            commands::storage_supplier::storage_supplier_get_by_id,
-            commands::storage_supplier::storage_supplier_get_detail,
-            commands::storage_supplier::storage_supplier_list,
-            commands::storage_supplier::storage_supplier_search,
-            commands::storage_supplier::storage_supplier_get_ledger,
-            commands::storage_supplier::storage_supplier_get_statement,
-            commands::storage_supplier::storage_supplier_get_balance,
-            commands::storage_supplier::storage_supplier_record_payment,
-            commands::storage_supplier::storage_supplier_deactivate,
-            // Typed Storage Commands (Purchasing / Procurement Domain Boundary)
-            commands::storage_purchase::storage_purchase_complete,
-            commands::storage_purchase::storage_purchase_get_by_id,
-            commands::storage_purchase::storage_purchase_get_by_number,
-            commands::storage_purchase::storage_purchase_list,
-            commands::storage_purchase::storage_purchase_get_lines,
             // Inventory Commands
             commands::inventory::inventory_increase,
             commands::inventory::inventory_decrease,

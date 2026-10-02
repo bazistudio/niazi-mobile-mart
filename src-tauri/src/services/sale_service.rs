@@ -442,27 +442,6 @@ impl SaleService {
                 final_cash_movement = Some(cash_movement);
             }
 
-            // H. Atomically enqueue SALE_CREATED event into offline_sync_queue in SQLite transaction
-            let sync_event_payload = crate::domain::sales::SaleSyncEventDto {
-                sale: sale.clone(),
-                lines: sale_lines.clone(),
-                payments: sale_payments.clone(),
-                stock_movements: final_stock_movements,
-                cash_movement: final_cash_movement,
-                customer_ledger_entry: final_customer_ledger_entry,
-            };
-            let sync_payload_json = serde_json::to_string(&sync_event_payload).unwrap_or_default();
-
-            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
-                client_event_id: Some(sale_id.clone()),
-                terminal_id,
-                organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
-                branch_id: branch_id.clone(),
-                event_type: "SALE_CREATED".to_string(),
-                payload: sync_payload_json,
-            };
-            crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
-
             let cogs: i64 = sale_lines.iter().map(|l| l.quantity * l.cost_price_snapshot).sum();
             let gross_profit = sale.total_amount - cogs;
             let gross_margin = crate::domain::profit::calculate_gross_margin(gross_profit, sale.total_amount);
@@ -1178,18 +1157,8 @@ mod tests {
             assert_eq!(cash_mv_amt, 1000); // Capped at sale allocation 1000!
         }
 
-        // 7. Payment UUID uniqueness & persistence across offline_sync_queue
+        // 7. Payment UUID uniqueness
         assert!(!s_overpay.payments[0].id.is_empty());
-        {
-            let conn_arc = db.inner();
-            let guard = conn_arc.lock().await;
-            let payload_json: String = guard
-                .query_row("SELECT payload FROM offline_sync_queue WHERE client_event_id = ?1", rusqlite::params![s_overpay.sale.id], |r| r.get(0))
-                .unwrap();
-            let sync_event: crate::domain::sales::SaleSyncEventDto = serde_json::from_str(&payload_json).unwrap();
-            assert_eq!(sync_event.payments.len(), 1);
-            assert_eq!(sync_event.payments[0].id, s_overpay.payments[0].id); // Canonical UUID preserved!
-        }
 
         // 8. Legacy flat DTO fallback & Empty payments fallback
         let s_legacy = sale_service

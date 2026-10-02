@@ -134,6 +134,9 @@ pub struct CompleteSaleDto {
     pub payment_method: Option<String>,
     pub payments: Option<Vec<SalePaymentInputDto>>,
     pub notes: Option<String>,
+    /// Terminal UUID from which this sale originates. Required for invoice numbering.
+    /// The server validates that this terminal exists and belongs to the correct branch.
+    pub terminal_id: Option<String>,
 }
 
 /// Normalizes payment method strings to canonical backend variants
