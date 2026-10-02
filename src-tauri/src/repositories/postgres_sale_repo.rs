@@ -43,15 +43,26 @@ impl PostgresSaleRepository {
             return Err(AppError::Validation("Cannot complete sale with empty cart".to_string()));
         }
 
-        // 1. Resolve Branch ID
-        let branch_id = match dto.branch_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-            Some(bid) => bid.to_string(),
-            None => {
-                let row_opt: Option<(String,)> = sqlx::query_as("SELECT id FROM branches WHERE code = 'MAIN' LIMIT 1")
+        // 1. Resolve Branch ID and Code
+        let (branch_id, branch_code) = match dto.branch_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(bid) => {
+                let code_opt: Option<(String,)> = sqlx::query_as("SELECT code FROM branches WHERE id = $1")
+                    .bind(bid)
                     .fetch_optional(&mut **tx)
                     .await
                     .map_err(|e| AppError::Database(e.to_string()))?;
-                row_opt.map(|r| r.0).unwrap_or_else(|| DEFAULT_MAIN_BRANCH_ID.to_string())
+                let code = code_opt.map(|r| r.0).unwrap_or_else(|| "MAIN".to_string());
+                (bid.to_string(), code)
+            }
+            None => {
+                let row_opt: Option<(String, String)> = sqlx::query_as("SELECT id, code FROM branches WHERE code = 'MAIN' LIMIT 1")
+                    .fetch_optional(&mut **tx)
+                    .await
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+                match row_opt {
+                    Some(r) => (r.0, r.1),
+                    None => (DEFAULT_MAIN_BRANCH_ID.to_string(), "MAIN".to_string()),
+                }
             }
         };
 
@@ -237,17 +248,38 @@ impl PostgresSaleRepository {
         }
 
         // 7. Generate invoice number
-        sqlx::query("UPDATE counters SET value = value + 1 WHERE name = 'invoice'")
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let (terminal_id, terminal_code) = {
+            let row_opt: Option<(String, String)> = sqlx::query_as("SELECT id, code FROM terminals WHERE id = '00000000-0000-0000-0000-000000000099'")
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            match row_opt {
+                Some(r) => (r.0, r.1),
+                None => ("00000000-0000-0000-0000-000000000099".to_string(), "T1".to_string()),
+            }
+        };
 
-        let inv_val: (i64,) = sqlx::query_as("SELECT value FROM counters WHERE name = 'invoice'")
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let billing_month = {
+            let karachi_offset = chrono::FixedOffset::east_opt(5 * 3600).expect("UTC+5 is valid");
+            let now_karachi = chrono::Utc::now().with_timezone(&karachi_offset);
+            now_karachi.format("%Y%m").to_string()
+        };
 
-        let invoice_number = format!("INV-{:06}", inv_val.0);
+        let next_val: (i64,) = sqlx::query_as(
+            "INSERT INTO terminal_invoice_counters (branch_id, terminal_id, period_yyyymm, next_value)
+             VALUES ($1, $2, $3, 2)
+             ON CONFLICT (branch_id, terminal_id, period_yyyymm) DO UPDATE 
+             SET next_value = terminal_invoice_counters.next_value + 1
+             RETURNING next_value - 1"
+        )
+        .bind(&branch_id)
+        .bind(&terminal_id)
+        .bind(&billing_month)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        let invoice_number = format!("{}-{}-{}-{:06}", branch_code, terminal_code, billing_month, next_val.0);
         let sale_id = sale_id_override
             .map(str::trim)
             .filter(|s| !s.is_empty())
