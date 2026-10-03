@@ -206,7 +206,7 @@ export const productService = {
       unit_id: unitId,
       purchase_price: productData.purchasePrice !== undefined ? Math.round(Number(productData.purchasePrice)) : undefined,
       sale_price: productData.price !== undefined ? Math.round(Number(productData.price)) : undefined,
-      low_stock_threshold: productData.lowStockThreshold !== undefined ? Number(productData.lowStockThreshold) : undefined,
+      low_stock_threshold: productData.minStockThreshold !== undefined ? Number(productData.minStockThreshold) : productData.lowStockThreshold !== undefined ? Number(productData.lowStockThreshold) : undefined,
       description: productData.description || null,
     });
 

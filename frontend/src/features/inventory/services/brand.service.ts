@@ -1,4 +1,4 @@
-import { isTauriEnvironment, tauriClient } from '@/lib/tauri/tauriClient';
+import { isTauriEnvironment, tauriClient, httpFetch } from '@/lib/tauri/tauriClient';
 import { ProductBrand } from '../types';
 
 const STORAGE_KEY = 'niazi_master_brands';
@@ -61,6 +61,23 @@ export const brandService = {
       } catch (err) {
         console.warn('Tauri brandList fallback to stored brands', err);
       }
+      return getStoredBrands();
+    }
+
+    // Browser mode -> call live PostgreSQL API
+    try {
+      const list = await httpFetch<any[]>('/api/brands');
+      if (list && list.length > 0) {
+        const mapped = list.map((b: any) => ({
+          id: b.id,
+          name: b.name,
+          organizationId: b.organization_id || '00000000-0000-0000-0000-000000000001',
+        }));
+        saveStoredBrands(mapped);
+        return mapped;
+      }
+    } catch (err) {
+      console.warn('API brandList failed, using cache', err);
     }
     return getStoredBrands();
   },

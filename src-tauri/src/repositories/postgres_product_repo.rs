@@ -16,8 +16,8 @@ impl PostgresProductRepository {
         Self { pool }
     }
 
-    async fn resolve_product_sku_tx(
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    async fn resolve_product_sku(
+        pool: &PgPool,
         category_id: &str,
         input_sku: &str,
     ) -> AppResult<String> {
@@ -30,11 +30,24 @@ impl PostgresProductRepository {
             "SELECT name, code FROM product_types WHERE id = $1"
         )
         .bind(category_id)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(pool)
         .await
         .unwrap_or(None);
 
-        let (cat_name, cat_code) = cat_row.unwrap_or_default();
+        let (cat_name, cat_code) = match cat_row {
+            Some(row) => row,
+            None => {
+                let legacy: Option<(String, String)> = sqlx::query_as(
+                    "SELECT name, code FROM categories WHERE id = $1"
+                )
+                .bind(category_id)
+                .fetch_optional(pool)
+                .await
+                .unwrap_or(None);
+                legacy.unwrap_or_default()
+            }
+        };
+
         let cat_upper = format!("{} {}", cat_name.to_uppercase(), cat_code.to_uppercase());
 
         let prefix = if cat_upper.contains("MOBILE") || cat_upper.contains("PHONE") || cat_upper.starts_with('M') {
@@ -53,7 +66,7 @@ impl PostgresProductRepository {
              RETURNING next_value - 1"
         )
         .bind(prefix)
-        .fetch_one(&mut **tx)
+        .fetch_one(pool)
         .await
         .map_err(|e| AppError::Database(format!("Failed to generate SKU counter: {e}")))?;
 
@@ -61,12 +74,12 @@ impl PostgresProductRepository {
     }
 
     pub async fn create_product(&self, id: &str, dto: &CreateProductDto) -> AppResult<Product> {
+        let sku = Self::resolve_product_sku(&self.pool, &dto.category_id, &dto.sku).await?;
         let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
         let now = Utc::now().to_rfc3339();
         let threshold = dto.low_stock_threshold.unwrap_or(5);
         let barcode_opt = dto.barcode.as_deref().map(str::trim).filter(|s| !s.is_empty());
         let initial_avg_cost = dto.average_cost.unwrap_or(dto.purchase_price);
-        let sku = Self::resolve_product_sku_tx(&mut tx, &dto.category_id, &dto.sku).await?;
         let name = dto.name.trim();
         let norm_name = crate::domain::product::normalize_product_name(name);
 
@@ -146,7 +159,7 @@ impl PostgresProductRepository {
         let threshold = dto.low_stock_threshold.unwrap_or(5);
         let barcode_opt = dto.barcode.as_deref().map(str::trim).filter(|s| !s.is_empty());
         let initial_avg_cost = dto.average_cost.unwrap_or(dto.purchase_price);
-        let sku = Self::resolve_product_sku_tx(&mut tx, &dto.category_id, &dto.sku).await?;
+        let sku = Self::resolve_product_sku(&self.pool, &dto.category_id, &dto.sku).await?;
         let name = dto.name.trim();
         let norm_name = crate::domain::product::normalize_product_name(name);
 
@@ -324,9 +337,11 @@ impl PostgresProductRepository {
             param_index += 1;
         }
 
-        if filter.is_active.is_some() {
+        if let Some(_active) = filter.is_active {
             query.push_str(&format!(" AND is_active = ${param_index}"));
-            let _ = param_index;
+            param_index += 1;
+        } else {
+            query.push_str(" AND is_active = 1");
         }
 
         query.push_str(" ORDER BY name ASC");
@@ -382,6 +397,13 @@ impl PostgresProductRepository {
         let new_name = dto.name.as_deref().unwrap_or(&current.name).trim();
         let new_norm_name = crate::domain::product::normalize_product_name(new_name);
 
+        let new_sku = if let Some(s) = &dto.sku {
+            let trimmed = s.trim().to_uppercase();
+            if trimmed.is_empty() { current.sku.clone() } else { trimmed }
+        } else {
+            current.sku.clone()
+        };
+
         let new_barcode = if let Some(bc) = &dto.barcode {
             let trimmed = bc.trim();
             if trimmed.is_empty() {
@@ -414,8 +436,8 @@ impl PostgresProductRepository {
              SET name = $1, normalized_name = $2, barcode = $3, category_id = $4, brand_id = $5,
                  company_id = $6, quality_id = $7, color_id = $8, unit_id = $9,
                  purchase_price = $10, average_cost = $11, sale_price = $12, low_stock_threshold = $13,
-                 is_active = $14, description = $15, updated_at = $16
-             WHERE id = $17"
+                 is_active = $14, description = $15, updated_at = $16, sku = $17
+             WHERE id = $18"
         )
         .bind(new_name)
         .bind(&new_norm_name)
@@ -433,6 +455,7 @@ impl PostgresProductRepository {
         .bind(if new_active { 1 } else { 0 })
         .bind(new_desc)
         .bind(&now)
+        .bind(&new_sku)
         .bind(id)
         .execute(&self.pool)
         .await

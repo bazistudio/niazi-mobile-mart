@@ -151,8 +151,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/users", get(list_users_handler).post(create_user_handler))
         .route("/api/v1/users/credential-snapshots", get(credential_snapshots_handler))
         .route("/api/products", get(list_products_handler).post(create_product_handler))
-        .route("/api/products/:id", get(get_product_handler))
+        .route("/api/products/:id", get(get_product_handler).put(update_product_handler).delete(deactivate_product_handler))
         .route("/api/categories", get(list_categories_handler).post(create_category_handler))
+        .route("/api/brands", get(list_brands_handler).post(create_brand_handler))
+        .route("/api/v1/brands", get(list_brands_handler).post(create_brand_handler))
         .route("/api/inventory", get(list_inventory_handler))
         .route("/api/v1/inventory/adjust", axum::routing::post(adjust_inventory_handler))
         .route("/api/v1/inventory/transfer", axum::routing::post(transfer_inventory_handler))
@@ -579,6 +581,35 @@ async fn create_category_handler(
     }
 }
 
+/// GET /api/brands — List all product brands
+async fn list_brands_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("inventory"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+    match state.app_state.catalog_service.list_brands().await {
+        Ok(brands) => (StatusCode::OK, Json(json!(brands))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// POST /api/brands — Create a new product brand
+async fn create_brand_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::catalog::CreateBrandDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("inventory"), Some("inventory:write")) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+    match state.app_state.catalog_service.create_brand(payload).await {
+        Ok(brand) => (StatusCode::CREATED, Json(json!(brand))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_FAILED", "message": e.to_string()}))),
+    }
+}
+
 /// GET /api/inventory ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â List inventory stock map with strict branch isolation
 async fn list_inventory_handler(
     State(state): State<ServerState>,
@@ -846,7 +877,7 @@ async fn update_product_handler(
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(payload): Json<niazi_mobile_mart_lib::domain::product::UpdateProductDto>,
 ) -> impl IntoResponse {
-    if let Err(e) = auth.0.authorize_permission(Some("inventory"), Some("stock:adjust")) {
+    if let Err(e) = auth.0.authorize_permission(Some("products"), None).or_else(|_| auth.0.authorize_permission(Some("inventory"), None)) {
         return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
     }
 
@@ -862,7 +893,7 @@ async fn deactivate_product_handler(
     auth: AuthenticatedUser,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    if let Err(e) = auth.0.authorize_permission(Some("inventory"), Some("stock:adjust")) {
+    if let Err(e) = auth.0.authorize_permission(Some("products"), None).or_else(|_| auth.0.authorize_permission(Some("inventory"), None)) {
         return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
     }
 

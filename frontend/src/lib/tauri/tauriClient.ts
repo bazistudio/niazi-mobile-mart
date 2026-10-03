@@ -982,46 +982,54 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Product>('storage_product_update', { id, dto });
     }
-    const products = getStoredWebProducts();
-    const idx = products.findIndex((p) => p.id === id);
-    if (idx === -1) {
-      throw new Error(`Product not found: ${id}`);
+    try {
+      return await httpFetch<Product>(`/api/products/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(dto),
+      });
+    } catch (err) {
+      console.warn('HTTP productUpdate failed, fallback to local', err);
+      const products = getStoredWebProducts();
+      const idx = products.findIndex((p) => p.id === id);
+      if (idx === -1) {
+        throw new Error(`Product not found: ${id}`);
+      }
+      const existing = products[idx];
+      const updated: Product = {
+        ...existing,
+        name: dto.name ?? existing.name,
+        sku: dto.sku ?? existing.sku,
+        barcode: dto.barcode !== undefined ? dto.barcode : existing.barcode,
+        category_id: dto.category_id ?? existing.category_id,
+        brand_id: dto.brand_id !== undefined ? dto.brand_id : existing.brand_id,
+        company_id: dto.company_id !== undefined ? dto.company_id : existing.company_id,
+        color_id: dto.color_id !== undefined ? dto.color_id : existing.color_id,
+        quality_id: dto.quality_id !== undefined ? dto.quality_id : existing.quality_id,
+        unit_id: dto.unit_id !== undefined ? dto.unit_id : existing.unit_id,
+        purchase_price:
+          dto.purchase_price !== undefined && dto.purchase_price !== null
+            ? Math.round(Number(dto.purchase_price))
+            : existing.purchase_price,
+        average_cost:
+          dto.average_cost !== undefined && dto.average_cost !== null
+            ? Math.round(Number(dto.average_cost))
+            : existing.average_cost,
+        sale_price:
+          dto.sale_price !== undefined && dto.sale_price !== null
+            ? Math.round(Number(dto.sale_price))
+            : existing.sale_price,
+        low_stock_threshold:
+          dto.low_stock_threshold !== undefined && dto.low_stock_threshold !== null
+            ? Number(dto.low_stock_threshold)
+            : existing.low_stock_threshold,
+        is_active: dto.is_active !== undefined && dto.is_active !== null ? dto.is_active : existing.is_active,
+        description: dto.description !== undefined ? dto.description : existing.description,
+        updated_at: new Date().toISOString(),
+      };
+      products[idx] = updated;
+      saveStoredWebProducts(products);
+      return updated;
     }
-    const existing = products[idx];
-    const updated: Product = {
-      ...existing,
-      name: dto.name ?? existing.name,
-      sku: dto.sku ?? existing.sku,
-      barcode: dto.barcode !== undefined ? dto.barcode : existing.barcode,
-      category_id: dto.category_id ?? existing.category_id,
-      brand_id: dto.brand_id !== undefined ? dto.brand_id : existing.brand_id,
-      company_id: dto.company_id !== undefined ? dto.company_id : existing.company_id,
-      color_id: dto.color_id !== undefined ? dto.color_id : existing.color_id,
-      quality_id: dto.quality_id !== undefined ? dto.quality_id : existing.quality_id,
-      unit_id: dto.unit_id !== undefined ? dto.unit_id : existing.unit_id,
-      purchase_price:
-        dto.purchase_price !== undefined && dto.purchase_price !== null
-          ? Math.round(Number(dto.purchase_price))
-          : existing.purchase_price,
-      average_cost:
-        dto.average_cost !== undefined && dto.average_cost !== null
-          ? Math.round(Number(dto.average_cost))
-          : existing.average_cost,
-      sale_price:
-        dto.sale_price !== undefined && dto.sale_price !== null
-          ? Math.round(Number(dto.sale_price))
-          : existing.sale_price,
-      low_stock_threshold:
-        dto.low_stock_threshold !== undefined && dto.low_stock_threshold !== null
-          ? Number(dto.low_stock_threshold)
-          : existing.low_stock_threshold,
-      is_active: dto.is_active !== undefined && dto.is_active !== null ? dto.is_active : existing.is_active,
-      description: dto.description !== undefined ? dto.description : existing.description,
-      updated_at: new Date().toISOString(),
-    };
-    products[idx] = updated;
-    saveStoredWebProducts(products);
-    return updated;
   },
 
   async productGet(id: string): Promise<Product> {
@@ -1082,12 +1090,20 @@ export const tauriClient = {
       await invoke('storage_product_deactivate', { id });
       return;
     }
-    const products = getStoredWebProducts();
-    const idx = products.findIndex((p) => p.id === id);
-    if (idx !== -1) {
-      products[idx].is_active = false;
-      products[idx].updated_at = new Date().toISOString();
-      saveStoredWebProducts(products);
+    try {
+      await httpFetch<void>(`/api/products/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+      return;
+    } catch (err) {
+      console.warn('HTTP productDeactivate failed, fallback to local', err);
+      const products = getStoredWebProducts();
+      const idx = products.findIndex((p) => p.id === id);
+      if (idx !== -1) {
+        products[idx].is_active = false;
+        products[idx].updated_at = new Date().toISOString();
+        saveStoredWebProducts(products);
+      }
     }
   },
 
