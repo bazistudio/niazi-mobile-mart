@@ -43,7 +43,7 @@ export interface InvoiceDocument {
 export class DocumentService {
   static buildInvoice(transaction: DBTransaction, shopProfile: ShopProfile): InvoiceDocument {
     return {
-      invoiceId: `INV-${transaction.transactionId}`,
+      invoiceId: transaction.transactionId,
       transactionId: transaction.transactionId,
 
       shop: shopProfile,

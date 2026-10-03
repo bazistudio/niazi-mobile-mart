@@ -1,19 +1,33 @@
 steps:
   # ---------------------------------------------------------------------------
+  # Step 0: Pull Previous Container Image for Layer Caching
+  # ---------------------------------------------------------------------------
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Pull Cache Image'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - 'docker pull asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:latest || true'
+
+  # ---------------------------------------------------------------------------
   # Step 1: Build Multi-Stage Production Container Image
   # ---------------------------------------------------------------------------
   - name: 'gcr.io/cloud-builders/docker'
     id: 'Build Container Image'
     args:
       - 'build'
+      - '--cache-from'
+      - 'asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:latest'
       - '-t'
       - 'asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:$TAG_NAME'
       - '-t'
       - 'asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:$COMMIT_SHA'
+      - '-t'
+      - 'asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:latest'
       - '.'
 
   # ---------------------------------------------------------------------------
-  # Step 2: Push Release Tag & Commit SHA Images to Artifact Registry
+  # Step 2: Push Release Tag, Commit SHA & Latest Images to Artifact Registry
   # ---------------------------------------------------------------------------
   - name: 'gcr.io/cloud-builders/docker'
     id: 'Push Release Tag Image'
@@ -26,6 +40,12 @@ steps:
     args:
       - 'push'
       - 'asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:$COMMIT_SHA'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Push Latest Image'
+    args:
+      - 'push'
+      - 'asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:latest'
 
   # ---------------------------------------------------------------------------
   # Step 3: Deploy Service to Google Cloud Run (Using Immutable Commit SHA)
@@ -55,6 +75,7 @@ steps:
 images:
   - 'asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:$TAG_NAME'
   - 'asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:$COMMIT_SHA'
+  - 'asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:latest'
 
 # The default Cloud Build machine (e2-standard-2) is used: no machineType is set.
 # Builds are slower on 2 vCPUs, so the build timeout is raised to 2 hours.
