@@ -14,7 +14,7 @@
  *   PORT           -- HTTP port (default: 8081)
  */
 
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import { getPool } from './db';
 import { createProductRouter } from './routes/product.routes';
 
@@ -34,6 +34,19 @@ async function main(): Promise<void> {
   const port = parseInt(process.env['PORT'] ?? '8081', 10);
 
   const app = express();
+
+  // Handle CORS for browser frontend development
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+
   app.use(express.json());
 
   const pool = getPool();
