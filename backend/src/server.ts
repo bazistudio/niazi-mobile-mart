@@ -31,7 +31,7 @@ async function main(): Promise<void> {
   requireEnv('DATABASE_URL');
   requireEnv('JWT_PUBLIC_KEY');
 
-  const port = parseInt(process.env['PORT'] ?? '8081', 10);
+  const port = parseInt(process.env['PORT'] ?? '8080', 10);
 
   const app = express();
 
