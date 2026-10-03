@@ -28,7 +28,6 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
     qualityId: '',
     
     quantity: '',
-    unit: 'Piece',
     minStockThreshold: '2',
     trackInventory: true,
     
@@ -99,7 +98,6 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
 
       await createProduct({
         ...formData,
-        categoryId: formData.categoryId || '00000000-0000-0000-0000-000000000010',
         purchasePrice: Number(formData.purchasePrice) || 0,
         price: Number(formData.price) || 0,
         quantity: Number(formData.quantity) || 0,
@@ -122,7 +120,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
     }
   };
 
-  const isValid = formData.name.trim() !== '' && formData.price !== '' && formData.quantity !== '';
+  const isValid = formData.name.trim() !== '' && formData.price !== '' && formData.quantity !== '' && formData.categoryId !== '';
 
   const margin = (Number(formData.price) || 0) - (Number(formData.purchasePrice) || 0);
 
@@ -260,7 +258,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Category *</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type *</label>
                       <DynamicMasterSelect showAddButton hideAllOption entity="category" value={formData.categoryId} onChange={(v) => handleChange('categoryId', v)} />
                     </div>
                     <div>
@@ -301,19 +299,6 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                         placeholder="0"
                         className="block w-full px-2 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
                       />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Unit</label>
-                      <select
-                        value={formData.unit}
-                        onChange={(e) => handleChange('unit', e.target.value)}
-                        className="block w-full px-2 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
-                      >
-                        <option>Piece</option>
-                        <option>Box</option>
-                        <option>Kg</option>
-                        <option>Meter</option>
-                      </select>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Min Alert</label>

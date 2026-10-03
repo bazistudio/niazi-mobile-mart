@@ -1,4 +1,4 @@
-﻿/// Niazi Mobile Mart ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Cloud Run HTTP Server binary
+/// Niazi Mobile Mart ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Cloud Run HTTP Server binary
 ///
 /// Architecture contract:
 /// - Axum handlers are TRANSPORT ONLY ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â they call service methods, never raw SQL
@@ -152,6 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/users/credential-snapshots", get(credential_snapshots_handler))
         .route("/api/products", get(list_products_handler).post(create_product_handler))
         .route("/api/products/:id", get(get_product_handler))
+        .route("/api/categories", get(list_categories_handler).post(create_category_handler))
         .route("/api/inventory", get(list_inventory_handler))
         .route("/api/v1/inventory/adjust", axum::routing::post(adjust_inventory_handler))
         .route("/api/v1/inventory/transfer", axum::routing::post(transfer_inventory_handler))
@@ -545,6 +546,35 @@ async fn create_product_handler(
 
     match state.app_state.product_service.create_product(payload, Some(&auth.0.user_id)).await {
         Ok(product) => (StatusCode::CREATED, Json(json!(product))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/categories — List all product categories
+async fn list_categories_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("inventory"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+    match state.app_state.catalog_service.list_categories().await {
+        Ok(cats) => (StatusCode::OK, Json(json!(cats))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// POST /api/categories — Create a new product category
+async fn create_category_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::catalog::CreateCategoryDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("inventory"), Some("inventory:write")) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+    match state.app_state.catalog_service.create_category(payload).await {
+        Ok(cat) => (StatusCode::CREATED, Json(json!(cat))),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_FAILED", "message": e.to_string()}))),
     }
 }

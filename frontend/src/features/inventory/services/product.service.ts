@@ -116,7 +116,10 @@ export const productService = {
     }
 
     const rawCatId = productData.categoryId || productData.category_id;
-    const categoryId = (rawCatId && rawCatId.length === 36) ? rawCatId : '00000000-0000-0000-0000-000000000010';
+    if (!rawCatId || rawCatId.length !== 36) {
+      throw new Error("Invalid or missing Type (Category) ID. Please select a valid Type from the dropdown.");
+    }
+    const categoryId = rawCatId;
 
     const rawBrandId = productData.brandId || productData.brand_id;
     const brandId = (rawBrandId && rawBrandId.length === 36) ? rawBrandId : null;
