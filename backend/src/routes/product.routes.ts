@@ -110,7 +110,8 @@ export function createProductRouter(pool: Pool): Router {
     }
 
     try {
-      const product = await getProductById(pool, req.params['id']!);
+      const id = req.params['id'] as string;
+      const product = await getProductById(pool, id);
       if (!product) {
         res.status(404).json({ error: 'Product not found' });
         return;
@@ -179,8 +180,9 @@ export function createProductRouter(pool: Pool): Router {
     }
 
     try {
+      const id = req.params['id'] as string;
       const dto = req.body as UpdateProductDto;
-      const product = await updateProduct(pool, req.params['id']!, dto);
+      const product = await updateProduct(pool, id, dto);
       res.status(200).json(product);
     } catch (err) {
       sendError(res, err);
@@ -201,7 +203,8 @@ export function createProductRouter(pool: Pool): Router {
     }
 
     try {
-      await deactivateProduct(pool, req.params['id']!);
+      const id = req.params['id'] as string;
+      await deactivateProduct(pool, id);
       res.status(200).json({ message: 'Product deactivated' });
     } catch (err) {
       sendError(res, err);

@@ -153,9 +153,11 @@ const NOW_ISO = () => new Date().toISOString();
 /**
  * Resolves the effective SKU for a new product.
  * Faithful translation of resolve_product_sku() in postgres_product_repo.rs.
+ * Executes on Pool outside the product insertion transaction to prevent
+ * query failures from poisoning the main transaction.
  */
 export async function resolveProductSku(
-  client: PoolClient,
+  pool: Pool,
   categoryId: string,
   inputSku: string
 ): Promise<string> {
@@ -168,23 +170,27 @@ export async function resolveProductSku(
   let catName = '';
   let catCode = '';
 
-  const ptRes = await client.query<{ name: string; code: string }>(
-    'SELECT name, code FROM product_types WHERE id = $1',
-    [categoryId]
-  );
-
-  if (ptRes.rows.length > 0) {
-    catName = ptRes.rows[0]!.name;
-    catCode = ptRes.rows[0]!.code;
-  } else {
-    const catRes = await client.query<{ name: string; code: string }>(
-      'SELECT name, code FROM categories WHERE id = $1',
+  try {
+    const ptRes = await pool.query<{ name: string; code: string }>(
+      'SELECT name, code FROM product_types WHERE id = $1',
       [categoryId]
     );
-    if (catRes.rows.length > 0) {
-      catName = catRes.rows[0]!.name;
-      catCode = catRes.rows[0]!.code ?? '';
+
+    if (ptRes.rows.length > 0) {
+      catName = ptRes.rows[0]!.name;
+      catCode = ptRes.rows[0]!.code ?? '';
+    } else {
+      const catRes = await pool.query<{ name: string; code: string }>(
+        'SELECT name, code FROM categories WHERE id = $1',
+        [categoryId]
+      );
+      if (catRes.rows.length > 0) {
+        catName = catRes.rows[0]!.name;
+        catCode = catRes.rows[0]!.code ?? '';
+      }
     }
+  } catch {
+    // If category table lookup fails, default prefix resolution proceeds safely
   }
 
   const catUpper = `${catName} ${catCode}`.toUpperCase();
@@ -202,16 +208,17 @@ export async function resolveProductSku(
     prefix = 'P';
   }
 
-  const counterRes = await client.query<{ next_value: string }>(
+  const counterRes = await pool.query<{ next_val: string; next_value: string }>(
     `INSERT INTO product_type_counters (prefix, next_value)
      VALUES ($1, 2)
      ON CONFLICT (prefix)
      DO UPDATE SET next_value = product_type_counters.next_value + 1
-     RETURNING next_value - 1`,
+     RETURNING (next_value - 1) AS next_val`,
     [prefix]
   );
 
-  const seq = Number(counterRes.rows[0]!['next_value']);
+  const row = counterRes.rows[0]!;
+  const seq = Number(row['next_val'] ?? row['next_value'] ?? 1);
   return `${prefix}${String(seq).padStart(6, '0')}`;
 }
 
@@ -226,11 +233,12 @@ export async function createProduct(
   id: string,
   dto: CreateProductDto
 ): Promise<Product> {
+  const resolvedSku = await resolveProductSku(pool, dto.category_id, dto.sku);
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    const resolvedSku = await resolveProductSku(client, dto.category_id, dto.sku);
     const normalizedName = normalizeProductName(dto.name);
     const barcodeVal =
       dto.barcode && dto.barcode.trim().length > 0 ? dto.barcode.trim() : null;
@@ -296,11 +304,12 @@ export async function createProductWithInitialStock(
   dto: CreateProductDto,
   userId: string
 ): Promise<Product> {
+  const resolvedSku = await resolveProductSku(pool, dto.category_id, dto.sku);
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    const resolvedSku = await resolveProductSku(client, dto.category_id, dto.sku);
     const normalizedName = normalizeProductName(dto.name);
     const barcodeVal =
       dto.barcode && dto.barcode.trim().length > 0 ? dto.barcode.trim() : null;

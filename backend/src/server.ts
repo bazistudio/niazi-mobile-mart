@@ -51,7 +51,7 @@ async function main(): Promise<void> {
   });
 
   await new Promise<void>((resolve) => {
-    app.listen(port, resolve);
+    app.listen(port, () => resolve());
   });
 
   console.log(`[server] Niazi Product Backend listening on port ${port}`);
