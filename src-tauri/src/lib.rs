@@ -75,33 +75,39 @@ pub fn run() {
         log_dir.join("app.log")
     );
 
-    let app_state = match AppState::try_open_default(env!("CARGO_PKG_VERSION")) {
-        Ok(state) => state,
-        Err(err) => {
-            tracing::error!("[run] Critical database initialization failure: {err}");
-            use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-            let err_msg = err.clone();
-            let _ = tauri::Builder::default()
-                .plugin(tauri_plugin_dialog::init())
-                .setup(move |app| {
-                    let handle = app.handle().clone();
-                    tauri::async_runtime::spawn(async move {
-                        handle
-                            .dialog()
-                            .message(format!(
-                                "Niazi Mobile Mart failed to initialize the local database:\n\n{}\n\nPlease check file permissions or close other running instances.",
-                                err_msg
-                            ))
-                            .title("Database Initialization Failure")
-                            .kind(MessageDialogKind::Error)
-                            .show(|_| {
-                                std::process::exit(1);
-                            });
-                    });
-                    Ok(())
-                })
-                .run(tauri::generate_context!());
-            return;
+    let app_state = if let Ok(database_url) = std::env::var("DATABASE_URL") {
+        tracing::info!("[run] DATABASE_URL detected. Initializing purely online PostgreSQL mode.");
+        let pool = sqlx::PgPool::connect_lazy(&database_url).expect("Failed to create PostgreSQL connection pool");
+        AppState::new_postgres(env!("CARGO_PKG_VERSION"), pool)
+    } else {
+        match AppState::try_open_default(env!("CARGO_PKG_VERSION")) {
+            Ok(state) => state,
+            Err(err) => {
+                tracing::error!("[run] Critical database initialization failure: {err}");
+                use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                let err_msg = err.clone();
+                let _ = tauri::Builder::default()
+                    .plugin(tauri_plugin_dialog::init())
+                    .setup(move |app| {
+                        let handle = app.handle().clone();
+                        tauri::async_runtime::spawn(async move {
+                            handle
+                                .dialog()
+                                .message(format!(
+                                    "Niazi Mobile Mart failed to initialize the local database:\n\n{}\n\nPlease check file permissions or close other running instances.",
+                                    err_msg
+                                ))
+                                .title("Database Initialization Failure")
+                                .kind(MessageDialogKind::Error)
+                                .show(|_| {
+                                    std::process::exit(1);
+                                });
+                        });
+                        Ok(())
+                    })
+                    .run(tauri::generate_context!());
+                return;
+            }
         }
     };
     let app_state_for_setup = app_state.clone();
@@ -153,17 +159,21 @@ pub fn run() {
             let menu = Menu::with_items(handle, &[&file_menu, &help_menu])?;
             app.set_menu(menu)?;
 
-            // Start Rust background SyncWorkerDaemon for offline outbox processing (single shared instance, non-blocking startup)
-            let sync_worker = std::sync::Arc::new(services::SyncWorkerDaemon::new(
-                std::sync::Arc::new(app_state_for_setup.clone())
-            ));
-            {
-                let sync_worker_ref = sync_worker.clone();
-                let app_state_ref = app_state_for_setup.clone();
-                tauri::async_runtime::spawn(async move {
-                    *app_state_ref.sync_worker.write().await = Some(sync_worker_ref.clone());
-                    sync_worker_ref.start();
-                });
+            // Start Rust background SyncWorkerDaemon for offline outbox processing if running in SQLite mode
+            if app_state_for_setup.pg_pool.is_none() {
+                let sync_worker = std::sync::Arc::new(services::SyncWorkerDaemon::new(
+                    std::sync::Arc::new(app_state_for_setup.clone())
+                ));
+                {
+                    let sync_worker_ref = sync_worker.clone();
+                    let app_state_ref = app_state_for_setup.clone();
+                    tauri::async_runtime::spawn(async move {
+                        *app_state_ref.sync_worker.write().await = Some(sync_worker_ref.clone());
+                        sync_worker_ref.start();
+                    });
+                }
+            } else {
+                tracing::info!("[run] Online Postgres mode active. Skipping SyncWorkerDaemon startup.");
             }
 
             if let Some(window) = app.get_webview_window("main") {
