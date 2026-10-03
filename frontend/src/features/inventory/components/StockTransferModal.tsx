@@ -29,7 +29,7 @@ export const StockTransferModal: React.FC<StockTransferModalProps> = ({
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string>(initialProduct?.id || '');
-  const [fromBranchId, setFromBranchId] = useState<string>('00000000-0000-0000-0000-000000000002'); // Main Branch default
+  const [fromBranchId, setFromBranchId] = useState<string>('');
   const [toBranchId, setToBranchId] = useState<string>('');
   const [quantity, setQuantity] = useState<number>(1);
   const [reason, setReason] = useState<string>('');
@@ -43,34 +43,13 @@ export const StockTransferModal: React.FC<StockTransferModalProps> = ({
     if (!isOpen) return;
 
     async function loadBranches() {
-      try {
-        const list = await tauriClient.branchList();
-        if (list && list.length > 0) {
-          setBranches(list);
-          const mainBranch = list.find((b) => b.code === 'MAIN' || b.name.toLowerCase().includes('main')) || list[0];
-          setFromBranchId(mainBranch.id);
-          // Default destination to a different branch if available
-          const otherBranch = list.find((b) => b.id !== mainBranch.id);
-          if (otherBranch) setToBranchId(otherBranch.id);
-        } else {
-          // Default fallback branches for development/testing
-          const fallbackBranches: Branch[] = [
-            { id: '00000000-0000-0000-0000-000000000002', organization_id: 'org1', name: 'Main Branch', code: 'MAIN', is_active: true, created_at: '', updated_at: '' },
-            { id: '00000000-0000-0000-0000-000000000003', organization_id: 'org1', name: 'Branch 2 (Gulberg)', code: 'BR-02', is_active: true, created_at: '', updated_at: '' },
-            { id: '00000000-0000-0000-0000-000000000004', organization_id: 'org1', name: 'Branch 3 (Saddar)', code: 'BR-03', is_active: true, created_at: '', updated_at: '' },
-          ];
-          setBranches(fallbackBranches);
-          setFromBranchId(fallbackBranches[0].id);
-          setToBranchId(fallbackBranches[1].id);
-        }
-      } catch {
-        const fallbackBranches: Branch[] = [
-          { id: '00000000-0000-0000-0000-000000000002', organization_id: 'org1', name: 'Main Branch', code: 'MAIN', is_active: true, created_at: '', updated_at: '' },
-          { id: '00000000-0000-0000-0000-000000000003', organization_id: 'org1', name: 'Branch 2 (Gulberg)', code: 'BR-02', is_active: true, created_at: '', updated_at: '' },
-        ];
-        setBranches(fallbackBranches);
-        setFromBranchId(fallbackBranches[0].id);
-        setToBranchId(fallbackBranches[1].id);
+      const list = await httpClient.get<Branch[]>('/api/v1/branches');
+      if (list && list.length > 0) {
+        setBranches(list);
+        const mainBranch = list.find((b) => b.code === 'MAIN' || b.name.toLowerCase().includes('main')) || list[0];
+        setFromBranchId(mainBranch.id);
+        const otherBranch = list.find((b) => b.id !== mainBranch.id);
+        if (otherBranch) setToBranchId(otherBranch.id);
       }
     }
 
