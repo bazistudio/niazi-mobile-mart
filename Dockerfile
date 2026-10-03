@@ -35,12 +35,21 @@ COPY src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json src-tau
 COPY src-tauri/capabilities ./src-tauri/capabilities
 COPY src-tauri/icons ./src-tauri/icons
 COPY src-tauri/migrations ./src-tauri/migrations
-COPY src-tauri/src ./src-tauri/src
 
 WORKDIR /usr/src/niazi-mobile-mart/src-tauri
 
+# Create dummy source files for dependency caching layer
+RUN mkdir -p src/bin && \
+    echo "" > src/lib.rs && \
+    echo "fn main() {}" > src/main.rs && \
+    echo "fn main() {}" > src/bin/server.rs && \
+    cargo build --release --bin niazi-server
+
+# Copy actual source files
+COPY src-tauri/src ./src
+
 # Build production release binary for niazi-server
-RUN cargo build --release --bin niazi-server
+RUN touch src/bin/server.rs && cargo build --release --bin niazi-server
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 3: Minimal Production Runtime Container
