@@ -16,12 +16,57 @@ impl PostgresProductRepository {
         Self { pool }
     }
 
+    async fn resolve_product_sku_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        category_id: &str,
+        input_sku: &str,
+    ) -> AppResult<String> {
+        let trimmed = input_sku.trim().to_uppercase();
+        if !trimmed.is_empty() && !trimmed.starts_with("SKU-") && !trimmed.starts_with("AUTO-") {
+            return Ok(trimmed);
+        }
+
+        let cat_row: Option<(String, String)> = sqlx::query_as(
+            "SELECT name, code FROM product_types WHERE id = $1"
+        )
+        .bind(category_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .unwrap_or(None);
+
+        let (cat_name, cat_code) = cat_row.unwrap_or_default();
+        let cat_upper = format!("{} {}", cat_name.to_uppercase(), cat_code.to_uppercase());
+
+        let prefix = if cat_upper.contains("MOBILE") || cat_upper.contains("PHONE") || cat_upper.starts_with('M') {
+            "M"
+        } else if cat_upper.contains("ACC") || cat_upper.contains("ACCESSOR") || cat_upper.starts_with('A') {
+            "A"
+        } else {
+            "P"
+        };
+
+        let seq_row: (i64,) = sqlx::query_as(
+            "INSERT INTO product_type_counters (prefix, next_value)
+             VALUES ($1, 2)
+             ON CONFLICT (prefix)
+             DO UPDATE SET next_value = product_type_counters.next_value + 1
+             RETURNING next_value - 1"
+        )
+        .bind(prefix)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to generate SKU counter: {e}")))?;
+
+        Ok(format!("{prefix}{:06}", seq_row.0))
+    }
+
     pub async fn create_product(&self, id: &str, dto: &CreateProductDto) -> AppResult<Product> {
+        let mut tx = self.pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
         let now = Utc::now().to_rfc3339();
         let threshold = dto.low_stock_threshold.unwrap_or(5);
         let barcode_opt = dto.barcode.as_deref().map(str::trim).filter(|s| !s.is_empty());
         let initial_avg_cost = dto.average_cost.unwrap_or(dto.purchase_price);
-        let sku = dto.sku.trim().to_uppercase();
+        let sku = Self::resolve_product_sku_tx(&mut tx, &dto.category_id, &dto.sku).await?;
         let name = dto.name.trim();
         let norm_name = crate::domain::product::normalize_product_name(name);
 
@@ -47,7 +92,7 @@ impl PostgresProductRepository {
         .bind(dto.description.as_deref())
         .bind(&now)
         .bind(&now)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| {
             let msg = e.to_string();
@@ -63,6 +108,8 @@ impl PostgresProductRepository {
                 AppError::Database(format!("Failed to create product: {e}"))
             }
         })?;
+
+        tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok(Product {
             id: id.to_string(),
@@ -99,7 +146,7 @@ impl PostgresProductRepository {
         let threshold = dto.low_stock_threshold.unwrap_or(5);
         let barcode_opt = dto.barcode.as_deref().map(str::trim).filter(|s| !s.is_empty());
         let initial_avg_cost = dto.average_cost.unwrap_or(dto.purchase_price);
-        let sku = dto.sku.trim().to_uppercase();
+        let sku = Self::resolve_product_sku_tx(&mut tx, &dto.category_id, &dto.sku).await?;
         let name = dto.name.trim();
         let norm_name = crate::domain::product::normalize_product_name(name);
 
