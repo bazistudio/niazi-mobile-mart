@@ -156,6 +156,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/sales", axum::routing::post(complete_sale_handler))
         .route("/api/customers", get(list_customers_handler).post(create_customer_handler))
         .route("/api/suppliers", get(list_suppliers_handler).post(create_supplier_handler))
+        .route("/api/v1/branches", get(list_branches_handler).post(create_branch_handler))
         .route("/api/v1/parties", get(list_parties_handler))
         .route("/api/v1/parties/:id", get(get_party_handler))
         .route("/api/v1/customers/:id", get(get_customer_detail_handler))
@@ -611,6 +612,37 @@ async fn create_customer_handler(
 
     match state.app_state.customer_service.create_customer(payload).await {
         Ok(customer) => (StatusCode::CREATED, Json(json!(customer))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/v1/branches — List branches (Admin/Manager)
+async fn list_branches_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("org"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.branch_repo.list_branches().await {
+        Ok(branches) => (StatusCode::OK, Json(json!(branches))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// POST /api/v1/branches — Create branch (Admin only)
+async fn create_branch_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::organization::CreateBranchDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("org"), None) { // "org" page handles branch management
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.branch_repo.create_branch(&payload).await {
+        Ok(branch) => (StatusCode::CREATED, Json(json!(branch))),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_FAILED", "message": e.to_string()}))),
     }
 }

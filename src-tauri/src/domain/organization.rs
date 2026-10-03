@@ -37,6 +37,13 @@ pub struct Branch {
 /// Internal product rate entity stored in the database.
 /// All monetary values are integer whole Pakistani Rupees (PKR).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CreateBranchDto {
+    pub name: String,
+    pub code: Option<String>,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InternalProductRate {
     pub product_id: String,
     pub product_name: String,

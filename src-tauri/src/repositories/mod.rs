@@ -222,6 +222,13 @@ impl BranchRepository {
         }
     }
 
+    pub async fn create_branch(&self, dto: &crate::domain::organization::CreateBranchDto) -> AppResult<Branch> {
+        match self {
+            Self::SQLite(_) => Err(crate::errors::AppError::Internal("SQLite does not support branch creation".into())),
+            Self::Postgres(r) => r.create_branch(dto).await,
+        }
+    }
+
     pub async fn get_main_branch(&self) -> AppResult<Option<Branch>> {
         match self {
             Self::SQLite(r) => r.get_main_branch().await,
