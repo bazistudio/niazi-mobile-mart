@@ -157,6 +157,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/customers", get(list_customers_handler).post(create_customer_handler))
         .route("/api/suppliers", get(list_suppliers_handler).post(create_supplier_handler))
         .route("/api/v1/branches", get(list_branches_handler).post(create_branch_handler))
+        .route("/api/v1/products", axum::routing::post(create_product_handler))
+        .route("/api/v1/products/:id", axum::routing::put(update_product_handler).delete(deactivate_product_handler))
         .route("/api/v1/parties", get(list_parties_handler))
         .route("/api/v1/parties/:id", get(get_party_handler))
         .route("/api/v1/customers/:id", get(get_customer_detail_handler))
@@ -644,6 +646,39 @@ async fn create_branch_handler(
     match state.app_state.branch_repo.create_branch(&payload).await {
         Ok(branch) => (StatusCode::CREATED, Json(json!(branch))),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// PUT /api/v1/products/:id — Update product
+async fn update_product_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::product::UpdateProductDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("inventory"), Some("stock:adjust")) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.product_service.update_product(&id, payload).await {
+        Ok(product) => (StatusCode::OK, Json(json!(product))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "UPDATE_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// DELETE /api/v1/products/:id — Deactivate product
+async fn deactivate_product_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("inventory"), Some("stock:adjust")) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.product_service.deactivate_product(&id).await {
+        Ok(_) => (StatusCode::OK, Json(json!({"message": "Product deactivated"}))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "DELETE_FAILED", "message": e.to_string()}))),
     }
 }
 

@@ -151,10 +151,12 @@ export const inventoryApi = {
       branch_id: branchId,
     };
 
-    console.info('[inventoryApi.createProduct] Sending product payload to Tauri IPC:', payload);
+    console.info('[inventoryApi.createProduct] Sending product payload to Axum API:', payload);
 
     try {
-      const created = await tauriClient.productCreate(payload);
+      // NOTE: Using HTTP Axum Postgres endpoint instead of Tauri IPC
+      const res = await httpClient.post<{ product?: any, data?: any }>('/api/v1/products', payload);
+      const created = res.data || res.product || res; // depending on how exactly axum responds, we handle variations
 
       const product: ProductDTO = {
         _id: created.id,
@@ -172,7 +174,7 @@ export const inventoryApi = {
         updatedAt: created.updated_at,
       };
 
-      console.info('[inventoryApi.createProduct] Product created successfully:', product);
+      console.info('[inventoryApi.createProduct] Product created successfully in Postgres:', product);
 
       return {
         message: 'Product created successfully',
@@ -210,17 +212,21 @@ export const inventoryApi = {
       description = data.description;
     }
 
-    const updated = await tauriClient.productUpdate(id, {
+    const payload = {
       name,
       sale_price: salePrice,
       purchase_price: purchasePrice,
       low_stock_threshold: lowStockThreshold,
       description,
-    });
+    };
+
+    const res = await httpClient.put<{ data?: any, product?: any }>(`/api/v1/products/${id}`, payload);
+    const updated = res.data || res.product || res;
 
     let currentStock = 0;
     try {
       const branchId = getActiveBranchId();
+      // Keep Tauri IPC for read stock for now
       currentStock = await tauriClient.inventoryGetStock(updated.id, branchId);
     } catch {}
 
@@ -247,7 +253,7 @@ export const inventoryApi = {
   },
 
   deleteProduct: async (id: string): Promise<{ message: string }> => {
-    await tauriClient.productDeactivate(id);
+    await httpClient.delete(`/api/v1/products/${id}`);
     return {
       message: 'Product deactivated successfully',
     };

@@ -64,67 +64,7 @@ impl ProductService {
                 pg_repo.create_product_with_initial_stock(&product_id, &dto, user_id).await
             }
             ProductRepository::SQLite(_) => {
-                let db = self.db.as_ref().expect("SQLite database connection required");
-                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
-                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
-                let terminal_id = current_terminal.id;
-
-                let target_branch = dto.branch_id.clone().unwrap_or_else(|| DEFAULT_MAIN_BRANCH_ID.to_string());
-                let uid = user_id.map(|s| s.to_string());
-                let pid = product_id.clone();
-
-                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
-                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
-                let terminal_id = current_terminal.id;
-
-                let product = with_transaction(db, move |tx| {
-                    let mut product = SQLiteProductRepository::create_product_in_tx(tx, &pid, &dto)?;
-                    product.initial_quantity = dto.initial_quantity;
-
-                    if let Some(qty) = dto.initial_quantity {
-                        if qty > 0 {
-                            let now = Utc::now().to_rfc3339();
-                            SQLiteInventoryRepository::set_stock_in_tx(tx, &pid, &target_branch, qty, &now)?;
-
-                            let valid_performed_by = SQLiteUserRepository::sanitize_performed_by_in_tx(tx, uid.as_deref())?;
-
-                            let movement = StockMovement {
-                                id: Uuid::new_v4().to_string(),
-                                product_id: pid.clone(),
-                                branch_id: target_branch.clone(),
-                                movement_type: StockMovementType::In,
-                                quantity: qty,
-                                previous_stock: 0,
-                                resulting_stock: qty,
-                                reason: Some("Opening Stock".to_string()),
-                                performed_by: valid_performed_by,
-                                reference_id: Some("OPENING_BALANCE".to_string()),
-                                created_at: now,
-                            };
-                            SQLiteInventoryRepository::insert_movement_in_tx(tx, &movement)?;
-                        }
-                    }
-
-                    // Enqueue PRODUCT_CREATED event into offline_sync_queue in SQLite transaction
-                    let payload_json = serde_json::to_string(&product).map_err(|e| {
-                        crate::db::errors::DbError::ValidationError(format!("Failed to serialize product for sync: {e}"))
-                    })?;
-
-                    let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
-                        client_event_id: Some(product.id.clone()),
-                        terminal_id: terminal_id.clone(),
-                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-                        branch_id: target_branch.clone(),
-                        event_type: "PRODUCT_CREATED".to_string(),
-                        payload: payload_json,
-                    };
-                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
-
-                    Ok(product)
-                })
-                .await?;
-
-                Ok(product)
+                Err(crate::errors::AppError::Internal("Product mutation requires PostgreSQL authority.".to_string()))
             }
         }
     }
@@ -154,39 +94,7 @@ impl ProductService {
         match &self.repo {
             ProductRepository::Postgres(pg_repo) => pg_repo.update_product(id, &dto).await,
             ProductRepository::SQLite(_) => {
-                let db = self.db.as_ref().expect("SQLite database connection required");
-                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
-                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
-                let terminal_id = current_terminal.id;
-
-                let id_owned = id.to_string();
-
-                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
-                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
-                let terminal_id = current_terminal.id;
-
-                let product = with_transaction(db, move |tx| {
-                    let product = SQLiteProductRepository::update_product_in_tx(tx, &id_owned, &dto)?;
-
-                    let payload_json = serde_json::to_string(&product).map_err(|e| {
-                        crate::db::errors::DbError::ValidationError(format!("Failed to serialize product for sync: {e}"))
-                    })?;
-
-                    let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
-                        client_event_id: Some(Uuid::new_v4().to_string()),
-                        terminal_id: terminal_id.clone(),
-                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-                        branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-                        event_type: "PRODUCT_UPDATED".to_string(),
-                        payload: payload_json,
-                    };
-                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
-
-                    Ok(product)
-                })
-                .await?;
-
-                Ok(product)
+                Err(crate::errors::AppError::Internal("Product mutation requires PostgreSQL authority.".to_string()))
             }
         }
     }
@@ -212,37 +120,7 @@ impl ProductService {
         match &self.repo {
             ProductRepository::Postgres(pg_repo) => pg_repo.deactivate_product(id).await,
             ProductRepository::SQLite(_) => {
-                let db = self.db.as_ref().expect("SQLite database connection required");
-                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
-                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
-                let terminal_id = current_terminal.id;
-
-                let id_owned = id.to_string();
-
-                let terminal_repo = crate::repositories::SQLiteTerminalRepository::new(db.clone());
-                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
-                let terminal_id = current_terminal.id;
-
-                with_transaction(db, move |tx| {
-                    SQLiteProductRepository::deactivate_product_in_tx(tx, &id_owned)?;
-
-                    let deactivate_payload = serde_json::json!({ "id": id_owned }).to_string();
-
-                    let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
-                        client_event_id: Some(Uuid::new_v4().to_string()),
-                        terminal_id: terminal_id.clone(),
-                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-                        branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-                        event_type: "PRODUCT_DEACTIVATED".to_string(),
-                        payload: deactivate_payload,
-                    };
-                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
-
-                    Ok(())
-                })
-                .await?;
-
-                Ok(())
+                Err(crate::errors::AppError::Internal("Product mutation requires PostgreSQL authority.".to_string()))
             }
         }
     }
