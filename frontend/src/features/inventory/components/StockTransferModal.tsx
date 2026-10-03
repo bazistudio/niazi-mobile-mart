@@ -6,6 +6,7 @@ import { InventoryProduct } from '../types';
 import { useInventoryStore } from '../core/inventory.store';
 import { usePermissions } from '@/lib/auth/usePermissions';
 import { tauriClient, Branch } from '@/lib/tauri/tauriClient';
+import { httpClient } from '@/lib/http/httpClient';
 import toast from 'react-hot-toast';
 
 interface StockTransferModalProps {
@@ -156,7 +157,7 @@ export const StockTransferModal: React.FC<StockTransferModalProps> = ({
       setIsSubmitting(true);
       setError(null);
 
-      await tauriClient.inventoryTransfer({
+      await httpClient.post('/api/v1/inventory/transfer', {
         product_id: selectedProductId,
         from_branch_id: fromBranchId,
         to_branch_id: toBranchId,

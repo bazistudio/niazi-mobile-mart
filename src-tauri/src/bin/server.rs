@@ -153,6 +153,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/products", get(list_products_handler).post(create_product_handler))
         .route("/api/products/:id", get(get_product_handler))
         .route("/api/inventory", get(list_inventory_handler))
+        .route("/api/v1/inventory/adjust", axum::routing::post(adjust_inventory_handler))
+        .route("/api/v1/inventory/transfer", axum::routing::post(transfer_inventory_handler))
         .route("/api/sales", axum::routing::post(complete_sale_handler))
         .route("/api/customers", get(list_customers_handler).post(create_customer_handler))
         .route("/api/suppliers", get(list_suppliers_handler).post(create_supplier_handler))
@@ -559,6 +561,38 @@ async fn list_inventory_handler(
     match state.app_state.inventory_service.get_stock_map(&effective_branch).await {
         Ok(stock) => (StatusCode::OK, Json(json!(stock))),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// POST /api/v1/inventory/adjust — Adjust inventory stock
+async fn adjust_inventory_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::inventory::AdjustStockDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("inventory"), Some("stock:adjust")) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.inventory_service.adjust_stock(payload, Some(auth.0.user_id.as_str())).await {
+        Ok(new_stock) => (StatusCode::OK, Json(json!(new_stock))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "ADJUST_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// POST /api/v1/inventory/transfer — Transfer stock between branches
+async fn transfer_inventory_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::inventory::TransferStockDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("inventory"), Some("stock:transfer")) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.inventory_service.transfer_stock(payload, Some(auth.0.user_id.as_str())).await {
+        Ok(_) => (StatusCode::OK, Json(json!({"message": "Transfer successful"}))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "TRANSFER_FAILED", "message": e.to_string()}))),
     }
 }
 

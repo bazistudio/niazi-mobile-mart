@@ -136,7 +136,7 @@ export const getApiBaseUrl = (): string => {
   return DEFAULT_CENTRAL_API_URL;
 };
 
-async function httpFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function httpFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getAuthToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -1144,22 +1144,18 @@ export const tauriClient = {
   },
 
   async inventoryAdjust(dto: AdjustStockDto): Promise<number> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('storage_inventory_adjust', { dto });
-    }
-    const stockMap = getStoredWebStockMap();
-    const next = dto.target_quantity ?? (dto as any).new_quantity ?? 0;
-    stockMap[dto.product_id] = next;
-    saveStoredWebStockMap(stockMap);
-    return next;
+    const res = await httpFetch<{ data?: any, newStock?: number }>('/api/v1/inventory/adjust', {
+      method: 'POST',
+      body: JSON.stringify(dto),
+    });
+    return typeof res.data === 'number' ? res.data : typeof res === 'number' ? res : (dto.target_quantity ?? 0);
   },
 
   async inventoryTransfer(dto: TransferStockDto): Promise<void> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('storage_inventory_transfer', { dto });
-    }
+    await httpFetch('/api/v1/inventory/transfer', {
+      method: 'POST',
+      body: JSON.stringify(dto),
+    });
   },
 
   async inventoryGetStock(productId: string, branchId: string): Promise<number> {

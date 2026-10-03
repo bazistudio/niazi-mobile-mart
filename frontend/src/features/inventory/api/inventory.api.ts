@@ -1,6 +1,7 @@
 // src/features/inventory/api/inventory.api.ts
 
 import { tauriClient } from '@/lib/tauri/tauriClient';
+import { httpClient } from '@/lib/http/httpClient';
 import { PaginatedProductsDTO, AdjustStockResponseDTO, ProductCategoryDTO, UpdateProductDTO, CheckDuplicateResponseDTO, ProductDTO } from '../dto/inventory.dto';
 import { InventoryAdjustmentType, PaginationParams } from '../types';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
@@ -51,6 +52,7 @@ export const inventoryApi = {
       status: 'active',
       createdAt: p.created_at,
       updatedAt: p.updated_at,
+      isLowStock: (p.quantity || 0) <= (p.low_stock_threshold || 5),
     }));
 
     return {
@@ -83,12 +85,16 @@ export const inventoryApi = {
       targetQuantity = currentStock - quantity;
     }
 
-    const newStock = await tauriClient.inventoryAdjust({
+    // NOTE: Using HTTP Axum Postgres endpoint instead of Tauri IPC
+    const res = await httpClient.post<{ data?: any, newStock?: number }>('/api/v1/inventory/adjust', {
       product_id: productId,
       branch_id: branchId,
       target_quantity: targetQuantity,
       reason: reason || 'Manual Adjustment',
     });
+    
+    // Extrapolate the new stock count from response (depends on how backend returns the single number)
+    const newStock = typeof res.data === 'number' ? res.data : typeof res === 'number' ? res : targetQuantity;
 
     return {
       success: true,
@@ -172,6 +178,7 @@ export const inventoryApi = {
         status: 'active',
         createdAt: created.created_at,
         updatedAt: created.updated_at,
+        isLowStock: initialQuantity <= created.low_stock_threshold,
       };
 
       console.info('[inventoryApi.createProduct] Product created successfully in Postgres:', product);
