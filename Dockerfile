@@ -49,7 +49,7 @@ RUN mkdir -p src/bin && \
 COPY src-tauri/src ./src
 
 # Build production release binary for niazi-server
-RUN touch src/bin/server.rs && cargo build --release --bin niazi-server
+RUN find src -type f -exec touch {} + && cargo build --release --bin niazi-server
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 3: Minimal Production Runtime Container
