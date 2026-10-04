@@ -226,6 +226,34 @@ Database Migration Parity:  PASSED (SQLite 017 & Postgres 006 verified)
 - **Build Process**: GitHub Actions runner installs Node.js & Rust, executes `tauri-action@v0`, and packages NSIS `.exe` installer and `.msi` package.
 - **Rule**: Creating production tags and deploying Cloud Run services requires explicit human owner authorization.
 
+### 11.1 RELEASE CANDIDATE (RC) CLOUD DEPLOYMENT
+
+- **RC Target Service**: `niazi-server-ts-product-sales-rc`
+- **Region**: `asia-south1`
+- **GCP Project**: `niazi-mobile-mart-508317`
+- **Required Cloud Build Service Account**: `niazi-cloudbuild-deployer@niazi-mobile-mart-508317.iam.gserviceaccount.com`
+
+*Note on Deployment Identity*: The default Compute Engine service account (`860232188829-compute@developer.gserviceaccount.com`) lacks Cloud Run deployment authorization (`PERMISSION_DENIED: Permission 'run.services.get' denied`). Build submissions MUST explicitly bind to the dedicated `niazi-cloudbuild-deployer` service account.
+
+#### Approved RC Build Submission Method
+
+Prefer executing the preflight-checked PowerShell helper from project root:
+
+```powershell
+.\scripts\deploy-rc.ps1
+```
+
+Equivalent direct `gcloud` command:
+
+```powershell
+gcloud builds submit `
+  --project=niazi-mobile-mart-508317 `
+  --config=cloudbuild.rc.yaml `
+  --service-account=projects/niazi-mobile-mart-508317/serviceAccounts/niazi-cloudbuild-deployer@niazi-mobile-mart-508317.iam.gserviceaccount.com `
+  .
+```
+
+
 ---
 
 ## 12. KNOWN TECHNICAL DEBT & FUTURE WORK PRIORITIES
