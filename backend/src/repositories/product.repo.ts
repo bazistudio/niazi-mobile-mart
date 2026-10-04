@@ -269,12 +269,22 @@ export async function createProduct(
     );
 
     await client.query('COMMIT');
-    return mapProductRow(res.rows[0]!);
-  } catch (err: unknown) {
-    await client.query('ROLLBACK');
-    throw mapPgError(err, dto.sku);
-  } finally {
+    const product = mapProductRow(res.rows[0]!);
     client.release();
+    return product;
+  } catch (err: unknown) {
+    // Attempt ROLLBACK. If ROLLBACK itself fails, pass the rollback error to
+    // client.release() so the pg pool destroys and replaces this connection
+    // instead of recycling a connection that is still in an aborted-transaction
+    // state. Recycling a dirty connection is what causes subsequent callers to
+    // receive "current transaction is aborted" on an unrelated query.
+    try {
+      await client.query('ROLLBACK');
+      client.release();
+    } catch (rollbackErr: unknown) {
+      client.release(rollbackErr as Error);
+    }
+    throw mapPgError(err, dto.sku);
   }
 }
 
@@ -363,12 +373,22 @@ export async function createProductWithInitialStock(
     }
 
     await client.query('COMMIT');
-    return { ...product, initial_quantity: dto.initial_quantity ?? null };
-  } catch (err: unknown) {
-    await client.query('ROLLBACK');
-    throw mapPgError(err, dto.sku);
-  } finally {
+    const result = { ...product, initial_quantity: dto.initial_quantity ?? null };
     client.release();
+    return result;
+  } catch (err: unknown) {
+    // Attempt ROLLBACK. If ROLLBACK itself fails, pass the rollback error to
+    // client.release() so the pg pool destroys and replaces this connection
+    // instead of recycling a connection that is still in an aborted-transaction
+    // state. Recycling a dirty connection is what causes subsequent callers to
+    // receive "current transaction is aborted" on an unrelated query.
+    try {
+      await client.query('ROLLBACK');
+      client.release();
+    } catch (rollbackErr: unknown) {
+      client.release(rollbackErr as Error);
+    }
+    throw mapPgError(err, dto.sku);
   }
 }
 
@@ -589,9 +609,7 @@ export async function updateProduct(
     );
 
     await client.query('COMMIT');
-
-    // Return product with current.sku (pre-update) -- matches Rust return behavior
-    return {
+    const updated = {
       ...current,
       name: newName,
       normalized_name: newNormalizedName,
@@ -611,12 +629,18 @@ export async function updateProduct(
       is_active: newIsActive,
       updated_at: now,
     };
+    client.release();
+    // Return product with current.sku (pre-update) -- matches Rust return behavior
+    return updated;
   } catch (err: unknown) {
-    await client.query('ROLLBACK');
+    try {
+      await client.query('ROLLBACK');
+      client.release();
+    } catch (rollbackErr: unknown) {
+      client.release(rollbackErr as Error);
+    }
     if (err instanceof RepoError) throw err;
     throw mapPgError(err, dto.sku ?? '');
-  } finally {
-    client.release();
   }
 }
 
