@@ -17,8 +17,11 @@
 import express, { Request, Response, NextFunction } from 'express';
 import fs from 'fs';
 import path from 'path';
+import https from 'https';
 import { getPool } from './db';
 import { createProductRouter } from './routes/product.routes';
+import { createSaleRouter } from './routes/sale.routes';
+import { listBrands, DEFAULT_BRANDS } from './repositories/product.repo';
 
 function loadEnv(): void {
   const envPaths = [
@@ -107,12 +110,26 @@ async function main(): Promise<void> {
   app.use('/api/products', productRouter);
   app.use('/api/v1/products', productRouter);
 
+  const saleRouter = createSaleRouter(pool);
+  app.use('/api/sales', saleRouter);
+  app.use('/api/v1/sales', saleRouter);
+
+  app.get(['/api/brands', '/api/v1/brands'], async (_req: Request, res: Response) => {
+    try {
+      const brands = await listBrands(pool);
+      res.status(200).json(brands);
+    } catch {
+      res.status(200).json(DEFAULT_BRANDS);
+    }
+  });
+
   app.get('/health', (_req: Request, res: Response) => {
     res.status(200).json({ status: 'ok', service: 'niazi-product-backend' });
   });
 
-  app.use((_req: Request, res: Response) => {
-    res.status(404).json({ error: 'Not found' });
+  // Transparent proxy fallback to Central Server for non-product routes (auth, branches, users, etc.)
+  app.use((req: Request, res: Response) => {
+    proxyToCentralServer(req, res);
   });
 
   await new Promise<void>((resolve) => {
@@ -120,6 +137,38 @@ async function main(): Promise<void> {
   });
 
   console.log(`[server] Niazi Product Backend listening on port ${port}`);
+}
+
+export function proxyToCentralServer(req: Request, res: Response): void {
+  const targetUrl = new URL(req.originalUrl || req.url, 'https://niazi-server-860232188829.asia-south1.run.app');
+  
+  const headers = { ...req.headers };
+  delete headers.host;
+
+  const proxyReq = https.request(targetUrl, {
+    method: req.method,
+    headers: headers,
+  }, (proxyRes) => {
+    res.status(proxyRes.statusCode ?? 500);
+    Object.entries(proxyRes.headers).forEach(([key, val]) => {
+      if (val) res.setHeader(key, val);
+    });
+    proxyRes.pipe(res);
+  });
+
+  proxyReq.on('error', (err) => {
+    res.status(502).json({ error: 'Central Server Proxy Error', message: err.message });
+  });
+
+  if (['POST', 'PUT', 'PATCH'].includes(req.method ?? '')) {
+    if (req.body && Object.keys(req.body).length > 0) {
+      const bodyData = JSON.stringify(req.body);
+      proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
+      proxyReq.write(bodyData);
+    }
+  }
+
+  proxyReq.end();
 }
 
 main().catch((err) => {

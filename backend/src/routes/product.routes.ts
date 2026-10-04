@@ -31,9 +31,31 @@ import {
   UpdateProductDto,
 } from '../repositories/product.repo';
 
+import { proxyToCentralServer } from '../server';
+
 // ─── Error Response Helper ────────────────────────────────────────────────────
 
-function sendError(res: Response, err: unknown): void {
+function isDbConnectionError(err: unknown): boolean {
+  if (!err) return false;
+  const msg = (err as any).message || String(err);
+  const code = (err as any).code;
+  return (
+    code === 'ECONNRESET' ||
+    code === 'ECONNREFUSED' ||
+    msg.includes('ECONNRESET') ||
+    msg.includes('ECONNREFUSED') ||
+    msg.includes('Connection terminated') ||
+    msg.includes('read')
+  );
+}
+
+function sendError(req: Request, res: Response, err: unknown): void {
+  console.error('[product.routes] Error handled by sendError:', err);
+  if (isDbConnectionError(err)) {
+    console.warn('[product.routes] Local DB connection unavailable; proxying request to Central Server Cloud Run...');
+    proxyToCentralServer(req, res);
+    return;
+  }
   if (err instanceof RepoError) {
     res.status(err.statusCode).json({ error: err.message });
     return;
@@ -93,7 +115,7 @@ export function createProductRouter(pool: Pool): Router {
       const products = await listProducts(pool, filter);
       res.status(200).json(products);
     } catch (err) {
-      sendError(res, err);
+      sendError(req, res, err);
     }
   });
 
@@ -118,7 +140,7 @@ export function createProductRouter(pool: Pool): Router {
       }
       res.status(200).json(product);
     } catch (err) {
-      sendError(res, err);
+      sendError(req, res, err);
     }
   });
 
@@ -162,7 +184,7 @@ export function createProductRouter(pool: Pool): Router {
 
       res.status(201).json(product);
     } catch (err) {
-      sendError(res, err);
+      sendError(req, res, err);
     }
   });
 
@@ -185,7 +207,7 @@ export function createProductRouter(pool: Pool): Router {
       const product = await updateProduct(pool, id, dto);
       res.status(200).json(product);
     } catch (err) {
-      sendError(res, err);
+      sendError(req, res, err);
     }
   });
 
@@ -207,7 +229,7 @@ export function createProductRouter(pool: Pool): Router {
       await deactivateProduct(pool, id);
       res.status(200).json({ message: 'Product deactivated' });
     } catch (err) {
-      sendError(res, err);
+      sendError(req, res, err);
     }
   });
 

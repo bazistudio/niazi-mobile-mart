@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
@@ -49,7 +51,28 @@ function requirePublicKey(): string {
   if (!key || !key.trim()) {
     throw new Error('FATAL: JWT_PUBLIC_KEY environment variable is required but missing or empty.');
   }
-  return key.trim();
+  return key.trim().replace(/\\n/g, '\n');
+}
+
+function getAlternativePublicKeys(): string[] {
+  const keys: string[] = [];
+  const candidatePaths = [
+    path.join(process.cwd(), 'jwt_pub.pem'),
+    path.join(process.cwd(), '..', 'jwt_pub.pem'),
+    path.join(process.cwd(), 'src-tauri', 'src', 'services', 'jwt_public_key.pem'),
+    path.join(process.cwd(), '..', 'src-tauri', 'src', 'services', 'jwt_public_key.pem'),
+  ];
+  for (const p of candidatePaths) {
+    try {
+      if (fs.existsSync(p)) {
+        const content = fs.readFileSync(p, 'utf8').trim().replace(/\\n/g, '\n');
+        if (content && !keys.includes(content)) {
+          keys.push(content);
+        }
+      }
+    } catch {}
+  }
+  return keys;
 }
 
 // --- Error Class ---
@@ -79,13 +102,23 @@ export function resolveIdentity(token: string): RequestIdentity {
     throw new AuthError('Missing or empty authorization token', 401);
   }
 
-  const publicKey = requirePublicKey();
+  const primaryKey = requirePublicKey();
+  const allKeys = [primaryKey, ...getAlternativePublicKeys()].filter((k, idx, arr) => arr.indexOf(k) === idx);
 
-  let claims: Claims;
-  try {
-    claims = jwt.verify(clean, publicKey, { algorithms: ['RS256'] }) as Claims;
-  } catch (err: unknown) {
-    if (err instanceof jwt.TokenExpiredError) {
+  let claims: Claims | null = null;
+  let lastErr: unknown = null;
+
+  for (const key of allKeys) {
+    try {
+      claims = jwt.verify(clean, key, { algorithms: ['RS256'] }) as Claims;
+      break;
+    } catch (err: unknown) {
+      lastErr = err;
+    }
+  }
+
+  if (!claims) {
+    if (lastErr instanceof jwt.TokenExpiredError) {
       throw new AuthError('Authentication token expired. Please log in again.', 401);
     }
     throw new AuthError('Invalid or corrupted authentication token', 401);
@@ -175,6 +208,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
   const authHeader = req.headers['authorization'] ?? '';
 
   if (!authHeader) {
+    console.warn(`[auth] 401 Unauthorized: Missing Authorization header on ${req.method} ${req.originalUrl || req.path}`);
     res.status(401).json({ error: 'Missing or empty authorization token' });
     return;
   }
@@ -184,9 +218,12 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     next();
   } catch (err) {
     if (err instanceof AuthError) {
+      console.warn(`[auth] 401 Unauthorized: ${err.message} on ${req.method} ${req.originalUrl || req.path}`);
       res.status(err.statusCode).json({ error: err.message });
     } else {
+      console.warn(`[auth] 401 Unauthorized: Invalid token on ${req.method} ${req.originalUrl || req.path}`, err);
       res.status(401).json({ error: 'Invalid or corrupted authentication token' });
     }
   }
 }
+
