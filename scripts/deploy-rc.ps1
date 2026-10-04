@@ -25,7 +25,7 @@ if (-not $repoRoot -or -not (Test-Path $repoRoot)) {
     Write-Error "Preflight Check Failed: Could not resolve Git repository root."
     exit 1
 }
-Write-Host "[✓] Repository Root: $repoRoot" -ForegroundColor Green
+Write-Host "[OK] Repository Root: $repoRoot" -ForegroundColor Green
 
 # Check 3: Verify current branch is feature/typescript-migrate
 $currentBranch = (git rev-parse --abbrev-ref HEAD 2>$null).Trim()
@@ -33,7 +33,7 @@ if ($currentBranch -ne 'feature/typescript-migrate') {
     Write-Error "Preflight Check Failed: Must be on branch 'feature/typescript-migrate', currently on '$currentBranch'."
     exit 1
 }
-Write-Host "[✓] Branch: $currentBranch" -ForegroundColor Green
+Write-Host "[OK] Branch: $currentBranch" -ForegroundColor Green
 
 # Check 4: Verify cloudbuild.rc.yaml exists at repository root
 $configPath = Join-Path $repoRoot "cloudbuild.rc.yaml"
@@ -41,7 +41,7 @@ if (-not (Test-Path $configPath)) {
     Write-Error "Preflight Check Failed: 'cloudbuild.rc.yaml' not found at repository root ($configPath)."
     exit 1
 }
-Write-Host "[✓] Config File: $configPath" -ForegroundColor Green
+Write-Host "[OK] Config File: $configPath" -ForegroundColor Green
 
 # Check 5: Inspect Git status for unexpected tracked modifications
 $statusOutput = git status --porcelain 2>$null
@@ -69,7 +69,7 @@ if ($unexpectedTrackedChanges.Count -gt 0) {
     Write-Error "Please resolve or revert tracked changes before submitting RC build."
     exit 1
 }
-Write-Host "[✓] Git Working Tree Tracked Files Clean" -ForegroundColor Green
+Write-Host "[OK] Git Working Tree Tracked Files Clean" -ForegroundColor Green
 
 # Check 6 & 7: Inspect cloudbuild.rc.yaml content for target & production protection
 $configContent = Get-Content $configPath -Raw
@@ -78,18 +78,18 @@ if ($configContent -notmatch 'niazi-server-ts-product-sales-rc') {
     Write-Error "Preflight Check Failed: RC target service 'niazi-server-ts-product-sales-rc' not found in cloudbuild.rc.yaml."
     exit 1
 }
-Write-Host "[✓] Expected RC Target Verified: niazi-server-ts-product-sales-rc" -ForegroundColor Green
+Write-Host "[OK] Expected RC Target Verified: niazi-server-ts-product-sales-rc" -ForegroundColor Green
 
 if ($configContent -match 'niazi-server\b(?!-ts-product-sales-rc)' -or $configContent -match '--image=.*niazi-server:latest\b') {
     Write-Error "Preflight Check Failed: Production deployment target 'niazi-server' or ':latest' image deployment detected in cloudbuild.rc.yaml!"
     exit 1
 }
-Write-Host "[✓] Production Protection Verified: Does not target production service 'niazi-server'" -ForegroundColor Green
+Write-Host "[OK] Production Protection Verified: Does not target production service 'niazi-server'" -ForegroundColor Green
 
 # Check 8: Dedicated service account specification verification
 $serviceAccount = "niazi-cloudbuild-deployer@niazi-mobile-mart-508317.iam.gserviceaccount.com"
 $fullServiceAccount = "projects/niazi-mobile-mart-508317/serviceAccounts/$serviceAccount"
-Write-Host "[✓] Dedicated Deployer SA Verified: $serviceAccount" -ForegroundColor Green
+Write-Host "[OK] Dedicated Deployer SA Verified: $serviceAccount" -ForegroundColor Green
 
 Write-Host "=== All Preflight Checks Passed ===" -ForegroundColor Green
 Write-Host "Submitting Cloud Build with Service Account: $serviceAccount..." -ForegroundColor Cyan
