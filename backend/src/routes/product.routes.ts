@@ -44,8 +44,7 @@ function isDbConnectionError(err: unknown): boolean {
     code === 'ECONNREFUSED' ||
     msg.includes('ECONNRESET') ||
     msg.includes('ECONNREFUSED') ||
-    msg.includes('Connection terminated') ||
-    msg.includes('read')
+    msg.includes('Connection terminated')
   );
 }
 

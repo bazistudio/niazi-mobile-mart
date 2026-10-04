@@ -159,9 +159,9 @@ const NOW_ISO = () => new Date().toISOString();
 export async function resolveProductSku(
   pool: Pool,
   categoryId: string,
-  inputSku: string
+  inputSku?: string | null
 ): Promise<string> {
-  const trimmed = inputSku.trim().toUpperCase();
+  const trimmed = (inputSku ?? '').trim().toUpperCase();
 
   if (trimmed.length > 0 && !trimmed.startsWith('SKU-') && !trimmed.startsWith('AUTO-')) {
     return trimmed;

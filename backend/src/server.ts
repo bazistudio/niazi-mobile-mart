@@ -22,13 +22,19 @@ import https from 'https';
 import { getPool } from './db';
 import { createProductRouter } from './routes/product.routes';
 import { createSaleRouter } from './routes/sale.routes';
+import { createCustomerRouter, createCustomerV1Router } from './routes/customer.routes';
 import { listBrands, DEFAULT_BRANDS } from './repositories/product.repo';
 
 function loadEnv(): void {
   const envPaths = [
     path.join(process.cwd(), '.env'),
+    path.join(process.cwd(), 'env'),
+    path.join(process.cwd(), 'backend', 'env'),
     path.join(process.cwd(), '..', '.env'),
+    path.join(process.cwd(), '..', 'env'),
+    path.join(process.cwd(), '..', 'backend', 'env'),
     path.join(__dirname, '..', '.env'),
+    path.join(__dirname, '..', 'env'),
     path.join(__dirname, '..', '..', '.env'),
   ];
   for (const p of envPaths) {
@@ -114,6 +120,12 @@ async function main(): Promise<void> {
   const saleRouter = createSaleRouter(pool);
   app.use('/api/sales', saleRouter);
   app.use('/api/v1/sales', saleRouter);
+
+  const customerRouter = createCustomerRouter(pool);
+  app.use('/api/customers', customerRouter);
+
+  const customerV1Router = createCustomerV1Router(pool);
+  app.use('/api/v1/customers', customerV1Router);
 
   app.get(['/api/brands', '/api/v1/brands'], async (_req: Request, res: Response) => {
     try {
