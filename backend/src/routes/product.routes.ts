@@ -52,8 +52,19 @@ function isDbConnectionError(err: unknown): boolean {
 function sendError(req: Request, res: Response, err: unknown): void {
   console.error('[product.routes] Error handled by sendError:', err);
   if (isDbConnectionError(err)) {
-    console.warn('[product.routes] Local DB connection unavailable; proxying request to Central Server Cloud Run...');
-    proxyToCentralServer(req, res);
+    // Only proxy read-only requests. Write requests (POST/PUT/DELETE/PATCH) must NOT be
+    // automatically retried through Rust: if the TS transaction already committed server-side
+    // before the connection dropped, a proxy retry would create a duplicate record.
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      console.warn('[product.routes] DB connection unavailable on read; proxying to Central Server Cloud Run...');
+      proxyToCentralServer(req, res);
+      return;
+    }
+    console.error('[product.routes] DB connection error on write route — returning 502, NOT proxying to prevent duplicate data');
+    res.status(502).json({
+      error: 'Database connection error',
+      message: 'Write outcome is unknown. The operation was not automatically retried to prevent duplicate data.',
+    });
     return;
   }
   if (err instanceof RepoError) {
