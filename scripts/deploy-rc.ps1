@@ -80,7 +80,7 @@ if ($configContent -notmatch 'niazi-server-ts-product-sales-rc') {
 }
 Write-Host "[OK] Expected RC Target Verified: niazi-server-ts-product-sales-rc" -ForegroundColor Green
 
-if ($configContent -match 'niazi-server\b(?!-ts-product-sales-rc)' -or $configContent -match '--image=.*niazi-server:latest\b') {
+if ($configContent -match "-\s*['""]niazi-server['""]\s*$" -or $configContent -match 'deploy\s+niazi-server\b(?!-ts-product-sales-rc)' -or $configContent -match '--image=\S+:latest\b') {
     Write-Error "Preflight Check Failed: Production deployment target 'niazi-server' or ':latest' image deployment detected in cloudbuild.rc.yaml!"
     exit 1
 }
