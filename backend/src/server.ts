@@ -17,6 +17,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import fs from 'fs';
 import path from 'path';
+import http from 'http';
 import https from 'https';
 import { getPool } from './db';
 import { createProductRouter } from './routes/product.routes';
@@ -139,13 +140,18 @@ async function main(): Promise<void> {
   console.log(`[server] Niazi Product Backend listening on port ${port}`);
 }
 
+// Default preserves pre-existing behaviour. The isolated RC sets RUST_UPSTREAM_URL=http://127.0.0.1:8081.
+const DEFAULT_RUST_UPSTREAM_URL = 'https://niazi-server-860232188829.asia-south1.run.app';
+
 export function proxyToCentralServer(req: Request, res: Response): void {
-  const targetUrl = new URL(req.originalUrl || req.url, 'https://niazi-server-860232188829.asia-south1.run.app');
+  const upstreamBase = (process.env['RUST_UPSTREAM_URL'] || '').trim() || DEFAULT_RUST_UPSTREAM_URL;
+  const targetUrl = new URL(req.originalUrl || req.url, upstreamBase);
+  const transport = targetUrl.protocol === 'http:' ? http : https;
   
   const headers = { ...req.headers };
   delete headers.host;
 
-  const proxyReq = https.request(targetUrl, {
+  const proxyReq = transport.request(targetUrl, {
     method: req.method,
     headers: headers,
   }, (proxyRes) => {

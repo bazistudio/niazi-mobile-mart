@@ -34,6 +34,7 @@ Thumbs.db
 # Temp
 temp/
 tmp/
+cloud-sql-proxy.exe
 
 # Documentation & Local Archives
 docs/

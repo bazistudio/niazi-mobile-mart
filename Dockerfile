@@ -102,6 +102,10 @@ COPY --from=ts-builder /app/backend/node_modules ./backend/node_modules
 # Copy compiled frontend production static assets from frontend-builder stage
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
+# Launcher: Rust sidecar on 127.0.0.1-internal port 8081 + Node on $PORT
+COPY scripts/docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoint.sh
+
 # Set file permissions for appuser
 RUN chown -R appuser:appuser /app
 
@@ -117,5 +121,6 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:${PORT}/api/health || exit 1
 
-# TypeScript Express server handles /api/products, proxies all other routes to Rust
-ENTRYPOINT ["node", "/app/backend/dist/server.js"]
+# Launcher runs Rust (internal :8081) and the TypeScript Express server ($PORT).
+# Express handles Product + Sales, proxies all other routes to the in-container Rust server.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

@@ -1,0 +1,63 @@
+# RC-ONLY Cloud Build config for the TypeScript Product+Sales Release Candidate.
+# Deploys to niazi-server-ts-product-sales-rc ONLY.
+# Does NOT touch the production niazi-server service.
+# Does NOT push or overwrite the :latest tag.
+
+steps:
+  # Step 0: Pull latest for layer caching (best-effort)
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Pull Cache'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - 'docker pull asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:latest || true'
+
+  # Step 1: Build RC image with unique immutable tag
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Build RC Image'
+    args:
+      - 'build'
+      - '--cache-from'
+      - 'asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:latest'
+      - '-t'
+      - 'asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:rc-product-sales-797a509'
+      - '.'
+
+  # Step 2: Push RC image ONLY (not latest, not stable, not production)
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Push RC Image'
+    args:
+      - 'push'
+      - 'asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:rc-product-sales-797a509'
+
+  # Step 3: Deploy to ISOLATED RC service (NOT the production niazi-server)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'Deploy RC Service'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'niazi-server-ts-product-sales-rc'
+      - '--image=asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:rc-product-sales-797a509'
+      - '--region=asia-south1'
+      - '--platform=managed'
+      - '--port=8080'
+      - '--cpu=1'
+      - '--memory=1Gi'
+      - '--min-instances=0'
+      - '--max-instances=3'
+      - '--vpc-connector=niazi-vpc-conn'
+      - '--vpc-egress=private-ranges-only'
+      - '--allow-unauthenticated'
+      - '--set-env-vars=RUST_UPSTREAM_URL=http://127.0.0.1:8081'
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest'
+      - '--set-secrets=JWT_PRIVATE_KEY=JWT_PRIVATE_KEY:latest'
+      - '--set-secrets=JWT_PUBLIC_KEY=JWT_PUBLIC_KEY:latest'
+
+images:
+  - 'asia-south1-docker.pkg.dev/$PROJECT_ID/niazi-repo/niazi-server:rc-product-sales-797a509'
+
+timeout: '7200s'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

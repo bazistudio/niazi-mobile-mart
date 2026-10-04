@@ -13,7 +13,10 @@ let _pool: Pool | null = null;
 export function getPool(): Pool {
   if (!_pool) {
     const connectionString = requireEnv('DATABASE_URL');
-    _pool = new Pool({ connectionString });
+    const ssl = connectionString.includes('sslmode=disable')
+      ? false
+      : { rejectUnauthorized: false };
+    _pool = new Pool({ connectionString, ssl });
 
     _pool.on('error', (err) => {
       console.error('[db] Unexpected pool error:', err.message);
