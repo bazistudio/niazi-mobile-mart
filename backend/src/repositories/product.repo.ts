@@ -96,7 +96,7 @@ export class RepoError extends Error {
 // --- Utilities ---
 
 const SELECT_COLS = `
-  id, name, normalized_name, sku, barcode, category_id,
+  id, name, normalized_name, sku, barcode, type_id AS category_id,
   brand_id, company_id, quality_id, color_id, unit_id,
   purchase_price, average_cost, sale_price, low_stock_threshold,
   is_active, description, created_at, updated_at
@@ -179,18 +179,11 @@ export async function resolveProductSku(
     if (ptRes.rows.length > 0) {
       catName = ptRes.rows[0]!.name;
       catCode = ptRes.rows[0]!.code ?? '';
-    } else {
-      const catRes = await pool.query<{ name: string; code: string }>(
-        'SELECT name, code FROM categories WHERE id = $1',
-        [categoryId]
-      );
-      if (catRes.rows.length > 0) {
-        catName = catRes.rows[0]!.name;
-        catCode = catRes.rows[0]!.code ?? '';
-      }
     }
+    // Note: 'categories' table was renamed to 'product_types' in migration 012.
+    // No fallback to 'categories' -- that table no longer exists in the live DB.
   } catch {
-    // If category table lookup fails, default prefix resolution proceeds safely
+    // If product_types lookup fails, default prefix resolution proceeds safely
   }
 
   const catUpper = `${catName} ${catCode}`.toUpperCase();
@@ -248,7 +241,7 @@ export async function createProduct(
 
     const res = await client.query(
       `INSERT INTO products (
-         id, name, normalized_name, sku, barcode, category_id, brand_id,
+         id, name, normalized_name, sku, barcode, type_id, brand_id,
          company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price,
          low_stock_threshold, is_active, description, created_at, updated_at
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, 1, $16,$17,$18)
@@ -319,7 +312,7 @@ export async function createProductWithInitialStock(
 
     const insertRes = await client.query(
       `INSERT INTO products (
-         id, name, normalized_name, sku, barcode, category_id, brand_id,
+         id, name, normalized_name, sku, barcode, type_id, brand_id,
          company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price,
          low_stock_threshold, is_active, description, created_at, updated_at
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, 1, $16,$17,$18)
@@ -402,7 +395,7 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
   }
 
   if (filter.category_id != null) {
-    conditions.push(`category_id = $${idx}`);
+    conditions.push(`type_id = $${idx}`);
     params.push(filter.category_id);
     idx++;
   }
@@ -559,7 +552,7 @@ export async function updateProduct(
          normalized_name = $2,
          sku = $3,
          barcode = $4,
-         category_id = $5,
+         type_id = $5,
          brand_id = $6,
          company_id = $7,
          quality_id = $8,
@@ -681,4 +674,33 @@ function mapPgError(err: unknown, sku: string): RepoError {
 
   const message = pgErr.message ?? 'Unknown database error';
   return new RepoError(`Internal database error: ${message}`, 500);
+}
+
+export const DEFAULT_BRANDS = [
+  { id: 'brd_samsung', name: 'Samsung' },
+  { id: 'brd_apple', name: 'Apple (iPhone)' },
+  { id: 'brd_infinix', name: 'Infinix' },
+  { id: 'brd_tecno', name: 'Tecno' },
+  { id: 'brd_vivo', name: 'Vivo' },
+  { id: 'brd_oppo', name: 'Oppo' },
+  { id: 'brd_realme', name: 'Realme' },
+  { id: 'brd_xiaomi', name: 'Xiaomi / Redmi' },
+  { id: 'brd_nokia', name: 'Nokia' },
+  { id: 'brd_itel', name: 'Itel' },
+  { id: 'brd_ronin', name: 'Ronin' },
+  { id: 'brd_audionic', name: 'Audionic' },
+  { id: 'brd_faster', name: 'Faster' },
+  { id: 'brd_anker', name: 'Anker' },
+];
+
+export async function listBrands(pool: Pool): Promise<Array<{ id: string; name: string }>> {
+  try {
+    const res = await pool.query('SELECT id, name FROM brands ORDER BY name ASC');
+    if (res.rows && res.rows.length > 0) {
+      return res.rows.map((r) => ({ id: String(r.id), name: String(r.name) }));
+    }
+  } catch {
+    // Return fallback list on database query error
+  }
+  return DEFAULT_BRANDS;
 }

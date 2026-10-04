@@ -1,4 +1,4 @@
-# Multi-stage Dockerfile for Niazi Mobile Mart Cloud Run HTTP Server (niazi-server)
+# Multi-stage Dockerfile for Niazi Mobile Mart Cloud Run HTTP Server
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 1: Frontend SPA Builder
 # ─────────────────────────────────────────────────────────────────────────────
@@ -15,7 +15,25 @@ COPY frontend/ ./
 RUN npm run build
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 2: Cargo Rust Backend Builder
+# STAGE 2: TypeScript Product Backend Builder
+# ─────────────────────────────────────────────────────────────────────────────
+FROM node:20-slim AS ts-builder
+
+WORKDIR /app/backend
+
+# Copy package manifests first to enable layer caching
+COPY backend/package.json backend/package-lock.json ./
+RUN npm ci
+
+# Copy TypeScript source and config
+COPY backend/src ./src
+COPY backend/tsconfig.json ./
+
+# Compile TypeScript to JavaScript
+RUN npm run build
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 3: Cargo Rust Backend Builder
 # ─────────────────────────────────────────────────────────────────────────────
 FROM rust:1.88-slim AS builder
 
@@ -52,11 +70,12 @@ COPY src-tauri/src ./src
 RUN find src -type f -exec touch {} + && cargo build --release --bin niazi-server
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 3: Minimal Production Runtime Container
+# STAGE 4: Minimal Production Runtime Container
 # ─────────────────────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
 
-# Install CA certificates, OpenSSL runtime, and GTK/GLib/WebKit shared libraries required by niazi-server binary
+# Install Node.js 20, CA certificates, OpenSSL runtime, and GTK/GLib/WebKit
+# shared libraries required by niazi-server binary
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3 \
@@ -64,6 +83,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgtk-3-0 \
     libglib2.0-0 \
     libwebkit2gtk-4.1-0 \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Create unprivileged non-root app user (UID 10001)
@@ -71,8 +92,12 @@ RUN useradd -m -u 10001 -s /bin/bash appuser
 
 WORKDIR /app
 
-# Copy compiled binary from Rust builder stage
+# Copy compiled Rust binary from Rust builder stage
 COPY --from=builder /usr/src/niazi-mobile-mart/src-tauri/target/release/niazi-server /app/niazi-server
+
+# Copy compiled TypeScript backend (dist + node_modules) from ts-builder stage
+COPY --from=ts-builder /app/backend/dist ./backend/dist
+COPY --from=ts-builder /app/backend/node_modules ./backend/node_modules
 
 # Copy compiled frontend production static assets from frontend-builder stage
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
@@ -92,4 +117,5 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:${PORT}/api/health || exit 1
 
-ENTRYPOINT ["/app/niazi-server"]
+# TypeScript Express server handles /api/products, proxies all other routes to Rust
+ENTRYPOINT ["node", "/app/backend/dist/server.js"]
