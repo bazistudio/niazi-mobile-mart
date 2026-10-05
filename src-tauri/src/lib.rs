@@ -281,22 +281,7 @@ pub fn run() {
             commands::catalog::color_get,
             commands::catalog::color_list,
             commands::catalog::color_update,
-            // Product Commands
-            commands::product::product_create,
-            commands::product::product_update,
-            commands::product::product_get,
-            commands::product::product_get_by_sku,
-            commands::product::product_get_by_barcode,
-            commands::product::product_list,
-            commands::product::product_deactivate,
-            // Typed Storage Commands (Products Pilot Boundary)
-            commands::storage_product::storage_product_create,
-            commands::storage_product::storage_product_update,
-            commands::storage_product::storage_product_get,
-            commands::storage_product::storage_product_get_by_sku,
-            commands::storage_product::storage_product_get_by_barcode,
-            commands::storage_product::storage_product_list,
-            commands::storage_product::storage_product_deactivate,
+            // Product Domain Fully Transferred to TypeScript Backend (v1.3.7)
             // Typed Storage Commands (Inventory Domain Boundary)
             commands::storage_inventory::storage_inventory_increase,
             commands::storage_inventory::storage_inventory_decrease,

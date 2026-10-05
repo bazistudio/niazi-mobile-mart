@@ -969,7 +969,7 @@ export const tauriClient = {
     throw new Error('Tauri environment required');
   },
 
-  // â”€â”€ Product Domain (Phase 7 Domain 1 â€” Typed Storage Bridge) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Product Domain (Phase 7 Domain 1 — TypeScript Backend Transfer) ───────────────
   async productCreate(dto: CreateProductDto): Promise<Product> {
     return await httpFetch<Product>('/api/products', {
       method: 'POST',
@@ -978,10 +978,6 @@ export const tauriClient = {
   },
 
   async productUpdate(id: string, dto: UpdateProductDto): Promise<Product> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('storage_product_update', { id, dto });
-    }
     try {
       return await httpFetch<Product>(`/api/products/${encodeURIComponent(id)}`, {
         method: 'PUT',
@@ -1033,21 +1029,22 @@ export const tauriClient = {
   },
 
   async productGet(id: string): Promise<Product> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('storage_product_get', { id });
+    try {
+      return await httpFetch<Product>(`/api/products/${encodeURIComponent(id)}`);
+    } catch {
+      const products = getStoredWebProducts();
+      const found = products.find((p) => p.id === id);
+      if (!found) throw new Error(`Product not found: ${id}`);
+      return found;
     }
-    const products = getStoredWebProducts();
-    const found = products.find((p) => p.id === id);
-    if (!found) throw new Error(`Product not found: ${id}`);
-    return found;
   },
 
   async productGetBySku(sku: string): Promise<Product> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('storage_product_get_by_sku', { sku });
-    }
+    try {
+      const products = await httpFetch<Product[]>(`/api/products?search=${encodeURIComponent(sku)}`);
+      const found = products.find((p) => p.sku.toLowerCase() === sku.toLowerCase());
+      if (found) return found;
+    } catch {}
     const products = getStoredWebProducts();
     const found = products.find((p) => p.sku.toLowerCase() === sku.toLowerCase());
     if (!found) throw new Error(`Product not found with SKU: ${sku}`);
@@ -1055,10 +1052,11 @@ export const tauriClient = {
   },
 
   async productGetByBarcode(barcode: string): Promise<Product> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('storage_product_get_by_barcode', { barcode });
-    }
+    try {
+      const products = await httpFetch<Product[]>(`/api/products?search=${encodeURIComponent(barcode)}`);
+      const found = products.find((p) => p.barcode && p.barcode.toLowerCase() === barcode.toLowerCase());
+      if (found) return found;
+    } catch {}
     const products = getStoredWebProducts();
     const found = products.find((p) => p.barcode && p.barcode.toLowerCase() === barcode.toLowerCase());
     if (!found) throw new Error(`Product not found with Barcode: ${barcode}`);
@@ -1085,11 +1083,6 @@ export const tauriClient = {
   },
 
   async productDeactivate(id: string): Promise<void> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('storage_product_deactivate', { id });
-      return;
-    }
     try {
       await httpFetch<void>(`/api/products/${encodeURIComponent(id)}`, {
         method: 'DELETE',

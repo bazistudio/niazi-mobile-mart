@@ -37,7 +37,8 @@ tmp/
 cloud-sql-proxy.exe
 
 # Documentation & Local Archives
-docs/
+docs/*
+!docs/old-rust-backend/
 
 # Keys
 ~
