@@ -96,8 +96,8 @@ export class RepoError extends Error {
 // --- Utilities ---
 
 export interface SchemaCaps {
-  catCol: 'type_id' | 'category_id';
-  catTable: 'product_types' | 'categories';
+  catCol: 'category_id';
+  catTable: 'categories';
   isActiveBool: boolean;
 }
 
@@ -107,35 +107,24 @@ export async function getSchemaCaps(pool: Pool): Promise<SchemaCaps> {
   if (cachedCaps) return cachedCaps;
   try {
     const colRes = await pool.query<{ column_name: string; data_type: string }>(
-      `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'products' AND column_name IN ('type_id', 'category_id', 'is_active')`
+      `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'products' AND column_name = 'is_active'`
     );
-    let catCol: 'type_id' | 'category_id' = 'type_id';
     let isActiveBool = false;
     for (const r of colRes.rows) {
-      if (r.column_name === 'type_id') catCol = 'type_id';
       if (r.column_name === 'is_active' && r.data_type.toLowerCase().includes('bool')) {
         isActiveBool = true;
       }
     }
-    const tblRes = await pool.query<{ table_name: string }>(
-      `SELECT table_name FROM information_schema.tables WHERE table_name IN ('product_types', 'categories')`
-    );
-    let catTable: 'product_types' | 'categories' = 'product_types';
-    if (tblRes.rows.length > 0) {
-      const names = tblRes.rows.map((r) => r.table_name);
-      if (names.includes('product_types')) catTable = 'product_types';
-      else if (names.includes('categories')) catTable = 'categories';
-    }
-    cachedCaps = { catCol, catTable, isActiveBool };
+    cachedCaps = { catCol: 'category_id', catTable: 'categories', isActiveBool };
   } catch {
-    cachedCaps = { catCol: 'type_id', catTable: 'product_types', isActiveBool: false };
+    cachedCaps = { catCol: 'category_id', catTable: 'categories', isActiveBool: false };
   }
   return cachedCaps;
 }
 
 /**
  * Maps a raw pg row to Product.
- * Supports both integer (0/1) and boolean is_active, and type_id/category_id column names.
+ * Supports both integer (0/1) and boolean is_active.
  */
 function mapProductRow(row: Record<string, unknown>): Product {
   const isActiveRaw = row['is_active'];
@@ -150,7 +139,7 @@ function mapProductRow(row: Record<string, unknown>): Product {
     normalized_name: row['normalized_name'] as string,
     sku: row['sku'] as string,
     barcode: (row['barcode'] as string | null) ?? null,
-    category_id: ((row['category_id'] ?? row['type_id']) as string) ?? '',
+    category_id: (row['category_id'] as string) ?? '',
     brand_id: (row['brand_id'] as string | null) ?? null,
     company_id: (row['company_id'] as string | null) ?? null,
     quality_id: (row['quality_id'] as string | null) ?? null,
@@ -213,10 +202,9 @@ export async function resolveProductSku(
   let catName = '';
   let catCode = '';
 
-  const caps = await getSchemaCaps(pool);
   try {
     const ptRes = await pool.query<{ name: string; code: string }>(
-      `SELECT name, code FROM ${caps.catTable} WHERE id = $1`,
+      `SELECT name, code FROM categories WHERE id = $1`,
       [categoryId]
     );
 
@@ -243,18 +231,22 @@ export async function resolveProductSku(
     prefix = 'P';
   }
 
-  const counterRes = await pool.query<{ next_val: string; next_value: string }>(
-    `INSERT INTO product_type_counters (prefix, next_value)
-     VALUES ($1, 2)
-     ON CONFLICT (prefix)
-     DO UPDATE SET next_value = product_type_counters.next_value + 1
-     RETURNING (next_value - 1) AS next_val`,
-    [prefix]
-  );
+  try {
+    const counterRes = await pool.query<{ next_val: string; next_value: string }>(
+      `INSERT INTO product_type_counters (prefix, next_value)
+       VALUES ($1, 2)
+       ON CONFLICT (prefix)
+       DO UPDATE SET next_value = product_type_counters.next_value + 1
+       RETURNING (next_value - 1) AS next_val`,
+      [prefix]
+    );
 
-  const row = counterRes.rows[0]!;
-  const seq = Number(row['next_val'] ?? row['next_value'] ?? 1);
-  return `${prefix}${String(seq).padStart(6, '0')}`;
+    const row = counterRes.rows[0]!;
+    const seq = Number(row['next_val'] ?? row['next_value'] ?? 1);
+    return `${prefix}${String(seq).padStart(6, '0')}`;
+  } catch {
+    return `${prefix}${String(Date.now() % 1000000).padStart(6, '0')}`;
+  }
 }
 
 // --- Create Product ---
@@ -271,7 +263,7 @@ export async function createProduct(
   const caps = await getSchemaCaps(pool);
   const resolvedSku = await resolveProductSku(pool, dto.category_id, dto.sku);
   const activeVal = caps.isActiveBool ? true : 1;
-  const selectCols = `id, name, normalized_name, sku, barcode, ${caps.catCol} AS category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+  const selectCols = `id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
 
   const client = await pool.connect();
   try {
@@ -286,7 +278,7 @@ export async function createProduct(
 
     const res = await client.query(
       `INSERT INTO products (
-         id, name, normalized_name, sku, barcode, ${caps.catCol}, brand_id,
+         id, name, normalized_name, sku, barcode, category_id, brand_id,
          company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price,
          low_stock_threshold, is_active, description, created_at, updated_at
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
@@ -351,7 +343,7 @@ export async function createProductWithInitialStock(
   const caps = await getSchemaCaps(pool);
   const resolvedSku = await resolveProductSku(pool, dto.category_id, dto.sku);
   const activeVal = caps.isActiveBool ? true : 1;
-  const selectCols = `id, name, normalized_name, sku, barcode, ${caps.catCol} AS category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+  const selectCols = `id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
 
   const client = await pool.connect();
   try {
@@ -366,7 +358,7 @@ export async function createProductWithInitialStock(
 
     const insertRes = await client.query(
       `INSERT INTO products (
-         id, name, normalized_name, sku, barcode, ${caps.catCol}, brand_id,
+         id, name, normalized_name, sku, barcode, category_id, brand_id,
          company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price,
          low_stock_threshold, is_active, description, created_at, updated_at
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
@@ -461,7 +453,7 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
   }
 
   if (filter.category_id != null) {
-    conditions.push(`${caps.catCol} = $${idx}`);
+    conditions.push(`category_id = $${idx}`);
     params.push(filter.category_id);
     idx++;
   }
@@ -500,7 +492,7 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
     conditions.push(`(is_active::text = '1' OR is_active::text = 'true')`);
   }
 
-  const selectCols = `id, name, normalized_name, sku, barcode, ${caps.catCol} AS category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+  const selectCols = `id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
 
   const sql = `
     SELECT ${selectCols}
@@ -517,7 +509,7 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
 
 export async function getProductById(pool: Pool, id: string): Promise<Product | null> {
   const caps = await getSchemaCaps(pool);
-  const selectCols = `id, name, normalized_name, sku, barcode, ${caps.catCol} AS category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+  const selectCols = `id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
   const res = await pool.query(
     `SELECT ${selectCols} FROM products WHERE id = $1`,
     [id]
@@ -548,7 +540,7 @@ export async function updateProduct(
   dto: UpdateProductDto
 ): Promise<Product> {
   const caps = await getSchemaCaps(pool);
-  const selectCols = `id, name, normalized_name, sku, barcode, ${caps.catCol} AS category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+  const selectCols = `id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
 
   const client = await pool.connect();
   try {
@@ -628,7 +620,7 @@ export async function updateProduct(
          normalized_name = $2,
          sku = $3,
          barcode = $4,
-         ${caps.catCol} = $5,
+         category_id = $5,
          brand_id = $6,
          company_id = $7,
          quality_id = $8,
