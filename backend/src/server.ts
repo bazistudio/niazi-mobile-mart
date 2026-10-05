@@ -160,8 +160,16 @@ export function proxyToCentralServer(req: Request, res: Response): void {
   const targetUrl = new URL(req.originalUrl || req.url, upstreamBase);
   const transport = targetUrl.protocol === 'http:' ? http : https;
   
-  const headers = { ...req.headers };
+  const headers: Record<string, any> = { ...req.headers };
   delete headers.host;
+
+  let bodyData: Buffer | null = null;
+  if (['POST', 'PUT', 'PATCH'].includes(req.method ?? '')) {
+    if (req.body && Object.keys(req.body).length > 0) {
+      bodyData = Buffer.from(JSON.stringify(req.body));
+      headers['content-length'] = String(bodyData.length);
+    }
+  }
 
   const proxyReq = transport.request(targetUrl, {
     method: req.method,
@@ -178,12 +186,8 @@ export function proxyToCentralServer(req: Request, res: Response): void {
     res.status(502).json({ error: 'Central Server Proxy Error', message: err.message });
   });
 
-  if (['POST', 'PUT', 'PATCH'].includes(req.method ?? '')) {
-    if (req.body && Object.keys(req.body).length > 0) {
-      const bodyData = JSON.stringify(req.body);
-      proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
-      proxyReq.write(bodyData);
-    }
+  if (bodyData) {
+    proxyReq.write(bodyData);
   }
 
   proxyReq.end();

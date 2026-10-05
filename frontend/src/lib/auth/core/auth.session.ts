@@ -13,7 +13,7 @@ export function setSession(session: AuthSession & { token?: string }) {
   if (typeof window === "undefined") return;
 
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  if (session.token) {
+  if (session.token && session.token !== "native-tauri-session") {
     localStorage.setItem(TOKEN_KEY, session.token);
   }
 }
@@ -41,10 +41,10 @@ export function getAuthToken(): string | null {
   if (typeof window === "undefined") return null;
 
   const directToken = localStorage.getItem(TOKEN_KEY);
-  if (directToken) return directToken;
+  if (directToken && directToken !== "native-tauri-session") return directToken;
 
   const session = getSession();
-  if (session && (session as any).token) {
+  if (session && (session as any).token && (session as any).token !== "native-tauri-session") {
     return (session as any).token;
   }
 

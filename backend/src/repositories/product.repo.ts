@@ -146,6 +146,20 @@ export function normalizeProductName(raw: string): string {
   return raw.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+const UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/**
+ * Sanitizes optional UUID foreign key parameters.
+ * Converts empty strings, whitespace, null, undefined, or invalid UUIDs to null.
+ * Preserves valid UUID strings unchanged.
+ */
+export function sanitizeOptionalUuid(val?: string | null): string | null {
+  if (!val) return null;
+  const trimmed = val.trim();
+  if (!trimmed) return null;
+  return UUID_REGEX.test(trimmed) ? trimmed : null;
+}
+
 const NOW_ISO = () => new Date().toISOString();
 
 // --- SKU Resolution ---
@@ -253,11 +267,11 @@ export async function createProduct(
         resolvedSku,
         barcodeVal,
         dto.category_id,
-        dto.brand_id ?? null,
-        dto.company_id ?? null,
-        dto.quality_id ?? null,
-        dto.color_id ?? null,
-        dto.unit_id ?? null,
+        sanitizeOptionalUuid(dto.brand_id),
+        sanitizeOptionalUuid(dto.company_id),
+        sanitizeOptionalUuid(dto.quality_id),
+        sanitizeOptionalUuid(dto.color_id),
+        sanitizeOptionalUuid(dto.unit_id),
         dto.purchase_price,
         avgCost,
         dto.sale_price,
@@ -334,11 +348,11 @@ export async function createProductWithInitialStock(
         resolvedSku,
         barcodeVal,
         dto.category_id,
-        dto.brand_id ?? null,
-        dto.company_id ?? null,
-        dto.quality_id ?? null,
-        dto.color_id ?? null,
-        dto.unit_id ?? null,
+        sanitizeOptionalUuid(dto.brand_id),
+        sanitizeOptionalUuid(dto.company_id),
+        sanitizeOptionalUuid(dto.quality_id),
+        sanitizeOptionalUuid(dto.color_id),
+        sanitizeOptionalUuid(dto.unit_id),
         dto.purchase_price,
         avgCost,
         dto.sale_price,
@@ -527,15 +541,15 @@ export async function updateProduct(
 
     const newCategoryId = dto.category_id ?? current.category_id;
     const newBrandId =
-      dto.brand_id !== undefined ? dto.brand_id ?? null : current.brand_id;
+      dto.brand_id !== undefined ? sanitizeOptionalUuid(dto.brand_id) : current.brand_id;
     const newCompanyId =
-      dto.company_id !== undefined ? dto.company_id ?? null : current.company_id;
+      dto.company_id !== undefined ? sanitizeOptionalUuid(dto.company_id) : current.company_id;
     const newQualityId =
-      dto.quality_id !== undefined ? dto.quality_id ?? null : current.quality_id;
+      dto.quality_id !== undefined ? sanitizeOptionalUuid(dto.quality_id) : current.quality_id;
     const newColorId =
-      dto.color_id !== undefined ? dto.color_id ?? null : current.color_id;
+      dto.color_id !== undefined ? sanitizeOptionalUuid(dto.color_id) : current.color_id;
     const newUnitId =
-      dto.unit_id !== undefined ? dto.unit_id ?? null : current.unit_id;
+      dto.unit_id !== undefined ? sanitizeOptionalUuid(dto.unit_id) : current.unit_id;
 
     const newPurchasePrice =
       dto.purchase_price !== undefined && dto.purchase_price !== null

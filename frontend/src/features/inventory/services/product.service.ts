@@ -121,11 +121,13 @@ export const productService = {
     }
     const categoryId = rawCatId;
 
-    const rawBrandId = productData.brandId || productData.brand_id;
-    const brandId = (rawBrandId && rawBrandId.length === 36) ? rawBrandId : null;
+    const parseUuidOrNull = (val: any) => (typeof val === 'string' && val.trim().length === 36) ? val.trim() : null;
 
-    const rawUnitId = productData.unitId || productData.unit_id;
-    const unitId = (rawUnitId && rawUnitId.length === 36) ? rawUnitId : null;
+    const brandId = parseUuidOrNull(productData.brandId || productData.brand_id);
+    const companyId = parseUuidOrNull(productData.companyId || productData.company_id);
+    const colorId = parseUuidOrNull(productData.colorId || productData.color_id);
+    const qualityId = parseUuidOrNull(productData.qualityId || productData.quality_id);
+    const unitId = parseUuidOrNull(productData.unitId || productData.unit_id);
 
     const created = await tauriClient.productCreate({
       name: productData.name,
@@ -133,9 +135,9 @@ export const productService = {
       barcode: productData.barcode || null,
       category_id: categoryId,
       brand_id: brandId,
-      company_id: productData.companyId || productData.company_id || null,
-      color_id: productData.colorId || productData.color_id || null,
-      quality_id: productData.qualityId || productData.quality_id || null,
+      company_id: companyId,
+      color_id: colorId,
+      quality_id: qualityId,
       unit_id: unitId,
       purchase_price: Math.round(Number(productData.purchasePrice || productData.purchase_price || 0)),
       sale_price: Math.round(Number(productData.price || productData.sale_price || 0)),
