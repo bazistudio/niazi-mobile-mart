@@ -95,25 +95,54 @@ export class RepoError extends Error {
 
 // --- Utilities ---
 
-const SELECT_COLS = `
-  id, name, normalized_name, sku, barcode, type_id AS category_id,
-  brand_id, company_id, quality_id, color_id, unit_id,
-  purchase_price, average_cost, sale_price, low_stock_threshold,
-  is_active, description, created_at, updated_at
-`;
+export interface SchemaCaps {
+  catCol: 'type_id' | 'category_id';
+  catTable: 'product_types' | 'categories';
+  isActiveBool: boolean;
+}
+
+let cachedCaps: SchemaCaps | null = null;
+
+export async function getSchemaCaps(pool: Pool): Promise<SchemaCaps> {
+  if (cachedCaps) return cachedCaps;
+  try {
+    const colRes = await pool.query<{ column_name: string; data_type: string }>(
+      `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'products' AND column_name IN ('type_id', 'category_id', 'is_active')`
+    );
+    let catCol: 'type_id' | 'category_id' = 'type_id';
+    let isActiveBool = false;
+    for (const r of colRes.rows) {
+      if (r.column_name === 'type_id') catCol = 'type_id';
+      if (r.column_name === 'is_active' && r.data_type.toLowerCase().includes('bool')) {
+        isActiveBool = true;
+      }
+    }
+    const tblRes = await pool.query<{ table_name: string }>(
+      `SELECT table_name FROM information_schema.tables WHERE table_name IN ('product_types', 'categories')`
+    );
+    let catTable: 'product_types' | 'categories' = 'product_types';
+    if (tblRes.rows.length > 0) {
+      const names = tblRes.rows.map((r) => r.table_name);
+      if (names.includes('product_types')) catTable = 'product_types';
+      else if (names.includes('categories')) catTable = 'categories';
+    }
+    cachedCaps = { catCol, catTable, isActiveBool };
+  } catch {
+    cachedCaps = { catCol: 'type_id', catTable: 'product_types', isActiveBool: false };
+  }
+  return cachedCaps;
+}
 
 /**
  * Maps a raw pg row to Product.
- * is_active stored as integer 0/1. Rust reads as i32 and compares == 1.
+ * Supports both integer (0/1) and boolean is_active, and type_id/category_id column names.
  */
 function mapProductRow(row: Record<string, unknown>): Product {
   const isActiveRaw = row['is_active'];
-  const isActiveInt =
-    typeof isActiveRaw === 'number'
+  const isActiveBool =
+    typeof isActiveRaw === 'boolean'
       ? isActiveRaw
-      : typeof isActiveRaw === 'string'
-        ? parseInt(isActiveRaw, 10)
-        : Number(isActiveRaw);
+      : isActiveRaw === 1 || isActiveRaw === '1' || isActiveRaw === 'true' || String(isActiveRaw) === 'true';
 
   return {
     id: row['id'] as string,
@@ -121,7 +150,7 @@ function mapProductRow(row: Record<string, unknown>): Product {
     normalized_name: row['normalized_name'] as string,
     sku: row['sku'] as string,
     barcode: (row['barcode'] as string | null) ?? null,
-    category_id: row['category_id'] as string,
+    category_id: ((row['category_id'] ?? row['type_id']) as string) ?? '',
     brand_id: (row['brand_id'] as string | null) ?? null,
     company_id: (row['company_id'] as string | null) ?? null,
     quality_id: (row['quality_id'] as string | null) ?? null,
@@ -131,7 +160,7 @@ function mapProductRow(row: Record<string, unknown>): Product {
     average_cost: Number(row['average_cost']),
     sale_price: Number(row['sale_price']),
     low_stock_threshold: Number(row['low_stock_threshold']),
-    is_active: isActiveInt === 1,
+    is_active: isActiveBool,
     description: (row['description'] as string | null) ?? null,
     initial_quantity: null,
     created_at: row['created_at'] as string,
@@ -184,9 +213,10 @@ export async function resolveProductSku(
   let catName = '';
   let catCode = '';
 
+  const caps = await getSchemaCaps(pool);
   try {
     const ptRes = await pool.query<{ name: string; code: string }>(
-      'SELECT name, code FROM product_types WHERE id = $1',
+      `SELECT name, code FROM ${caps.catTable} WHERE id = $1`,
       [categoryId]
     );
 
@@ -194,10 +224,8 @@ export async function resolveProductSku(
       catName = ptRes.rows[0]!.name;
       catCode = ptRes.rows[0]!.code ?? '';
     }
-    // Note: 'categories' table was renamed to 'product_types' in migration 012.
-    // No fallback to 'categories' -- that table no longer exists in the live DB.
   } catch {
-    // If product_types lookup fails, default prefix resolution proceeds safely
+    // If lookup fails, default prefix resolution proceeds safely
   }
 
   const catUpper = `${catName} ${catCode}`.toUpperCase();
@@ -240,7 +268,10 @@ export async function createProduct(
   id: string,
   dto: CreateProductDto
 ): Promise<Product> {
+  const caps = await getSchemaCaps(pool);
   const resolvedSku = await resolveProductSku(pool, dto.category_id, dto.sku);
+  const activeVal = caps.isActiveBool ? true : 1;
+  const selectCols = `id, name, normalized_name, sku, barcode, ${caps.catCol} AS category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
 
   const client = await pool.connect();
   try {
@@ -255,11 +286,11 @@ export async function createProduct(
 
     const res = await client.query(
       `INSERT INTO products (
-         id, name, normalized_name, sku, barcode, type_id, brand_id,
+         id, name, normalized_name, sku, barcode, ${caps.catCol}, brand_id,
          company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price,
          low_stock_threshold, is_active, description, created_at, updated_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, 1, $16,$17,$18)
-       RETURNING ${SELECT_COLS}`,
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+       RETURNING ${selectCols}`,
       [
         id,
         dto.name.trim(),
@@ -276,6 +307,7 @@ export async function createProduct(
         avgCost,
         dto.sale_price,
         threshold,
+        activeVal,
         dto.description ?? null,
         now,
         now,
@@ -287,11 +319,6 @@ export async function createProduct(
     client.release();
     return product;
   } catch (err: unknown) {
-    // Attempt ROLLBACK. If ROLLBACK itself fails, pass the rollback error to
-    // client.release() so the pg pool destroys and replaces this connection
-    // instead of recycling a connection that is still in an aborted-transaction
-    // state. Recycling a dirty connection is what causes subsequent callers to
-    // receive "current transaction is aborted" on an unrelated query.
     try {
       await client.query('ROLLBACK');
       client.release();
@@ -321,7 +348,10 @@ export async function createProductWithInitialStock(
   dto: CreateProductDto,
   userId: string
 ): Promise<Product> {
+  const caps = await getSchemaCaps(pool);
   const resolvedSku = await resolveProductSku(pool, dto.category_id, dto.sku);
+  const activeVal = caps.isActiveBool ? true : 1;
+  const selectCols = `id, name, normalized_name, sku, barcode, ${caps.catCol} AS category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
 
   const client = await pool.connect();
   try {
@@ -336,11 +366,11 @@ export async function createProductWithInitialStock(
 
     const insertRes = await client.query(
       `INSERT INTO products (
-         id, name, normalized_name, sku, barcode, type_id, brand_id,
+         id, name, normalized_name, sku, barcode, ${caps.catCol}, brand_id,
          company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price,
          low_stock_threshold, is_active, description, created_at, updated_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, 1, $16,$17,$18)
-       RETURNING ${SELECT_COLS}`,
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+       RETURNING ${selectCols}`,
       [
         id,
         dto.name.trim(),
@@ -357,6 +387,7 @@ export async function createProductWithInitialStock(
         avgCost,
         dto.sale_price,
         threshold,
+        activeVal,
         dto.description ?? null,
         now,
         now,
@@ -417,6 +448,7 @@ export async function createProductWithInitialStock(
  *            if Some(false) -> is_active = 0
  */
 export async function listProducts(pool: Pool, filter: ProductListFilter): Promise<Product[]> {
+  const caps = await getSchemaCaps(pool);
   const conditions: string[] = ['1=1'];
   const params: unknown[] = [];
   let idx = 1;
@@ -429,7 +461,7 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
   }
 
   if (filter.category_id != null) {
-    conditions.push(`type_id = $${idx}`);
+    conditions.push(`${caps.catCol} = $${idx}`);
     params.push(filter.category_id);
     idx++;
   }
@@ -459,15 +491,19 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
   }
 
   if (filter.is_active !== null && filter.is_active !== undefined) {
-    conditions.push(`is_active = $${idx}`);
-    params.push(filter.is_active ? 1 : 0);
-    idx++;
+    if (filter.is_active) {
+      conditions.push(`(is_active::text = '1' OR is_active::text = 'true')`);
+    } else {
+      conditions.push(`(is_active::text = '0' OR is_active::text = 'false')`);
+    }
   } else {
-    conditions.push('is_active = 1');
+    conditions.push(`(is_active::text = '1' OR is_active::text = 'true')`);
   }
 
+  const selectCols = `id, name, normalized_name, sku, barcode, ${caps.catCol} AS category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+
   const sql = `
-    SELECT ${SELECT_COLS}
+    SELECT ${selectCols}
     FROM products
     WHERE ${conditions.join(' AND ')}
     ORDER BY name ASC
@@ -480,8 +516,10 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
 // --- Get Product By ID ---
 
 export async function getProductById(pool: Pool, id: string): Promise<Product | null> {
+  const caps = await getSchemaCaps(pool);
+  const selectCols = `id, name, normalized_name, sku, barcode, ${caps.catCol} AS category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
   const res = await pool.query(
-    `SELECT ${SELECT_COLS} FROM products WHERE id = $1`,
+    `SELECT ${selectCols} FROM products WHERE id = $1`,
     [id]
   );
   if (res.rows.length === 0) {
@@ -509,12 +547,15 @@ export async function updateProduct(
   id: string,
   dto: UpdateProductDto
 ): Promise<Product> {
+  const caps = await getSchemaCaps(pool);
+  const selectCols = `id, name, normalized_name, sku, barcode, ${caps.catCol} AS category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     const currentRes = await client.query(
-      `SELECT ${SELECT_COLS} FROM products WHERE id = $1`,
+      `SELECT ${selectCols} FROM products WHERE id = $1`,
       [id]
     );
     if (currentRes.rows.length === 0) {
@@ -579,6 +620,7 @@ export async function updateProduct(
     }
 
     const now = NOW_ISO();
+    const activeVal = caps.isActiveBool ? newIsActive : (newIsActive ? 1 : 0);
 
     await client.query(
       `UPDATE products SET
@@ -586,7 +628,7 @@ export async function updateProduct(
          normalized_name = $2,
          sku = $3,
          barcode = $4,
-         type_id = $5,
+         ${caps.catCol} = $5,
          brand_id = $6,
          company_id = $7,
          quality_id = $8,
@@ -616,7 +658,7 @@ export async function updateProduct(
         newSalePrice,
         newThreshold,
         newDescription,
-        newIsActive ? 1 : 0,
+        activeVal,
         now,
         id,
       ]
@@ -644,7 +686,6 @@ export async function updateProduct(
       updated_at: now,
     };
     client.release();
-    // Return product with current.sku (pre-update) -- matches Rust return behavior
     return updated;
   } catch (err: unknown) {
     try {
@@ -661,15 +702,17 @@ export async function updateProduct(
 // --- Deactivate Product ---
 
 /**
- * Soft-deactivates a product by setting is_active = 0.
+ * Soft-deactivates a product by setting is_active = 0 or false.
  * Mirrors deactivate_product() in postgres_product_repo.rs.
  * Returns 404 if product does not exist (rows_affected == 0).
  */
 export async function deactivateProduct(pool: Pool, id: string): Promise<void> {
+  const caps = await getSchemaCaps(pool);
+  const activeVal = caps.isActiveBool ? false : 0;
   const now = NOW_ISO();
   const res = await pool.query(
-    'UPDATE products SET is_active = 0, updated_at = $1 WHERE id = $2',
-    [now, id]
+    'UPDATE products SET is_active = $1, updated_at = $2 WHERE id = $3',
+    [activeVal, now, id]
   );
 
   if (res.rowCount === 0) {
