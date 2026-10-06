@@ -164,6 +164,11 @@ export function normalizeProductName(raw: string): string {
   return raw.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+export function normalizeModelName(name: string): string {
+  if (!name) return '';
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 const UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 /**
@@ -391,6 +396,39 @@ export async function createProductWithInitialStock(
     const branchId = dto.branch_id ?? null;
 
     if (qty > 0 && branchId !== null) {
+      // 1. Ensure opening_stock_entries table exists
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS opening_stock_entries (
+          id UUID PRIMARY KEY,
+          organization_id UUID NOT NULL,
+          branch_id UUID NOT NULL,
+          product_id UUID NOT NULL,
+          quantity BIGINT NOT NULL,
+          unit_cost BIGINT NOT NULL DEFAULT 0,
+          reference_number VARCHAR(100),
+          performed_by UUID,
+          notes TEXT,
+          created_at TIMESTAMPTZ NOT NULL
+        )
+      `);
+
+      // 2. Resolve Organization ID for branch
+      const orgRow = await client.query('SELECT organization_id FROM branches WHERE id = $1', [branchId]);
+      const orgId = ((orgRow.rows[0] as Record<string, unknown>)?.['organization_id'] as string) ?? '00000000-0000-0000-0000-000000000001';
+
+      const entryId = uuidv4();
+      const refNo = `OP-${Date.now()}`;
+      const unitCost = Math.round(Number(dto.purchase_price || 0));
+
+      // 3. INSERT opening_stock_entries audit row
+      await client.query(
+        `INSERT INTO opening_stock_entries (
+           id, organization_id, branch_id, product_id, quantity, unit_cost, reference_number, performed_by, notes, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [entryId, orgId, branchId, id, qty, unitCost, refNo, userId ?? null, 'Opening Stock during Product Add', now]
+      );
+
+      // 4. UPSERT stock
       await client.query(
         `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
          VALUES ($1, $2, $3, $4)
@@ -399,13 +437,14 @@ export async function createProductWithInitialStock(
         [id, branchId, qty, now]
       );
 
+      // 5. INSERT stock_movements
       const movementId = uuidv4();
       await client.query(
         `INSERT INTO stock_movements (
            id, product_id, branch_id, movement_type, quantity,
            previous_stock, resulting_stock, reason, performed_by, reference_id, created_at
-         ) VALUES ($1, $2, $3, 'IN', $4, 0, $5, 'Opening Stock', $6, 'OPENING_BALANCE', $7)`,
-        [movementId, id, branchId, qty, qty, userId, now]
+         ) VALUES ($1, $2, $3, 'IN', $4, 0, $5, 'Opening Stock', $6, $7, $8)`,
+        [movementId, id, branchId, qty, qty, userId ?? null, entryId, now]
       );
     }
 

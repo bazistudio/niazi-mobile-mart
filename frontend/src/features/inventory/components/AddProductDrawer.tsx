@@ -34,6 +34,10 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
     purchasePrice: '',
     price: '',
     
+    // Compatible Models
+    compatibleModels: [] as string[],
+    newModelInput: '',
+    
     // Advanced
     serialTracking: false,
     imeiTracking: false,
@@ -101,7 +105,8 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
         purchasePrice: Number(formData.purchasePrice) || 0,
         price: Number(formData.price) || 0,
         quantity: Number(formData.quantity) || 0,
-        lowStockThreshold: Number(formData.minStockThreshold) || 2
+        lowStockThreshold: Number(formData.minStockThreshold) || 2,
+        compatible_models: formData.compatibleModels,
       });
       
       toast.success('Product created successfully');
@@ -110,7 +115,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
       setFormData(prev => ({
         ...prev,
         name: '', productCode: '', sku: '', barcode: '', description: '',
-        quantity: '', purchasePrice: '', price: ''
+        quantity: '', purchasePrice: '', price: '', compatibleModels: [], newModelInput: ''
       }));
       onClose();
     } catch (err: any) {
@@ -322,6 +327,75 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                     <label htmlFor="trackInventory" className="ml-2 block text-sm text-gray-900 dark:text-gray-300">
                       Track Inventory
                     </label>
+                  </div>
+
+                  {/* Compatible Mobile Models (Spare Parts) */}
+                  <div className="pt-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Compatible Mobile Models (Spare Parts)
+                    </label>
+                    <div className="flex gap-2 mb-2">
+                      <input
+                        type="text"
+                        value={formData.newModelInput}
+                        onChange={(e) => handleChange('newModelInput', e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const val = formData.newModelInput.trim();
+                            if (val && !formData.compatibleModels.includes(val)) {
+                              setFormData(prev => ({
+                                ...prev,
+                                compatibleModels: [...prev.compatibleModels, val],
+                                newModelInput: ''
+                              }));
+                            }
+                          }
+                        }}
+                        placeholder="e.g. Realme C35, Tecno X680 (Press Enter)"
+                        className="block flex-1 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const val = formData.newModelInput.trim();
+                          if (val && !formData.compatibleModels.includes(val)) {
+                            setFormData(prev => ({
+                              ...prev,
+                              compatibleModels: [...prev.compatibleModels, val],
+                              newModelInput: ''
+                            }));
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-[#006970] text-white text-xs font-semibold rounded-md hover:bg-[#005a60] transition-colors"
+                      >
+                        + Add Model
+                      </button>
+                    </div>
+                    {formData.compatibleModels.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 p-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md max-h-24 overflow-y-auto">
+                        {formData.compatibleModels.map((m, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-[#006970]/10 text-[#006970] dark:bg-[#006970]/30 dark:text-teal-200 border border-[#006970]/20"
+                          >
+                            {m}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  compatibleModels: prev.compatibleModels.filter((_, i) => i !== idx)
+                                }));
+                              }}
+                              className="hover:text-red-500 font-bold ml-1"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </section>

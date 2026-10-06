@@ -945,6 +945,49 @@ pub const MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_public_rates_is_public ON public_rates(is_public);
         "#,
     },
+    Migration {
+        version: 23,
+        name: "023_opening_stock_and_user_counters",
+        up: r#"
+        CREATE TABLE IF NOT EXISTS opening_stock_entries (
+            id TEXT PRIMARY KEY,
+            organization_id TEXT NOT NULL,
+            branch_id TEXT NOT NULL,
+            product_id TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            unit_cost INTEGER NOT NULL DEFAULT 0,
+            reference_number TEXT,
+            performed_by TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS user_invoice_counters (
+            branch_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            period_yyyymm TEXT NOT NULL,
+            next_value INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (branch_id, user_id, period_yyyymm)
+        );
+        "#,
+    },
+    Migration {
+        version: 24,
+        name: "024_product_compatible_models",
+        up: r#"
+        CREATE TABLE IF NOT EXISTS product_compatible_models (
+            id TEXT PRIMARY KEY,
+            product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+            model_name TEXT NOT NULL,
+            normalized_model TEXT NOT NULL,
+            brand_id TEXT REFERENCES brands(id) ON DELETE SET NULL,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_compatible_models_product ON product_compatible_models(product_id);
+        CREATE INDEX IF NOT EXISTS idx_compatible_models_normalized ON product_compatible_models(normalized_model);
+        "#,
+    },
 ];
 
 /// Migration engine that executes pending migrations deterministically in a transaction

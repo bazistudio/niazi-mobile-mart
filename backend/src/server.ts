@@ -27,6 +27,7 @@ import { createHistoryRouter } from './routes/history.routes';
 import { createReturnsRouter } from './routes/returns.routes';
 import { createCashRouter } from './routes/cash.routes';
 import { createReportsRouter } from './routes/reports.routes';
+import { createSearchRouter } from './routes/search.routes';
 import {
   listBrands,
   DEFAULT_BRANDS,
@@ -156,6 +157,10 @@ async function main(): Promise<void> {
   const reportsRouter = createReportsRouter(pool);
   app.use('/api/reports', reportsRouter);
   app.use('/api/v1/reports', reportsRouter);
+
+  const searchRouter = createSearchRouter(pool);
+  app.use('/api/search', searchRouter);
+  app.use('/api/v1/search', searchRouter);
 
   app.get(['/api/brands', '/api/v1/brands'], async (_req: Request, res: Response) => {
     try {

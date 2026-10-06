@@ -49,7 +49,9 @@ function isDbConnectionError(err: unknown): boolean {
   );
 }
 
-function sendError(req: Request, res: Response, err: unknown): void {
+export { authorizePermission };
+
+export function sendError(req: Request, res: Response, err: unknown): void {
   console.error('[product.routes] Error handled by sendError:', err);
   if (isDbConnectionError(err)) {
     // Only proxy read-only requests. Write requests (POST/PUT/DELETE/PATCH) must NOT be
