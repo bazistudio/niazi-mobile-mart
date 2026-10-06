@@ -163,17 +163,20 @@ export class AuthService {
         createdAt: res.user.created_at,
       };
 
+      const existingToken = getAuthToken();
+      const validToken = (existingToken && existingToken !== "native-tauri-session") ? existingToken : undefined;
+
       const session: AuthSession = {
         expiresAt: Date.now() + 7 * 24 * 3600 * 1000,
         deviceId: "native-desktop",
         user,
-        token: "native-tauri-session",
+        token: validToken || "native-tauri-session",
       };
 
       setSession(session);
       useAuthStore.getState().setAuth(user, session);
 
-      return { user, token: "native-tauri-session", session };
+      return { user, token: validToken || "native-tauri-session", session };
     }
 
     throw new Error("No Central API URL configured and not running in native desktop shell");
@@ -279,11 +282,13 @@ export class AuthService {
               createdAt: rawUser.created_at,
             };
 
+            const validToken = (token && token !== "native-tauri-session") ? token : undefined;
+
             const authSession: AuthSession = {
               expiresAt: Date.now() + 7 * 24 * 3600 * 1000,
               deviceId: "native-desktop",
               user,
-              token: token || undefined,
+              token: validToken,
             };
 
             setSession(authSession);

@@ -1,7 +1,7 @@
-/// Niazi Mobile Mart â€” Cloud Run HTTP Server binary
+/// Niazi Mobile Mart ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Cloud Run HTTP Server binary
 ///
 /// Architecture contract:
-/// - Axum handlers are TRANSPORT ONLY â€” they call service methods, never raw SQL
+/// - Axum handlers are TRANSPORT ONLY ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â they call service methods, never raw SQL
 /// - Business rules live in the service layer (services/*.rs)
 /// - The repository layer owns persistence (SQLite or PostgreSQL)
 /// - This binary shares all service + domain + repository code with the Tauri desktop binary
@@ -28,7 +28,7 @@ use niazi_mobile_mart_lib::db::PostgresAdapter;
 use niazi_mobile_mart_lib::state::AppState;
 
 /// Shared server state threaded through Axum via `.with_state()`
-/// Handlers call service methods on `app_state` â€” never raw SQL.
+/// Handlers call service methods on `app_state` ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â never raw SQL.
 #[derive(Clone)]
 pub struct ServerState {
     pub app_state: Arc<AppState>,
@@ -100,7 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_state = if let Ok(database_url) = std::env::var("DATABASE_URL") {
         match PostgresAdapter::from_url(&database_url).await {
             Ok(pg_adapter) => {
-                info!("PostgreSQL connection pool ready â€” pg_mode: active");
+                info!("PostgreSQL connection pool ready ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â pg_mode: active");
                 let pool = pg_adapter.pool().clone();
                 Arc::new(AppState::new_postgres(env!("CARGO_PKG_VERSION"), pool).with_jwt_keys(jwt_private, jwt_public))
             }
@@ -111,12 +111,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     } else {
-        info!("DATABASE_URL not set â€” running in SQLite-only mode (local desktop / dev mode)");
+        info!("DATABASE_URL not set ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â running in SQLite-only mode (local desktop / dev mode)");
         let db_path = niazi_mobile_mart_lib::db::connection::DatabaseConnection::default_db_path();
         let base_state = match niazi_mobile_mart_lib::db::connection::DatabaseConnection::open_file(db_path) {
             Ok(db) => AppState::new_sqlite(env!("CARGO_PKG_VERSION"), db).with_jwt_keys(jwt_private.clone(), jwt_public.clone()),
             Err(e) => {
-                warn!("Persistent SQLite path unavailable ({e}) â€” using in-memory SQLite.");
+                warn!("Persistent SQLite path unavailable ({e}) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â using in-memory SQLite.");
                 AppState::in_memory(env!("CARGO_PKG_VERSION")).with_jwt_keys(jwt_private, jwt_public)
             }
         };
@@ -151,18 +151,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/users", get(list_users_handler).post(create_user_handler))
         .route("/api/v1/users/credential-snapshots", get(credential_snapshots_handler))
         .route("/api/products", get(list_products_handler).post(create_product_handler))
-        .route("/api/products/:id", get(get_product_handler))
+        .route("/api/products/:id", get(get_product_handler).put(update_product_handler).delete(deactivate_product_handler))
+        .route("/api/categories", get(list_categories_handler).post(create_category_handler))
+        .route("/api/brands", get(list_brands_handler).post(create_brand_handler))
+        .route("/api/v1/brands", get(list_brands_handler).post(create_brand_handler))
         .route("/api/inventory", get(list_inventory_handler))
-        .route("/api/sales", axum::routing::post(complete_sale_handler))
+        .route("/api/v1/inventory/adjust", axum::routing::post(adjust_inventory_handler))
+        .route("/api/v1/inventory/transfer", axum::routing::post(transfer_inventory_handler))
+                .route("/api/sales", axum::routing::post(complete_sale_handler).get(list_sales_handler))
+        .route("/api/sales/:id", get(get_sale_handler))
+        .route("/api/sales/:id/lines", get(get_sale_lines_handler))
+        .route("/api/sales/:id/payments", get(get_sale_payments_handler))
+        .route("/api/sales/invoice/:number", get(get_sale_by_invoice_handler))
         .route("/api/customers", get(list_customers_handler).post(create_customer_handler))
         .route("/api/suppliers", get(list_suppliers_handler).post(create_supplier_handler))
+        .route("/api/v1/branches", get(list_branches_handler).post(create_branch_handler))
+        .route("/api/v1/products", axum::routing::post(create_product_handler))
+        .route("/api/v1/products/:id", axum::routing::put(update_product_handler).delete(deactivate_product_handler))
         .route("/api/v1/parties", get(list_parties_handler))
         .route("/api/v1/parties/:id", get(get_party_handler))
         .route("/api/v1/customers/:id", get(get_customer_detail_handler))
         .route("/api/v1/customers/:id/ledger", get(get_customer_ledger_handler))
         .route("/api/v1/suppliers/:id", get(get_supplier_detail_handler))
         .route("/api/v1/suppliers/:id/ledger", get(get_supplier_ledger_handler))
-        .route("/api/purchases", axum::routing::post(complete_purchase_handler))
+                .route("/api/purchases", axum::routing::post(complete_purchase_handler).get(list_purchases_handler))
+        .route("/api/purchases/:id", get(get_purchase_handler))
+        .route("/api/purchases/:id/lines", get(get_purchase_lines_handler))
+        
         .route("/api/expenses", get(list_expenses_handler).post(create_expense_handler))
         .route("/api/reports/profit", get(profit_report_handler))
         .route("/api/v1/sync/push", axum::routing::post(sync_push_handler))
@@ -174,25 +189,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 7. Bind and start
     let listener = tokio::net::TcpListener::bind(bind_addr).await?;
     info!("Niazi Cloud Run HTTP Server listening on http://{bind_addr}");
-    info!("  GET  /api/health â†’ {bind_addr}/api/health");
-    info!("  GET  /api/v1/health â†’ {bind_addr}/api/v1/health");
-    info!("  POST /api/auth/login â†’ {bind_addr}/api/auth/login");
-    info!("  POST /api/auth/logout â†’ {bind_addr}/api/auth/logout");
-    info!("  GET  /api/auth/me â†’ {bind_addr}/api/auth/me");
-    info!("  GET  /api/products â†’ {bind_addr}/api/products");
-    info!("  POST /api/products â†’ {bind_addr}/api/products");
-    info!("  GET  /api/inventory â†’ {bind_addr}/api/inventory");
-    info!("  POST /api/sales â†’ {bind_addr}/api/sales");
-    info!("  GET  /api/customers â†’ {bind_addr}/api/customers");
-    info!("  POST /api/customers â†’ {bind_addr}/api/customers");
-    info!("  GET  /api/suppliers â†’ {bind_addr}/api/suppliers");
-    info!("  POST /api/suppliers â†’ {bind_addr}/api/suppliers");
-    info!("  GET  /api/v1/parties â†’ {bind_addr}/api/v1/parties");
-    info!("  POST /api/purchases â†’ {bind_addr}/api/purchases");
-    info!("  GET  /api/expenses â†’ {bind_addr}/api/expenses");
-    info!("  POST /api/expenses â†’ {bind_addr}/api/expenses");
-    info!("  GET  /api/reports/profit â†’ {bind_addr}/api/reports/profit");
-    info!("  FALLBACK SPA serving â†’ React dist directory (index.html)");
+    info!("  GET  /api/health ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/health");
+    info!("  GET  /api/v1/health ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/v1/health");
+    info!("  POST /api/auth/login ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/auth/login");
+    info!("  POST /api/auth/logout ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/auth/logout");
+    info!("  GET  /api/auth/me ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/auth/me");
+    info!("  GET  /api/products ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/products");
+    info!("  POST /api/products ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/products");
+    info!("  GET  /api/inventory ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/inventory");
+    info!("  POST /api/sales ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/sales");
+    info!("  GET  /api/customers ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/customers");
+    info!("  POST /api/customers ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/customers");
+    info!("  GET  /api/suppliers ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/suppliers");
+    info!("  POST /api/suppliers ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/suppliers");
+    info!("  GET  /api/v1/parties ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/v1/parties");
+    info!("  POST /api/purchases ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/purchases");
+    info!("  GET  /api/expenses ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/expenses");
+    info!("  POST /api/expenses ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/expenses");
+    info!("  GET  /api/reports/profit ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {bind_addr}/api/reports/profit");
+    info!("  FALLBACK SPA serving ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ React dist directory (index.html)");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -250,7 +265,7 @@ impl axum::extract::FromRequestParts<ServerState> for AuthenticatedUser {
 }
 
 // ---------------------------------------------------------------------------
-// Route Handlers â€” TRANSPORT LAYER ONLY
+// Route Handlers ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â TRANSPORT LAYER ONLY
 // Each handler must delegate business operations to a service method.
 // Direct SQL queries are PROHIBITED in this module.
 // ---------------------------------------------------------------------------
@@ -372,7 +387,7 @@ async fn bootstrap_first_admin_handler(
     }
 }
 
-/// POST /api/v1/users â€” Create staff user (Admin only)
+/// POST /api/v1/users ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Create staff user (Admin only)
 async fn create_user_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -389,7 +404,7 @@ async fn create_user_handler(
     }
 }
 
-/// GET /api/v1/users â€” List all users (Admin/Manager)
+/// GET /api/v1/users ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â List all users (Admin/Manager)
 async fn list_users_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -407,7 +422,7 @@ async fn list_users_handler(
     }
 }
 
-/// GET /api/v1/users/credential-snapshots — Return user authentication snapshots (Admin only)
+/// GET /api/v1/users/credential-snapshots Ã¢â‚¬â€ Return user authentication snapshots (Admin only)
 async fn credential_snapshots_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -467,7 +482,7 @@ async fn credential_snapshots_handler(
 /// GET /api/health
 /// Infrastructure-level health check.
 /// Reports server liveness and active database mode.
-/// No service calls required â€” reads connection state only.
+/// No service calls required ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â reads connection state only.
 async fn health_handler(State(state): State<ServerState>) -> impl IntoResponse {
     let db_mode = if state.app_state.pg_pool().is_some() {
         "postgresql"
@@ -486,10 +501,10 @@ async fn health_handler(State(state): State<ServerState>) -> impl IntoResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Domain API Handlers â€” TRANSPORT ONLY WITH STRICT SERVER-SIDE RBAC
+// Domain API Handlers ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â TRANSPORT ONLY WITH STRICT SERVER-SIDE RBAC
 // ---------------------------------------------------------------------------
 
-/// GET /api/products â€” List products with search filter
+/// GET /api/products ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â List products with search filter
 async fn list_products_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -505,7 +520,7 @@ async fn list_products_handler(
     }
 }
 
-/// GET /api/products/:id â€” Get product details
+/// GET /api/products/:id ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Get product details
 async fn get_product_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -521,7 +536,7 @@ async fn get_product_handler(
     }
 }
 
-/// POST /api/products â€” Create new product
+/// POST /api/products ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Create new product
 async fn create_product_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -537,7 +552,65 @@ async fn create_product_handler(
     }
 }
 
-/// GET /api/inventory â€” List inventory stock map with strict branch isolation
+/// GET /api/categories — List all product categories
+async fn list_categories_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("inventory"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+    match state.app_state.catalog_service.list_categories().await {
+        Ok(cats) => (StatusCode::OK, Json(json!(cats))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// POST /api/categories — Create a new product category
+async fn create_category_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::catalog::CreateCategoryDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("inventory"), Some("inventory:write")) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+    match state.app_state.catalog_service.create_category(payload).await {
+        Ok(cat) => (StatusCode::CREATED, Json(json!(cat))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/brands — List all product brands
+async fn list_brands_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("inventory"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+    match state.app_state.catalog_service.list_brands().await {
+        Ok(brands) => (StatusCode::OK, Json(json!(brands))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// POST /api/brands — Create a new product brand
+async fn create_brand_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::catalog::CreateBrandDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("inventory"), Some("inventory:write")) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+    match state.app_state.catalog_service.create_brand(payload).await {
+        Ok(brand) => (StatusCode::CREATED, Json(json!(brand))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/inventory ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â List inventory stock map with strict branch isolation
 async fn list_inventory_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -559,7 +632,39 @@ async fn list_inventory_handler(
     }
 }
 
-/// POST /api/sales â€” Complete retail sale checkout with strict branch isolation
+/// POST /api/v1/inventory/adjust Ã¢â‚¬â€ Adjust inventory stock
+async fn adjust_inventory_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::inventory::AdjustStockDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("inventory"), Some("stock:adjust")) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.inventory_service.adjust_stock(payload, Some(auth.0.user_id.as_str())).await {
+        Ok(new_stock) => (StatusCode::OK, Json(json!(new_stock))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "ADJUST_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// POST /api/v1/inventory/transfer Ã¢â‚¬â€ Transfer stock between branches
+async fn transfer_inventory_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::inventory::TransferStockDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("inventory"), Some("stock:transfer")) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.inventory_service.transfer_stock(payload, Some(auth.0.user_id.as_str())).await {
+        Ok(_) => (StatusCode::OK, Json(json!({"message": "Transfer successful"}))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "TRANSFER_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// POST /api/sales ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Complete retail sale checkout with strict branch isolation
 async fn complete_sale_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -583,7 +688,126 @@ async fn complete_sale_handler(
     }
 }
 
-/// GET /api/customers â€” List customers
+/// GET /api/sales â€” List sales
+async fn list_sales_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Query(filter): axum::extract::Query<niazi_mobile_mart_lib::domain::sales::SaleFilterDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("pos"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    let mut filter = filter;
+    let effective_branch = match auth.0.resolve_branch(filter.branch_id.as_deref()) {
+        Ok(bid) => bid,
+        Err(e) => return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()}))),
+    };
+    filter.branch_id = Some(effective_branch);
+
+    match state.app_state.sale_service.list_sales(filter).await {
+        Ok(sales) => (StatusCode::OK, Json(json!(sales))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/sales/:id â€” Get sale by ID
+async fn get_sale_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("pos"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.sale_service.get_sale_by_id(&id).await {
+        Ok(Some(sale)) => {
+            if let Err(e) = auth.0.resolve_branch(Some(sale.branch_id.as_str())) {
+                return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+            }
+            (StatusCode::OK, Json(json!(sale)))
+        }
+        Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "NOT_FOUND", "message": "Sale not found"}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/sales/:id/lines â€” Get sale lines
+async fn get_sale_lines_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("pos"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.sale_service.get_sale_by_id(&id).await {
+        Ok(Some(sale)) => {
+            if let Err(e) = auth.0.resolve_branch(Some(sale.branch_id.as_str())) {
+                return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+            }
+        }
+        Ok(None) => return (StatusCode::NOT_FOUND, Json(json!({"error": "NOT_FOUND", "message": "Sale not found"}))),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+
+    match state.app_state.sale_service.get_sale_lines(&id).await {
+        Ok(lines) => (StatusCode::OK, Json(json!(lines))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/sales/:id/payments â€” Get sale payments
+async fn get_sale_payments_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("pos"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.sale_service.get_sale_by_id(&id).await {
+        Ok(Some(sale)) => {
+            if let Err(e) = auth.0.resolve_branch(Some(sale.branch_id.as_str())) {
+                return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+            }
+        }
+        Ok(None) => return (StatusCode::NOT_FOUND, Json(json!({"error": "NOT_FOUND", "message": "Sale not found"}))),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+
+    match state.app_state.sale_service.get_sale_payments(&id).await {
+        Ok(payments) => (StatusCode::OK, Json(json!(payments))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/sales/invoice/:number -- Get sale by invoice number
+async fn get_sale_by_invoice_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(number): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("pos"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.sale_service.get_sale_by_invoice(&number).await {
+        Ok(Some(sale)) => {
+            if let Err(e) = auth.0.resolve_branch(Some(sale.branch_id.as_str())) {
+                return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+            }
+            (StatusCode::OK, Json(json!(sale)))
+        }
+        Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "NOT_FOUND", "message": "Sale not found"}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/customers ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â List customers
 async fn list_customers_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -599,7 +823,7 @@ async fn list_customers_handler(
     }
 }
 
-/// POST /api/customers â€” Create customer
+/// POST /api/customers ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Create customer
 async fn create_customer_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -615,7 +839,71 @@ async fn create_customer_handler(
     }
 }
 
-/// GET /api/v1/parties — List canonical parties (Phase 1.1, read-only).
+/// GET /api/v1/branches Ã¢â‚¬â€ List branches (Admin/Manager)
+async fn list_branches_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("org"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.branch_repo.list_branches().await {
+        Ok(branches) => (StatusCode::OK, Json(json!(branches))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// POST /api/v1/branches Ã¢â‚¬â€ Create branch (Admin only)
+async fn create_branch_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::organization::CreateBranchDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("org"), None) { // "org" page handles branch management
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.branch_repo.create_branch(&payload).await {
+        Ok(branch) => (StatusCode::CREATED, Json(json!(branch))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// PUT /api/v1/products/:id Ã¢â‚¬â€ Update product
+async fn update_product_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(payload): Json<niazi_mobile_mart_lib::domain::product::UpdateProductDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("products"), None).or_else(|_| auth.0.authorize_permission(Some("inventory"), None)) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.product_service.update_product(&id, payload).await {
+        Ok(product) => (StatusCode::OK, Json(json!(product))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "UPDATE_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// DELETE /api/v1/products/:id Ã¢â‚¬â€ Deactivate product
+async fn deactivate_product_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("products"), None).or_else(|_| auth.0.authorize_permission(Some("inventory"), None)) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.product_service.deactivate_product(&id).await {
+        Ok(_) => (StatusCode::OK, Json(json!({"message": "Product deactivated"}))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "DELETE_FAILED", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/v1/parties Ã¢â‚¬â€ List canonical parties (Phase 1.1, read-only).
 /// RBAC: page "parties" (aliases "customers"/"suppliers" in access_control), enforced server-side.
 async fn list_parties_handler(
     State(state): State<ServerState>,
@@ -632,7 +920,7 @@ async fn list_parties_handler(
     }
 }
 
-/// GET /api/v1/parties/:id — One canonical party with linked roles and balances (read-only).
+/// GET /api/v1/parties/:id Ã¢â‚¬â€ One canonical party with linked roles and balances (read-only).
 async fn get_party_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -651,7 +939,7 @@ async fn get_party_handler(
     }
 }
 
-/// GET /api/suppliers â€” List suppliers
+/// GET /api/suppliers ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â List suppliers
 async fn list_suppliers_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -667,7 +955,7 @@ async fn list_suppliers_handler(
     }
 }
 
-/// POST /api/suppliers â€” Create supplier
+/// POST /api/suppliers ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Create supplier
 async fn create_supplier_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -755,7 +1043,79 @@ async fn get_supplier_ledger_handler(
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
     }
 }
-/// POST /api/purchases â€” Complete purchase with strict branch isolation
+/// GET /api/purchases — List purchases
+async fn list_purchases_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Query(filter): axum::extract::Query<niazi_mobile_mart_lib::domain::purchases::PurchaseFilterDto>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("purchases"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    let mut filter = filter;
+    let effective_branch = match auth.0.resolve_branch(filter.branch_id.as_deref()) {
+        Ok(bid) => bid,
+        Err(e) => return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()}))),
+    };
+    filter.branch_id = Some(effective_branch);
+
+    match state.app_state.purchase_service.list_purchases(Some(filter)).await {
+        Ok(purchases) => (StatusCode::OK, Json(json!(purchases))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/purchases/:id — Get purchase by ID
+async fn get_purchase_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("purchases"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.purchase_service.get_purchase_by_id(&id).await {
+        Ok(Some(purchase)) => {
+            if let Err(e) = auth.0.resolve_branch(Some(purchase.branch_id.as_str())) {
+                return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+            }
+            (StatusCode::OK, Json(json!(purchase)))
+        }
+        Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "NOT_FOUND", "message": "Purchase not found"}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+/// GET /api/purchases/:id/lines — Get purchase lines
+async fn get_purchase_lines_handler(
+    State(state): State<ServerState>,
+    auth: AuthenticatedUser,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = auth.0.authorize_permission(Some("purchases"), None) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+    }
+
+    match state.app_state.purchase_service.get_purchase_by_id(&id).await {
+        Ok(Some(purchase)) => {
+            if let Err(e) = auth.0.resolve_branch(Some(purchase.branch_id.as_str())) {
+                return (StatusCode::FORBIDDEN, Json(json!({"error": "FORBIDDEN", "message": e.to_string()})));
+            }
+        }
+        Ok(None) => return (StatusCode::NOT_FOUND, Json(json!({"error": "NOT_FOUND", "message": "Purchase not found"}))),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+
+    match state.app_state.purchase_service.get_purchase_lines(&id).await {
+        Ok(lines) => (StatusCode::OK, Json(json!(lines))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "SERVER_ERROR", "message": e.to_string()}))),
+    }
+}
+
+
+/// POST /api/purchases - Complete purchase with strict branch isolation
 async fn complete_purchase_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -779,7 +1139,7 @@ async fn complete_purchase_handler(
     }
 }
 
-/// GET /api/expenses â€” List expenses with strict branch isolation
+/// GET /api/expenses ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â List expenses with strict branch isolation
 async fn list_expenses_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -803,7 +1163,7 @@ async fn list_expenses_handler(
     }
 }
 
-/// POST /api/expenses â€” Create expense with strict branch isolation
+/// POST /api/expenses ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Create expense with strict branch isolation
 async fn create_expense_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -827,7 +1187,7 @@ async fn create_expense_handler(
     }
 }
 
-/// GET /api/reports/profit â€” Get profit summary report with strict branch isolation
+/// GET /api/reports/profit ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Get profit summary report with strict branch isolation
 async fn profit_report_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -857,7 +1217,7 @@ struct SyncPushPayload {
     events: Vec<niazi_mobile_mart_lib::domain::sync_queue::SyncQueueItem>,
 }
 
-/// POST /api/v1/sync/push â€” Central Outbox Event Ingestion & Deduplication Handler
+/// POST /api/v1/sync/push ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Central Outbox Event Ingestion & Deduplication Handler
 async fn sync_push_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -1583,7 +1943,7 @@ async fn sync_push_handler(
                 // corresponding change_log events so downstream PCs can receive the catalog entity.
                 // Each INSERT uses ON CONFLICT DO NOTHING for idempotency; rows_affected() > 0
                 // distinguishes a new insertion from a no-op, so we only emit change_log when the
-                // entity was actually created.  All operations share the outer transaction — if any
+                // entity was actually created.  All operations share the outer transaction Ã¢â‚¬â€ if any
                 // step fails the entire PRODUCT_UPDATED transaction is rolled back, preventing the
                 // split-brain state (catalog row exists, change_log missing).
                 let now = chrono::Utc::now().to_rfc3339();
@@ -1595,7 +1955,7 @@ async fn sync_push_handler(
                         match sqlx::query($sql).bind($id).bind(&now).execute(&mut *tx).await {
                             Ok(result) => {
                                 if result.rows_affected() > 0 {
-                                    // Catalog entity did not exist — build the canonical payload and
+                                    // Catalog entity did not exist Ã¢â‚¬â€ build the canonical payload and
                                     // append a change_log event so other PCs can pull it.
                                     let entity = niazi_mobile_mart_lib::domain::catalog::$domain_type {
                                         id: $id.clone(),
@@ -1627,7 +1987,7 @@ async fn sync_push_handler(
                                         );
                                     }
                                 }
-                                // rows_affected() == 0 → entity already exists; no duplicate change_log emitted.
+                                // rows_affected() == 0 Ã¢â€ â€™ entity already exists; no duplicate change_log emitted.
                             }
                             Err(e) => {
                                 let _ = tx.rollback().await;
@@ -1999,7 +2359,7 @@ async fn sync_push_handler(
                 }
             }
 
-            // SYNC-B2 — Customer payment projection
+            // SYNC-B2 Ã¢â‚¬â€ Customer payment projection
             if event.event_type == "CUSTOMER_PAYMENT_RECORDED" {
                 let payment_event: niazi_mobile_mart_lib::domain::customer::CustomerPaymentSyncEventDto =
                     match serde_json::from_str(&event.payload) {
@@ -2060,7 +2420,7 @@ async fn sync_push_handler(
                 }
             }
 
-            // ── SYNC-H1: Manual inventory operation ──────────────────────────────
+            // Ã¢â€â‚¬Ã¢â€â‚¬ SYNC-H1: Manual inventory operation Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
             if event.event_type == "INVENTORY_OPERATION_RECORDED" {
                 let inv_event: niazi_mobile_mart_lib::domain::inventory::InventoryOperationSyncEventDto =
                     match serde_json::from_str(&event.payload) {
@@ -2784,7 +3144,7 @@ async fn sync_push_handler(
             // Every recognised event type is handled by one of the independent `if`
             // blocks above.  An event type that is not in the registry falls through
             // ALL of them, which would previously cause the empty transaction to be
-            // committed and a spurious `SYNCED` response to be returned — resulting
+            // committed and a spurious `SYNCED` response to be returned Ã¢â‚¬â€ resulting
             // in silent permanent data loss on the originating terminal.
             //
             // This guard MUST remain immediately before the audit record and commit
@@ -2850,7 +3210,7 @@ async fn sync_push_handler(
     )
 }
 
-/// GET /api/v1/sync/pull — Downstream Delta Reconciliation Pull Handler
+/// GET /api/v1/sync/pull Ã¢â‚¬â€ Downstream Delta Reconciliation Pull Handler
 async fn sync_pull_handler(
     State(state): State<ServerState>,
     auth: AuthenticatedUser,
@@ -2902,7 +3262,7 @@ async fn sync_pull_handler(
 }
 
 // ---------------------------------------------------------------------------
-// Graceful Shutdown â€” handles Ctrl+C (dev) and SIGTERM (Cloud Run)
+// Graceful Shutdown ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â handles Ctrl+C (dev) and SIGTERM (Cloud Run)
 // ---------------------------------------------------------------------------
 
 async fn shutdown_signal() {
@@ -2924,8 +3284,8 @@ async fn shutdown_signal() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => { info!("Ctrl+C received â€” shutting down."); },
-        _ = terminate => { info!("SIGTERM received â€” shutting down."); },
+        _ = ctrl_c => { info!("Ctrl+C received ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â shutting down."); },
+        _ = terminate => { info!("SIGTERM received ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â shutting down."); },
     }
 }
 
@@ -3001,4 +3361,8 @@ fn get_mime_type(path: &std::path::Path) -> &'static str {
         _ => "application/octet-stream",
     }
 }
+
+
+
+
 

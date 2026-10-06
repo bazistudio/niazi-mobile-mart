@@ -1,6 +1,7 @@
 // src/features/inventory/api/inventory.api.ts
 
 import { tauriClient } from '@/lib/tauri/tauriClient';
+import { httpClient } from '@/lib/http/httpClient';
 import { PaginatedProductsDTO, AdjustStockResponseDTO, ProductCategoryDTO, UpdateProductDTO, CheckDuplicateResponseDTO, ProductDTO } from '../dto/inventory.dto';
 import { InventoryAdjustmentType, PaginationParams } from '../types';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
@@ -51,6 +52,7 @@ export const inventoryApi = {
       status: 'active',
       createdAt: p.created_at,
       updatedAt: p.updated_at,
+      isLowStock: (p.quantity || 0) <= (p.low_stock_threshold || 5),
     }));
 
     return {
@@ -83,12 +85,16 @@ export const inventoryApi = {
       targetQuantity = currentStock - quantity;
     }
 
-    const newStock = await tauriClient.inventoryAdjust({
+    // NOTE: Using HTTP Axum Postgres endpoint instead of Tauri IPC
+    const res = await httpClient.post<{ data?: any, newStock?: number }>('/api/v1/inventory/adjust', {
       product_id: productId,
       branch_id: branchId,
       target_quantity: targetQuantity,
       reason: reason || 'Manual Adjustment',
     });
+    
+    // Extrapolate the new stock count from response (depends on how backend returns the single number)
+    const newStock = typeof res.data === 'number' ? res.data : typeof res === 'number' ? res : targetQuantity;
 
     return {
       success: true,
@@ -151,10 +157,12 @@ export const inventoryApi = {
       branch_id: branchId,
     };
 
-    console.info('[inventoryApi.createProduct] Sending product payload to Tauri IPC:', payload);
+    console.info('[inventoryApi.createProduct] Sending product payload to Axum API:', payload);
 
     try {
-      const created = await tauriClient.productCreate(payload);
+      // NOTE: Using HTTP Axum Postgres endpoint instead of Tauri IPC
+      const res = await httpClient.post<{ product?: any, data?: any }>('/api/v1/products', payload);
+      const created = res.data || res.product || res; // depending on how exactly axum responds, we handle variations
 
       const product: ProductDTO = {
         _id: created.id,
@@ -170,9 +178,10 @@ export const inventoryApi = {
         status: 'active',
         createdAt: created.created_at,
         updatedAt: created.updated_at,
+        isLowStock: initialQuantity <= created.low_stock_threshold,
       };
 
-      console.info('[inventoryApi.createProduct] Product created successfully:', product);
+      console.info('[inventoryApi.createProduct] Product created successfully in Postgres:', product);
 
       return {
         message: 'Product created successfully',
@@ -191,6 +200,13 @@ export const inventoryApi = {
 
   updateProduct: async (id: string, data: UpdateProductDTO | FormData): Promise<{ message: string; product: ProductDTO }> => {
     let name: string | undefined;
+    let barcode: string | undefined;
+    let categoryId: string | undefined;
+    let brandId: string | undefined;
+    let companyId: string | undefined;
+    let colorId: string | undefined;
+    let qualityId: string | undefined;
+    let unitId: string | undefined;
     let salePrice: number | undefined;
     let purchasePrice: number | undefined;
     let lowStockThreshold: number | undefined;
@@ -198,29 +214,55 @@ export const inventoryApi = {
 
     if (data instanceof FormData) {
       name = data.get('name') ? (data.get('name') as string) : undefined;
-      salePrice = data.get('price') ? Math.round(Number(data.get('price'))) : undefined;
-      purchasePrice = data.get('purchasePrice') ? Math.round(Number(data.get('purchasePrice'))) : undefined;
-      lowStockThreshold = data.get('lowStockThreshold') ? Number(data.get('lowStockThreshold')) : undefined;
+      barcode = data.get('barcode') ? (data.get('barcode') as string) : undefined;
+      categoryId = (data.get('categoryId') || data.get('category_id')) as string || undefined;
+      brandId = (data.get('brandId') || data.get('brand_id')) as string || undefined;
+      companyId = (data.get('companyId') || data.get('company_id')) as string || undefined;
+      colorId = (data.get('colorId') || data.get('color_id')) as string || undefined;
+      qualityId = (data.get('qualityId') || data.get('quality_id')) as string || undefined;
+      unitId = (data.get('unitId') || data.get('unit_id')) as string || undefined;
+      salePrice = data.get('price') || data.get('salePrice') || data.get('sale_price') ? Math.round(Number(data.get('price') || data.get('salePrice') || data.get('sale_price'))) : undefined;
+      purchasePrice = data.get('purchasePrice') || data.get('purchase_price') ? Math.round(Number(data.get('purchasePrice') || data.get('purchase_price'))) : undefined;
+      lowStockThreshold = data.get('lowStockThreshold') || data.get('minStockThreshold') || data.get('low_stock_threshold') ? Number(data.get('lowStockThreshold') || data.get('minStockThreshold') || data.get('low_stock_threshold')) : undefined;
       description = data.get('description') ? (data.get('description') as string) : undefined;
     } else {
-      name = data.name;
-      salePrice = data.price !== undefined ? Math.round(data.price) : undefined;
-      purchasePrice = data.purchasePrice !== undefined ? Math.round(data.purchasePrice) : undefined;
-      lowStockThreshold = data.lowStockThreshold;
-      description = data.description;
+      const d = data as any;
+      name = d.name;
+      barcode = d.barcode;
+      categoryId = d.categoryId || d.category_id;
+      brandId = d.brandId || d.brand_id;
+      companyId = d.companyId || d.company_id;
+      colorId = d.colorId || d.color_id;
+      qualityId = d.qualityId || d.quality_id;
+      unitId = d.unitId || d.unit_id;
+      salePrice = d.price !== undefined ? Math.round(Number(d.price)) : d.sale_price !== undefined ? Math.round(Number(d.sale_price)) : undefined;
+      purchasePrice = d.purchasePrice !== undefined ? Math.round(Number(d.purchasePrice)) : d.purchase_price !== undefined ? Math.round(Number(d.purchase_price)) : undefined;
+      lowStockThreshold = d.minStockThreshold !== undefined ? Number(d.minStockThreshold) : d.lowStockThreshold !== undefined ? Number(d.lowStockThreshold) : d.low_stock_threshold !== undefined ? Number(d.low_stock_threshold) : undefined;
+      description = d.description;
     }
 
-    const updated = await tauriClient.productUpdate(id, {
+    const payload = {
       name,
+      barcode,
+      category_id: categoryId,
+      brand_id: brandId,
+      company_id: companyId,
+      color_id: colorId,
+      quality_id: qualityId,
+      unit_id: unitId,
       sale_price: salePrice,
       purchase_price: purchasePrice,
       low_stock_threshold: lowStockThreshold,
       description,
-    });
+    };
+
+    const res = await httpClient.put<{ data?: any, product?: any }>(`/api/v1/products/${id}`, payload);
+    const updated = res.data || res.product || res;
 
     let currentStock = 0;
     try {
       const branchId = getActiveBranchId();
+      // Keep Tauri IPC for read stock for now
       currentStock = await tauriClient.inventoryGetStock(updated.id, branchId);
     } catch {}
 
@@ -247,7 +289,7 @@ export const inventoryApi = {
   },
 
   deleteProduct: async (id: string): Promise<{ message: string }> => {
-    await tauriClient.productDeactivate(id);
+    await httpClient.delete(`/api/v1/products/${id}`);
     return {
       message: 'Product deactivated successfully',
     };

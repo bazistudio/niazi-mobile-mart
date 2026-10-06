@@ -236,18 +236,81 @@ impl PostgresSaleRepository {
             }
         }
 
-        // 7. Generate invoice number
-        sqlx::query("UPDATE counters SET value = value + 1 WHERE name = 'invoice'")
-            .execute(&mut **tx)
+        // 7. Generate Scoped Invoice Number (BRANCH_CODE-TERMINAL_CODE-YYYYMM-SEQUENCE)
+        let branch_code: String = sqlx::query_as("SELECT code FROM branches WHERE id = $1")
+            .bind(&branch_id)
+            .fetch_optional(&mut **tx)
             .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .map(|r: (String,)| r.0)
+            .unwrap_or_else(|| "MAIN".to_string());
 
-        let inv_val: (i64,) = sqlx::query_as("SELECT value FROM counters WHERE name = 'invoice'")
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let terminal_row: Option<(String, String)> = if let Some(ref tid) = dto.terminal_id {
+            sqlx::query_as("SELECT id, code FROM terminals WHERE id = $1 OR code = $1 LIMIT 1")
+                .bind(tid)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?
+        } else {
+            sqlx::query_as("SELECT id, code FROM terminals WHERE branch_id = $1 ORDER BY created_at ASC LIMIT 1")
+                .bind(&branch_id)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?
+        };
 
-        let invoice_number = format!("INV-{:06}", inv_val.0);
+        let (terminal_id, terminal_code) = match terminal_row {
+            Some(t) => t,
+            None => {
+                let default_term_id = Uuid::new_v4().to_string();
+                let default_term_code = "T1".to_string();
+                let org_id: String = sqlx::query_as("SELECT organization_id FROM branches WHERE id = $1")
+                    .bind(&branch_id)
+                    .fetch_optional(&mut **tx)
+                    .await
+                    .map_err(|e| AppError::Database(e.to_string()))?
+                    .map(|r: (String,)| r.0)
+                    .unwrap_or_else(|| "00000000-0000-0000-0000-000000000001".to_string());
+
+                let now_str = Utc::now().to_rfc3339();
+                sqlx::query(
+                    "INSERT INTO terminals (id, organization_id, branch_id, device_name, code, is_active, created_at, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, 1, $6, $7)
+                     ON CONFLICT (id) DO NOTHING"
+                )
+                .bind(&default_term_id)
+                .bind(&org_id)
+                .bind(&branch_id)
+                .bind("Main POS Terminal")
+                .bind(&default_term_code)
+                .bind(&now_str)
+                .bind(&now_str)
+                .execute(&mut **tx)
+                .await
+                .map_err(|e| AppError::Database(e.to_string()))?;
+
+                (default_term_id, default_term_code)
+            }
+        };
+
+        let karachi_offset = chrono::FixedOffset::east_opt(5 * 3600).unwrap();
+        let period_yyyymm = Utc::now().with_timezone(&karachi_offset).format("%Y%m").to_string();
+
+        let seq_row: (i64,) = sqlx::query_as(
+            "INSERT INTO terminal_invoice_counters (branch_id, terminal_id, period_yyyymm, next_value)
+             VALUES ($1, $2, $3, 2)
+             ON CONFLICT (branch_id, terminal_id, period_yyyymm)
+             DO UPDATE SET next_value = terminal_invoice_counters.next_value + 1
+             RETURNING next_value - 1"
+        )
+        .bind(&branch_id)
+        .bind(&terminal_id)
+        .bind(&period_yyyymm)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        let invoice_number = format!("{branch_code}-{terminal_code}-{period_yyyymm}-{:06}", seq_row.0);
         let sale_id = sale_id_override
             .map(str::trim)
             .filter(|s| !s.is_empty())

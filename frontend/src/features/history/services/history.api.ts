@@ -1,24 +1,37 @@
 import { HistoryItem, HistoryStats, HistoryFilterParams, LedgerTraceItem } from '../types/history.types';
+import { httpFetch } from '@/lib/tauri/tauriClient';
 
 export const historyApi = {
-  getHistory: async (_filters: HistoryFilterParams): Promise<{ data: HistoryItem[], total: number }> => {
-    return {
-      data: [],
-      total: 0,
-    };
+  getHistory: async (filters?: HistoryFilterParams): Promise<{ data: HistoryItem[]; total: number }> => {
+    try {
+      const params = new URLSearchParams();
+      if (filters?.page) params.set('page', String(filters.page));
+      if (filters?.limit) params.set('limit', String(filters.limit));
+      if (filters?.type) params.set('type', filters.type);
+      if (filters?.startDate) params.set('startDate', filters.startDate);
+      if (filters?.endDate) params.set('endDate', filters.endDate);
+      if (filters?.search) params.set('search', filters.search);
+
+      const qs = params.toString();
+      return await httpFetch<{ data: HistoryItem[]; total: number }>(`/api/history${qs ? '?' + qs : ''}`);
+    } catch (err) {
+      console.error('Failed to fetch financial history:', err);
+      return { data: [], total: 0 };
+    }
   },
 
   getStats: async (): Promise<HistoryStats> => {
     try {
-      const summary = await import('@/lib/tauri/tauriClient').then(m => m.tauriClient.profitGetDashboardSummary());
+      const stats = await httpFetch<any>('/api/history/stats');
       return {
-        totalSales: summary.total.net_revenue,
-        totalInvoices: summary.total.orders_count,
-        totalExpenses: 0,
-        netRevenue: summary.total.gross_profit,
-        pendingPayments: 0,
+        totalSales: Number(stats?.totalSales ?? 0),
+        totalInvoices: Number(stats?.totalInvoices ?? 0),
+        totalExpenses: Number(stats?.totalExpenses ?? 0),
+        netRevenue: Number(stats?.netRevenue ?? 0),
+        pendingPayments: Number(stats?.pendingPayments ?? 0),
       };
-    } catch (e) {
+    } catch (err) {
+      console.error('Failed to fetch history stats:', err);
       return {
         totalSales: 0,
         totalInvoices: 0,
@@ -31,5 +44,5 @@ export const historyApi = {
 
   getLedgerTrace: async (_id: string): Promise<LedgerTraceItem[]> => {
     return [];
-  }
+  },
 };

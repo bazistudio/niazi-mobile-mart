@@ -34,9 +34,11 @@ Thumbs.db
 # Temp
 temp/
 tmp/
+cloud-sql-proxy.exe
 
 # Documentation & Local Archives
-docs/
+docs/*
+!docs/old-rust-backend/
 
 # Keys
 ~
@@ -49,5 +51,5 @@ public.pem
 # Public JWT verification key shipped with the desktop app (public, never private)
 !src-tauri/src/services/jwt_public_key.pem
 
-# JWT Private Key
-jwt_private_key.pem
+# Local backend environment
+backend/env

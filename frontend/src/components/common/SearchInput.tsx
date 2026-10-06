@@ -331,15 +331,15 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
                         className={`w-full text-left flex items-center justify-between px-3 py-2 rounded-md transition-colors group ${isSelected ? 'bg-surface-hover ring-1 ring-focus-ring' : 'hover:bg-surface-hover'}`}
                       >
                         <div>
-                          <p className="text-sm font-medium text-text-primary group-hover:text-primary flex items-center">
-                            {product.name}
-                            {getMatchBadge(product, query, [
-                              { key: 'name', label: 'Name' },
-                              { key: 'sku', label: 'SKU' },
-                              { key: 'barcode', label: 'Barcode' }
-                            ])}
+                          <p className="text-sm font-medium text-text-primary group-hover:text-primary flex items-center gap-2">
+                            <span>{product.name}</span>
+                            {product.match_type === 'COMPATIBLE_MODEL' && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                                Compatible: {product.matched_value || product.matched_compatible_model}
+                              </span>
+                            )}
                           </p>
-                          <p className="text-xs text-text-muted">{product.sku || product.barcode}</p>
+                          <p className="text-xs text-text-muted">{product.sku || product.barcode || ''}</p>
                         </div>
                         <div className="flex flex-col items-end gap-1">
                           <span 

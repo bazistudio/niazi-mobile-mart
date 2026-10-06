@@ -127,6 +127,7 @@ pub struct SalePaymentInputDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompleteSaleDto {
     pub branch_id: Option<String>,
+    pub terminal_id: Option<String>,
     pub customer_id: Option<String>,
     pub items: Vec<SaleItemDto>,
     pub discount: Option<i64>,

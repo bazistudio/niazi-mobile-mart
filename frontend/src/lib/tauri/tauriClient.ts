@@ -136,7 +136,7 @@ export const getApiBaseUrl = (): string => {
   return DEFAULT_CENTRAL_API_URL;
 };
 
-async function httpFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function httpFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getAuthToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -291,7 +291,7 @@ function saveStoredWebSales(sales: StoredWebSale[]): void {
 export const tauriClient = {
   isTauri: isTauriEnvironment,
 
-  // ── Baseline Diagnostics ───────────────────────────────────────────────────
+  // â”€â”€ Baseline Diagnostics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async healthCheck(): Promise<HealthResponse> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -319,7 +319,7 @@ export const tauriClient = {
     return `pong (web fallback): ${message || 'hello'}`;
   },
 
-  // ── Auto-Updater ─────────────────────────────────────────────────────────
+  // â”€â”€ Auto-Updater â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async checkAppUpdate(): Promise<UpdateCheckResponse> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -328,7 +328,7 @@ export const tauriClient = {
     return {
       available: false,
       version: '1.1.3',
-      body: 'Web fallback — updater is active only in native desktop app.',
+      body: 'Web fallback â€” updater is active only in native desktop app.',
       current_version: '1.1.3',
     };
   },
@@ -363,7 +363,7 @@ export const tauriClient = {
     window.open(url, '_blank');
   },
 
-  // ── Native Staff Authentication ───────────────────────────────────────────
+  // â”€â”€ Native Staff Authentication â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async authLogin(username: string, loginKey: string): Promise<AuthResponse> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -522,7 +522,7 @@ export const tauriClient = {
     return true;
   },
 
-  // ── First-Run Bootstrap & Password Security ───────────────────────────────
+  // â”€â”€ First-Run Bootstrap & Password Security â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   /**
    * Three-State Central Bootstrap Authority Resolution:
    * - CENTRAL_INITIALIZED: Central PostgreSQL org is initialized. Proceed to Sign In screen.
@@ -592,7 +592,7 @@ export const tauriClient = {
     throw new Error('Native Tauri environment required for staff registration');
   },
 
-  // ── Staff Access Management (Admin) ───────────────────────────────────────
+  // â”€â”€ Staff Access Management (Admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async adminListUsers(): Promise<SanitizedUser[]> {
     if (getApiBaseUrl()) {
       return await httpFetch<SanitizedUser[]>('/api/v1/users');
@@ -728,7 +728,7 @@ export const tauriClient = {
     }
   },
 
-  // ── Catalog Domain (Phase 7 Domain 1) ─────────────────────────────────────
+  // â”€â”€ Catalog Domain (Phase 7 Domain 1) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async categoryCreate(dto: CreateCategoryDto): Promise<Category> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -969,110 +969,82 @@ export const tauriClient = {
     throw new Error('Tauri environment required');
   },
 
-  // ── Product Domain (Phase 7 Domain 1 — Typed Storage Bridge) ───────────────
+  // ── Product Domain (Phase 7 Domain 1 — TypeScript Backend Transfer) ───────────────
   async productCreate(dto: CreateProductDto): Promise<Product> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('storage_product_create', { dto });
-    }
-    const products = getStoredWebProducts();
-    const now = new Date().toISOString();
-    const newProduct: Product = {
-      id: `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      name: dto.name,
-      sku: dto.sku,
-      barcode: dto.barcode || null,
-      category_id: dto.category_id,
-      brand_id: dto.brand_id || null,
-      company_id: dto.company_id || null,
-      color_id: dto.color_id || null,
-      quality_id: dto.quality_id || null,
-      unit_id: dto.unit_id || null,
-      purchase_price: Math.round(Number(dto.purchase_price) || 0),
-      average_cost: Math.round(Number(dto.average_cost ?? dto.purchase_price) || 0),
-      sale_price: Math.round(Number(dto.sale_price) || 0),
-      low_stock_threshold: Number(dto.low_stock_threshold) || 5,
-      is_active: true,
-      description: dto.description || null,
-      created_at: now,
-      updated_at: now,
-    };
-    products.unshift(newProduct);
-    saveStoredWebProducts(products);
-
-    const qty = dto.initial_quantity || 0;
-    if (qty > 0) {
-      const stockMap = getStoredWebStockMap();
-      stockMap[newProduct.id] = (stockMap[newProduct.id] || 0) + qty;
-      saveStoredWebStockMap(stockMap);
-    }
-
-    return newProduct;
+    return await httpFetch<Product>('/api/products', {
+      method: 'POST',
+      body: JSON.stringify(dto),
+    });
   },
 
   async productUpdate(id: string, dto: UpdateProductDto): Promise<Product> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('storage_product_update', { id, dto });
+    try {
+      return await httpFetch<Product>(`/api/products/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(dto),
+      });
+    } catch (err) {
+      console.warn('HTTP productUpdate failed, fallback to local', err);
+      const products = getStoredWebProducts();
+      const idx = products.findIndex((p) => p.id === id);
+      if (idx === -1) {
+        throw new Error(`Product not found: ${id}`);
+      }
+      const existing = products[idx];
+      const updated: Product = {
+        ...existing,
+        name: dto.name ?? existing.name,
+        sku: dto.sku ?? existing.sku,
+        barcode: dto.barcode !== undefined ? dto.barcode : existing.barcode,
+        category_id: dto.category_id ?? existing.category_id,
+        brand_id: dto.brand_id !== undefined ? dto.brand_id : existing.brand_id,
+        company_id: dto.company_id !== undefined ? dto.company_id : existing.company_id,
+        color_id: dto.color_id !== undefined ? dto.color_id : existing.color_id,
+        quality_id: dto.quality_id !== undefined ? dto.quality_id : existing.quality_id,
+        unit_id: dto.unit_id !== undefined ? dto.unit_id : existing.unit_id,
+        purchase_price:
+          dto.purchase_price !== undefined && dto.purchase_price !== null
+            ? Math.round(Number(dto.purchase_price))
+            : existing.purchase_price,
+        average_cost:
+          dto.average_cost !== undefined && dto.average_cost !== null
+            ? Math.round(Number(dto.average_cost))
+            : existing.average_cost,
+        sale_price:
+          dto.sale_price !== undefined && dto.sale_price !== null
+            ? Math.round(Number(dto.sale_price))
+            : existing.sale_price,
+        low_stock_threshold:
+          dto.low_stock_threshold !== undefined && dto.low_stock_threshold !== null
+            ? Number(dto.low_stock_threshold)
+            : existing.low_stock_threshold,
+        is_active: dto.is_active !== undefined && dto.is_active !== null ? dto.is_active : existing.is_active,
+        description: dto.description !== undefined ? dto.description : existing.description,
+        updated_at: new Date().toISOString(),
+      };
+      products[idx] = updated;
+      saveStoredWebProducts(products);
+      return updated;
     }
-    const products = getStoredWebProducts();
-    const idx = products.findIndex((p) => p.id === id);
-    if (idx === -1) {
-      throw new Error(`Product not found: ${id}`);
-    }
-    const existing = products[idx];
-    const updated: Product = {
-      ...existing,
-      name: dto.name ?? existing.name,
-      sku: dto.sku ?? existing.sku,
-      barcode: dto.barcode !== undefined ? dto.barcode : existing.barcode,
-      category_id: dto.category_id ?? existing.category_id,
-      brand_id: dto.brand_id !== undefined ? dto.brand_id : existing.brand_id,
-      company_id: dto.company_id !== undefined ? dto.company_id : existing.company_id,
-      color_id: dto.color_id !== undefined ? dto.color_id : existing.color_id,
-      quality_id: dto.quality_id !== undefined ? dto.quality_id : existing.quality_id,
-      unit_id: dto.unit_id !== undefined ? dto.unit_id : existing.unit_id,
-      purchase_price:
-        dto.purchase_price !== undefined && dto.purchase_price !== null
-          ? Math.round(Number(dto.purchase_price))
-          : existing.purchase_price,
-      average_cost:
-        dto.average_cost !== undefined && dto.average_cost !== null
-          ? Math.round(Number(dto.average_cost))
-          : existing.average_cost,
-      sale_price:
-        dto.sale_price !== undefined && dto.sale_price !== null
-          ? Math.round(Number(dto.sale_price))
-          : existing.sale_price,
-      low_stock_threshold:
-        dto.low_stock_threshold !== undefined && dto.low_stock_threshold !== null
-          ? Number(dto.low_stock_threshold)
-          : existing.low_stock_threshold,
-      is_active: dto.is_active !== undefined && dto.is_active !== null ? dto.is_active : existing.is_active,
-      description: dto.description !== undefined ? dto.description : existing.description,
-      updated_at: new Date().toISOString(),
-    };
-    products[idx] = updated;
-    saveStoredWebProducts(products);
-    return updated;
   },
 
   async productGet(id: string): Promise<Product> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('storage_product_get', { id });
+    try {
+      return await httpFetch<Product>(`/api/products/${encodeURIComponent(id)}`);
+    } catch {
+      const products = getStoredWebProducts();
+      const found = products.find((p) => p.id === id);
+      if (!found) throw new Error(`Product not found: ${id}`);
+      return found;
     }
-    const products = getStoredWebProducts();
-    const found = products.find((p) => p.id === id);
-    if (!found) throw new Error(`Product not found: ${id}`);
-    return found;
   },
 
   async productGetBySku(sku: string): Promise<Product> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('storage_product_get_by_sku', { sku });
-    }
+    try {
+      const products = await httpFetch<Product[]>(`/api/products?search=${encodeURIComponent(sku)}`);
+      const found = products.find((p) => p.sku.toLowerCase() === sku.toLowerCase());
+      if (found) return found;
+    } catch {}
     const products = getStoredWebProducts();
     const found = products.find((p) => p.sku.toLowerCase() === sku.toLowerCase());
     if (!found) throw new Error(`Product not found with SKU: ${sku}`);
@@ -1080,10 +1052,11 @@ export const tauriClient = {
   },
 
   async productGetByBarcode(barcode: string): Promise<Product> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product>('storage_product_get_by_barcode', { barcode });
-    }
+    try {
+      const products = await httpFetch<Product[]>(`/api/products?search=${encodeURIComponent(barcode)}`);
+      const found = products.find((p) => p.barcode && p.barcode.toLowerCase() === barcode.toLowerCase());
+      if (found) return found;
+    } catch {}
     const products = getStoredWebProducts();
     const found = products.find((p) => p.barcode && p.barcode.toLowerCase() === barcode.toLowerCase());
     if (!found) throw new Error(`Product not found with Barcode: ${barcode}`);
@@ -1091,65 +1064,43 @@ export const tauriClient = {
   },
 
   async productList(filter?: ProductFilter): Promise<Product[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Product[]>('storage_product_list', { filter });
-    }
-    let list = getStoredWebProducts();
+    const params = new URLSearchParams();
     if (filter) {
+      if (filter.search) params.set('search', filter.search);
+      if (filter.category_id) params.set('category_id', filter.category_id);
+      if (filter.brand_id) params.set('brand_id', filter.brand_id);
+      if (filter.company_id) params.set('company_id', filter.company_id);
+      if (filter.color_id) params.set('color_id', filter.color_id);
+      if (filter.quality_id) params.set('quality_id', filter.quality_id);
       if (filter.is_active !== undefined && filter.is_active !== null) {
-        list = list.filter((p) => p.is_active === filter.is_active);
+        params.set('is_active', String(filter.is_active));
       }
-      if (filter.category_id) {
-        list = list.filter((p) => p.category_id === filter.category_id);
-      }
-      if (filter.brand_id) {
-        list = list.filter((p) => p.brand_id === filter.brand_id);
-      }
-      if (filter.company_id) {
-        list = list.filter((p) => p.company_id === filter.company_id);
-      }
-      if (filter.color_id) {
-        list = list.filter((p) => p.color_id === filter.color_id);
-      }
-      if (filter.quality_id) {
-        list = list.filter((p) => p.quality_id === filter.quality_id);
-      }
-      if (filter.search) {
-        const query = filter.search.toLowerCase();
-        list = list.filter(
-          (p) =>
-            p.name.toLowerCase().includes(query) ||
-            p.sku.toLowerCase().includes(query) ||
-            (p.barcode && p.barcode.toLowerCase().includes(query))
-        );
-      }
-      if (filter.offset) {
-        list = list.slice(filter.offset);
-      }
-      if (filter.limit) {
-        list = list.slice(0, filter.limit);
-      }
+      if (filter.limit !== undefined && filter.limit !== null) params.set('limit', String(filter.limit));
+      if (filter.offset !== undefined && filter.offset !== null) params.set('offset', String(filter.offset));
     }
-    return list;
+    const qs = params.toString();
+    return await httpFetch<Product[]>(`/api/products${qs ? '?' + qs : ''}`);
   },
 
   async productDeactivate(id: string): Promise<void> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('storage_product_deactivate', { id });
+    try {
+      await httpFetch<void>(`/api/products/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
       return;
-    }
-    const products = getStoredWebProducts();
-    const idx = products.findIndex((p) => p.id === id);
-    if (idx !== -1) {
-      products[idx].is_active = false;
-      products[idx].updated_at = new Date().toISOString();
-      saveStoredWebProducts(products);
+    } catch (err) {
+      console.warn('HTTP productDeactivate failed, fallback to local', err);
+      const products = getStoredWebProducts();
+      const idx = products.findIndex((p) => p.id === id);
+      if (idx !== -1) {
+        products[idx].is_active = false;
+        products[idx].updated_at = new Date().toISOString();
+        saveStoredWebProducts(products);
+      }
     }
   },
 
-  // ── Inventory Foundation Domain (Phase 4A Typed Storage Bridge) ─────────────
+  // â”€â”€ Inventory Foundation Domain (Phase 4A Typed Storage Bridge) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async inventoryIncrease(dto: IncreaseStockDto): Promise<number> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -1177,44 +1128,31 @@ export const tauriClient = {
   },
 
   async inventoryAdjust(dto: AdjustStockDto): Promise<number> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('storage_inventory_adjust', { dto });
-    }
-    const stockMap = getStoredWebStockMap();
-    const next = dto.target_quantity ?? (dto as any).new_quantity ?? 0;
-    stockMap[dto.product_id] = next;
-    saveStoredWebStockMap(stockMap);
-    return next;
+    const res = await httpFetch<{ data?: any, newStock?: number }>('/api/v1/inventory/adjust', {
+      method: 'POST',
+      body: JSON.stringify(dto),
+    });
+    return typeof res.data === 'number' ? res.data : typeof res === 'number' ? res : (dto.target_quantity ?? 0);
   },
 
   async inventoryTransfer(dto: TransferStockDto): Promise<void> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('storage_inventory_transfer', { dto });
-    }
+    await httpFetch('/api/v1/inventory/transfer', {
+      method: 'POST',
+      body: JSON.stringify(dto),
+    });
   },
 
   async inventoryGetStock(productId: string, branchId: string): Promise<number> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('storage_inventory_get_stock', {
-        productId,
-        branchId,
-      });
+    const stockList = await httpFetch<any[]>(`/api/inventory?product_id=${encodeURIComponent(productId)}&branch_id=${encodeURIComponent(branchId)}`).catch(() => []);
+    if (Array.isArray(stockList)) {
+      const record = stockList.find((r: any) => r.product_id === productId);
+      return record ? (record.quantity || 0) : 0;
     }
-    const stockMap = getStoredWebStockMap();
-    return stockMap[productId] || 0;
+    return 0;
   },
 
   async inventoryGetStockMap(branchId: string): Promise<Record<string, number>> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Record<string, number>>('storage_inventory_get_stock_map', {
-        branchId,
-      });
-    }
-    return getStoredWebStockMap();
+    return await httpFetch<Record<string, number>>(`/api/inventory?branch_id=${encodeURIComponent(branchId)}`);
   },
 
   async inventoryGetMovements(
@@ -1243,23 +1181,9 @@ export const tauriClient = {
     return [];
   },
 
-  // ── Organization & Branch Operations ──────────────────────────────────────
+  // â”€â”€ Organization & Branch Operations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async branchList(): Promise<Branch[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Branch[]>('branch_list');
-    }
-    return [
-      {
-        id: '00000000-0000-0000-0000-000000000002',
-        organization_id: '00000000-0000-0000-0000-000000000001',
-        name: 'Main Branch',
-        code: 'MAIN',
-        is_active: true,
-        created_at: '2026-01-01T00:00:00Z',
-        updated_at: '2026-01-01T00:00:00Z',
-      },
-    ];
+    return await httpFetch<Branch[]>('/api/v1/branches');
   },
 
   async branchGetMain(): Promise<Branch | null> {
@@ -1279,33 +1203,19 @@ export const tauriClient = {
   },
 
   async organizationGetDashboardStats(): Promise<OrganizationDashboardStats> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<OrganizationDashboardStats>('organization_get_dashboard_stats');
-    }
-    const prods = getStoredWebProducts();
-    const lowStockCount = prods.filter((p: any) => (p.quantity ?? 0) <= ((p.min_stock_level ?? p.low_stock_threshold) || 5)).length;
-    let activeStaffCount = 6;
-    try {
-      const raw = typeof window !== 'undefined' ? localStorage.getItem('nmm_browser_staff_users') : null;
-      if (raw) {
-        const staff = JSON.parse(raw);
-        if (Array.isArray(staff)) {
-          activeStaffCount = Math.max(1, staff.filter((u: any) => u.status === 'active').length);
-        }
-      }
-    } catch {}
+    const products = await httpFetch<any[]>('/api/products').catch(() => []);
+    const users = await httpFetch<any[]>('/api/users').catch(() => []);
+    const lowStockCount = products.filter((p) => (p.quantity || 0) <= (p.low_stock_threshold || 5)).length;
+    const activeStaffCount = users.filter((u) => u.status === 'active' || u.is_active).length;
 
     return {
-      product_count: prods.length,
-      category_count: 0,
-      active_staff_count: activeStaffCount,
-      low_stock_count: lowStockCount,
-      active_branch_count: 1,
+      total_products: products.length,
+      active_staff: activeStaffCount || 1,
+      low_stock_items: lowStockCount,
     };
   },
 
-  // ── Customer & Ledger Domain (Phase 15) ──────────────────────────────────
+  // â”€â”€ Customer & Ledger Domain (Phase 15) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async customerCreate(dto: CreateCustomerDto): Promise<Customer> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -1456,13 +1366,17 @@ export const tauriClient = {
   },
 
   async customerGetStatement(customerId: string): Promise<CustomerStatementDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CustomerStatementDto>('storage_customer_get_statement', {
-        customerId,
-      });
+    try {
+      return await httpFetch<CustomerStatementDto>(`/api/v1/customers/${encodeURIComponent(customerId)}/ledger`);
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<CustomerStatementDto>('storage_customer_get_statement', {
+          customerId,
+        });
+      }
+      throw e;
     }
-    throw new Error('Tauri environment required');
   },
 
   async customerGetBalance(customerId: string): Promise<number> {
@@ -1492,7 +1406,7 @@ export const tauriClient = {
     }
   },
 
-  // ── Supplier & Procurement Domain (Phase 16) ──────────────────────────────────
+  // â”€â”€ Supplier & Procurement Domain (Phase 16) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async supplierCreate(dto: CreateSupplierDto): Promise<Supplier> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -1683,7 +1597,7 @@ export const tauriClient = {
     }
   },
 
-  // ── Party Domain (Phase 1.1 canonical party identity) ─────────────────────
+  // â”€â”€ Party Domain (Phase 1.1 canonical party identity) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Desktop only: parties live in the local SQLite database and sync through the
   // outbox. Browser (web preview) mode has no party store.
   async partyList(filter?: PartyFilter): Promise<PartySummaryDto[]> {
@@ -1718,248 +1632,97 @@ export const tauriClient = {
     throw new Error(PARTY_DESKTOP_ONLY_MESSAGE);
   },
 
-  // ── Sales & Checkout Domain (Phase 4B Typed Storage Bridge) ───────────────
+  // â”€â”€ Sales & Checkout Domain (Phase 4B Typed Storage Bridge) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async saleComplete(dto: CompleteSaleDto): Promise<SaleResultDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SaleResultDto>('storage_sale_complete', { dto });
-    }
-    const now = new Date().toISOString();
-    const invoiceNum = `INV-${Math.floor(100000 + Math.random() * 900000)}`;
-    const saleId = `sale_${Date.now()}`;
-
-    let subtotal = 0;
-    const lines: SaleLine[] = [];
-    const products = getStoredWebProducts();
-    const stockMap = getStoredWebStockMap();
-
-    (dto.items || []).forEach((item, idx) => {
-      const prod = products.find((p) => p.id === item.product_id);
-      const unitPrice = (item as any).unit_price ?? (item as any).price ?? (prod ? prod.sale_price : 1000);
-      const costPrice = prod ? (prod.purchase_price || prod.average_cost || 800) : 800;
-      const lineDisc = item.discount || 0;
-      const lineTotal = Math.max(0, unitPrice * item.quantity - lineDisc);
-      subtotal += lineTotal;
-
-      lines.push({
-        id: `line_${saleId}_${idx + 1}`,
-        sale_id: saleId,
-        product_id: item.product_id,
-        product_name_snapshot: prod ? prod.name : `Product ${item.product_id}`,
-        sku_snapshot: prod ? prod.sku : `SKU-${idx + 1}`,
-        unit_price: unitPrice,
-        cost_price_snapshot: costPrice,
-        quantity: item.quantity,
-        discount: lineDisc,
-        line_total: lineTotal,
-        created_at: now,
-      });
-
-      if (stockMap[item.product_id] !== undefined) {
-        stockMap[item.product_id] = Math.max(0, (stockMap[item.product_id] || 0) - item.quantity);
-      }
+    return await httpFetch<SaleResultDto>('/api/sales', {
+      method: 'POST',
+      body: JSON.stringify(dto),
     });
-
-    saveStoredWebStockMap(stockMap);
-
-    const extraDisc = dto.discount || 0;
-    const totalAmount = Math.max(0, subtotal - extraDisc);
-    const paidAmount = dto.paid_amount !== null && dto.paid_amount !== undefined ? dto.paid_amount : totalAmount;
-    const changeAmount = Math.max(0, paidAmount - totalAmount);
-
-    let paymentStatus: PaymentStatus = 'PAID';
-    if (paidAmount === 0 && totalAmount > 0) {
-      paymentStatus = 'UNPAID';
-    } else if (paidAmount < totalAmount) {
-      paymentStatus = 'PARTIALLY_PAID';
-    }
-
-    const saleRecord: Sale = {
-      id: saleId,
-      invoice_number: invoiceNum,
-      branch_id: dto.branch_id || '00000000-0000-0000-0000-000000000002',
-      customer_id: dto.customer_id || null,
-      customer_name_snapshot: dto.customer_id ? 'Customer' : 'Walk-in Customer',
-      subtotal,
-      discount: extraDisc,
-      tax_amount: 0,
-      total_amount: totalAmount,
-      paid_amount: paidAmount,
-      change_amount: changeAmount,
-      payment_status: paymentStatus,
-      sale_status: 'COMPLETED',
-      performed_by: 'Cashier',
-      notes: dto.notes || null,
-      created_at: now,
-      updated_at: now,
-    };
-
-    const payments: SalePayment[] = [
-      {
-        id: `pay_${saleId}_1`,
-        sale_id: saleId,
-        amount: paidAmount,
-        payment_method: dto.payment_method || 'cash',
-        reference_number: null,
-        notes: null,
-        created_at: now,
-      },
-    ];
-
-    const cogs = lines.reduce((acc, l) => acc + l.cost_price_snapshot * l.quantity, 0);
-    const grossProfit = totalAmount - cogs;
-    const grossMargin = totalAmount > 0 ? (grossProfit / totalAmount) * 100 : 0;
-
-    const storedSales = getStoredWebSales();
-    storedSales.unshift({ sale: saleRecord, lines, payments });
-    saveStoredWebSales(storedSales);
-
-    return {
-      sale: saleRecord,
-      lines,
-      payments,
-      credit_amount: paymentStatus === 'UNPAID' || paymentStatus === 'PARTIALLY_PAID' ? totalAmount - paidAmount : 0,
-      customer_balance_after: null,
-      cogs,
-      gross_profit: grossProfit,
-      gross_margin: grossMargin,
-    };
   },
 
   async saleGetById(id: string): Promise<Sale | null> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Sale | null>('storage_sale_get_by_id', { id });
+    try {
+      return await httpFetch<Sale>(`/api/sales/${encodeURIComponent(id)}`);
+    } catch (e: any) {
+      if (e?.status === 404) return null;
+      throw e;
     }
-    const stored = getStoredWebSales();
-    const found = stored.find((s) => s.sale.id === id);
-    return found ? found.sale : null;
   },
 
   async saleGetByInvoice(invoiceNumber: string): Promise<Sale | null> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Sale | null>('storage_sale_get_by_invoice', { invoiceNumber });
+    try {
+      return await httpFetch<Sale>(`/api/sales/invoice/${encodeURIComponent(invoiceNumber)}`);
+    } catch (e: any) {
+      if (e?.status === 404) return null;
+      throw e;
     }
-    const stored = getStoredWebSales();
-    const found = stored.find((s) => s.sale.invoice_number.toLowerCase() === invoiceNumber.toLowerCase());
-    return found ? found.sale : null;
   },
 
   async saleList(filter?: SaleFilterDto): Promise<Sale[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Sale[]>('storage_sale_list', { filter });
-    }
-    let list = getStoredWebSales().map((s) => s.sale);
+    const params = new URLSearchParams();
     if (filter) {
-      if (filter.customer_id) {
-        list = list.filter((s) => s.customer_id === filter.customer_id);
-      }
-      if (filter.payment_status) {
-        list = list.filter((s) => s.payment_status === filter.payment_status);
-      }
-      if (filter.sale_status) {
-        list = list.filter((s) => s.sale_status === filter.sale_status);
-      }
-      if (filter.start_date) {
-        list = list.filter((s) => {
-          if (!s.created_at) return true;
-          const d = new Date(s.created_at);
-          const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          return dateStr >= filter.start_date!;
-        });
-      }
-      if (filter.end_date) {
-        list = list.filter((s) => {
-          if (!s.created_at) return true;
-          const d = new Date(s.created_at);
-          const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          return dateStr <= filter.end_date!;
-        });
-      }
-      if (filter.search) {
-        const q = filter.search.toLowerCase();
-        list = list.filter(
-          (s) =>
-            s.invoice_number.toLowerCase().includes(q) ||
-            (s.customer_name_snapshot && s.customer_name_snapshot.toLowerCase().includes(q))
-        );
-      }
-      if (filter.offset) {
-        list = list.slice(filter.offset);
-      }
-      if (filter.limit) {
-        list = list.slice(0, filter.limit);
-      }
+      if (filter.branch_id) params.set('branch_id', filter.branch_id);
+      if (filter.customer_id) params.set('customer_id', filter.customer_id);
+      if (filter.payment_status) params.set('payment_status', filter.payment_status);
+      if (filter.sale_status) params.set('sale_status', filter.sale_status);
+      if (filter.start_date) params.set('start_date', filter.start_date);
+      if (filter.end_date) params.set('end_date', filter.end_date);
+      if (filter.search) params.set('search', filter.search);
+      if (filter.limit !== undefined && filter.limit !== null) params.set('limit', String(filter.limit));
+      if (filter.offset !== undefined && filter.offset !== null) params.set('offset', String(filter.offset));
     }
-    return list;
+    const qs = params.toString();
+    return await httpFetch<Sale[]>(`/api/sales${qs ? '?' + qs : ''}`);
   },
 
   async saleGetLines(saleId: string): Promise<SaleLine[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SaleLine[]>('storage_sale_get_lines', { saleId });
-    }
-    const stored = getStoredWebSales();
-    const found = stored.find((s) => s.sale.id === saleId);
-    return found ? found.lines : [];
+    return await httpFetch<SaleLine[]>(`/api/sales/${encodeURIComponent(saleId)}/lines`);
   },
 
   async saleGetPayments(saleId: string): Promise<SalePayment[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SalePayment[]>('storage_sale_get_payments', { saleId });
-    }
-    const stored = getStoredWebSales();
-    const found = stored.find((s) => s.sale.id === saleId);
-    return found ? found.payments : [];
+    return await httpFetch<SalePayment[]>(`/api/sales/${encodeURIComponent(saleId)}/payments`);
   },
 
-  // ── Purchasing Domain (Phase 16 Typed Storage Bridge) ─────────────────────
+  // â”€â”€ Purchasing Domain (Phase 16 Typed Storage Bridge) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async purchaseComplete(dto: CompletePurchaseDto): Promise<PurchaseResultDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<PurchaseResultDto>('storage_purchase_complete', { dto });
-    }
-    throw new Error('Tauri environment required');
+    return await httpFetch<PurchaseResultDto>('/api/purchases', {
+      method: 'POST',
+      body: JSON.stringify(dto),
+    });
   },
 
   async purchaseGetById(id: string): Promise<Purchase | null> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Purchase | null>('storage_purchase_get_by_id', { id });
+    try {
+      return await httpFetch<Purchase | null>(`/api/purchases/` + id, { method: 'GET' });
+    } catch (e: any) {
+      if (e.status === 404) return null;
+      throw e;
     }
-    return null;
   },
 
   async purchaseGetByNumber(purchaseNumber: string): Promise<Purchase | null> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Purchase | null>('storage_purchase_get_by_number', {
-        purchaseNumber,
-      });
-    }
-    return null;
+    const list = await httpFetch<Purchase[]>('/api/purchases?number=' + encodeURIComponent(purchaseNumber), { method: 'GET' });
+    return list.length > 0 ? list[0] : null;
   },
 
   async purchaseList(filter?: PurchaseFilterDto): Promise<Purchase[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Purchase[]>('storage_purchase_list', { filter });
+    const params = new URLSearchParams();
+    if (filter) {
+      Object.entries(filter).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          params.append(key, String(value));
+        }
+      });
     }
-    return [];
+    const qs = params.toString() ? '?' + params.toString() : '';
+    return await httpFetch<Purchase[]>('/api/purchases' + qs, { method: 'GET' });
   },
 
   async purchaseGetLines(purchaseId: string): Promise<PurchaseLine[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<PurchaseLine[]>('storage_purchase_get_lines', { purchaseId });
-    }
-    return [];
+    return await httpFetch<PurchaseLine[]>(`/api/purchases/` + purchaseId + `/lines`, { method: 'GET' });
   },
 
-  // ── Expense Domain (Phase 17) ───────────────────────────────────────────────
+  // â”€â”€ Expense Domain (Phase 17) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async expenseCategoryCreate(dto: CreateExpenseCategoryDto): Promise<ExpenseCategory> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -2016,7 +1779,7 @@ export const tauriClient = {
     throw new Error('Tauri environment required');
   },
 
-  // ── Cash Management & Daily Closing Domain (Phase 17) ───────────────────────
+  // â”€â”€ Cash Management & Daily Closing Domain (Phase 17) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async cashSessionOpen(dto: OpenCashSessionDto): Promise<CashSession> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -2081,45 +1844,75 @@ export const tauriClient = {
     throw new Error('Tauri environment required');
   },
 
-  // ── Returns & Stock Reversal Domain (Phase 18) ─────────────────────────────
+  // â”€â”€ Returns & Stock Reversal Domain (Phase 18) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async salesReturnGetReturnable(saleId: string): Promise<SaleReturnableInfoDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SaleReturnableInfoDto>('sales_return_get_returnable', { saleId });
+    try {
+      return await httpFetch<SaleReturnableInfoDto>(`/api/returns/sale/${encodeURIComponent(saleId)}/returnable`);
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<SaleReturnableInfoDto>('sales_return_get_returnable', { saleId });
+      }
+      throw e;
     }
-    throw new Error('Tauri environment required');
   },
 
   async salesReturnCreate(dto: CreateSalesReturnDto): Promise<SalesReturnResultDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SalesReturnResultDto>('sales_return_create', { dto });
+    try {
+      return await httpFetch<SalesReturnResultDto>('/api/returns', {
+        method: 'POST',
+        body: JSON.stringify(dto),
+      });
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<SalesReturnResultDto>('sales_return_create', { dto });
+      }
+      throw e;
     }
-    throw new Error('Tauri environment required');
   },
 
   async salesReturnGet(id: string): Promise<SalesReturnDetailDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SalesReturnDetailDto>('sales_return_get', { id });
+    try {
+      return await httpFetch<SalesReturnDetailDto>(`/api/returns/${encodeURIComponent(id)}`);
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<SalesReturnDetailDto>('sales_return_get', { id });
+      }
+      throw e;
     }
-    throw new Error('Tauri environment required');
   },
 
   async salesReturnList(filter?: SalesReturnFilterDto): Promise<SalesReturn[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SalesReturn[]>('sales_return_list', { filter });
+    try {
+      const params = new URLSearchParams();
+      if (filter) {
+        if (filter.branch_id) params.set('branch_id', filter.branch_id);
+        if (filter.customer_id) params.set('customer_id', filter.customer_id);
+        if (filter.sale_id) params.set('sale_id', filter.sale_id);
+      }
+      const qs = params.toString();
+      return await httpFetch<SalesReturn[]>(`/api/returns${qs ? '?' + qs : ''}`);
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<SalesReturn[]>('sales_return_list', { filter });
+      }
+      return [];
     }
-    return [];
   },
 
   async salesReturnGetBySale(saleId: string): Promise<SalesReturn[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SalesReturn[]>('sales_return_get_by_sale', { saleId });
+    try {
+      return await httpFetch<SalesReturn[]>(`/api/returns?sale_id=${encodeURIComponent(saleId)}`);
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<SalesReturn[]>('sales_return_get_by_sale', { saleId });
+      }
+      return [];
     }
-    return [];
   },
 
   async purchaseReturnGetReturnable(purchaseId: string): Promise<PurchaseReturnableInfoDto> {
@@ -2162,7 +1955,7 @@ export const tauriClient = {
     return [];
   },
 
-  // ── Profitability & COGS (Phase 20) ─────────────────────────────────────────
+  // â”€â”€ Profitability & COGS (Phase 20) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async profitGetPeriod(
     startDate?: string | null,
     endDate?: string | null,
@@ -2244,58 +2037,14 @@ export const tauriClient = {
   },
 
   async profitGetDashboardSummary(branchId?: string | null): Promise<DashboardProfitSummaryDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<DashboardProfitSummaryDto>('profit_get_dashboard_summary', {
-        branchId: branchId || null,
-      });
+    let url = '/api/reports/profit';
+    if (branchId) {
+      url += `?branch_id=${encodeURIComponent(branchId)}`;
     }
-    const sales = getStoredWebSales();
-    const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const thisMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-
-    const calcMetrics = (filterFn: (s: StoredWebSale) => boolean): ProfitMetricsDto => {
-      const matches = sales.filter((s) => s.sale && s.sale.sale_status === 'COMPLETED' && filterFn(s));
-      let gross_revenue = 0;
-      let discounts = 0;
-      let net_revenue = 0;
-      let cogs = 0;
-
-      for (const item of matches) {
-        const s = item.sale;
-        gross_revenue += s.subtotal || 0;
-        discounts += s.discount || 0;
-        net_revenue += s.total_amount || 0;
-        if (item.lines && item.lines.length > 0) {
-          for (const line of item.lines) {
-            cogs += (line.cost_price_snapshot || 0) * (line.quantity || 1);
-          }
-        }
-      }
-
-      const gross_profit = net_revenue - cogs;
-      const gross_margin = net_revenue > 0 ? (gross_profit / net_revenue) * 100 : 0;
-
-      return {
-        gross_revenue,
-        discounts,
-        net_revenue,
-        cogs,
-        gross_profit,
-        gross_margin,
-        orders_count: matches.length,
-      };
-    };
-
-    return {
-      today: calcMetrics((s) => (s.sale.created_at || '').startsWith(todayStr)),
-      this_month: calcMetrics((s) => (s.sale.created_at || '').startsWith(thisMonthStr)),
-      total: calcMetrics(() => true),
-    };
+    return await httpFetch<DashboardProfitSummaryDto>(url);
   },
 
-  // ── Sync Engine Commands ───────────────────────────────────────────────────
+  // â”€â”€ Sync Engine Commands â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async syncGetStatus(): Promise<SyncEngineStatus> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -2337,7 +2086,7 @@ export const tauriClient = {
   },
 };
 
-// ── Type Definitions for Organization & Branch ──────────────────────────────
+// â”€â”€ Type Definitions for Organization & Branch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface Branch {
   id: string;
   organization_id: string;
@@ -2356,7 +2105,7 @@ export interface OrganizationDashboardStats {
   active_branch_count: number;
 }
 
-// ── Type Definitions for Catalog & Inventory Foundation ─────────────────────
+// â”€â”€ Type Definitions for Catalog & Inventory Foundation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface Category {
   id: string;
   name: string;
@@ -2556,7 +2305,7 @@ export interface LowStockItemDto {
   low_stock_threshold: number;
 }
 
-// ── Type Definitions for Customer & Customer Ledger (Phase 15) ──────────────
+// â”€â”€ Type Definitions for Customer & Customer Ledger (Phase 15) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface Customer {
   id: string;
   customer_code: string;
@@ -2684,7 +2433,7 @@ export interface CustomerPaymentResultDto {
   allocated_sales: AllocatedSaleDto[];
 }
 
-// ── Type Definitions for Sales & Checkout (Phase 15) ────────────────────────
+// â”€â”€ Type Definitions for Sales & Checkout (Phase 15) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export type PaymentStatus = 'PAID' | 'PARTIALLY_PAID' | 'UNPAID';
 export type SaleStatus = 'COMPLETED' | 'VOIDED' | 'REFUNDED';
 
@@ -2779,7 +2528,7 @@ export interface SaleFilterDto {
   offset?: number | null;
 }
 
-// ── Type Definitions for Suppliers & Purchasing (Phase 16) ───────────────────
+// â”€â”€ Type Definitions for Suppliers & Purchasing (Phase 16) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface Supplier {
   id: string;
   supplier_code: string;
@@ -2974,7 +2723,7 @@ export interface PurchaseFilterDto {
   offset?: number | null;
 }
 
-// ── Type Definitions for Expenses & Cash Management (Phase 17) ────────────────
+// â”€â”€ Type Definitions for Expenses & Cash Management (Phase 17) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface ExpenseCategory {
   id: string;
   name: string;
@@ -3127,7 +2876,7 @@ export interface DailyCashSummaryDto {
   cash_variance: number | null;
 }
 
-// ── Type Definitions for Returns & Stock Reversal (Phase 18) ──────────────────
+// â”€â”€ Type Definitions for Returns & Stock Reversal (Phase 18) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export type SalesRefundMethod = 'CASH' | 'CUSTOMER_CREDIT';
 export type PurchaseSettlementMethod = 'CASH' | 'SUPPLIER_CREDIT';
 export type ReturnStatus = 'COMPLETED' | 'CANCELLED';
@@ -3309,7 +3058,7 @@ export interface PurchaseReturnFilterDto {
   offset?: number | null;
 }
 
-// ── Type Definitions for Profitability & COGS (Phase 20) ─────────────────────
+// â”€â”€ Type Definitions for Profitability & COGS (Phase 20) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface ProfitMetricsDto {
   gross_revenue: number;
   discounts: number;
@@ -3408,7 +3157,7 @@ export interface SyncQueueItem {
   updated_at: string;
 }
 
-// ── Party Domain (Phase 1.1) — mirrors src-tauri/src/domain/party.rs ─────────
+// â”€â”€ Party Domain (Phase 1.1) â€” mirrors src-tauri/src/domain/party.rs â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const PARTY_DESKTOP_ONLY_MESSAGE = 'Parties are available in the Niazi desktop app only.';
 
@@ -3475,3 +3224,6 @@ export interface PartyFilter {
   limit?: number;
   offset?: number;
 }
+
+
+

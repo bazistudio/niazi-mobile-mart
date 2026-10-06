@@ -198,7 +198,7 @@ export function ProductEditModal({ product, onClose }: ProductEditModalProps) {
               </h3>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Category *</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type *</label>
                 <DynamicMasterSelect
                   showAddButton
                   hideAllOption

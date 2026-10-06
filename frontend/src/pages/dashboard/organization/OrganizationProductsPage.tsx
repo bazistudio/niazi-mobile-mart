@@ -45,6 +45,7 @@ export function OrganizationProductsPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [branchStockMaps, setBranchStockMaps] = useState<Record<string, Record<string, number>>>({});
   const [isLoadingBranchStocks, setIsLoadingBranchStocks] = useState<boolean>(false);
+  const [stockLoadError, setStockLoadError] = useState<string | null>(null);
 
   const products = useInventoryStore((state) => state.products);
   const fetchProducts = useInventoryStore((state) => state.fetchProducts);
@@ -58,6 +59,7 @@ export function OrganizationProductsPage() {
   useEffect(() => {
     async function loadBranchesAndStocks() {
       setIsLoadingBranchStocks(true);
+      setStockLoadError(null);
       try {
         const branchList = await tauriClient.branchList();
         const activeBranches = branchList && branchList.length > 0 ? branchList : [
@@ -66,17 +68,24 @@ export function OrganizationProductsPage() {
         setBranches(activeBranches);
 
         const maps: Record<string, Record<string, number>> = {};
+        let mapFailedCount = 0;
         for (const branch of activeBranches) {
           try {
             const stockMap = await tauriClient.inventoryGetStockMap(branch.id);
-            maps[branch.id] = stockMap;
-          } catch {
+            maps[branch.id] = stockMap || {};
+          } catch (err) {
+            console.warn(`[OrganizationProductsPage] Failed stock map for branch ${branch.id}:`, err);
             maps[branch.id] = {};
+            mapFailedCount++;
           }
         }
+        if (mapFailedCount > 0 && mapFailedCount === activeBranches.length) {
+          setStockLoadError('Unable to connect to central stock server. Stock quantities may be unavailable.');
+        }
         setBranchStockMaps(maps);
-      } catch (err) {
-        console.warn('Failed to fetch branch stock distribution', err);
+      } catch (err: any) {
+        console.warn('[OrganizationProductsPage] Failed to fetch branch stock distribution', err);
+        setStockLoadError(err?.message || 'Network error fetching branch inventory data.');
       } finally {
         setIsLoadingBranchStocks(false);
       }
@@ -84,6 +93,7 @@ export function OrganizationProductsPage() {
 
     loadBranchesAndStocks();
   }, [products]);
+
 
   // Filter products by search term
   const filteredProducts = useMemo(() => {
@@ -177,6 +187,19 @@ export function OrganizationProductsPage() {
         </div>
       }
     >
+      {stockLoadError && (
+        <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl flex items-center justify-between text-xs text-amber-800 dark:text-amber-300">
+          <span>⚠️ {stockLoadError}</span>
+          <button
+            type="button"
+            onClick={() => fetchProducts()}
+            className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold transition-all"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Stat Summary Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200/80 dark:border-gray-700 shadow-sm flex items-center justify-between">

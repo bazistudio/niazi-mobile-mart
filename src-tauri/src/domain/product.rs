@@ -93,6 +93,7 @@ pub struct CreateProductDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateProductDto {
     pub name: Option<String>,
+    pub sku: Option<String>,
     pub barcode: Option<String>,
     pub category_id: Option<String>,
     pub brand_id: Option<String>,
