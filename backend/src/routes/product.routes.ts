@@ -30,6 +30,7 @@ import {
   CreateProductDto,
   UpdateProductDto,
 } from '../repositories/product.repo';
+import { importOpeningStock, ImportOpeningStockDto } from '../repositories/opening_stock.repo';
 
 import { proxyToCentralServer } from '../server';
 
@@ -238,6 +239,27 @@ export function createProductRouter(pool: Pool): Router {
       const id = req.params['id'] as string;
       await deactivateProduct(pool, id);
       res.status(200).json({ message: 'Product deactivated' });
+    } catch (err) {
+      sendError(req, res, err);
+    }
+  });
+
+  // ── POST /opening-stock ───────────────────────────────────────────────────
+  router.post('/opening-stock', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    if (identity.role !== 'Admin' && identity.role !== 'ShopAdmin') {
+      res.status(403).json({ error: 'Access denied: Opening stock import requires Admin or ShopAdmin permissions' });
+      return;
+    }
+
+    try {
+      const dto = req.body as ImportOpeningStockDto;
+      if (!dto.branch_id && identity.branch_id) {
+        dto.branch_id = identity.branch_id;
+      }
+      const result = await importOpeningStock(pool, dto, identity.user_id);
+      res.status(201).json(result);
     } catch (err) {
       sendError(req, res, err);
     }

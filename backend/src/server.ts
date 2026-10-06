@@ -23,7 +23,21 @@ import { getPool } from './db';
 import { createProductRouter } from './routes/product.routes';
 import { createSaleRouter } from './routes/sale.routes';
 import { createCustomerRouter, createCustomerV1Router } from './routes/customer.routes';
-import { listBrands, DEFAULT_BRANDS } from './repositories/product.repo';
+import { createHistoryRouter } from './routes/history.routes';
+import { createReturnsRouter } from './routes/returns.routes';
+import { createCashRouter } from './routes/cash.routes';
+import { createReportsRouter } from './routes/reports.routes';
+import {
+  listBrands,
+  DEFAULT_BRANDS,
+  listCategories,
+  listCompanies,
+  listQualities,
+  listColors,
+  listUnits,
+  listBranches,
+  getStockMapForBranch,
+} from './repositories/product.repo';
 
 function loadEnv(): void {
   const envPaths = [
@@ -127,6 +141,22 @@ async function main(): Promise<void> {
   const customerV1Router = createCustomerV1Router(pool);
   app.use('/api/v1/customers', customerV1Router);
 
+  const historyRouter = createHistoryRouter(pool);
+  app.use('/api/history', historyRouter);
+  app.use('/api/v1/history', historyRouter);
+
+  const returnsRouter = createReturnsRouter(pool);
+  app.use('/api/returns', returnsRouter);
+  app.use('/api/v1/returns', returnsRouter);
+
+  const cashRouter = createCashRouter(pool);
+  app.use('/api/cash', cashRouter);
+  app.use('/api/v1/cash', cashRouter);
+
+  const reportsRouter = createReportsRouter(pool);
+  app.use('/api/reports', reportsRouter);
+  app.use('/api/v1/reports', reportsRouter);
+
   app.get(['/api/brands', '/api/v1/brands'], async (_req: Request, res: Response) => {
     try {
       const brands = await listBrands(pool);
@@ -135,6 +165,43 @@ async function main(): Promise<void> {
       res.status(200).json(DEFAULT_BRANDS);
     }
   });
+
+  app.get(['/api/categories', '/api/v1/categories'], async (_req: Request, res: Response) => {
+    const list = await listCategories(pool);
+    res.status(200).json(list);
+  });
+
+  app.get(['/api/companies', '/api/v1/companies'], async (_req: Request, res: Response) => {
+    const list = await listCompanies(pool);
+    res.status(200).json(list);
+  });
+
+  app.get(['/api/qualities', '/api/v1/qualities'], async (_req: Request, res: Response) => {
+    const list = await listQualities(pool);
+    res.status(200).json(list);
+  });
+
+  app.get(['/api/colors', '/api/v1/colors'], async (_req: Request, res: Response) => {
+    const list = await listColors(pool);
+    res.status(200).json(list);
+  });
+
+  app.get(['/api/units', '/api/v1/units'], async (_req: Request, res: Response) => {
+    const list = await listUnits(pool);
+    res.status(200).json(list);
+  });
+
+  app.get(['/api/branches', '/api/v1/branches', '/api/shops'], async (_req: Request, res: Response) => {
+    const list = await listBranches(pool);
+    res.status(200).json(list);
+  });
+
+  app.get(['/api/inventory', '/api/v1/inventory', '/api/stock'], async (req: Request, res: Response) => {
+    const branchId = req.query['branch_id'] as string | undefined;
+    const stockMap = await getStockMapForBranch(pool, branchId);
+    res.status(200).json(stockMap);
+  });
+
 
   app.get('/health', (_req: Request, res: Response) => {
     res.status(200).json({ status: 'ok', service: 'niazi-product-backend' });

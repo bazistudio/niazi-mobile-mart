@@ -777,3 +777,110 @@ export async function listBrands(pool: Pool): Promise<Array<{ id: string; name: 
   }
   return DEFAULT_BRANDS;
 }
+
+export async function listCategories(pool: Pool): Promise<Array<{ id: string; name: string; code?: string }>> {
+  try {
+    const res = await pool.query('SELECT id, name, code FROM categories ORDER BY name ASC');
+    if (res.rows && res.rows.length > 0) {
+      return res.rows.map((r) => ({ id: String(r.id), name: String(r.name), code: r.code ? String(r.code) : undefined }));
+    }
+  } catch (err) {
+    console.warn('[product.repo] listCategories query failed:', err);
+  }
+  return [];
+}
+
+export async function listCompanies(pool: Pool): Promise<Array<{ id: string; name: string; code?: string }>> {
+  try {
+    const res = await pool.query('SELECT id, name, code FROM companies ORDER BY name ASC');
+    if (res.rows && res.rows.length > 0) {
+      return res.rows.map((r) => ({ id: String(r.id), name: String(r.name), code: r.code ? String(r.code) : undefined }));
+    }
+  } catch (err) {
+    console.warn('[product.repo] listCompanies query failed:', err);
+  }
+  return [];
+}
+
+export async function listQualities(pool: Pool): Promise<Array<{ id: string; name: string; code?: string }>> {
+  try {
+    const res = await pool.query('SELECT id, name, code FROM qualities ORDER BY name ASC');
+    if (res.rows && res.rows.length > 0) {
+      return res.rows.map((r) => ({ id: String(r.id), name: String(r.name), code: r.code ? String(r.code) : undefined }));
+    }
+  } catch (err) {
+    console.warn('[product.repo] listQualities query failed:', err);
+  }
+  return [];
+}
+
+export async function listColors(pool: Pool): Promise<Array<{ id: string; name: string; code?: string }>> {
+  try {
+    const res = await pool.query('SELECT id, name, code FROM colors ORDER BY name ASC');
+    if (res.rows && res.rows.length > 0) {
+      return res.rows.map((r) => ({ id: String(r.id), name: String(r.name), code: r.code ? String(r.code) : undefined }));
+    }
+  } catch (err) {
+    console.warn('[product.repo] listColors query failed:', err);
+  }
+  return [];
+}
+
+export async function listUnits(pool: Pool): Promise<Array<{ id: string; name: string; code?: string }>> {
+  try {
+    const res = await pool.query('SELECT id, name, abbreviation FROM units ORDER BY name ASC');
+    if (res.rows && res.rows.length > 0) {
+      return res.rows.map((r) => ({ id: String(r.id), name: String(r.name), code: r.abbreviation ? String(r.abbreviation) : undefined }));
+    }
+  } catch (err) {
+    console.warn('[product.repo] listUnits query failed:', err);
+  }
+  return [];
+}
+
+export async function listBranches(pool: Pool): Promise<Array<{ id: string; organization_id: string; name: string; code: string; is_active: boolean }>> {
+  try {
+    const res = await pool.query('SELECT id, organization_id, name, code, is_active FROM branches ORDER BY name ASC');
+    if (res.rows && res.rows.length > 0) {
+      return res.rows.map((r) => ({
+        id: String(r.id),
+        organization_id: String(r.organization_id || '00000000-0000-0000-0000-000000000001'),
+        name: String(r.name),
+        code: String(r.code || 'MAIN'),
+        is_active: Boolean(r.is_active === 1 || r.is_active === true || String(r.is_active) === 'true'),
+      }));
+    }
+  } catch (err) {
+    console.warn('[product.repo] listBranches query failed:', err);
+  }
+  return [
+    { id: '00000000-0000-0000-0000-000000000002', organization_id: '00000000-0000-0000-0000-000000000001', name: 'Main Branch', code: 'MAIN', is_active: true }
+  ];
+}
+
+export async function getStockMapForBranch(pool: Pool, branchId?: string): Promise<Record<string, number>> {
+  try {
+    const map: Record<string, number> = {};
+    if (branchId && branchId.trim()) {
+      const res = await pool.query(
+        'SELECT product_id, quantity FROM stock WHERE branch_id = $1',
+        [branchId.trim()]
+      );
+      for (const row of res.rows) {
+        map[String(row['product_id'])] = Number(row['quantity']) || 0;
+      }
+    } else {
+      const res = await pool.query(
+        'SELECT product_id, SUM(quantity)::bigint AS total_qty FROM stock GROUP BY product_id'
+      );
+      for (const row of res.rows) {
+        map[String(row['product_id'])] = Number(row['total_qty']) || 0;
+      }
+    }
+    return map;
+  } catch (err) {
+    console.warn('[product.repo] getStockMapForBranch query failed:', err);
+    return {};
+  }
+}
+

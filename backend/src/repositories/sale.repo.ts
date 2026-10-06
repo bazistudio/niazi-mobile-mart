@@ -398,72 +398,58 @@ export async function completeSaleTx(
     }
   }
 
-  // Step 10: Generate Scoped Invoice Number
+  // Step 10: Generate User-Scoped Invoice Number (Requirement 11 & 12)
   const branchCodeRow = await client.query(
     'SELECT code FROM branches WHERE id = $1',
     [branchId]
   );
   const branchCode: string = (branchCodeRow.rows[0] as Record<string, unknown>)?.['code'] as string ?? 'MAIN';
 
-  let terminalId: string;
-  let terminalCode: string;
+  // Ensure user_invoice_counters table exists
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS user_invoice_counters (
+      branch_id UUID NOT NULL,
+      user_id UUID NOT NULL,
+      period_yyyymm VARCHAR(10) NOT NULL,
+      next_value BIGINT NOT NULL DEFAULT 1,
+      PRIMARY KEY (branch_id, user_id, period_yyyymm)
+    )
+  `);
 
-  const rawTerminalId = dto.terminal_id?.trim();
-  if (rawTerminalId && rawTerminalId.length > 0) {
-    const termRow = await client.query(
-      'SELECT id, code FROM terminals WHERE id = $1 OR code = $1 LIMIT 1',
-      [rawTerminalId]
+  const effectiveUserId = userId || '00000000-0000-0000-0000-000000000001';
+  
+  // Resolve User Short Code (e.g. U01, U17)
+  let userCode = 'U01';
+  if (userId && userId !== '00000000-0000-0000-0000-000000000001') {
+    const userRow = await client.query(
+      'SELECT username, user_code FROM users WHERE id = $1',
+      [userId]
     );
-    if (termRow.rows.length > 0) {
-      const t = termRow.rows[0] as Record<string, unknown>;
-      terminalId = t['id'] as string;
-      terminalCode = t['code'] as string;
-    } else {
-      terminalId = uuidv4();
-      terminalCode = 'T1';
-      const orgRow = await client.query('SELECT organization_id FROM branches WHERE id = $1', [branchId]);
-      const orgId = ((orgRow.rows[0] as Record<string, unknown>)?.['organization_id'] as string) ?? '00000000-0000-0000-0000-000000000001';
-      await client.query(
-        `INSERT INTO terminals (id, organization_id, branch_id, device_name, code, is_active, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, 1, $6, $7) ON CONFLICT (id) DO NOTHING`,
-        [terminalId, orgId, branchId, 'Main POS Terminal', terminalCode, now, now]
-      );
-    }
-  } else {
-    const termRow = await client.query(
-      'SELECT id, code FROM terminals WHERE branch_id = $1 ORDER BY created_at ASC LIMIT 1',
-      [branchId]
-    );
-    if (termRow.rows.length > 0) {
-      const t = termRow.rows[0] as Record<string, unknown>;
-      terminalId = t['id'] as string;
-      terminalCode = t['code'] as string;
-    } else {
-      terminalId = uuidv4();
-      terminalCode = 'T1';
-      const orgRow = await client.query('SELECT organization_id FROM branches WHERE id = $1', [branchId]);
-      const orgId = ((orgRow.rows[0] as Record<string, unknown>)?.['organization_id'] as string) ?? '00000000-0000-0000-0000-000000000001';
-      await client.query(
-        `INSERT INTO terminals (id, organization_id, branch_id, device_name, code, is_active, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, 1, $6, $7) ON CONFLICT (id) DO NOTHING`,
-        [terminalId, orgId, branchId, 'Main POS Terminal', terminalCode, now, now]
-      );
+    if (userRow.rows.length > 0) {
+      const u = userRow.rows[0] as Record<string, unknown>;
+      if (u['user_code']) {
+        userCode = String(u['user_code']);
+      } else {
+        // Derive stable short user code from user ID hex suffix
+        const shortHex = userId.replace(/-/g, '').slice(-2).toUpperCase();
+        userCode = `U${shortHex}`;
+      }
     }
   }
 
   const periodYYYYMM = getPeriodYYYYMM();
 
   const seqRow = await client.query(
-    `INSERT INTO terminal_invoice_counters (branch_id, terminal_id, period_yyyymm, next_value)
+    `INSERT INTO user_invoice_counters (branch_id, user_id, period_yyyymm, next_value)
      VALUES ($1, $2, $3, 2)
-     ON CONFLICT (branch_id, terminal_id, period_yyyymm)
-     DO UPDATE SET next_value = terminal_invoice_counters.next_value + 1
+     ON CONFLICT (branch_id, user_id, period_yyyymm)
+     DO UPDATE SET next_value = user_invoice_counters.next_value + 1
      RETURNING next_value - 1`,
-    [branchId, terminalId, periodYYYYMM]
+    [branchId, effectiveUserId, periodYYYYMM]
   );
   const seqRowData = seqRow.rows[0] as Record<string, unknown>;
   const seqValue = Number(Object.values(seqRowData)[0]);
-  const invoiceNumber = `${branchCode}-${terminalCode}-${periodYYYYMM}-${String(seqValue).padStart(6, '0')}`;
+  const invoiceNumber = `${branchCode}-${userCode}-${periodYYYYMM}-${String(seqValue).padStart(6, '0')}`;
 
   const saleId =
     saleIdOverride?.trim()

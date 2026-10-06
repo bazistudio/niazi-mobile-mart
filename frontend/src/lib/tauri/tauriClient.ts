@@ -1366,13 +1366,17 @@ export const tauriClient = {
   },
 
   async customerGetStatement(customerId: string): Promise<CustomerStatementDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CustomerStatementDto>('storage_customer_get_statement', {
-        customerId,
-      });
+    try {
+      return await httpFetch<CustomerStatementDto>(`/api/v1/customers/${encodeURIComponent(customerId)}/ledger`);
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<CustomerStatementDto>('storage_customer_get_statement', {
+          customerId,
+        });
+      }
+      throw e;
     }
-    throw new Error('Tauri environment required');
   },
 
   async customerGetBalance(customerId: string): Promise<number> {
@@ -1842,43 +1846,73 @@ export const tauriClient = {
 
   // â”€â”€ Returns & Stock Reversal Domain (Phase 18) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async salesReturnGetReturnable(saleId: string): Promise<SaleReturnableInfoDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SaleReturnableInfoDto>('sales_return_get_returnable', { saleId });
+    try {
+      return await httpFetch<SaleReturnableInfoDto>(`/api/returns/sale/${encodeURIComponent(saleId)}/returnable`);
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<SaleReturnableInfoDto>('sales_return_get_returnable', { saleId });
+      }
+      throw e;
     }
-    throw new Error('Tauri environment required');
   },
 
   async salesReturnCreate(dto: CreateSalesReturnDto): Promise<SalesReturnResultDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SalesReturnResultDto>('sales_return_create', { dto });
+    try {
+      return await httpFetch<SalesReturnResultDto>('/api/returns', {
+        method: 'POST',
+        body: JSON.stringify(dto),
+      });
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<SalesReturnResultDto>('sales_return_create', { dto });
+      }
+      throw e;
     }
-    throw new Error('Tauri environment required');
   },
 
   async salesReturnGet(id: string): Promise<SalesReturnDetailDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SalesReturnDetailDto>('sales_return_get', { id });
+    try {
+      return await httpFetch<SalesReturnDetailDto>(`/api/returns/${encodeURIComponent(id)}`);
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<SalesReturnDetailDto>('sales_return_get', { id });
+      }
+      throw e;
     }
-    throw new Error('Tauri environment required');
   },
 
   async salesReturnList(filter?: SalesReturnFilterDto): Promise<SalesReturn[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SalesReturn[]>('sales_return_list', { filter });
+    try {
+      const params = new URLSearchParams();
+      if (filter) {
+        if (filter.branch_id) params.set('branch_id', filter.branch_id);
+        if (filter.customer_id) params.set('customer_id', filter.customer_id);
+        if (filter.sale_id) params.set('sale_id', filter.sale_id);
+      }
+      const qs = params.toString();
+      return await httpFetch<SalesReturn[]>(`/api/returns${qs ? '?' + qs : ''}`);
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<SalesReturn[]>('sales_return_list', { filter });
+      }
+      return [];
     }
-    return [];
   },
 
   async salesReturnGetBySale(saleId: string): Promise<SalesReturn[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<SalesReturn[]>('sales_return_get_by_sale', { saleId });
+    try {
+      return await httpFetch<SalesReturn[]>(`/api/returns?sale_id=${encodeURIComponent(saleId)}`);
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<SalesReturn[]>('sales_return_get_by_sale', { saleId });
+      }
+      return [];
     }
-    return [];
   },
 
   async purchaseReturnGetReturnable(purchaseId: string): Promise<PurchaseReturnableInfoDto> {
