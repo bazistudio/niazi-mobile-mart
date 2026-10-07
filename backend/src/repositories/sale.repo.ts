@@ -128,14 +128,27 @@ const DEFAULT_MAIN_BRANCH_ID = '00000000-0000-0000-0000-000000000001';
  * Mirrors normalize_payment_method() in src-tauri/src/domain/sales.rs.
  */
 function normalizePaymentMethod(method: string): string {
+  if (!method) return 'CASH';
   const m = method.trim().toUpperCase();
   if (m === 'CASH') return 'CASH';
-  if (m === 'CARD') return 'CARD';
-  if (m === 'BANK' || m === 'BANK_TRANSFER') return 'BANK_TRANSFER';
+  if (m === 'CARD' || m === 'DEBIT_CARD' || m === 'CREDIT_CARD' || m === 'CARD_PAYMENT') return 'CARD';
+  if (m === 'BANK' || m === 'BANK_TRANSFER' || m === 'BANK TRANSFER') return 'BANK_TRANSFER';
   if (m === 'EASYPAISA') return 'EASYPAISA';
   if (m === 'JAZZCASH') return 'JAZZCASH';
-  if (m === 'CREDIT') return 'CREDIT';
-  return 'CASH';
+  if (
+    m === 'CREDIT' ||
+    m === 'DEBT' ||
+    m === 'DEBIT' ||
+    m === 'UDHAR' ||
+    m === 'CUSTOMER_CREDIT' ||
+    m === 'ON_ACCOUNT' ||
+    m === 'DUE' ||
+    m === 'CUSTOMER_LEDGER' ||
+    m === 'RECEIVABLE'
+  ) {
+    return 'CREDIT';
+  }
+  return m || 'CASH';
 }
 
 /**

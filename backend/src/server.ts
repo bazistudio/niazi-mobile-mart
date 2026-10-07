@@ -53,6 +53,7 @@ import { buildUsersRouter } from './routes/users.routes';
 import { buildSupplierRouter } from './routes/supplier.routes';
 import { buildExpenseRouter } from './routes/expense.routes';
 import { buildBranchRouter } from './routes/branch.routes';
+import { BranchRepo } from './repositories/branch.repo';
 import {
   listBrands,
   DEFAULT_BRANDS,
@@ -243,6 +244,16 @@ async function main(): Promise<void> {
   const searchRouter = createSearchRouter(pool);
   app.use('/api/search', searchRouter);
   app.use('/api/v1/search', searchRouter);
+
+  app.get(['/api/organization/balances', '/api/v1/organization/balances'], async (_req: Request, res: Response) => {
+    try {
+      const branchRepo = new BranchRepo(pool);
+      const balances = await branchRepo.getDashboardBalances();
+      res.status(200).json(balances);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to fetch dashboard balances' });
+    }
+  });
 
   app.get(['/api/brands', '/api/v1/brands'], async (_req: Request, res: Response) => {
     try {

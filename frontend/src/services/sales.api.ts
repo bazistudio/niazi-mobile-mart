@@ -20,6 +20,13 @@ export interface CreateOrderPayload {
 }
 
 function mapSaleToOrder(s: Sale, lines: any[] = [], payments: any[] = []): any {
+  let paymentMethod = 'cash';
+  if (payments && payments.length > 0) {
+    paymentMethod = (payments[0].payment_method || payments[0].method || 'cash').toLowerCase();
+  } else if (s.payment_status === 'UNPAID' || (s.paid_amount !== undefined && s.paid_amount < s.total_amount)) {
+    paymentMethod = 'credit';
+  }
+
   return {
     id: s.id,
     _id: s.id,
@@ -40,6 +47,7 @@ function mapSaleToOrder(s: Sale, lines: any[] = [], payments: any[] = []): any {
     totalPaid: s.paid_amount,
     changeAmount: s.change_amount,
     paymentStatus: s.payment_status,
+    paymentMethod,
     saleStatus: s.sale_status,
     status: s.sale_status.toLowerCase(),
     notes: s.notes,

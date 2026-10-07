@@ -2060,10 +2060,7 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<DashboardBalancesDto>('organization_get_dashboard_balances');
     }
-    return {
-      customer_receivables: 0,
-      supplier_payables: 0,
-    };
+    return await httpFetch<DashboardBalancesDto>('/api/organization/balances');
   },
 
   async profitGetDashboardSummary(branchId?: string | null): Promise<DashboardProfitSummaryDto> {

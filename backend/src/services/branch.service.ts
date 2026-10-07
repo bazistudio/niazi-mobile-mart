@@ -114,6 +114,17 @@ export class BranchService {
   }
 
   // ---------------------------------------------------------------------------
+  // Get dashboard balances
+  // ---------------------------------------------------------------------------
+  async getDashboardBalances(): Promise<{ customer_receivables: number; supplier_payables: number }> {
+    try {
+      return await this.repo.getDashboardBalances();
+    } catch (err: unknown) {
+      throw this.translateError(err, 'get_dashboard_balances');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
   private translateError(err: unknown, operation: string): BranchServiceError {

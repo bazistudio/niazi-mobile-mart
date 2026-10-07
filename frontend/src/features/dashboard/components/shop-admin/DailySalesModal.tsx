@@ -209,7 +209,14 @@ export const DailySalesModal = ({ isOpen, onClose }: DailySalesModalProps) => {
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {orders.map((order: any) => {
-                    const isCredit = order.paymentMethod === 'credit';
+                    const isCredit =
+                      order.paymentMethod === 'credit' ||
+                      order.paymentMethod === 'CREDIT' ||
+                      order.paymentMethod === 'debit' ||
+                      order.paymentMethod === 'debt' ||
+                      order.paymentStatus === 'UNPAID' ||
+                      order.paymentStatus === 'PARTIALLY_PAID' ||
+                      (order.paidAmount !== undefined && order.paidAmount < (order.grandTotal || order.totalAmount || 0));
                     const isCancelled = order.status === 'cancelled' || order.status === 'Cancelled';
                     
                     const isExpanded = expandedOrderId === order._id;
@@ -245,7 +252,7 @@ export const DailySalesModal = ({ isOpen, onClose }: DailySalesModalProps) => {
                           <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
                             <div className="flex items-center gap-1.5">
                               <User className="w-3.5 h-3.5 opacity-50" />
-                              {order.partyId?.companyName || order.partyId?.name || order.partyId?.contactPerson || order.customerId?.name || 'Walk-in Customer'}
+                              {order.partyId?.companyName || order.partyId?.name || order.partyId?.contactPerson || (typeof order.customerId === 'object' ? order.customerId?.name : null) || order.customerName || order.customer_name_snapshot || 'Walk-in Customer'}
                             </div>
                           </td>
                           <td className="px-4 py-3 text-sm">

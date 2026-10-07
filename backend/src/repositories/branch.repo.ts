@@ -187,4 +187,21 @@ export class BranchRepo {
     }
     return result.rows[0];
   }
+
+  // ---------------------------------------------------------------------------
+  // Get aggregate dashboard balances (organization-wide)
+  // Mirrors postgres_branch_repo.rs::get_dashboard_balances()
+  // ---------------------------------------------------------------------------
+  async getDashboardBalances(): Promise<{ customer_receivables: number; supplier_payables: number }> {
+    const custRes = await this.pool.query<{ customer_receivables: string }>(
+      `SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT AS customer_receivables FROM customer_ledger_entries`
+    );
+    const suppRes = await this.pool.query<{ supplier_payables: string }>(
+      `SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT AS supplier_payables FROM supplier_ledger_entries`
+    );
+    return {
+      customer_receivables: Number(custRes.rows[0]?.customer_receivables ?? 0),
+      supplier_payables: Number(suppRes.rows[0]?.supplier_payables ?? 0),
+    };
+  }
 }
