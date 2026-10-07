@@ -61,6 +61,12 @@ import {
   listQualities,
   listColors,
   listUnits,
+  createCategory,
+  createBrand,
+  createCompany,
+  createQuality,
+  createColor,
+  createUnit,
   getStockMapForBranch,
 } from './repositories/product.repo';
 
@@ -240,9 +246,37 @@ async function main(): Promise<void> {
     }
   });
 
+  app.post(['/api/brands', '/api/v1/brands'], async (req: Request, res: Response) => {
+    try {
+      const name = req.body?.name || req.body?.title;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        res.status(400).json({ error: 'Name is required' });
+        return;
+      }
+      const item = await createBrand(pool, { name, code: req.body?.code, description: req.body?.description });
+      res.status(201).json(item);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to create brand' });
+    }
+  });
+
   app.get(['/api/categories', '/api/v1/categories'], async (_req: Request, res: Response) => {
     const list = await listCategories(pool);
     res.status(200).json(list);
+  });
+
+  app.post(['/api/categories', '/api/v1/categories'], async (req: Request, res: Response) => {
+    try {
+      const name = req.body?.name || req.body?.title;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        res.status(400).json({ error: 'Name is required' });
+        return;
+      }
+      const item = await createCategory(pool, { name, code: req.body?.code, description: req.body?.description });
+      res.status(201).json(item);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to create category' });
+    }
   });
 
   app.get(['/api/companies', '/api/v1/companies'], async (_req: Request, res: Response) => {
@@ -250,9 +284,37 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
+  app.post(['/api/companies', '/api/v1/companies'], async (req: Request, res: Response) => {
+    try {
+      const name = req.body?.name || req.body?.title;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        res.status(400).json({ error: 'Name is required' });
+        return;
+      }
+      const item = await createCompany(pool, { name, code: req.body?.code, description: req.body?.description });
+      res.status(201).json(item);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to create company' });
+    }
+  });
+
   app.get(['/api/qualities', '/api/v1/qualities'], async (_req: Request, res: Response) => {
     const list = await listQualities(pool);
     res.status(200).json(list);
+  });
+
+  app.post(['/api/qualities', '/api/v1/qualities'], async (req: Request, res: Response) => {
+    try {
+      const name = req.body?.name || req.body?.title;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        res.status(400).json({ error: 'Name is required' });
+        return;
+      }
+      const item = await createQuality(pool, { name, code: req.body?.code, description: req.body?.description });
+      res.status(201).json(item);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to create quality' });
+    }
   });
 
   app.get(['/api/colors', '/api/v1/colors'], async (_req: Request, res: Response) => {
@@ -260,9 +322,37 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
+  app.post(['/api/colors', '/api/v1/colors'], async (req: Request, res: Response) => {
+    try {
+      const name = req.body?.name || req.body?.title;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        res.status(400).json({ error: 'Name is required' });
+        return;
+      }
+      const item = await createColor(pool, { name, code: req.body?.code, description: req.body?.description });
+      res.status(201).json(item);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to create color' });
+    }
+  });
+
   app.get(['/api/units', '/api/v1/units'], async (_req: Request, res: Response) => {
     const list = await listUnits(pool);
     res.status(200).json(list);
+  });
+
+  app.post(['/api/units', '/api/v1/units'], async (req: Request, res: Response) => {
+    try {
+      const name = req.body?.name || req.body?.title;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        res.status(400).json({ error: 'Name is required' });
+        return;
+      }
+      const item = await createUnit(pool, { name, symbol: req.body?.symbol || req.body?.code, code: req.body?.code });
+      res.status(201).json(item);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to create unit' });
+    }
   });
 
   app.get(['/api/inventory', '/api/v1/inventory', '/api/stock'], async (req: Request, res: Response) => {

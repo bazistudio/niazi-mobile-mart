@@ -1051,3 +1051,120 @@ export async function getStockMapForBranch(pool: Pool, branchId?: string): Promi
   }
 }
 
+// --- Classification Creation Functions ---
+
+export async function createCategory(
+  pool: Pool,
+  dto: { name: string; code?: string; description?: string }
+): Promise<{ id: string; name: string; code: string; description?: string | null }> {
+  const caps = await getSchemaCaps(pool);
+  const id = uuidv4();
+  const name = dto.name.trim();
+  const code = (dto.code || name.substring(0, 4)).toUpperCase().replace(/[^A-Z0-9]/g, 'X').padEnd(3, 'X');
+  const description = dto.description ?? null;
+  const now = NOW_ISO();
+
+  const res = await pool.query(
+    `INSERT INTO ${caps.catTable} (id, name, code, description, is_active, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 1, $5, $5)
+     RETURNING id, name, code, description`,
+    [id, name, code, description, now]
+  );
+  return res.rows[0]!;
+}
+
+export async function createBrand(
+  pool: Pool,
+  dto: { name: string; code?: string; description?: string }
+): Promise<{ id: string; name: string; code: string; description?: string | null }> {
+  const id = uuidv4();
+  const name = dto.name.trim();
+  const code = (dto.code || name.substring(0, 4)).toUpperCase().replace(/[^A-Z0-9]/g, 'X').padEnd(3, 'X');
+  const description = dto.description ?? null;
+  const now = NOW_ISO();
+
+  const res = await pool.query(
+    `INSERT INTO brands (id, name, code, description, is_active, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 1, $5, $5)
+     RETURNING id, name, code, description`,
+    [id, name, code, description, now]
+  );
+  return res.rows[0]!;
+}
+
+export async function createCompany(
+  pool: Pool,
+  dto: { name: string; code?: string; description?: string }
+): Promise<{ id: string; name: string; code: string; description?: string | null }> {
+  const id = uuidv4();
+  const name = dto.name.trim();
+  const code = (dto.code || name.substring(0, 4)).toUpperCase().replace(/[^A-Z0-9]/g, 'X').padEnd(3, 'X');
+  const description = dto.description ?? null;
+  const now = NOW_ISO();
+
+  const res = await pool.query(
+    `INSERT INTO companies (id, name, code, description, is_active, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 1, $5, $5)
+     RETURNING id, name, code, description`,
+    [id, name, code, description, now]
+  );
+  return res.rows[0]!;
+}
+
+export async function createQuality(
+  pool: Pool,
+  dto: { name: string; code?: string; description?: string }
+): Promise<{ id: string; name: string; code: string; description?: string | null }> {
+  const id = uuidv4();
+  const name = dto.name.trim();
+  const code = (dto.code || name.substring(0, 4)).toUpperCase().replace(/[^A-Z0-9]/g, 'X').padEnd(3, 'X');
+  const description = dto.description ?? null;
+  const now = NOW_ISO();
+
+  const res = await pool.query(
+    `INSERT INTO qualities (id, name, code, description, is_active, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 1, $5, $5)
+     RETURNING id, name, code, description`,
+    [id, name, code, description, now]
+  );
+  return res.rows[0]!;
+}
+
+export async function createColor(
+  pool: Pool,
+  dto: { name: string; code?: string; description?: string }
+): Promise<{ id: string; name: string; code: string; description?: string | null }> {
+  const id = uuidv4();
+  const name = dto.name.trim();
+  const code = (dto.code || name.substring(0, 4)).toUpperCase().replace(/[^A-Z0-9]/g, 'X').padEnd(3, 'X');
+  const description = dto.description ?? null;
+  const now = NOW_ISO();
+
+  const res = await pool.query(
+    `INSERT INTO colors (id, name, code, description, is_active, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 1, $5, $5)
+     RETURNING id, name, code, description`,
+    [id, name, code, description, now]
+  );
+  return res.rows[0]!;
+}
+
+export async function createUnit(
+  pool: Pool,
+  dto: { name: string; symbol?: string; code?: string }
+): Promise<{ id: string; name: string; code: string }> {
+  const id = uuidv4();
+  const name = dto.name.trim();
+  const symbol = (dto.symbol || dto.code || name.substring(0, 3)).toUpperCase();
+  const now = NOW_ISO();
+
+  const res = await pool.query(
+    `INSERT INTO units (id, name, symbol, conversion_factor, is_active, created_at, updated_at)
+     VALUES ($1, $2, $3, 1, 1, $4, $4)
+     RETURNING id, name, symbol AS code`,
+    [id, name, symbol, now]
+  );
+  return res.rows[0]!;
+}
+
+
