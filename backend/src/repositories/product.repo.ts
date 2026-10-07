@@ -105,26 +105,34 @@ let cachedCaps: SchemaCaps | null = null;
 
 export async function getSchemaCaps(pool: Pool): Promise<SchemaCaps> {
   if (cachedCaps) return cachedCaps;
+
+  let catCol: 'type_id' | 'category_id' = 'category_id';
+  let catTable: 'product_types' | 'categories' = 'categories';
+  let isActiveBool = false;
+
+  // 1. Direct query test to determine whether type_id or category_id exists on products table
   try {
-    const colRes = await pool.query<{ column_name: string; data_type: string }>(
-      `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'products'`
-    );
-    let isActiveBool = false;
-    let catCol: 'type_id' | 'category_id' = 'category_id';
-    let catTable: 'product_types' | 'categories' = 'categories';
-    for (const r of colRes.rows) {
-      if (r.column_name === 'is_active' && r.data_type.toLowerCase().includes('bool')) {
-        isActiveBool = true;
-      }
-      if (r.column_name === 'type_id') {
-        catCol = 'type_id';
-        catTable = 'product_types';
-      }
-    }
-    cachedCaps = { catCol, catTable, isActiveBool };
+    await pool.query('SELECT type_id FROM products LIMIT 0');
+    catCol = 'type_id';
+    catTable = 'product_types';
   } catch {
-    cachedCaps = { catCol: 'type_id', catTable: 'product_types', isActiveBool: false };
+    catCol = 'category_id';
+    catTable = 'categories';
   }
+
+  // 2. Check if is_active is boolean or integer
+  try {
+    const colRes = await pool.query<{ data_type: string }>(
+      `SELECT data_type FROM information_schema.columns WHERE table_name = 'products' AND column_name = 'is_active'`
+    );
+    if (colRes.rows.length > 0 && colRes.rows[0]!.data_type.toLowerCase().includes('bool')) {
+      isActiveBool = true;
+    }
+  } catch {
+    isActiveBool = false;
+  }
+
+  cachedCaps = { catCol, catTable, isActiveBool };
   return cachedCaps;
 }
 
@@ -466,6 +474,11 @@ export async function createProduct(
     const avgCost = dto.average_cost ?? dto.purchase_price;
     const now = NOW_ISO();
 
+    const brandId = dto.brand_id ? await resolveEffectiveBrandId(pool, dto.brand_id) : null;
+    const companyId = dto.company_id ? await resolveEffectiveCompanyId(pool, dto.company_id) : null;
+    const qualityId = dto.quality_id ? await resolveEffectiveQualityId(pool, dto.quality_id) : null;
+    const colorId = dto.color_id ? await resolveEffectiveColorId(pool, dto.color_id) : null;
+
     const res = await client.query(
       `INSERT INTO products (
          id, name, normalized_name, sku, barcode, ${caps.catCol}, brand_id,
@@ -480,10 +493,10 @@ export async function createProduct(
         resolvedSku,
         barcodeVal,
         categoryId,
-        sanitizeOptionalUuid(dto.brand_id),
-        sanitizeOptionalUuid(dto.company_id),
-        sanitizeOptionalUuid(dto.quality_id),
-        sanitizeOptionalUuid(dto.color_id),
+        brandId,
+        companyId,
+        qualityId,
+        colorId,
         unitId,
         dto.purchase_price,
         avgCost,
@@ -548,6 +561,11 @@ export async function createProductWithInitialStock(
     const avgCost = dto.average_cost ?? dto.purchase_price;
     const now = NOW_ISO();
 
+    const brandId = dto.brand_id ? await resolveEffectiveBrandId(pool, dto.brand_id) : null;
+    const companyId = dto.company_id ? await resolveEffectiveCompanyId(pool, dto.company_id) : null;
+    const qualityId = dto.quality_id ? await resolveEffectiveQualityId(pool, dto.quality_id) : null;
+    const colorId = dto.color_id ? await resolveEffectiveColorId(pool, dto.color_id) : null;
+
     const insertRes = await client.query(
       `INSERT INTO products (
          id, name, normalized_name, sku, barcode, ${caps.catCol}, brand_id,
@@ -562,10 +580,10 @@ export async function createProductWithInitialStock(
         resolvedSku,
         barcodeVal,
         categoryId,
-        sanitizeOptionalUuid(dto.brand_id),
-        sanitizeOptionalUuid(dto.company_id),
-        sanitizeOptionalUuid(dto.quality_id),
-        sanitizeOptionalUuid(dto.color_id),
+        brandId,
+        companyId,
+        qualityId,
+        colorId,
         unitId,
         dto.purchase_price,
         avgCost,
