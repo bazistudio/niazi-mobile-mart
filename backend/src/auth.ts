@@ -182,13 +182,13 @@ export function authorizePermission(
   }
 
   if (page !== null) {
-    if (!hasPageAccess(identity.access_profile, page)) {
+    if (!hasPageAccess(identity.access_profile, page, identity.role)) {
       return `Access denied: You do not have permission to access page '${page}'`;
     }
   }
 
   if (action !== null) {
-    if (!hasActionAccess(identity.access_profile, action)) {
+    if (!hasActionAccess(identity.access_profile, action, identity.role)) {
       return `Access denied: You do not have permission to execute action '${action}'`;
     }
   }
@@ -198,16 +198,32 @@ export function authorizePermission(
 
 /**
  * Mirrors StaffAccessProfile::has_page_access() in access_control.rs.
+ * Falls back to allowing staff roles (SALESMAN, CASHIER, STAFF, MANAGER) when allowed_pages is empty.
  */
-function hasPageAccess(profile: StaffAccessProfile, page: string): boolean {
-  return profile.allowed_pages.some((p) => p === '*' || p === page);
+function hasPageAccess(profile: StaffAccessProfile, page: string, role?: UserRole): boolean {
+  if (profile && Array.isArray(profile.allowed_pages) && profile.allowed_pages.length > 0) {
+    return profile.allowed_pages.some((p) => p === '*' || p === page);
+  }
+  const r = String(role || '').toUpperCase();
+  if (r === 'SALESMAN' || r === 'CASHIER' || r === 'STAFF' || r === 'MANAGER' || r === 'ACCOUNTANT') {
+    return true;
+  }
+  return false;
 }
 
 /**
  * Mirrors StaffAccessProfile::has_action_access() in access_control.rs.
+ * Falls back to allowing staff roles (SALESMAN, CASHIER, STAFF, MANAGER) when allowed_actions is empty.
  */
-function hasActionAccess(profile: StaffAccessProfile, action: string): boolean {
-  return profile.allowed_actions.some((a) => a === '*' || a === action);
+function hasActionAccess(profile: StaffAccessProfile, action: string, role?: UserRole): boolean {
+  if (profile && Array.isArray(profile.allowed_actions) && profile.allowed_actions.length > 0) {
+    return profile.allowed_actions.some((a) => a === '*' || a === action);
+  }
+  const r = String(role || '').toUpperCase();
+  if (r === 'SALESMAN' || r === 'CASHIER' || r === 'STAFF' || r === 'MANAGER' || r === 'ACCOUNTANT') {
+    return true;
+  }
+  return false;
 }
 
 // --- Express Middleware ---
