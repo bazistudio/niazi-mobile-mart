@@ -99,6 +99,7 @@ export interface SaleFilterDto {
   branch_id?: string | null;
   payment_status?: string | null;
   sale_status?: string | null;
+  search?: string | null;
   start_date?: string | null;
   end_date?: string | null;
   limit?: number | null;
@@ -284,7 +285,10 @@ export async function completeSaleTx(
     const salePrice = Number(prod['sale_price'] ?? 0);
     const purchasePrice = Number(prod['purchase_price'] ?? 0);
     const avgCost = Number(prod['average_cost'] ?? 0);
-    const costPrice = avgCost > 0 ? avgCost : purchasePrice;
+    let costPrice = avgCost > 0 ? avgCost : purchasePrice;
+    if (purchasePrice > 0 && avgCost > purchasePrice * 3) {
+      costPrice = purchasePrice;
+    }
 
     const lineDisc = Math.max(Number(item.discount ?? 0), 0);
     const subtotalLine = salePrice * item.quantity;
@@ -729,6 +733,22 @@ export async function getSalePayments(pool: Pool, saleId: string): Promise<SaleP
   });
 }
 
+function parseLocalDateStart(dateStr: string): string {
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+    return new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0).toISOString();
+  }
+  return dateStr;
+}
+
+function parseLocalDateEnd(dateStr: string): string {
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+    return new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59, 999).toISOString();
+  }
+  return dateStr;
+}
+
 export async function listSales(pool: Pool, filter?: SaleFilterDto | null): Promise<Sale[]> {
   let query = `SELECT id, invoice_number, branch_id, customer_id, customer_name_snapshot,
                       subtotal, discount, tax_amount, total_amount, paid_amount, change_amount,
@@ -754,13 +774,19 @@ export async function listSales(pool: Pool, filter?: SaleFilterDto | null): Prom
     query += ` AND sale_status = $${paramIndex++}`;
     params.push(filter.sale_status);
   }
+  if (filter?.search && filter.search.trim()) {
+    const term = `%${filter.search.trim()}%`;
+    query += ` AND (invoice_number ILIKE $${paramIndex} OR customer_name_snapshot ILIKE $${paramIndex} OR notes ILIKE $${paramIndex})`;
+    paramIndex++;
+    params.push(term);
+  }
   if (filter?.start_date) {
-    const sDate = filter.start_date.length === 10 ? `${filter.start_date}T00:00:00.000Z` : filter.start_date;
+    const sDate = filter.start_date.length === 10 ? parseLocalDateStart(filter.start_date) : filter.start_date;
     query += ` AND created_at >= $${paramIndex++}`;
     params.push(sDate);
   }
   if (filter?.end_date) {
-    const eDate = filter.end_date.length === 10 ? `${filter.end_date}T23:59:59.999Z` : filter.end_date;
+    const eDate = filter.end_date.length === 10 ? parseLocalDateEnd(filter.end_date) : filter.end_date;
     query += ` AND created_at <= $${paramIndex++}`;
     params.push(eDate);
   }

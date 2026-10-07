@@ -14,6 +14,7 @@ export function OrganizationDashboardPage() {
   const navigate = useNavigate();
   const [stats, setStats] = useState<OrganizationDashboardStats | null>(null);
   const [balances, setBalances] = useState<DashboardBalancesDto | null>(null);
+  const [profitSummary, setProfitSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,12 +22,14 @@ export function OrganizationDashboardPage() {
     try {
       setLoading(true);
       setError(null);
-      const [dashboardStats, dashboardBalances] = await Promise.all([
+      const [dashboardStats, dashboardBalances, profitData] = await Promise.all([
         tauriClient.organizationGetDashboardStats(),
-        tauriClient.organizationGetDashboardBalances()
+        tauriClient.organizationGetDashboardBalances(),
+        tauriClient.profitGetDashboardSummary().catch(() => null)
       ]);
       setStats(dashboardStats);
       setBalances(dashboardBalances);
+      setProfitSummary(profitData);
     } catch (err: any) {
       setError(err.message || 'Failed to load dashboard metrics from database');
     } finally {
@@ -64,9 +67,9 @@ export function OrganizationDashboardPage() {
       total: stats?.active_staff_count || 1,
     },
     sales: {
-      today: 0,
-      month: 0,
-      total: 0,
+      today: profitSummary?.today?.net_revenue || 0,
+      month: profitSummary?.this_month?.net_revenue || 0,
+      total: profitSummary?.total?.net_revenue || 0,
     },
     inventory: {
       lowStockProducts: stats?.low_stock_count || 0,

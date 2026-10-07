@@ -96,13 +96,11 @@ export const DailySalesModal = ({ isOpen, onClose }: DailySalesModalProps) => {
   const { data: salesResponse, isLoading, error } = useQuery({
     queryKey: queryKeys.sales(dateFilter, startDate, endDate, debouncedSearch),
     queryFn: () => {
-      const cleanSearch = debouncedSearch.trim().toUpperCase().replace(/^ORD-/, '');
-      const queryOrderNumber = cleanSearch ? `ORD-${cleanSearch}` : undefined;
-
+      const cleanSearch = debouncedSearch.trim();
       return salesApi.getOrders({
-        startDate: queryOrderNumber ? undefined : startDate,
-        endDate: queryOrderNumber ? undefined : endDate,
-        orderNumber: queryOrderNumber,
+        startDate,
+        endDate,
+        orderNumber: cleanSearch || undefined,
         limit: 500,
       });
     },

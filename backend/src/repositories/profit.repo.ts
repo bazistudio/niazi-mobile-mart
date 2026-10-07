@@ -56,6 +56,22 @@ export class ProfitRepoError extends Error {
   }
 }
 
+function parseLocalDateStart(dateStr: string): string {
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+    return new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0).toISOString();
+  }
+  return dateStr;
+}
+
+function parseLocalDateEnd(dateStr: string): string {
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+    return new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59, 999).toISOString();
+  }
+  return dateStr;
+}
+
 export async function getProfitSummary(
   pool: Pool,
   filter?: ProfitReportFilter
@@ -69,12 +85,12 @@ export async function getProfitSummary(
     params.push(filter.branch_id);
   }
   if (filter?.start_date) {
-    const sDate = filter.start_date.length === 10 ? `${filter.start_date}T00:00:00.000Z` : filter.start_date;
+    const sDate = filter.start_date.length === 10 ? parseLocalDateStart(filter.start_date) : filter.start_date;
     salesWhere += ` AND created_at >= $${pIdx++}`;
     params.push(sDate);
   }
   if (filter?.end_date) {
-    const eDate = filter.end_date.length === 10 ? `${filter.end_date}T23:59:59.999Z` : filter.end_date;
+    const eDate = filter.end_date.length === 10 ? parseLocalDateEnd(filter.end_date) : filter.end_date;
     salesWhere += ` AND created_at <= $${pIdx++}`;
     params.push(eDate);
   }
@@ -98,12 +114,12 @@ export async function getProfitSummary(
     lineParams.push(filter.branch_id);
   }
   if (filter?.start_date) {
-    const sDate = filter.start_date.length === 10 ? `${filter.start_date}T00:00:00.000Z` : filter.start_date;
+    const sDate = filter.start_date.length === 10 ? parseLocalDateStart(filter.start_date) : filter.start_date;
     linesWhere += ` AND created_at >= $${lpIdx++}`;
     lineParams.push(sDate);
   }
   if (filter?.end_date) {
-    const eDate = filter.end_date.length === 10 ? `${filter.end_date}T23:59:59.999Z` : filter.end_date;
+    const eDate = filter.end_date.length === 10 ? parseLocalDateEnd(filter.end_date) : filter.end_date;
     linesWhere += ` AND created_at <= $${lpIdx++}`;
     lineParams.push(eDate);
   }
@@ -181,13 +197,9 @@ export async function getDashboardProfitSummary(
   branchId?: string | null
 ): Promise<DashboardProfitSummaryDto> {
   const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-
-  const todayStart = `${yyyy}-${mm}-${dd}T00:00:00.000Z`;
-  const todayEnd = `${yyyy}-${mm}-${dd}T23:59:59.999Z`;
-  const monthStart = `${yyyy}-${mm}-01T00:00:00.000Z`;
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString();
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).toISOString();
 
   const [today, this_month, total] = await Promise.all([
     getPeriodProfitMetrics(pool, todayStart, todayEnd, branchId),
