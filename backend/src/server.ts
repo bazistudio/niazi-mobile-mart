@@ -54,6 +54,10 @@ import { buildSupplierRouter } from './routes/supplier.routes';
 import { buildExpenseRouter } from './routes/expense.routes';
 import { buildBranchRouter } from './routes/branch.routes';
 import { BranchRepo } from './repositories/branch.repo';
+import { createPurchaseRouter } from './routes/purchase.routes';
+import { createPurchaseReturnRouter } from './routes/purchase_return.routes';
+import { createAdminRouter } from './routes/admin.routes';
+import { createSyncRouter } from './routes/sync.routes';
 import {
   listBrands,
   DEFAULT_BRANDS,
@@ -244,6 +248,22 @@ async function main(): Promise<void> {
   const searchRouter = createSearchRouter(pool);
   app.use('/api/search', searchRouter);
   app.use('/api/v1/search', searchRouter);
+
+  const purchaseRouter = createPurchaseRouter(pool);
+  app.use('/api/purchases', purchaseRouter);
+  app.use('/api/v1/purchases', purchaseRouter);
+
+  const purchaseReturnRouter = createPurchaseReturnRouter(pool);
+  app.use('/api/purchase-returns', purchaseReturnRouter);
+  app.use('/api/v1/purchase-returns', purchaseReturnRouter);
+
+  const adminRouter = createAdminRouter(pool);
+  app.use('/api/admin', adminRouter);
+  app.use('/api/v1/admin', adminRouter);
+
+  const syncRouter = createSyncRouter(pool);
+  app.use('/api/sync', syncRouter);
+  app.use('/api/v1/sync', syncRouter);
 
   app.get(['/api/organization/balances', '/api/v1/organization/balances'], async (_req: Request, res: Response) => {
     try {
