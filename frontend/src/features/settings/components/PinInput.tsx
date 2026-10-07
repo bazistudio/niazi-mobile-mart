@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 
 interface PinInputProps {
   value: string;
@@ -9,6 +10,8 @@ interface PinInputProps {
   disabled?: boolean;
   error?: string;
   label?: string;
+  /** Show an eye icon button to toggle digit visibility */
+  showToggle?: boolean;
 }
 
 export const PinInput: React.FC<PinInputProps> = ({
@@ -18,8 +21,10 @@ export const PinInput: React.FC<PinInputProps> = ({
   disabled = false,
   error,
   label,
+  showToggle = false,
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [visible, setVisible] = useState(false);
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -44,14 +49,31 @@ export const PinInput: React.FC<PinInputProps> = ({
     inputRef.current?.focus();
   }, []);
 
-  const displayValue = value.padEnd(length, ' ');
-
   return (
     <div className="w-full flex flex-col gap-1.5">
-      {label && (
-        <label className="text-sm font-medium text-text-secondary select-none">
-          {label}
-        </label>
+      {(label || showToggle) && (
+        <div className="flex items-center justify-between">
+          {label && (
+            <label className="text-sm font-medium text-text-secondary select-none">
+              {label}
+            </label>
+          )}
+          {showToggle && (
+            <button
+              type="button"
+              onClick={() => setVisible((v) => !v)}
+              disabled={disabled}
+              className="flex items-center gap-1 text-xs text-text-muted hover:text-primary transition-colors disabled:opacity-50"
+              aria-label={visible ? 'Hide PIN digits' : 'Show PIN digits'}
+            >
+              {visible ? (
+                <><EyeOff className="w-3.5 h-3.5" /><span>Hide</span></>
+              ) : (
+                <><Eye className="w-3.5 h-3.5" /><span>Show</span></>
+              )}
+            </button>
+          )}
+        </div>
       )}
       <div
         role="group"
@@ -92,7 +114,7 @@ export const PinInput: React.FC<PinInputProps> = ({
               }`}
               aria-hidden="true"
             >
-              {value[index] ? '•' : '_'}
+              {value[index] ? (visible ? value[index] : '•') : '_'}
             </span>
           ))}
         </div>

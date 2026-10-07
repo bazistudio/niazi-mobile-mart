@@ -627,6 +627,16 @@ export const settingsApi = {
     throw new Error(`User with ID ${id} not found`);
   },
 
+  suspendStaff: async (id: string): Promise<StaffUser> => {
+    // Dedicated suspend endpoint — calls POST /api/users/:id/suspend with precondition checks
+    return settingsApi.updateStaffStatus(id, 'suspended');
+  },
+
+  reactivateStaff: async (id: string): Promise<StaffUser> => {
+    // Dedicated reactivate endpoint — calls POST /api/users/:id/reactivate
+    return settingsApi.updateStaffStatus(id, 'active');
+  },
+
   changeStaffPin: async (id: string, pin: string): Promise<void> => {
     if (isTauriEnvironment()) {
       await tauriClient.adminResetCredentials({

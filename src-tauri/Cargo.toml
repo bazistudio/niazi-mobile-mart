@@ -17,6 +17,10 @@ path = "src/main.rs"
 name = "niazi-server"
 path = "src/bin/server.rs"
 
+[[bin]]
+name = "argon2-helper"
+path = "src/bin/argon2_helper.rs"
+
 [dev-dependencies]
 # Test-only RSA key generation for JWT unit tests (no embedded private keys in source).
 rsa = { version = "0.9", features = ["pem"] }

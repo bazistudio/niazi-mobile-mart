@@ -5,7 +5,27 @@ import jwt from 'jsonwebtoken';
 
 // --- Types ---
 
-export type UserRole = 'Admin' | 'ShopAdmin' | 'Cashier' | 'Salesman';
+/**
+ * All supported user roles — must match Rust UserRole enum in domain/user.rs.
+ * Phase 1 fix: expanded from 4 to 9 roles to match Rust definition exactly.
+ * Supports both PascalCase (legacy frontend) and SCREAMING_SNAKE_CASE (Rust/DB) variants.
+ */
+export type UserRole =
+  // Canonical SCREAMING_SNAKE_CASE values (stored in PostgreSQL, issued in JWT)
+  | 'ADMIN'
+  | 'SHOP_ADMIN'
+  | 'MANAGER'
+  | 'ACCOUNTANT'
+  | 'SALESMAN'
+  | 'CASHIER'
+  | 'REPAIR_MECHANIC'
+  | 'STAFF'
+  | 'PUBLIC_USER'
+  // Legacy PascalCase aliases (may appear in old tokens or frontend code)
+  | 'Admin'
+  | 'ShopAdmin'
+  | 'Cashier'
+  | 'Salesman';
 
 export interface StaffAccessProfile {
   allowed_pages: string[];

@@ -1,17 +1,39 @@
 /**
- * TypeScript Product Backend -- Entry Point
+ * TypeScript Backend -- Entry Point
  *
- * Standalone Express server serving the Product domain HTTP routes.
- * All other domains continue to be served by the Rust Axum backend.
+ * Standalone Express server serving TypeScript-owned domain HTTP routes.
+ * Routes not handled here are transparently proxied to the Rust Axum backend.
  *
- * Routes:
- *   /api/products    -> Product CRUD
- *   /api/v1/products -> Product CRUD (v1 alias, matches Rust Axum registration)
+ * TypeScript-owned routes (Phase 1 migration):
+ *   /api/auth       -> Authentication (login, JWT issuance, user identity)
+ *   /api/v1/auth    -> Authentication (v1 alias, matches Rust Axum registration)
+ *   /api/users      -> User management (CRUD, approve/reject, credentials)
+ *   /api/v1/users   -> User management (v1 alias)
+ *   /api/products   -> Product CRUD
+ *   /api/v1/products -> Product CRUD (v1 alias)
+ *   ... (other domains)
+ *
+ * TypeScript-owned routes (Phase 2 migration):
+ *   /api/suppliers    -> Supplier CRUD + ledger (TypeScript is online authority)
+ *   /api/v1/suppliers -> Supplier (v1 alias)
+ *
+ * TypeScript-owned routes (Phase 3 migration):
+ *   /api/expenses     -> Expense CRUD + categories + cancel (TypeScript is online authority)
+ *   /api/v1/expenses  -> Expense (v1 alias — Rust only had /api/expenses, v1 alias added here)
+ *
+ * TypeScript-owned routes (Phase 4 migration):
+ *   /api/branches     -> Branch CRUD (TypeScript is online authority)
+ *   /api/v1/branches  -> Branch (v1 alias)
+ *   /api/shops        -> Branch (alias for /api/branches)
+ *   /api/users        -> User management extended: suspend, change-pin, permissions
+ *   /api/v1/users     -> User (v1 alias)
  *
  * Environment variables required:
- *   DATABASE_URL   -- PostgreSQL connection string
- *   JWT_PUBLIC_KEY -- RSA PEM public key for Bearer token verification
- *   PORT           -- HTTP port (default: 8081)
+ *   DATABASE_URL      -- PostgreSQL connection string
+ *   JWT_PUBLIC_KEY    -- RSA PEM public key for Bearer token verification
+ *   JWT_PRIVATE_KEY   -- RSA PEM private key for JWT issuance (NEW in Phase 1)
+ *   RUST_SIDECAR_PORT -- Port for Rust argon2 sidecar (default: 8081)
+ *   PORT              -- HTTP port (default: 8080)
  */
 
 import express, { Request, Response, NextFunction } from 'express';
@@ -28,6 +50,11 @@ import { createReturnsRouter } from './routes/returns.routes';
 import { createCashRouter } from './routes/cash.routes';
 import { createReportsRouter } from './routes/reports.routes';
 import { createSearchRouter } from './routes/search.routes';
+import { buildAuthRouter } from './routes/auth.routes';
+import { buildUsersRouter } from './routes/users.routes';
+import { buildSupplierRouter } from './routes/supplier.routes';
+import { buildExpenseRouter } from './routes/expense.routes';
+import { buildBranchRouter } from './routes/branch.routes';
 import {
   listBrands,
   DEFAULT_BRANDS,
@@ -36,7 +63,6 @@ import {
   listQualities,
   listColors,
   listUnits,
-  listBranches,
   getStockMapForBranch,
 } from './repositories/product.repo';
 
@@ -107,6 +133,7 @@ async function main(): Promise<void> {
   loadEnv();
   requireEnv('DATABASE_URL');
   requireEnv('JWT_PUBLIC_KEY');
+  requireEnv('JWT_PRIVATE_KEY');
 
   const port = parseInt(process.env['PORT'] ?? '8080', 10);
 
@@ -127,6 +154,50 @@ async function main(): Promise<void> {
   app.use(express.json());
 
   const pool = getPool();
+
+  // -------------------------------------------------------------------------
+  // Auth routes — TypeScript is the NEW ONLINE AUTH AUTHORITY (Phase 1)
+  // Registered before the Rust proxy fallback; both /api/ and /api/v1/ paths.
+  // -------------------------------------------------------------------------
+  const authRouter = buildAuthRouter(pool);
+  app.use('/api/auth', authRouter);
+  app.use('/api/v1/auth', authRouter);
+
+  // -------------------------------------------------------------------------
+  // User management routes — TypeScript-owned (Phase 1)
+  // -------------------------------------------------------------------------
+  const usersRouter = buildUsersRouter(pool);
+  app.use('/api/users', usersRouter);
+  app.use('/api/v1/users', usersRouter);
+
+  // -------------------------------------------------------------------------
+  // Supplier routes — TypeScript is the NEW ONLINE SUPPLIER AUTHORITY (Phase 2)
+  // Registered before the Rust proxy fallback; both /api/ and /api/v1/ paths.
+  // PostgreSQL is the authoritative store — no SQLite/sync path for suppliers.
+  // -------------------------------------------------------------------------
+  const supplierRouter = buildSupplierRouter(pool);
+  app.use('/api/suppliers', supplierRouter);
+  app.use('/api/v1/suppliers', supplierRouter);
+
+  // -------------------------------------------------------------------------
+  // Expense routes — TypeScript is the NEW ONLINE EXPENSE AUTHORITY (Phase 3)
+  // Registered before the Rust proxy fallback; both /api/ and /api/v1/ paths.
+  // PostgreSQL is the authoritative store — no SQLite/sync path for expenses.
+  // -------------------------------------------------------------------------
+  const expenseRouter = buildExpenseRouter(pool);
+  app.use('/api/expenses', expenseRouter);
+  app.use('/api/v1/expenses', expenseRouter);
+
+  // -------------------------------------------------------------------------
+  // Branch routes — TypeScript is the NEW ONLINE BRANCH AUTHORITY (Phase 4)
+  // Registered before the Rust proxy fallback; /api/branches, /api/v1/branches,
+  // and /api/shops (alias) for full compatibility.
+  // Replaces the inline GET-only handler that was here before Phase 4.
+  // -------------------------------------------------------------------------
+  const branchRouter = buildBranchRouter(pool);
+  app.use('/api/branches', branchRouter);
+  app.use('/api/v1/branches', branchRouter);
+  app.use('/api/shops', branchRouter);
 
   const productRouter = createProductRouter(pool);
   app.use('/api/products', productRouter);
@@ -193,11 +264,6 @@ async function main(): Promise<void> {
 
   app.get(['/api/units', '/api/v1/units'], async (_req: Request, res: Response) => {
     const list = await listUnits(pool);
-    res.status(200).json(list);
-  });
-
-  app.get(['/api/branches', '/api/v1/branches', '/api/shops'], async (_req: Request, res: Response) => {
-    const list = await listBranches(pool);
     res.status(200).json(list);
   });
 

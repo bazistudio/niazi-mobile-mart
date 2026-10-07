@@ -109,6 +109,7 @@ export const ChangePinModal: React.FC<ChangePinModalProps> = ({
               setError(null);
             }}
             disabled={isPending}
+            showToggle
           />
 
           <PinInput
@@ -120,6 +121,7 @@ export const ChangePinModal: React.FC<ChangePinModalProps> = ({
             }}
             disabled={isPending}
             error={error ?? undefined}
+            showToggle
           />
 
           {/* Action buttons */}
