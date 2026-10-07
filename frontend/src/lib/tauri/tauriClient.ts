@@ -1215,8 +1215,14 @@ export const tauriClient = {
     };
   },
 
-  // â”€â”€ Customer & Ledger Domain (Phase 15) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Customer & Ledger Domain (Phase 15) ─────────────────────────────────
   async customerCreate(dto: CreateCustomerDto): Promise<Customer> {
+    if (getApiBaseUrl()) {
+      return await httpFetch<Customer>('/api/customers', {
+        method: 'POST',
+        body: JSON.stringify(dto),
+      });
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Customer>('storage_customer_create', { dto });
@@ -1243,6 +1249,12 @@ export const tauriClient = {
   },
 
   async customerUpdate(id: string, dto: UpdateCustomerDto): Promise<Customer> {
+    if (getApiBaseUrl()) {
+      return await httpFetch<Customer>(`/api/customers/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(dto),
+      });
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Customer>('storage_customer_update', { id, dto });
@@ -1269,6 +1281,9 @@ export const tauriClient = {
   },
 
   async customerGetById(id: string): Promise<Customer> {
+    if (getApiBaseUrl()) {
+      return await httpFetch<Customer>(`/api/v1/customers/${id}`);
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Customer>('storage_customer_get_by_id', { id });
@@ -1280,6 +1295,9 @@ export const tauriClient = {
   },
 
   async customerGetDetail(id: string): Promise<CustomerDetailDto> {
+    if (getApiBaseUrl()) {
+      return await httpFetch<CustomerDetailDto>(`/api/v1/customers/${id}`);
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<CustomerDetailDto>('storage_customer_get_detail', { id });
@@ -1295,6 +1313,15 @@ export const tauriClient = {
   },
 
   async customerList(filter?: CustomerFilter): Promise<CustomerSummaryDto[]> {
+    if (getApiBaseUrl()) {
+      const params = new URLSearchParams();
+      if (filter?.search) params.append('search', filter.search);
+      if (filter?.is_active !== undefined && filter?.is_active !== null) params.append('is_active', String(filter.is_active));
+      if (filter?.limit) params.append('limit', String(filter.limit));
+      if (filter?.offset) params.append('offset', String(filter.offset));
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      return await httpFetch<CustomerSummaryDto[]>(`/api/customers${qs}`);
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<CustomerSummaryDto[]>('storage_customer_list', { filter });
@@ -1323,6 +1350,9 @@ export const tauriClient = {
   },
 
   async customerSearch(query: string): Promise<CustomerSummaryDto[]> {
+    if (getApiBaseUrl()) {
+      return await httpFetch<CustomerSummaryDto[]>(`/api/customers?search=${encodeURIComponent(query)}`);
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<CustomerSummaryDto[]>('storage_customer_search', { query });

@@ -17,7 +17,7 @@ import express, { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, RequestIdentity } from '../auth';
+import { authMiddleware, authorizePermission, isAdmin, RequestIdentity } from '../auth';
 import {
   createProduct,
   createProductWithInitialStock,
@@ -250,7 +250,7 @@ export function createProductRouter(pool: Pool): Router {
   router.post('/opening-stock', async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;
 
-    if (identity.role !== 'Admin' && identity.role !== 'ShopAdmin') {
+    if (!isAdmin(identity)) {
       res.status(403).json({ error: 'Access denied: Opening stock import requires Admin or ShopAdmin permissions' });
       return;
     }

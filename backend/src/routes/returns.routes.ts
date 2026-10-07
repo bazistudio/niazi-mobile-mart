@@ -5,7 +5,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, RequestIdentity } from '../auth';
+import { authMiddleware, authorizePermission, isAdmin, RequestIdentity } from '../auth';
 import {
   createSalesReturn,
   getSaleReturnableInfo,
@@ -76,7 +76,7 @@ export function createReturnsRouter(pool: Pool): Router {
     const identity = req.identity as RequestIdentity;
 
     // Returns require management permissions (Admin or ShopAdmin)
-    if (identity.role !== 'Admin' && identity.role !== 'ShopAdmin') {
+    if (!isAdmin(identity)) {
       res.status(403).json({ error: 'Access denied: Sales returns require Admin or ShopAdmin permissions' });
       return;
     }

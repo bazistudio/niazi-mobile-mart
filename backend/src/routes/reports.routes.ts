@@ -5,7 +5,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, RequestIdentity } from '../auth';
+import { authMiddleware, authorizePermission, isAdmin, RequestIdentity } from '../auth';
 import { getProfitSummary, ProfitRepoError } from '../repositories/profit.repo';
 import { proxyToCentralServer } from '../server';
 
@@ -51,7 +51,7 @@ export function createReportsRouter(pool: Pool): Router {
     const identity = req.identity as RequestIdentity;
 
     // Financial reporting is restricted to Admin or ShopAdmin
-    if (identity.role !== 'Admin' && identity.role !== 'ShopAdmin') {
+    if (!isAdmin(identity)) {
       res.status(403).json({ error: 'Access denied: Profit reporting requires Admin or ShopAdmin permissions' });
       return;
     }

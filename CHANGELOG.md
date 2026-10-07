@@ -5,6 +5,17 @@ All notable changes to Niazi Mobile Mart will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.12] - 2026-10-07
+
+### Added
+- Created missing PostgreSQL database migration `014_opening_stock_and_user_counters.sql` defining `opening_stock_entries` and `user_invoice_counters` tables.
+- Registered migration `014` and `015` in `src-tauri/src/db/postgres.rs` for automatic execution up to version 015.
+
+### Fixed
+- Fixed 403 Forbidden authorization errors on `/api/reports/profit` and other backend routes by implementing a case-insensitive `isAdmin()` helper in `backend/src/auth.ts` supporting `ADMIN`, `SHOP_ADMIN`, `SUPER_ADMIN`, and `OWNER` uppercase roles.
+- Fixed Customer creation and synchronization pipeline in `frontend/src/lib/tauri/tauriClient.ts` to directly hit Live PostgreSQL API endpoints (`/api/customers` & `/api/v1/customers`) when online.
+
+
 ## [1.2.18] - 2026-09-24
 
 ### Fixed

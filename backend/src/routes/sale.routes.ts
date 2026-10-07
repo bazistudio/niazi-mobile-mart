@@ -15,7 +15,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, RequestIdentity } from '../auth';
+import { authMiddleware, authorizePermission, isAdmin, RequestIdentity } from '../auth';
 import {
   completeSale,
   getSaleById,
@@ -79,7 +79,7 @@ function sendError(req: Request, res: Response, err: unknown): void {
  * Mirrors AuthService::require_branch_access in src-tauri/src/services/auth_service.rs.
  */
 function canAccessBranch(identity: RequestIdentity, branchId: string): boolean {
-  if (identity.role === 'Admin' || identity.role === 'ShopAdmin') return true;
+  if (isAdmin(identity)) return true;
   if (identity.access_profile.allowed_pages.some((p) => p === '*')) return true;
   if (!identity.branch_id) return true;
   return identity.branch_id === branchId;
@@ -129,8 +129,7 @@ export function createSaleRouter(pool: Pool): Router {
 
     try {
       const isOrgAdmin =
-        identity.role === 'Admin' ||
-        identity.role === 'ShopAdmin' ||
+        isAdmin(identity) ||
         identity.access_profile.allowed_pages.some((p) => p === '*');
 
       const filter: SaleFilterDto = {

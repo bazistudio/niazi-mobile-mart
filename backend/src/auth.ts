@@ -139,10 +139,12 @@ export function resolveIdentity(token: string): RequestIdentity {
 
 /**
  * Checks if identity has an administrative role.
+ * Case-insensitive comparison supporting ADMIN, ShopAdmin, SUPER_ADMIN, OWNER.
  * Mirrors RequestIdentity::is_admin() in identity.rs.
  */
-function isAdmin(identity: RequestIdentity): boolean {
-  return identity.role === 'Admin' || identity.role === 'ShopAdmin';
+export function isAdmin(identity: RequestIdentity): boolean {
+  const r = String(identity.role || '').toUpperCase();
+  return r === 'ADMIN' || r === 'SHOPADMIN' || r === 'SHOP_ADMIN' || r === 'SUPER_ADMIN' || r === 'OWNER';
 }
 
 /**

@@ -9,6 +9,7 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 import { globalSearch } from '../repositories/search.repo';
 import { sendError, authorizePermission } from './product.routes';
+import { isAdmin } from '../auth';
 
 export function createSearchRouter(pool: Pool): Router {
   const router = Router();
@@ -18,7 +19,7 @@ export function createSearchRouter(pool: Pool): Router {
 
     // Optional Branch Scope based on Role (Cashier/ShopAdmin scoped to active branch)
     let branchId: string | null = null;
-    if (identity && identity.role !== 'Admin') {
+    if (identity && !isAdmin(identity)) {
       branchId = identity.branch_id || null;
     }
 

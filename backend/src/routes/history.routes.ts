@@ -6,7 +6,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, RequestIdentity } from '../auth';
+import { authMiddleware, authorizePermission, isAdmin, RequestIdentity } from '../auth';
 import {
   getHistoryStats,
   listHistoryItems,
@@ -64,8 +64,7 @@ export function createHistoryRouter(pool: Pool): Router {
 
     try {
       const isOrgAdmin =
-        identity.role === 'Admin' ||
-        identity.role === 'ShopAdmin' ||
+        isAdmin(identity) ||
         identity.access_profile.allowed_pages.some((p) => p === '*');
 
       const filter: HistoryFilterParams = {
@@ -98,8 +97,7 @@ export function createHistoryRouter(pool: Pool): Router {
 
     try {
       const isOrgAdmin =
-        identity.role === 'Admin' ||
-        identity.role === 'ShopAdmin' ||
+        isAdmin(identity) ||
         identity.access_profile.allowed_pages.some((p) => p === '*');
 
       const branchId = !isOrgAdmin && identity.branch_id ? identity.branch_id : (req.query['branch_id'] as string) || null;

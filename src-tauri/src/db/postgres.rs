@@ -98,6 +98,8 @@ impl PostgresAdapter {
         let schema_011 = include_str!("../../migrations/postgres/011_terminal_invoice_counters.sql");
         let schema_012 = include_str!("../../migrations/postgres/012_product_type_foundation.sql");
         let schema_013 = include_str!("../../migrations/postgres/013_product_type_counters.sql");
+        let schema_014 = include_str!("../../migrations/postgres/014_opening_stock_and_user_counters.sql");
+        let schema_015 = include_str!("../../migrations/postgres/015_product_compatible_models.sql");
 
         let mut tx = self.pool.begin().await.map_err(|e| {
             DbError::MigrationError(format!("Failed to begin migration transaction: {e}"))
@@ -168,11 +170,21 @@ impl PostgresAdapter {
             .await
             .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 013: {e}")))?;
 
+        sqlx::raw_sql(schema_014)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 014: {e}")))?;
+
+        sqlx::raw_sql(schema_015)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 015: {e}")))?;
+
         tx.commit().await.map_err(|e| {
             DbError::MigrationError(format!("Failed to commit migration transaction: {e}"))
         })?;
 
-        info!("PostgreSQL schema migrations applied successfully (001 to 013).");
+        info!("PostgreSQL schema migrations applied successfully (001 to 015).");
         Ok(())
     }
 
