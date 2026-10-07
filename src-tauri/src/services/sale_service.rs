@@ -328,7 +328,7 @@ impl SaleService {
                 let movement = StockMovement {
                     id: Uuid::new_v4().to_string(),
                     product_id: line.product_id.clone(),
-                    branch_id: branch_id.clone(),
+                    branch_id: branch_id.to_string(),
                     movement_type: StockMovementType::Out,
                     quantity: line.quantity,
                     previous_stock: prev_stock,
@@ -347,7 +347,7 @@ impl SaleService {
             let sale = Sale {
                 id: sale_id.clone(),
                 invoice_number: invoice_number.clone(),
-                branch_id: branch_id.clone(),
+                branch_id: branch_id.to_string(),
                 customer_id: customer_id.clone(),
                 customer_name_snapshot: customer_name_snapshot.clone(),
                 subtotal,
@@ -426,7 +426,7 @@ impl SaleService {
                 let cash_movement = CashMovement {
                     id: Uuid::new_v4().to_string(),
                     session_id: open_session_id,
-                    branch_id: branch_id.clone(),
+                    branch_id: branch_id.to_string(),
                     movement_type: CashMovementType::SalePayment,
                     direction: CashMovementDirection::In,
                     amount: allocated_cash,
@@ -457,7 +457,7 @@ impl SaleService {
                 client_event_id: Some(sale_id.clone()),
                 terminal_id,
                 organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
-                branch_id: branch_id.clone(),
+                branch_id: branch_id.to_string(),
                 event_type: "SALE_CREATED".to_string(),
                 payload: sync_payload_json,
             };

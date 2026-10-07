@@ -83,6 +83,32 @@ impl PostgresBranchRepository {
         })
     }
 
+    pub async fn get_branch_by_id(&self, id: &str) -> AppResult<Option<Branch>> {
+        let sql = "SELECT id, organization_id, name, code, is_active, created_at, updated_at FROM branches WHERE id = $1 LIMIT 1";
+        let row_opt = sqlx::query(sql)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Error querying branch by id: {e}")))?;
+
+        match row_opt {
+            Some(row) => {
+                use sqlx::Row;
+                let is_active_int: i32 = row.try_get(4).unwrap_or(1);
+                Ok(Some(Branch {
+                    id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
+                    organization_id: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+                    name: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                    code: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
+                    is_active: is_active_int == 1,
+                    created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
+                    updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
     pub async fn get_main_branch(&self) -> AppResult<Option<Branch>> {
         let sql = "SELECT id, organization_id, name, code, is_active, created_at, updated_at FROM branches WHERE code = 'MAIN' LIMIT 1";
         let row_opt = sqlx::query(sql)
