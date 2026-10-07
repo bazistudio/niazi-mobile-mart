@@ -249,7 +249,7 @@ export async function resolveEffectiveCategoryId(pool: Pool, inputCategoryId?: s
   if (trimmed.length > 0) {
     try {
       const checkRes = await pool.query<{ id: string }>(
-        `SELECT id FROM ${caps.catTable} WHERE id = $1`,
+        `SELECT id FROM ${caps.catTable} WHERE id = $1 OR name ILIKE $1 OR code ILIKE $1`,
         [trimmed]
       );
       if (checkRes.rows.length > 0) {
@@ -281,7 +281,7 @@ export async function resolveEffectiveUnitId(pool: Pool, inputUnitId?: string | 
   if (trimmed.length > 0) {
     try {
       const checkRes = await pool.query<{ id: string }>(
-        `SELECT id FROM units WHERE id = $1`,
+        `SELECT id FROM units WHERE id = $1 OR name ILIKE $1 OR symbol ILIKE $1`,
         [trimmed]
       );
       if (checkRes.rows.length > 0) {
@@ -305,6 +305,66 @@ export async function resolveEffectiveUnitId(pool: Pool, inputUnitId?: string | 
 
   const seeded = await ensureDefaultUnits(pool);
   return seeded[0]!.id;
+}
+
+export async function resolveEffectiveBrandId(pool: Pool, inputBrandId?: string | null): Promise<string | null> {
+  const trimmed = (inputBrandId ?? '').trim();
+  if (!trimmed) return null;
+  try {
+    const res = await pool.query<{ id: string }>(
+      `SELECT id FROM brands WHERE id = $1 OR name ILIKE $1`,
+      [trimmed]
+    );
+    if (res.rows.length > 0) return res.rows[0]!.id;
+  } catch {
+    // ignore
+  }
+  return UUID_REGEX.test(trimmed) ? trimmed : null;
+}
+
+export async function resolveEffectiveCompanyId(pool: Pool, inputCompanyId?: string | null): Promise<string | null> {
+  const trimmed = (inputCompanyId ?? '').trim();
+  if (!trimmed) return null;
+  try {
+    const res = await pool.query<{ id: string }>(
+      `SELECT id FROM companies WHERE id = $1 OR name ILIKE $1`,
+      [trimmed]
+    );
+    if (res.rows.length > 0) return res.rows[0]!.id;
+  } catch {
+    // ignore
+  }
+  return UUID_REGEX.test(trimmed) ? trimmed : null;
+}
+
+export async function resolveEffectiveQualityId(pool: Pool, inputQualityId?: string | null): Promise<string | null> {
+  const trimmed = (inputQualityId ?? '').trim();
+  if (!trimmed) return null;
+  try {
+    const res = await pool.query<{ id: string }>(
+      `SELECT id FROM qualities WHERE id = $1 OR name ILIKE $1`,
+      [trimmed]
+    );
+    if (res.rows.length > 0) return res.rows[0]!.id;
+  } catch {
+    // ignore
+  }
+  return UUID_REGEX.test(trimmed) ? trimmed : null;
+}
+
+export async function resolveEffectiveColorId(pool: Pool, inputColorId?: string | null): Promise<string | null> {
+  const trimmed = (inputColorId ?? '').trim();
+  if (!trimmed) return null;
+  try {
+    const res = await pool.query<{ id: string }>(
+      `SELECT id FROM colors WHERE id = $1 OR name ILIKE $1`,
+      [trimmed]
+    );
+    if (res.rows.length > 0) return res.rows[0]!.id;
+  } catch {
+    // ignore
+  }
+  return UUID_REGEX.test(trimmed) ? trimmed : null;
 }
 
 // --- SKU Resolution ---
@@ -738,17 +798,30 @@ export async function updateProduct(
           : null
         : current.barcode;
 
-    const newCategoryId = dto.category_id ?? current.category_id;
+    const newCategoryId =
+      dto.category_id !== undefined && dto.category_id !== null && dto.category_id.trim().length > 0
+        ? await resolveEffectiveCategoryId(pool, dto.category_id)
+        : current.category_id;
     const newBrandId =
-      dto.brand_id !== undefined ? sanitizeOptionalUuid(dto.brand_id) : current.brand_id;
+      dto.brand_id !== undefined
+        ? (dto.brand_id ? await resolveEffectiveBrandId(pool, dto.brand_id) : null)
+        : current.brand_id;
     const newCompanyId =
-      dto.company_id !== undefined ? sanitizeOptionalUuid(dto.company_id) : current.company_id;
+      dto.company_id !== undefined
+        ? (dto.company_id ? await resolveEffectiveCompanyId(pool, dto.company_id) : null)
+        : current.company_id;
     const newQualityId =
-      dto.quality_id !== undefined ? sanitizeOptionalUuid(dto.quality_id) : current.quality_id;
+      dto.quality_id !== undefined
+        ? (dto.quality_id ? await resolveEffectiveQualityId(pool, dto.quality_id) : null)
+        : current.quality_id;
     const newColorId =
-      dto.color_id !== undefined ? sanitizeOptionalUuid(dto.color_id) : current.color_id;
+      dto.color_id !== undefined
+        ? (dto.color_id ? await resolveEffectiveColorId(pool, dto.color_id) : null)
+        : current.color_id;
     const newUnitId =
-      dto.unit_id !== undefined ? sanitizeOptionalUuid(dto.unit_id) : current.unit_id;
+      dto.unit_id !== undefined
+        ? (dto.unit_id ? await resolveEffectiveUnitId(pool, dto.unit_id) : null)
+        : current.unit_id;
 
     const newPurchasePrice =
       dto.purchase_price !== undefined && dto.purchase_price !== null
@@ -780,7 +853,7 @@ export async function updateProduct(
     const now = NOW_ISO();
     const activeVal = caps.isActiveBool ? newIsActive : (newIsActive ? 1 : 0);
 
-    await client.query(
+    const updateRes = await client.query(
       `UPDATE products SET
          name = $1,
          normalized_name = $2,
@@ -799,7 +872,8 @@ export async function updateProduct(
          description = $15,
          is_active = $16,
          updated_at = $17
-       WHERE id = $18`,
+       WHERE id = $18
+       RETURNING ${selectCols}`,
       [
         newName,
         newNormalizedName,
@@ -823,26 +897,7 @@ export async function updateProduct(
     );
 
     await client.query('COMMIT');
-    const updated = {
-      ...current,
-      name: newName,
-      normalized_name: newNormalizedName,
-      sku: current.sku,
-      barcode: newBarcode,
-      category_id: newCategoryId,
-      brand_id: newBrandId,
-      company_id: newCompanyId,
-      quality_id: newQualityId,
-      color_id: newColorId,
-      unit_id: newUnitId,
-      purchase_price: newPurchasePrice,
-      average_cost: newAvgCost,
-      sale_price: newSalePrice,
-      low_stock_threshold: newThreshold,
-      description: newDescription,
-      is_active: newIsActive,
-      updated_at: now,
-    };
+    const updated = mapProductRow(updateRes.rows[0]!);
     client.release();
     return updated;
   } catch (err: unknown) {
@@ -1165,6 +1220,173 @@ export async function createUnit(
     [id, name, symbol, now]
   );
   return res.rows[0]!;
+}
+
+// --- Classification Update Functions ---
+
+export async function updateCategory(
+  pool: Pool,
+  id: string,
+  dto: { name: string }
+): Promise<{ id: string; name: string; code: string }> {
+  const caps = await getSchemaCaps(pool);
+  const name = dto.name.trim();
+  const now = NOW_ISO();
+  const res = await pool.query(
+    `UPDATE ${caps.catTable} SET name = $1, updated_at = $2 WHERE id = $3 RETURNING id, name, code`,
+    [name, now, id]
+  );
+  if (res.rows.length === 0) {
+    throw new RepoError('Category not found', 404);
+  }
+  return res.rows[0]!;
+}
+
+export async function updateBrand(
+  pool: Pool,
+  id: string,
+  dto: { name: string }
+): Promise<{ id: string; name: string; code: string }> {
+  const name = dto.name.trim();
+  const now = NOW_ISO();
+  const res = await pool.query(
+    `UPDATE brands SET name = $1, updated_at = $2 WHERE id = $3 RETURNING id, name, code`,
+    [name, now, id]
+  );
+  if (res.rows.length === 0) {
+    throw new RepoError('Brand not found', 404);
+  }
+  return res.rows[0]!;
+}
+
+export async function updateCompany(
+  pool: Pool,
+  id: string,
+  dto: { name: string }
+): Promise<{ id: string; name: string; code: string }> {
+  const name = dto.name.trim();
+  const now = NOW_ISO();
+  const res = await pool.query(
+    `UPDATE companies SET name = $1, updated_at = $2 WHERE id = $3 RETURNING id, name, code`,
+    [name, now, id]
+  );
+  if (res.rows.length === 0) {
+    throw new RepoError('Company not found', 404);
+  }
+  return res.rows[0]!;
+}
+
+export async function updateQuality(
+  pool: Pool,
+  id: string,
+  dto: { name: string }
+): Promise<{ id: string; name: string; code: string }> {
+  const name = dto.name.trim();
+  const now = NOW_ISO();
+  const res = await pool.query(
+    `UPDATE qualities SET name = $1, updated_at = $2 WHERE id = $3 RETURNING id, name, code`,
+    [name, now, id]
+  );
+  if (res.rows.length === 0) {
+    throw new RepoError('Quality not found', 404);
+  }
+  return res.rows[0]!;
+}
+
+export async function updateColor(
+  pool: Pool,
+  id: string,
+  dto: { name: string }
+): Promise<{ id: string; name: string; code: string }> {
+  const name = dto.name.trim();
+  const now = NOW_ISO();
+  const res = await pool.query(
+    `UPDATE colors SET name = $1, updated_at = $2 WHERE id = $3 RETURNING id, name, code`,
+    [name, now, id]
+  );
+  if (res.rows.length === 0) {
+    throw new RepoError('Color not found', 404);
+  }
+  return res.rows[0]!;
+}
+
+export async function updateUnit(
+  pool: Pool,
+  id: string,
+  dto: { name: string; symbol?: string; code?: string }
+): Promise<{ id: string; name: string; code: string }> {
+  const name = dto.name.trim();
+  const now = NOW_ISO();
+  const res = await pool.query(
+    `UPDATE units SET name = $1, updated_at = $2 WHERE id = $3 RETURNING id, name, symbol AS code`,
+    [name, now, id]
+  );
+  if (res.rows.length === 0) {
+    throw new RepoError('Unit not found', 404);
+  }
+  return res.rows[0]!;
+}
+
+export async function adjustStock(
+  pool: Pool,
+  dto: {
+    product_id: string;
+    branch_id?: string | null;
+    target_quantity: number;
+    reason?: string | null;
+    reference_id?: string | null;
+  }
+): Promise<number> {
+  const branchId = (dto.branch_id && dto.branch_id.trim().length === 36)
+    ? dto.branch_id.trim()
+    : '00000000-0000-0000-0000-000000000002';
+  const productId = dto.product_id;
+  const targetQuantity = Math.max(0, Math.round(Number(dto.target_quantity ?? 0)));
+  const now = NOW_ISO();
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const stockRes = await client.query(
+      'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2',
+      [productId, branchId]
+    );
+    const prevStock = Number(stockRes.rows[0]?.['quantity'] ?? 0);
+    const diff = targetQuantity - prevStock;
+
+    await client.query(
+      `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (product_id, branch_id)
+       DO UPDATE SET quantity = EXCLUDED.quantity, updated_at = EXCLUDED.updated_at`,
+      [productId, branchId, targetQuantity, now]
+    );
+
+    if (diff !== 0) {
+      const movementId = uuidv4();
+      const movementType = diff > 0 ? 'IN' : 'OUT';
+      const absQty = Math.abs(diff);
+      const reason = dto.reason || 'Manual Adjustment';
+      const refId = dto.reference_id || 'STOCK_ADJUST';
+
+      await client.query(
+        `INSERT INTO stock_movements (
+           id, product_id, branch_id, movement_type, quantity,
+           previous_stock, resulting_stock, reason, reference_id, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [movementId, productId, branchId, movementType, absQty, prevStock, targetQuantity, reason, refId, now]
+      );
+    }
+
+    await client.query('COMMIT');
+    client.release();
+    return targetQuantity;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    client.release();
+    throw err;
+  }
 }
 
 

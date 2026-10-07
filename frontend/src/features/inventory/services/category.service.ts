@@ -1,4 +1,4 @@
-﻿import { isTauriEnvironment, tauriClient, httpFetch } from '@/lib/tauri/tauriClient';
+import { isTauriEnvironment, tauriClient, httpFetch } from '@/lib/tauri/tauriClient';
 import { ProductCategory } from '../types';
 
 const STORAGE_KEY = 'niazi_master_categories';
@@ -121,10 +121,19 @@ export const categoryService = {
         console.warn('Tauri categoryUpdate fallback to local storage', err);
       }
     }
+
+    const updated = await httpFetch<any>(`/api/categories/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: cleanName }),
+    });
+    const catObj: ProductCategory = {
+      id: updated.id,
+      name: updated.name,
+      organizationId: '00000000-0000-0000-0000-000000000001',
+    };
     const current = getStoredCategories();
-    const updatedObj = { id, name: cleanName, organizationId: '00000000-0000-0000-0000-000000000001' };
-    saveStoredCategories(current.map((cat) => cat.id === id ? updatedObj : cat));
-    return updatedObj;
+    saveStoredCategories(current.map(c => c.id === id ? catObj : c));
+    return catObj;
   },
 
   deleteCategory: async (id: string): Promise<void> => {

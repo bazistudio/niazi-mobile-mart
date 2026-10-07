@@ -1,4 +1,4 @@
-import { isTauriEnvironment, tauriClient } from '@/lib/tauri/tauriClient';
+import { isTauriEnvironment, tauriClient, httpFetch } from '@/lib/tauri/tauriClient';
 import { ProductQuality } from '../types';
 
 const STORAGE_KEY = 'niazi_master_qualities';
@@ -24,41 +24,47 @@ function getStoredQualities(): ProductQuality[] {
   return DEFAULT_QUALITIES;
 }
 
+function saveStoredQualities(list: ProductQuality[]) {
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
 export const qualityService = {
   getQualities: async (): Promise<ProductQuality[]> => {
     if (isTauriEnvironment()) {
       try {
         const list = await tauriClient.qualityList();
         if (list && list.length > 0) {
-          // Perform one-time migration of legacy localStorage custom qualities into DB
-          try {
-            const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-            if (raw) {
-              const legacy: ProductQuality[] = JSON.parse(raw);
-              if (Array.isArray(legacy)) {
-                for (const item of legacy) {
-                  const clean = item.name?.trim();
-                  if (clean && !list.some(q => q.name.toLowerCase() === clean.toLowerCase())) {
-                    await tauriClient.qualityCreate({ name: clean });
-                  }
-                }
-              }
-              localStorage.removeItem(STORAGE_KEY);
-            }
-          } catch {
-            // Ignore legacy migration error
-          }
-
-          const refreshed = await tauriClient.qualityList();
-          return refreshed.map((q) => ({
+          return list.map((q) => ({
             id: q.id,
             name: q.name,
             organizationId: '00000000-0000-0000-0000-000000000001',
           }));
         }
       } catch (err) {
-        console.warn('Tauri qualityList fallback to local storage', err);
+        console.warn('Tauri qualityList fallback to stored qualities', err);
       }
+      return getStoredQualities();
+    }
+
+    try {
+      const list = await httpFetch<any[]>('/api/qualities');
+      if (list && list.length > 0) {
+        const mapped = list.map((q: any) => ({
+          id: q.id,
+          name: q.name,
+          organizationId: q.organization_id || '00000000-0000-0000-0000-000000000001',
+        }));
+        saveStoredQualities(mapped);
+        return mapped;
+      }
+    } catch (err) {
+      console.warn('API qualityList failed, using cache', err);
     }
     return getStoredQualities();
   },
@@ -68,21 +74,31 @@ export const qualityService = {
     if (isTauriEnvironment()) {
       try {
         const created = await tauriClient.qualityCreate({ name: cleanName });
-        return {
+        const qltObj = {
           id: created.id,
           name: created.name,
           organizationId: '00000000-0000-0000-0000-000000000001',
         };
+        const current = getStoredQualities();
+        saveStoredQualities([...current.filter(q => q.id !== qltObj.id), qltObj]);
+        return qltObj;
       } catch (err) {
         console.warn('Tauri qualityCreate fallback to local storage', err);
       }
     }
-    const newQuality: ProductQuality = {
-      id: `qlt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      name: cleanName,
-      organizationId: data.organizationId || '00000000-0000-0000-0000-000000000001',
+
+    const created = await httpFetch<any>('/api/qualities', {
+      method: 'POST',
+      body: JSON.stringify({ name: cleanName }),
+    });
+    const qltObj: ProductQuality = {
+      id: created.id,
+      name: created.name,
+      organizationId: created.organization_id || '00000000-0000-0000-0000-000000000001',
     };
-    return newQuality;
+    const current = getStoredQualities();
+    saveStoredQualities([...current.filter(q => q.id !== qltObj.id), qltObj]);
+    return qltObj;
   },
 
   updateQuality: async (id: string, data: { name: string }): Promise<ProductQuality> => {
@@ -90,16 +106,31 @@ export const qualityService = {
     if (isTauriEnvironment()) {
       try {
         const updated = await tauriClient.qualityUpdate(id, { name: cleanName });
-        return {
+        const qltObj = {
           id: updated.id,
           name: updated.name,
           organizationId: '00000000-0000-0000-0000-000000000001',
         };
+        const current = getStoredQualities();
+        saveStoredQualities(current.map(q => q.id === id ? qltObj : q));
+        return qltObj;
       } catch (err) {
         console.warn('Tauri qualityUpdate fallback to local storage', err);
       }
     }
-    return { id, name: cleanName, organizationId: '00000000-0000-0000-0000-000000000001' };
+
+    const updated = await httpFetch<any>(`/api/qualities/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: cleanName }),
+    });
+    const qltObj: ProductQuality = {
+      id: updated.id,
+      name: updated.name,
+      organizationId: '00000000-0000-0000-0000-000000000001',
+    };
+    const current = getStoredQualities();
+    saveStoredQualities(current.map(q => q.id === id ? qltObj : q));
+    return qltObj;
   },
 
   deleteQuality: async (_id: string): Promise<void> => {

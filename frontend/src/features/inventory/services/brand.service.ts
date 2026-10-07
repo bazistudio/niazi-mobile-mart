@@ -104,14 +104,19 @@ export const brandService = {
         console.warn('Tauri brandCreate fallback to local storage', err);
       }
     }
-    const current = getStoredBrands();
-    const newBrand: ProductBrand = {
-      id: `brd_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-      name: cleanName,
-      organizationId: data.organizationId || '00000000-0000-0000-0000-000000000001',
+
+    const created = await httpFetch<any>('/api/brands', {
+      method: 'POST',
+      body: JSON.stringify({ name: cleanName }),
+    });
+    const brandObj: ProductBrand = {
+      id: created.id,
+      name: created.name,
+      organizationId: created.organization_id || '00000000-0000-0000-0000-000000000001',
     };
-    saveStoredBrands([...current, newBrand]);
-    return newBrand;
+    const current = getStoredBrands();
+    saveStoredBrands([...current.filter(b => b.id !== brandObj.id), brandObj]);
+    return brandObj;
   },
 
   updateBrand: async (id: string, data: { name: string }): Promise<ProductBrand> => {
@@ -133,10 +138,19 @@ export const brandService = {
         console.warn('Tauri brandUpdate fallback to local storage', err);
       }
     }
+
+    const updated = await httpFetch<any>(`/api/brands/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: cleanName }),
+    });
+    const brandObj: ProductBrand = {
+      id: updated.id,
+      name: updated.name,
+      organizationId: '00000000-0000-0000-0000-000000000001',
+    };
     const current = getStoredBrands();
-    const updatedObj = { id, name: cleanName, organizationId: '00000000-0000-0000-0000-000000000001' };
-    saveStoredBrands(current.map((b) => b.id === id ? updatedObj : b));
-    return updatedObj;
+    saveStoredBrands(current.map(b => b.id === id ? brandObj : b));
+    return brandObj;
   },
 
   deleteBrand: async (id: string): Promise<void> => {

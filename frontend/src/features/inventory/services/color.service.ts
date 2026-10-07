@@ -1,4 +1,4 @@
-import { isTauriEnvironment, tauriClient } from '@/lib/tauri/tauriClient';
+import { isTauriEnvironment, tauriClient, httpFetch } from '@/lib/tauri/tauriClient';
 import { ProductColor } from '../types';
 
 const STORAGE_KEY = 'niazi_master_colors';
@@ -27,41 +27,47 @@ function getStoredColors(): ProductColor[] {
   return DEFAULT_COLORS;
 }
 
+function saveStoredColors(list: ProductColor[]) {
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
 export const colorService = {
   getColors: async (): Promise<ProductColor[]> => {
     if (isTauriEnvironment()) {
       try {
         const list = await tauriClient.colorList();
         if (list && list.length > 0) {
-          // Perform one-time migration of legacy localStorage custom colors into DB
-          try {
-            const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-            if (raw) {
-              const legacy: ProductColor[] = JSON.parse(raw);
-              if (Array.isArray(legacy)) {
-                for (const item of legacy) {
-                  const clean = item.name?.trim();
-                  if (clean && !list.some(c => c.name.toLowerCase() === clean.toLowerCase())) {
-                    await tauriClient.colorCreate({ name: clean });
-                  }
-                }
-              }
-              localStorage.removeItem(STORAGE_KEY);
-            }
-          } catch {
-            // Ignore legacy migration error
-          }
-
-          const refreshed = await tauriClient.colorList();
-          return refreshed.map((c) => ({
+          return list.map((c) => ({
             id: c.id,
             name: c.name,
             organizationId: '00000000-0000-0000-0000-000000000001',
           }));
         }
       } catch (err) {
-        console.warn('Tauri colorList fallback to local storage', err);
+        console.warn('Tauri colorList fallback to stored colors', err);
       }
+      return getStoredColors();
+    }
+
+    try {
+      const list = await httpFetch<any[]>('/api/colors');
+      if (list && list.length > 0) {
+        const mapped = list.map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          organizationId: c.organization_id || '00000000-0000-0000-0000-000000000001',
+        }));
+        saveStoredColors(mapped);
+        return mapped;
+      }
+    } catch (err) {
+      console.warn('API colorList failed, using cache', err);
     }
     return getStoredColors();
   },
@@ -71,21 +77,31 @@ export const colorService = {
     if (isTauriEnvironment()) {
       try {
         const created = await tauriClient.colorCreate({ name: cleanName });
-        return {
+        const colorObj = {
           id: created.id,
           name: created.name,
           organizationId: '00000000-0000-0000-0000-000000000001',
         };
+        const current = getStoredColors();
+        saveStoredColors([...current.filter(c => c.id !== colorObj.id), colorObj]);
+        return colorObj;
       } catch (err) {
         console.warn('Tauri colorCreate fallback to local storage', err);
       }
     }
-    const newColor: ProductColor = {
-      id: `clr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      name: cleanName,
-      organizationId: data.organizationId || '00000000-0000-0000-0000-000000000001',
+
+    const created = await httpFetch<any>('/api/colors', {
+      method: 'POST',
+      body: JSON.stringify({ name: cleanName }),
+    });
+    const colorObj: ProductColor = {
+      id: created.id,
+      name: created.name,
+      organizationId: created.organization_id || '00000000-0000-0000-0000-000000000001',
     };
-    return newColor;
+    const current = getStoredColors();
+    saveStoredColors([...current.filter(c => c.id !== colorObj.id), colorObj]);
+    return colorObj;
   },
 
   updateColor: async (id: string, data: { name: string }): Promise<ProductColor> => {
@@ -93,16 +109,31 @@ export const colorService = {
     if (isTauriEnvironment()) {
       try {
         const updated = await tauriClient.colorUpdate(id, { name: cleanName });
-        return {
+        const colorObj = {
           id: updated.id,
           name: updated.name,
           organizationId: '00000000-0000-0000-0000-000000000001',
         };
+        const current = getStoredColors();
+        saveStoredColors(current.map(c => c.id === id ? colorObj : c));
+        return colorObj;
       } catch (err) {
         console.warn('Tauri colorUpdate fallback to local storage', err);
       }
     }
-    return { id, name: cleanName, organizationId: '00000000-0000-0000-0000-000000000001' };
+
+    const updated = await httpFetch<any>(`/api/colors/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: cleanName }),
+    });
+    const colorObj: ProductColor = {
+      id: updated.id,
+      name: updated.name,
+      organizationId: '00000000-0000-0000-0000-000000000001',
+    };
+    const current = getStoredColors();
+    saveStoredColors(current.map(c => c.id === id ? colorObj : c));
+    return colorObj;
   },
 
   deleteColor: async (_id: string): Promise<void> => {

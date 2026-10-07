@@ -67,7 +67,14 @@ import {
   createQuality,
   createColor,
   createUnit,
+  updateCategory,
+  updateBrand,
+  updateCompany,
+  updateQuality,
+  updateColor,
+  updateUnit,
   getStockMapForBranch,
+  adjustStock,
 } from './repositories/product.repo';
 
 function loadEnv(): void {
@@ -260,6 +267,21 @@ async function main(): Promise<void> {
     }
   });
 
+  app.put(['/api/brands/:id', '/api/v1/brands/:id'], async (req: Request, res: Response) => {
+    try {
+      const id = req.params['id'] as string;
+      const name = req.body?.name || req.body?.title;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        res.status(400).json({ error: 'Name is required' });
+        return;
+      }
+      const item = await updateBrand(pool, id, { name });
+      res.status(200).json(item);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to update brand' });
+    }
+  });
+
   app.get(['/api/categories', '/api/v1/categories'], async (_req: Request, res: Response) => {
     const list = await listCategories(pool);
     res.status(200).json(list);
@@ -276,6 +298,21 @@ async function main(): Promise<void> {
       res.status(201).json(item);
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to create category' });
+    }
+  });
+
+  app.put(['/api/categories/:id', '/api/v1/categories/:id'], async (req: Request, res: Response) => {
+    try {
+      const id = req.params['id'] as string;
+      const name = req.body?.name || req.body?.title;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        res.status(400).json({ error: 'Name is required' });
+        return;
+      }
+      const item = await updateCategory(pool, id, { name });
+      res.status(200).json(item);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to update category' });
     }
   });
 
@@ -298,6 +335,21 @@ async function main(): Promise<void> {
     }
   });
 
+  app.put(['/api/companies/:id', '/api/v1/companies/:id'], async (req: Request, res: Response) => {
+    try {
+      const id = req.params['id'] as string;
+      const name = req.body?.name || req.body?.title;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        res.status(400).json({ error: 'Name is required' });
+        return;
+      }
+      const item = await updateCompany(pool, id, { name });
+      res.status(200).json(item);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to update company' });
+    }
+  });
+
   app.get(['/api/qualities', '/api/v1/qualities'], async (_req: Request, res: Response) => {
     const list = await listQualities(pool);
     res.status(200).json(list);
@@ -314,6 +366,21 @@ async function main(): Promise<void> {
       res.status(201).json(item);
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to create quality' });
+    }
+  });
+
+  app.put(['/api/qualities/:id', '/api/v1/qualities/:id'], async (req: Request, res: Response) => {
+    try {
+      const id = req.params['id'] as string;
+      const name = req.body?.name || req.body?.title;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        res.status(400).json({ error: 'Name is required' });
+        return;
+      }
+      const item = await updateQuality(pool, id, { name });
+      res.status(200).json(item);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to update quality' });
     }
   });
 
@@ -336,6 +403,21 @@ async function main(): Promise<void> {
     }
   });
 
+  app.put(['/api/colors/:id', '/api/v1/colors/:id'], async (req: Request, res: Response) => {
+    try {
+      const id = req.params['id'] as string;
+      const name = req.body?.name || req.body?.title;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        res.status(400).json({ error: 'Name is required' });
+        return;
+      }
+      const item = await updateColor(pool, id, { name });
+      res.status(200).json(item);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to update color' });
+    }
+  });
+
   app.get(['/api/units', '/api/v1/units'], async (_req: Request, res: Response) => {
     const list = await listUnits(pool);
     res.status(200).json(list);
@@ -355,10 +437,50 @@ async function main(): Promise<void> {
     }
   });
 
+  app.put(['/api/units/:id', '/api/v1/units/:id'], async (req: Request, res: Response) => {
+    try {
+      const id = req.params['id'] as string;
+      const name = req.body?.name || req.body?.title;
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        res.status(400).json({ error: 'Name is required' });
+        return;
+      }
+      const item = await updateUnit(pool, id, { name });
+      res.status(200).json(item);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to update unit' });
+    }
+  });
+
   app.get(['/api/inventory', '/api/v1/inventory', '/api/stock'], async (req: Request, res: Response) => {
     const branchId = req.query['branch_id'] as string | undefined;
     const stockMap = await getStockMapForBranch(pool, branchId);
     res.status(200).json(stockMap);
+  });
+
+  app.post(['/api/inventory/adjust', '/api/v1/inventory/adjust', '/api/stock/adjust'], async (req: Request, res: Response) => {
+    try {
+      const productId = req.body?.product_id || req.body?.productId;
+      if (!productId || typeof productId !== 'string') {
+        res.status(400).json({ error: 'product_id is required' });
+        return;
+      }
+      const targetQty = Number(req.body?.target_quantity ?? req.body?.targetQuantity ?? req.body?.quantity ?? 0);
+      const branchId = req.body?.branch_id || req.body?.branchId;
+      const reason = req.body?.reason;
+      const referenceId = req.body?.reference_id || req.body?.referenceId;
+
+      const newStock = await adjustStock(pool, {
+        product_id: productId,
+        branch_id: branchId,
+        target_quantity: targetQty,
+        reason,
+        reference_id: referenceId,
+      });
+      res.status(200).json({ data: newStock, newStock });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to adjust stock' });
+    }
   });
 
   app.get(['/health', '/api/health', '/api/v1/health'], (_req: Request, res: Response) => {
