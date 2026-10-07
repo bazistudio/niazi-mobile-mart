@@ -31,17 +31,15 @@
  * Environment variables required:
  *   DATABASE_URL      -- PostgreSQL connection string
  *   JWT_PUBLIC_KEY    -- RSA PEM public key for Bearer token verification
- *   JWT_PRIVATE_KEY   -- RSA PEM private key for JWT issuance (NEW in Phase 1)
- *   RUST_SIDECAR_PORT -- Port for Rust argon2 sidecar (default: 8081)
+ *   JWT_PRIVATE_KEY   -- RSA PEM private key for JWT issuance
  *   PORT              -- HTTP port (default: 8080)
  */
 
 import express, { Request, Response, NextFunction } from 'express';
 import fs from 'fs';
 import path from 'path';
-import http from 'http';
-import https from 'https';
 import { getPool } from './db';
+import { runMigrations } from './migrate';
 import { createProductRouter } from './routes/product.routes';
 import { createSaleRouter } from './routes/sale.routes';
 import { createCustomerRouter, createCustomerV1Router } from './routes/customer.routes';
@@ -155,44 +153,44 @@ async function main(): Promise<void> {
 
   const pool = getPool();
 
+  // Run PostgreSQL database migrations sequentially on startup
+  try {
+    await runMigrations(pool);
+  } catch (err) {
+    console.error('[server] Fatal database migration failure:', (err as Error).message);
+    process.exit(1);
+  }
+
   // -------------------------------------------------------------------------
-  // Auth routes — TypeScript is the NEW ONLINE AUTH AUTHORITY (Phase 1)
-  // Registered before the Rust proxy fallback; both /api/ and /api/v1/ paths.
+  // Auth routes — TypeScript Online Authority
   // -------------------------------------------------------------------------
   const authRouter = buildAuthRouter(pool);
   app.use('/api/auth', authRouter);
   app.use('/api/v1/auth', authRouter);
 
   // -------------------------------------------------------------------------
-  // User management routes — TypeScript-owned (Phase 1)
+  // User management routes — TypeScript Online Authority
   // -------------------------------------------------------------------------
   const usersRouter = buildUsersRouter(pool);
   app.use('/api/users', usersRouter);
   app.use('/api/v1/users', usersRouter);
 
   // -------------------------------------------------------------------------
-  // Supplier routes — TypeScript is the NEW ONLINE SUPPLIER AUTHORITY (Phase 2)
-  // Registered before the Rust proxy fallback; both /api/ and /api/v1/ paths.
-  // PostgreSQL is the authoritative store — no SQLite/sync path for suppliers.
+  // Supplier routes — TypeScript Online Authority
   // -------------------------------------------------------------------------
   const supplierRouter = buildSupplierRouter(pool);
   app.use('/api/suppliers', supplierRouter);
   app.use('/api/v1/suppliers', supplierRouter);
 
   // -------------------------------------------------------------------------
-  // Expense routes — TypeScript is the NEW ONLINE EXPENSE AUTHORITY (Phase 3)
-  // Registered before the Rust proxy fallback; both /api/ and /api/v1/ paths.
-  // PostgreSQL is the authoritative store — no SQLite/sync path for expenses.
+  // Expense routes — TypeScript Online Authority
   // -------------------------------------------------------------------------
   const expenseRouter = buildExpenseRouter(pool);
   app.use('/api/expenses', expenseRouter);
   app.use('/api/v1/expenses', expenseRouter);
 
   // -------------------------------------------------------------------------
-  // Branch routes — TypeScript is the NEW ONLINE BRANCH AUTHORITY (Phase 4)
-  // Registered before the Rust proxy fallback; /api/branches, /api/v1/branches,
-  // and /api/shops (alias) for full compatibility.
-  // Replaces the inline GET-only handler that was here before Phase 4.
+  // Branch routes — TypeScript Online Authority
   // -------------------------------------------------------------------------
   const branchRouter = buildBranchRouter(pool);
   app.use('/api/branches', branchRouter);
@@ -273,65 +271,24 @@ async function main(): Promise<void> {
     res.status(200).json(stockMap);
   });
 
-
-  app.get('/health', (_req: Request, res: Response) => {
+  app.get(['/health', '/api/health', '/api/v1/health'], (_req: Request, res: Response) => {
     res.status(200).json({ status: 'ok', service: 'niazi-product-backend' });
   });
 
-  // Transparent proxy fallback to Central Server for non-product routes (auth, branches, users, etc.)
+  // Standard API 404 Handler (Rust sidecar reverse proxy fallback retired)
   app.use((req: Request, res: Response) => {
-    proxyToCentralServer(req, res);
+    res.status(404).json({ error: 'Not Found', path: req.originalUrl });
   });
 
   await new Promise<void>((resolve) => {
     app.listen(port, () => resolve());
   });
 
-  console.log(`[server] Niazi Product Backend listening on port ${port}`);
-}
-
-// Default preserves pre-existing behaviour. The isolated RC sets RUST_UPSTREAM_URL=http://127.0.0.1:8081.
-const DEFAULT_RUST_UPSTREAM_URL = 'https://niazi-server-860232188829.asia-south1.run.app';
-
-export function proxyToCentralServer(req: Request, res: Response): void {
-  const upstreamBase = (process.env['RUST_UPSTREAM_URL'] || '').trim() || DEFAULT_RUST_UPSTREAM_URL;
-  const targetUrl = new URL(req.originalUrl || req.url, upstreamBase);
-  const transport = targetUrl.protocol === 'http:' ? http : https;
-  
-  const headers: Record<string, any> = { ...req.headers };
-  delete headers.host;
-
-  let bodyData: Buffer | null = null;
-  if (['POST', 'PUT', 'PATCH'].includes(req.method ?? '')) {
-    if (req.body && Object.keys(req.body).length > 0) {
-      bodyData = Buffer.from(JSON.stringify(req.body));
-      headers['content-length'] = String(bodyData.length);
-    }
-  }
-
-  const proxyReq = transport.request(targetUrl, {
-    method: req.method,
-    headers: headers,
-  }, (proxyRes) => {
-    res.status(proxyRes.statusCode ?? 500);
-    Object.entries(proxyRes.headers).forEach(([key, val]) => {
-      if (val) res.setHeader(key, val);
-    });
-    proxyRes.pipe(res);
-  });
-
-  proxyReq.on('error', (err) => {
-    res.status(502).json({ error: 'Central Server Proxy Error', message: err.message });
-  });
-
-  if (bodyData) {
-    proxyReq.write(bodyData);
-  }
-
-  proxyReq.end();
+  console.log(`[server] Niazi Standalone TypeScript Backend listening on port ${port}`);
 }
 
 main().catch((err) => {
   console.error('[server] Fatal startup error:', err);
   process.exit(1);
 });
+

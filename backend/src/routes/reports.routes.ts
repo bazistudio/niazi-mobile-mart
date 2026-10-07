@@ -7,7 +7,6 @@ import { Pool } from 'pg';
 
 import { authMiddleware, authorizePermission, isAdmin, RequestIdentity } from '../auth';
 import { getProfitSummary, ProfitRepoError } from '../repositories/profit.repo';
-import { proxyToCentralServer } from '../server';
 
 function isDbConnectionError(err: unknown): boolean {
   if (!err) return false;
@@ -22,15 +21,10 @@ function isDbConnectionError(err: unknown): boolean {
   );
 }
 
-function sendError(req: Request, res: Response, err: unknown): void {
+function sendError(_req: Request, res: Response, err: unknown): void {
   console.error('[reports.routes] Error handled by sendError:', err);
   if (isDbConnectionError(err)) {
-    if (req.method === 'GET' || req.method === 'HEAD') {
-      console.warn('[reports.routes] DB connection unavailable on read; proxying...');
-      proxyToCentralServer(req, res);
-      return;
-    }
-    res.status(502).json({ error: 'Database connection error' });
+    res.status(503).json({ error: 'Database service unavailable', message: (err as Error).message });
     return;
   }
   if (err instanceof ProfitRepoError) {

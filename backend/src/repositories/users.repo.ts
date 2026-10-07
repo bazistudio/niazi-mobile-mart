@@ -180,8 +180,8 @@ export class UsersRepo {
         input.pin_hash ?? null,
         input.role,
         status,
-        is_active,
-        input.must_change_password ?? false,
+        is_active ? 1 : 0,
+        (input.must_change_password ?? false) ? 1 : 0,
         JSON.stringify(defaultProfile),
         input.branch_id ?? null,
       ]
@@ -231,7 +231,7 @@ export class UsersRepo {
     }
     if (input.must_change_password !== undefined) {
       setClauses.push(`must_change_password = $${paramIdx++}`);
-      params.push(input.must_change_password);
+      params.push(input.must_change_password ? 1 : 0);
     }
 
     if (setClauses.length === 1) {
@@ -532,7 +532,7 @@ export class UsersRepo {
    */
   async countAdmins(): Promise<number> {
     const result = await this.pool.query(
-      `SELECT COUNT(*) AS cnt FROM users WHERE role = 'ADMIN' AND is_active = true`
+      `SELECT COUNT(*) AS cnt FROM users WHERE (role = 'ADMIN' OR role = 'SHOP_ADMIN') AND (is_active = 1 OR status = 'ACTIVE')`
     );
     return Number((result.rows[0] as Record<string, unknown>)?.['cnt'] ?? 0);
   }
@@ -542,7 +542,7 @@ export class UsersRepo {
    */
   async hasAnyUser(): Promise<boolean> {
     const result = await this.pool.query(
-      `SELECT 1 FROM users WHERE role = 'ADMIN' AND is_active = true LIMIT 1`
+      `SELECT 1 FROM users WHERE (role = 'ADMIN' OR role = 'SHOP_ADMIN') AND (is_active = 1 OR status = 'ACTIVE') LIMIT 1`
     );
     return result.rows.length > 0;
   }

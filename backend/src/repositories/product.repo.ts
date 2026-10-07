@@ -96,8 +96,8 @@ export class RepoError extends Error {
 // --- Utilities ---
 
 export interface SchemaCaps {
-  catCol: 'category_id';
-  catTable: 'categories';
+  catCol: 'type_id' | 'category_id';
+  catTable: 'product_types' | 'categories';
   isActiveBool: boolean;
 }
 
@@ -107,19 +107,29 @@ export async function getSchemaCaps(pool: Pool): Promise<SchemaCaps> {
   if (cachedCaps) return cachedCaps;
   try {
     const colRes = await pool.query<{ column_name: string; data_type: string }>(
-      `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'products' AND column_name = 'is_active'`
+      `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'products'`
     );
     let isActiveBool = false;
+    let catCol: 'type_id' | 'category_id' = 'category_id';
+    let catTable: 'product_types' | 'categories' = 'categories';
     for (const r of colRes.rows) {
       if (r.column_name === 'is_active' && r.data_type.toLowerCase().includes('bool')) {
         isActiveBool = true;
       }
+      if (r.column_name === 'type_id') {
+        catCol = 'type_id';
+        catTable = 'product_types';
+      }
     }
-    cachedCaps = { catCol: 'category_id', catTable: 'categories', isActiveBool };
+    cachedCaps = { catCol, catTable, isActiveBool };
   } catch {
-    cachedCaps = { catCol: 'category_id', catTable: 'categories', isActiveBool: false };
+    cachedCaps = { catCol: 'type_id', catTable: 'product_types', isActiveBool: false };
   }
   return cachedCaps;
+}
+
+function getSelectCols(caps: SchemaCaps): string {
+  return `id, name, normalized_name, sku, barcode, ${caps.catCol} AS category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
 }
 
 /**
@@ -139,7 +149,7 @@ function mapProductRow(row: Record<string, unknown>): Product {
     normalized_name: row['normalized_name'] as string,
     sku: row['sku'] as string,
     barcode: (row['barcode'] as string | null) ?? null,
-    category_id: (row['category_id'] as string) ?? '',
+    category_id: ((row['category_id'] ?? row['type_id']) as string) ?? '',
     brand_id: (row['brand_id'] as string | null) ?? null,
     company_id: (row['company_id'] as string | null) ?? null,
     quality_id: (row['quality_id'] as string | null) ?? null,
@@ -185,6 +195,118 @@ export function sanitizeOptionalUuid(val?: string | null): string | null {
 
 const NOW_ISO = () => new Date().toISOString();
 
+export const DEFAULT_CATEGORIES = [
+  { id: '00000000-0000-0000-0000-000000000010', name: 'General', code: 'GEN' },
+  { id: '00000000-0000-0000-0000-000000000011', name: 'Mobiles', code: 'MOB' },
+  { id: '00000000-0000-0000-0000-000000000012', name: 'Accessories', code: 'ACC' },
+];
+
+export const DEFAULT_UNITS = [
+  { id: '00000000-0000-0000-0000-000000000020', name: 'Piece', symbol: 'PCS' },
+  { id: '00000000-0000-0000-0000-000000000021', name: 'Box', symbol: 'BOX' },
+  { id: '00000000-0000-0000-0000-000000000022', name: 'Set', symbol: 'SET' },
+];
+
+export async function ensureDefaultCategories(pool: Pool): Promise<Array<{ id: string; name: string; code?: string }>> {
+  const caps = await getSchemaCaps(pool);
+  const now = NOW_ISO();
+  for (const cat of DEFAULT_CATEGORIES) {
+    try {
+      await pool.query(
+        `INSERT INTO ${caps.catTable} (id, name, code, is_active, created_at, updated_at)
+         VALUES ($1, $2, $3, 1, $4, $4)
+         ON CONFLICT (id) DO NOTHING`,
+        [cat.id, cat.name, cat.code, now]
+      );
+    } catch {
+      // ignore insert failure
+    }
+  }
+  return DEFAULT_CATEGORIES;
+}
+
+export async function ensureDefaultUnits(pool: Pool): Promise<Array<{ id: string; name: string; code?: string }>> {
+  const now = NOW_ISO();
+  for (const u of DEFAULT_UNITS) {
+    try {
+      await pool.query(
+        `INSERT INTO units (id, name, symbol, conversion_factor, is_active, created_at, updated_at)
+         VALUES ($1, $2, $3, 1, 1, $4, $4)
+         ON CONFLICT (id) DO NOTHING`,
+        [u.id, u.name, u.symbol, now]
+      );
+    } catch {
+      // ignore
+    }
+  }
+  return DEFAULT_UNITS.map(u => ({ id: u.id, name: u.name, code: u.symbol }));
+}
+
+export async function resolveEffectiveCategoryId(pool: Pool, inputCategoryId?: string | null): Promise<string> {
+  const caps = await getSchemaCaps(pool);
+  const trimmed = (inputCategoryId ?? '').trim();
+
+  if (trimmed.length > 0) {
+    try {
+      const checkRes = await pool.query<{ id: string }>(
+        `SELECT id FROM ${caps.catTable} WHERE id = $1`,
+        [trimmed]
+      );
+      if (checkRes.rows.length > 0) {
+        return checkRes.rows[0]!.id;
+      }
+    } catch {
+      // ignore check error
+    }
+  }
+
+  try {
+    const existingRes = await pool.query<{ id: string }>(
+      `SELECT id FROM ${caps.catTable} ORDER BY created_at ASC LIMIT 1`
+    );
+    if (existingRes.rows.length > 0) {
+      return existingRes.rows[0]!.id;
+    }
+  } catch {
+    // ignore
+  }
+
+  const seeded = await ensureDefaultCategories(pool);
+  return seeded[0]!.id;
+}
+
+export async function resolveEffectiveUnitId(pool: Pool, inputUnitId?: string | null): Promise<string | null> {
+  const trimmed = (inputUnitId ?? '').trim();
+
+  if (trimmed.length > 0) {
+    try {
+      const checkRes = await pool.query<{ id: string }>(
+        `SELECT id FROM units WHERE id = $1`,
+        [trimmed]
+      );
+      if (checkRes.rows.length > 0) {
+        return checkRes.rows[0]!.id;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  try {
+    const existingRes = await pool.query<{ id: string }>(
+      `SELECT id FROM units ORDER BY name ASC LIMIT 1`
+    );
+    if (existingRes.rows.length > 0) {
+      return existingRes.rows[0]!.id;
+    }
+  } catch {
+    // ignore
+  }
+
+  const seeded = await ensureDefaultUnits(pool);
+  return seeded[0]!.id;
+}
+
 // --- SKU Resolution ---
 
 /**
@@ -204,12 +326,13 @@ export async function resolveProductSku(
     return trimmed;
   }
 
+  const caps = await getSchemaCaps(pool);
   let catName = '';
   let catCode = '';
 
   try {
     const ptRes = await pool.query<{ name: string; code: string }>(
-      `SELECT name, code FROM categories WHERE id = $1`,
+      `SELECT name, code FROM ${caps.catTable} WHERE id = $1`,
       [categoryId]
     );
 
@@ -266,9 +389,11 @@ export async function createProduct(
   dto: CreateProductDto
 ): Promise<Product> {
   const caps = await getSchemaCaps(pool);
-  const resolvedSku = await resolveProductSku(pool, dto.category_id, dto.sku);
+  const categoryId = await resolveEffectiveCategoryId(pool, dto.category_id);
+  const unitId = await resolveEffectiveUnitId(pool, dto.unit_id);
+  const resolvedSku = await resolveProductSku(pool, categoryId, dto.sku);
   const activeVal = caps.isActiveBool ? true : 1;
-  const selectCols = `id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+  const selectCols = getSelectCols(caps);
 
   const client = await pool.connect();
   try {
@@ -283,7 +408,7 @@ export async function createProduct(
 
     const res = await client.query(
       `INSERT INTO products (
-         id, name, normalized_name, sku, barcode, category_id, brand_id,
+         id, name, normalized_name, sku, barcode, ${caps.catCol}, brand_id,
          company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price,
          low_stock_threshold, is_active, description, created_at, updated_at
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
@@ -294,12 +419,12 @@ export async function createProduct(
         normalizedName,
         resolvedSku,
         barcodeVal,
-        dto.category_id,
+        categoryId,
         sanitizeOptionalUuid(dto.brand_id),
         sanitizeOptionalUuid(dto.company_id),
         sanitizeOptionalUuid(dto.quality_id),
         sanitizeOptionalUuid(dto.color_id),
-        sanitizeOptionalUuid(dto.unit_id),
+        unitId,
         dto.purchase_price,
         avgCost,
         dto.sale_price,
@@ -346,9 +471,11 @@ export async function createProductWithInitialStock(
   userId: string
 ): Promise<Product> {
   const caps = await getSchemaCaps(pool);
-  const resolvedSku = await resolveProductSku(pool, dto.category_id, dto.sku);
+  const categoryId = await resolveEffectiveCategoryId(pool, dto.category_id);
+  const unitId = await resolveEffectiveUnitId(pool, dto.unit_id);
+  const resolvedSku = await resolveProductSku(pool, categoryId, dto.sku);
   const activeVal = caps.isActiveBool ? true : 1;
-  const selectCols = `id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+  const selectCols = getSelectCols(caps);
 
   const client = await pool.connect();
   try {
@@ -363,7 +490,7 @@ export async function createProductWithInitialStock(
 
     const insertRes = await client.query(
       `INSERT INTO products (
-         id, name, normalized_name, sku, barcode, category_id, brand_id,
+         id, name, normalized_name, sku, barcode, ${caps.catCol}, brand_id,
          company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price,
          low_stock_threshold, is_active, description, created_at, updated_at
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
@@ -374,12 +501,12 @@ export async function createProductWithInitialStock(
         normalizedName,
         resolvedSku,
         barcodeVal,
-        dto.category_id,
+        categoryId,
         sanitizeOptionalUuid(dto.brand_id),
         sanitizeOptionalUuid(dto.company_id),
         sanitizeOptionalUuid(dto.quality_id),
         sanitizeOptionalUuid(dto.color_id),
-        sanitizeOptionalUuid(dto.unit_id),
+        unitId,
         dto.purchase_price,
         avgCost,
         dto.sale_price,
@@ -492,7 +619,7 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
   }
 
   if (filter.category_id != null) {
-    conditions.push(`category_id = $${idx}`);
+    conditions.push(`${caps.catCol} = $${idx}`);
     params.push(filter.category_id);
     idx++;
   }
@@ -531,7 +658,7 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
     conditions.push(`(is_active::text = '1' OR is_active::text = 'true')`);
   }
 
-  const selectCols = `id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+  const selectCols = getSelectCols(caps);
 
   const sql = `
     SELECT ${selectCols}
@@ -548,7 +675,7 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
 
 export async function getProductById(pool: Pool, id: string): Promise<Product | null> {
   const caps = await getSchemaCaps(pool);
-  const selectCols = `id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+  const selectCols = getSelectCols(caps);
   const res = await pool.query(
     `SELECT ${selectCols} FROM products WHERE id = $1`,
     [id]
@@ -579,7 +706,7 @@ export async function updateProduct(
   dto: UpdateProductDto
 ): Promise<Product> {
   const caps = await getSchemaCaps(pool);
-  const selectCols = `id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+  const selectCols = getSelectCols(caps);
 
   const client = await pool.connect();
   try {
@@ -659,7 +786,7 @@ export async function updateProduct(
          normalized_name = $2,
          sku = $3,
          barcode = $4,
-         category_id = $5,
+         ${caps.catCol} = $5,
          brand_id = $6,
          company_id = $7,
          quality_id = $8,
@@ -818,8 +945,9 @@ export async function listBrands(pool: Pool): Promise<Array<{ id: string; name: 
 }
 
 export async function listCategories(pool: Pool): Promise<Array<{ id: string; name: string; code?: string }>> {
+  const caps = await getSchemaCaps(pool);
   try {
-    const res = await pool.query('SELECT id, name, code FROM categories ORDER BY name ASC');
+    const res = await pool.query(`SELECT id, name, code FROM ${caps.catTable} ORDER BY name ASC`);
     if (res.rows && res.rows.length > 0) {
       return res.rows.map((r) => ({ id: String(r.id), name: String(r.name), code: r.code ? String(r.code) : undefined }));
     }

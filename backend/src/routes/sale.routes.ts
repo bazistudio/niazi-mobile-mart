@@ -28,8 +28,6 @@ import {
   SaleFilterDto,
 } from '../repositories/sale.repo';
 
-import { proxyToCentralServer } from '../server';
-
 // ─── Error Response Helper ────────────────────────────────────────────────────
 
 function isDbConnectionError(err: unknown): boolean {
@@ -45,23 +43,10 @@ function isDbConnectionError(err: unknown): boolean {
   );
 }
 
-function sendError(req: Request, res: Response, err: unknown): void {
+function sendError(_req: Request, res: Response, err: unknown): void {
   console.error('[sale.routes] Error handled by sendError:', err);
   if (isDbConnectionError(err)) {
-    // Only proxy read-only requests. Write requests (POST/PUT/DELETE/PATCH) must NOT be
-    // automatically retried through Rust: if the TS transaction already committed server-side
-    // before the connection dropped, a proxy retry would create a duplicate record (duplicate
-    // sale, double stock deduction, double payment).
-    if (req.method === 'GET' || req.method === 'HEAD') {
-      console.warn('[sale.routes] DB connection unavailable on read; proxying to Central Server...');
-      proxyToCentralServer(req, res);
-      return;
-    }
-    console.error('[sale.routes] DB connection error on write route — returning 502, NOT proxying to prevent duplicate data');
-    res.status(502).json({
-      error: 'Database connection error',
-      message: 'Write outcome is unknown. The operation was not automatically retried to prevent duplicate data.',
-    });
+    res.status(503).json({ error: 'Database service unavailable', message: (err as Error).message });
     return;
   }
   if (err instanceof SaleRepoError) {

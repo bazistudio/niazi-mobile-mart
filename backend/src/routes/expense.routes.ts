@@ -126,9 +126,10 @@ export function buildExpenseRouter(pool: Pool): Router {
     }
 
     const isAdmin =
-      identity.role === 'ADMIN' ||
-      identity.role === 'Admin' ||
-      identity.role === 'admin';
+      identity.role === 'SHOP_ADMIN' ||
+      (identity.role as string) === 'ADMIN' ||
+      (identity.role as string) === 'Admin' ||
+      (identity.role as string) === 'admin';
 
     const requested = requestedBranchId?.trim() ?? null;
 
@@ -329,9 +330,10 @@ export function buildExpenseRouter(pool: Pool): Router {
 
       // Branch access check — mirrors IPC expense_get_by_id branch check
       const isAdmin =
-        identity.role === 'ADMIN' ||
-        identity.role === 'Admin' ||
-        identity.role === 'admin';
+        identity.role === 'SHOP_ADMIN' ||
+        (identity.role as string) === 'ADMIN' ||
+        (identity.role as string) === 'Admin' ||
+        (identity.role as string) === 'admin';
       if (!isAdmin && identity.branch_id && expense.branch_id !== identity.branch_id) {
         res.status(403).json({
           error: 'FORBIDDEN',
@@ -364,9 +366,10 @@ export function buildExpenseRouter(pool: Pool): Router {
       const existing = await service.getExpenseById(id);
 
       const isAdmin =
-        identity.role === 'ADMIN' ||
-        identity.role === 'Admin' ||
-        identity.role === 'admin';
+        identity.role === 'SHOP_ADMIN' ||
+        (identity.role as string) === 'ADMIN' ||
+        (identity.role as string) === 'Admin' ||
+        (identity.role as string) === 'admin';
       if (!isAdmin && identity.branch_id && existing.branch_id !== identity.branch_id) {
         res.status(403).json({
           error: 'FORBIDDEN',
