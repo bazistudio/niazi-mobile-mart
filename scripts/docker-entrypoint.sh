@@ -10,6 +10,16 @@ RUST_INTERNAL_PORT=8081
 
 export RUST_UPSTREAM_URL="${RUST_UPSTREAM_URL:-http://127.0.0.1:${RUST_INTERNAL_PORT}}"
 
+# Execute database migrations if DATABASE_URL is configured (e.g. in Cloud Run)
+if [ -n "${DATABASE_URL:-}" ]; then
+  echo "[entrypoint] DATABASE_URL detected. Executing database migrations..."
+  /app/niazi-server migrate || {
+    echo "[entrypoint] FATAL: Database migration failed. Aborting startup."
+    exit 1
+  }
+  echo "[entrypoint] Database migrations completed successfully."
+fi
+
 PORT="${RUST_INTERNAL_PORT}" /app/niazi-server &
 RUST_PID=$!
 

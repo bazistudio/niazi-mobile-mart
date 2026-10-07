@@ -5,6 +5,15 @@ All notable changes to Niazi Mobile Mart will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.14] - 2026-10-07
+
+### Added
+- Added deterministic database migration preflight execution (`/app/niazi-server migrate`) to container launcher script `scripts/docker-entrypoint.sh` whenever `DATABASE_URL` is configured in production runtime.
+
+### Fixed
+- Added full `opening_stock_entries` audit logging and `reference_id` link parity to Rust PostgreSQL product creation (`PostgresProductRepository::create_product`) and sync change applier (`apply_product_created_tx`) in `src-tauri/src/repositories/postgres_product_repo.rs`.
+
+
 ## [1.3.13] - 2026-10-07
 
 ### Fixed

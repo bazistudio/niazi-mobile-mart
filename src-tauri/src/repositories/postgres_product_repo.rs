@@ -202,6 +202,43 @@ impl PostgresProductRepository {
 
         if let (Some(qty), Some(branch_id)) = (dto.initial_quantity, &dto.branch_id) {
             if qty > 0 {
+                let org_id: String = sqlx::query_scalar(
+                    "SELECT organization_id::text FROM branches WHERE id::text = $1"
+                )
+                .bind(branch_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "00000000-0000-0000-0000-000000000001".to_string());
+
+                let entry_id = Uuid::new_v4().to_string();
+                let ref_no = format!(
+                    "OP-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                );
+                let unit_cost = dto.purchase_price;
+
+                sqlx::query(
+                    "INSERT INTO opening_stock_entries (id, organization_id, branch_id, product_id, quantity, unit_cost, reference_number, performed_by, notes, created_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Opening Stock during Product Add', $9)"
+                )
+                .bind(&entry_id)
+                .bind(&org_id)
+                .bind(branch_id)
+                .bind(id)
+                .bind(qty)
+                .bind(unit_cost)
+                .bind(&ref_no)
+                .bind(user_id)
+                .bind(&now)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| AppError::Database(format!("Failed to insert opening stock entry: {e}")))?;
+
                 sqlx::query(
                     "INSERT INTO stock (product_id, branch_id, quantity, updated_at)
                      VALUES ($1, $2, $3, $4)
@@ -218,7 +255,7 @@ impl PostgresProductRepository {
                 let movement_id = Uuid::new_v4().to_string();
                 sqlx::query(
                     "INSERT INTO stock_movements (id, product_id, branch_id, movement_type, quantity, previous_stock, resulting_stock, reason, performed_by, reference_id, created_at)
-                     VALUES ($1, $2, $3, 'IN', $4, 0, $5, 'Opening Stock', $6, 'OPENING_BALANCE', $7)"
+                     VALUES ($1, $2, $3, 'IN', $4, 0, $5, 'Opening Stock', $6, $7, $8)"
                 )
                 .bind(movement_id)
                 .bind(id)
@@ -226,6 +263,7 @@ impl PostgresProductRepository {
                 .bind(qty)
                 .bind(qty)
                 .bind(user_id)
+                .bind(&entry_id)
                 .bind(&now)
                 .execute(&mut *tx)
                 .await
@@ -586,8 +624,8 @@ impl PostgresProductRepository {
             if qty > 0 {
                 let target_branch = branch_id_override.unwrap_or(crate::domain::organization::DEFAULT_MAIN_BRANCH_ID);
 
-                let movement_exists: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM stock_movements WHERE product_id = $1 AND branch_id = $2 AND reference_id = 'OPENING_BALANCE')"
+                let entry_exists: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM opening_stock_entries WHERE product_id = $1 AND branch_id = $2)"
                 )
                 .bind(&product.id)
                 .bind(target_branch)
@@ -595,7 +633,43 @@ impl PostgresProductRepository {
                 .await
                 .unwrap_or(false);
 
-                if !movement_exists {
+                if !entry_exists {
+                    let org_id: String = sqlx::query_scalar(
+                        "SELECT organization_id::text FROM branches WHERE id::text = $1"
+                    )
+                    .bind(target_branch)
+                    .fetch_optional(&mut **tx)
+                    .await
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| "00000000-0000-0000-0000-000000000001".to_string());
+
+                    let entry_id = Uuid::new_v4().to_string();
+                    let ref_no = format!(
+                        "OP-{}",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis()
+                    );
+                    let unit_cost = product.purchase_price;
+
+                    sqlx::query(
+                        "INSERT INTO opening_stock_entries (id, organization_id, branch_id, product_id, quantity, unit_cost, reference_number, notes, created_at)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, 'Opening Stock Projection', $8)"
+                    )
+                    .bind(&entry_id)
+                    .bind(&org_id)
+                    .bind(target_branch)
+                    .bind(&product.id)
+                    .bind(qty)
+                    .bind(unit_cost)
+                    .bind(&ref_no)
+                    .bind(&now)
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(|e| AppError::Database(format!("Failed to project opening stock entry: {e}")))?;
+
                     sqlx::query(
                         "INSERT INTO stock (product_id, branch_id, quantity, updated_at)
                          VALUES ($1, $2, $3, $4)
@@ -612,12 +686,13 @@ impl PostgresProductRepository {
                     let movement_id = Uuid::new_v4().to_string();
                     sqlx::query(
                         "INSERT INTO stock_movements (id, product_id, branch_id, movement_type, quantity, previous_stock, resulting_stock, reason, reference_id, created_at)
-                         VALUES ($1, $2, $3, 'IN', $4, 0, $4, 'Opening Stock', 'OPENING_BALANCE', $5)"
+                         VALUES ($1, $2, $3, 'IN', $4, 0, $4, 'Opening Stock', $5, $6)"
                     )
                     .bind(movement_id)
                     .bind(&product.id)
                     .bind(target_branch)
                     .bind(qty)
+                    .bind(&entry_id)
                     .bind(&now)
                     .execute(&mut **tx)
                     .await
