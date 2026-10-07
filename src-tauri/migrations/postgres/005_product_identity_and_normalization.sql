@@ -17,7 +17,15 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint WHERE conname = 'products_composite_identity_key'
     ) THEN
-        ALTER TABLE products ADD CONSTRAINT products_composite_identity_key
-        UNIQUE NULLS NOT DISTINCT (category_id, normalized_name, brand_id, unit_id, quality_id, color_id);
+        IF EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'products' AND column_name = 'type_id'
+        ) THEN
+            ALTER TABLE products ADD CONSTRAINT products_composite_identity_key
+            UNIQUE NULLS NOT DISTINCT (type_id, normalized_name, brand_id, unit_id, quality_id, color_id);
+        ELSE
+            ALTER TABLE products ADD CONSTRAINT products_composite_identity_key
+            UNIQUE NULLS NOT DISTINCT (category_id, normalized_name, brand_id, unit_id, quality_id, color_id);
+        END IF;
     END IF;
 END $$;

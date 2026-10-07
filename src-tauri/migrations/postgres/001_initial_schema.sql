@@ -135,7 +135,15 @@ CREATE TABLE IF NOT EXISTS products (
     updated_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'products' AND column_name = 'category_id'
+    ) THEN
+        CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
+    END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_products_brand_id ON products(brand_id);
 CREATE INDEX IF NOT EXISTS idx_products_unit_id ON products(unit_id);
 CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);

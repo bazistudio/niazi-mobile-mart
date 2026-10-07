@@ -52,6 +52,21 @@ async function ensureMigrationTable(client: PoolClient): Promise<void> {
       applied_at TEXT NOT NULL
     );
   `);
+
+  // Seeding: if products table already exists in the database, ensure initial schema (version 1) is recorded as applied
+  try {
+    const checkRes = await client.query(
+      "SELECT table_name FROM information_schema.tables WHERE table_name = 'products'"
+    );
+    if (checkRes.rows.length > 0) {
+      await client.query(
+        "INSERT INTO schema_migrations (version, name, applied_at) VALUES (1, '001_initial_schema.sql', $1) ON CONFLICT (version) DO NOTHING;",
+        [new Date().toISOString()]
+      );
+    }
+  } catch {
+    // ignore seeding error
+  }
 }
 
 /**
