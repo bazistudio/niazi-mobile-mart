@@ -17,7 +17,6 @@ import { OrganizationSocialPage } from '@/pages/dashboard/organization/Organizat
 import { OrganizationProductsPage } from '@/pages/dashboard/organization/OrganizationProductsPage';
 import { OrganizationCustomersPage } from '@/pages/dashboard/organization/OrganizationCustomersPage';
 import { OrganizationSuppliersPage } from '@/pages/dashboard/organization/OrganizationSuppliersPage';
-import { OrganizationPartiesPage } from '@/pages/dashboard/organization/OrganizationPartiesPage';
 import { OrganizationProfilePage } from '@/pages/dashboard/organization/OrganizationProfilePage';
 import { OrganizationSettingsPage } from '@/pages/dashboard/organization/OrganizationSettingsPage';
 
@@ -73,8 +72,6 @@ export const organizationRoutes = (
       {/* 15. Suppliers */}
       <Route path="suppliers" element={<OrganizationSuppliersPage />} />
       
-      {/* 16. Parties */}
-      <Route path="parties" element={<OrganizationPartiesPage />} />
       
       {/* 17. Settings */}
       <Route path="settings" element={<OrganizationSettingsPage />} />

@@ -103,14 +103,7 @@ impl CustomerService {
             with_transaction(db, move |tx| {
                 crate::repositories::SQLiteCustomerRepository::insert_customer_in_tx(tx, &customer_clone)?;
 
-                // Phase 1.1: every customer role is linked to a canonical party (party.id = customer.id).
-                let payloads = crate::repositories::SQLitePartyRepository::link_role_and_build_payloads_in_tx(
-                    tx,
-                    &customer_clone,
-                    &crate::domain::party::PartyRoleContact::from(&customer_clone),
-                    false,
-                )?;
-                let payload = payloads.role_payload;
+                let payload = serde_json::to_string(&customer_clone).map_err(|e| crate::db::errors::DbError::Internal(e.to_string()))?;
                 let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
                     client_event_id: Some(customer_clone.id.clone()),
                     terminal_id,
@@ -156,14 +149,7 @@ impl CustomerService {
             
             let updated = with_transaction(db, move |tx| {
                 let cust = crate::repositories::SQLiteCustomerRepository::update_customer_in_tx(tx, &id_clone, &dto_clone)?;
-                // Phase 1.1: keep the canonical party linked; a single-role party mirrors this edit.
-                let payloads = crate::repositories::SQLitePartyRepository::link_role_and_build_payloads_in_tx(
-                    tx,
-                    &cust,
-                    &crate::domain::party::PartyRoleContact::from(&cust),
-                    true,
-                )?;
-                let payload = payloads.role_payload;
+                let payload = serde_json::to_string(&cust).map_err(|e| crate::db::errors::DbError::Internal(e.to_string()))?;
                 let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
                     client_event_id: Some(Uuid::new_v4().to_string()), // Must use a new UUID for the event
                     terminal_id: terminal_id.clone(),
@@ -173,19 +159,6 @@ impl CustomerService {
                     payload,
                 };
                 crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
-                if let Some(party_payload) = payloads.party_payload {
-                    crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(
-                        tx,
-                        crate::domain::sync_queue::EnqueueOfflineEventDto {
-                            client_event_id: Some(Uuid::new_v4().to_string()),
-                            terminal_id,
-                            organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
-                            branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-                            event_type: crate::domain::party::PARTY_UPSERTED_EVENT.to_string(),
-                            payload: party_payload,
-                        },
-                    )?;
-                }
                 Ok(cust)
             }).await?;
             Ok(updated)

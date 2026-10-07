@@ -8,13 +8,12 @@ import { supplierApi } from '@/services/supplier.api';
 import { Search, ArrowLeft, Building2, User, Wallet, History, FileText, Download, Receipt } from 'lucide-react';
 import { LedgerBook } from './LedgerBook'; // We will create this
 import { queryKeys } from '@/lib/react-query/queryKeys';
-import { partyApi } from '@/services/party.api';
 import { expensesApi } from '@/features/expenses/services/expenses.api';
 import { Users } from 'lucide-react';
 
 export const LedgerDashboard: React.FC = () => {
   const { selectedParty, setSelectedParty } = useLedger();
-  const [directoryTab, setDirectoryTab] = useState<'CUSTOMER' | 'SUPPLIER' | 'PARTY' | 'EXPENSE'>('CUSTOMER');
+  const [directoryTab, setDirectoryTab] = useState<'CUSTOMER' | 'SUPPLIER' | 'EXPENSE'>('CUSTOMER');
   const [searchTerm, setSearchTerm] = useState('');
 
   // Fetch directories
@@ -26,11 +25,6 @@ export const LedgerDashboard: React.FC = () => {
   const { data: suppliersData, isLoading: isLoadingSuppliers } = useQuery({
     queryKey: queryKeys.suppliers.all,
     queryFn: () => supplierApi.getSuppliers(1, 1000)
-  });
-
-  const { data: partiesData, isLoading: isLoadingParties } = useQuery({
-    queryKey: ['parties'],
-    queryFn: () => partyApi.getParties(1, 1000)
   });
 
   const { data: expensesData, isLoading: isLoadingExpenses } = useQuery({
@@ -58,7 +52,6 @@ export const LedgerDashboard: React.FC = () => {
   // Directory View
   const listToRender = directoryTab === 'CUSTOMER' ? (customersData?.data || []) 
     : directoryTab === 'SUPPLIER' ? (suppliersData?.data || []) 
-    : directoryTab === 'PARTY' ? (partiesData?.data || [])
     : (expensesData?.data || []);
 
   const filteredList = listToRender.filter((item: any) => {
@@ -103,16 +96,7 @@ export const LedgerDashboard: React.FC = () => {
             >
               <Building2 className="w-4 h-4" /> Suppliers (Payables)
             </button>
-            <button
-              onClick={() => setDirectoryTab('PARTY')}
-              className={`px-4 py-2 text-sm font-bold rounded-lg flex items-center gap-2 transition-colors ${
-                directoryTab === 'PARTY' 
-                ? 'bg-purple-600 text-white shadow-md' 
-                : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
-              }`}
-            >
-              <Users className="w-4 h-4" /> Parties (Unified)
-            </button>
+
             <button
               onClick={() => setDirectoryTab('EXPENSE')}
               className={`px-4 py-2 text-sm font-bold rounded-lg flex items-center gap-2 transition-colors ${
@@ -206,17 +190,13 @@ export const LedgerDashboard: React.FC = () => {
                     <td className="px-6 py-4 text-right">
                       <button
                         onClick={() => {
-                          if (directoryTab === 'PARTY') {
-                            window.location.href = `/dashboard/shop-admin/parties/${party.id}`;
-                          } else {
-                            setSelectedParty({
-                              id: party.id,
-                              type: directoryTab,
-                              name: party.name || party.contactPerson,
-                              balance: party.currentBalance,
-                              creditLimit: party.creditLimit
-                            });
-                          }
+                          setSelectedParty({
+                            id: party.id,
+                            type: directoryTab as 'CUSTOMER' | 'SUPPLIER',
+                            name: party.name || party.contactPerson,
+                            balance: party.currentBalance,
+                            creditLimit: party.creditLimit
+                          });
                         }}
                         className="px-4 py-1.5 text-sm font-bold text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
                       >

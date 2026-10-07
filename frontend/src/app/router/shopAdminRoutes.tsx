@@ -17,8 +17,6 @@ import { CustomersPage } from '@/pages/dashboard/shop-admin/CustomersPage';
 import { CustomerDetailPage } from '@/pages/dashboard/shop-admin/CustomerDetailPage';
 import { SuppliersPage } from '@/pages/dashboard/shop-admin/SuppliersPage';
 import { SupplierDetailPage } from '@/pages/dashboard/shop-admin/SupplierDetailPage';
-import { PartiesPage } from '@/pages/dashboard/shop-admin/PartiesPage';
-import { PartyDetailPage } from '@/pages/dashboard/shop-admin/PartyDetailPage';
 import { RepairsPage } from '@/pages/dashboard/shop-admin/RepairsPage';
 import { RepairDetailPage } from '@/pages/dashboard/shop-admin/RepairDetailPage';
 import { ExpensesPage } from '@/pages/dashboard/shop-admin/ExpensesPage';
@@ -144,23 +142,6 @@ export const shopAdminCoreRoutes = (
       }
     />
 
-    {/* Unified Party Management (Customers + Suppliers) */}
-    <Route
-      path="parties"
-      element={
-        <PermissionGuard requiredPermission={PERMISSIONS.CUSTOMERS_VIEW} fallbackPath="/dashboard/shop-admin">
-          <PartiesPage />
-        </PermissionGuard>
-      }
-    />
-    <Route
-      path="parties/:id"
-      element={
-        <PermissionGuard requiredPermission={PERMISSIONS.CUSTOMERS_VIEW} fallbackPath="/dashboard/shop-admin">
-          <PartyDetailPage />
-        </PermissionGuard>
-      }
-    />
 
     {/* Repair Service Ticketing */}
     <Route

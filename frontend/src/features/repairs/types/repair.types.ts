@@ -80,8 +80,8 @@ export interface RepairJob {
   id: string; // mapped from _id
   _id: string;
   jobId: string;
-  customerId: any; // Populated Customer or Party
-  customerModel: 'Customer' | 'Party';
+  customerId: any; // Populated Customer
+  customerModel: 'Customer';
   device: DeviceInfo;
   accessories: Accessories;
   problemDescription: string;

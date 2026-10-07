@@ -14,7 +14,7 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({ isOpen, onCl
   const queryClient = useQueryClient();
   const [formData, setFormData] = useState({
     customerId: '', // in a real app, this would be a searchable dropdown component
-    customerModel: 'Customer' as 'Customer' | 'Party',
+    customerModel: 'Customer' as const,
     device: {
       type: 'Smartphone',
       brand: '',
@@ -84,7 +84,7 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({ isOpen, onCl
               </h3>
               <div className="grid grid-cols-1 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Customer / Party ID (Placeholder)</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Customer ID (Placeholder)</label>
                   <input 
                     type="text" required 
                     className="w-full px-4 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:ring-[#006970]"

@@ -96,14 +96,7 @@ impl SupplierService {
                 with_transaction(db, move |tx| {
                     SQLiteSupplierRepository::insert_supplier_in_tx(tx, &supplier_cloned)?;
 
-                    // Phase 1.1: every supplier role is linked to a canonical party (party.id = supplier.id).
-                    let payload = crate::repositories::SQLitePartyRepository::link_role_and_build_payloads_in_tx(
-                        tx,
-                        &supplier_cloned,
-                        &crate::domain::party::PartyRoleContact::from(&supplier_cloned),
-                        false,
-                    )?
-                    .role_payload;
+                    let payload = serde_json::to_string(&supplier_cloned).map_err(|e| crate::db::errors::DbError::Internal(e.to_string()))?;
                     let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
                         client_event_id: Some(Uuid::new_v4().to_string()),
                         terminal_id,
@@ -123,27 +116,7 @@ impl SupplierService {
         }
     }
 
-    /// Phase 1.1: enqueue PARTY_UPSERTED when a single-role party mirrored a supplier edit.
-    fn enqueue_party_upsert_in_tx(
-        tx: &rusqlite::Transaction<'_>,
-        terminal_id: &str,
-        party_payload: Option<String>,
-    ) -> crate::db::errors::DbResult<()> {
-        if let Some(payload) = party_payload {
-            crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(
-                tx,
-                crate::domain::sync_queue::EnqueueOfflineEventDto {
-                    client_event_id: Some(Uuid::new_v4().to_string()),
-                    terminal_id: terminal_id.to_string(),
-                    organization_id: crate::domain::organization::NIAZI_ORGANIZATION_ID.to_string(),
-                    branch_id: crate::domain::organization::DEFAULT_MAIN_BRANCH_ID.to_string(),
-                    event_type: crate::domain::party::PARTY_UPSERTED_EVENT.to_string(),
-                    payload,
-                },
-            )?;
-        }
-        Ok(())
-    }
+
 
     pub async fn get_supplier_by_id(&self, id: &str) -> AppResult<Option<Supplier>> {
         self.supplier_repo.get_supplier_by_id(id).await
@@ -191,13 +164,7 @@ impl SupplierService {
 
             let updated = with_transaction(db, move |tx| {
                 let supp = crate::repositories::SQLiteSupplierRepository::update_supplier_in_tx(tx, &id_clone, &dto_clone)?;
-                let payloads = crate::repositories::SQLitePartyRepository::link_role_and_build_payloads_in_tx(
-                    tx,
-                    &supp,
-                    &crate::domain::party::PartyRoleContact::from(&supp),
-                    true,
-                )?;
-                let payload = payloads.role_payload;
+                let payload = serde_json::to_string(&supp).map_err(|e| crate::db::errors::DbError::Internal(e.to_string()))?;
                 let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
                     client_event_id: Some(Uuid::new_v4().to_string()),
                     terminal_id: terminal_id.clone(),
@@ -207,7 +174,6 @@ impl SupplierService {
                     payload,
                 };
                 crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
-                Self::enqueue_party_upsert_in_tx(tx, &terminal_id, payloads.party_payload)?;
                 Ok(supp)
             }).await?;
             Ok(updated)
@@ -237,13 +203,7 @@ impl SupplierService {
                 };
                 let supp = crate::repositories::SQLiteSupplierRepository::update_supplier_in_tx(tx, &id_clone, &update_dto)?;
 
-                let payloads = crate::repositories::SQLitePartyRepository::link_role_and_build_payloads_in_tx(
-                    tx,
-                    &supp,
-                    &crate::domain::party::PartyRoleContact::from(&supp),
-                    true,
-                )?;
-                let payload = payloads.role_payload;
+                let payload = serde_json::to_string(&supp).map_err(|e| crate::db::errors::DbError::Internal(e.to_string()))?;
                 let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
                     client_event_id: Some(Uuid::new_v4().to_string()),
                     terminal_id: terminal_id.clone(),
@@ -253,7 +213,6 @@ impl SupplierService {
                     payload,
                 };
                 crate::repositories::SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
-                Self::enqueue_party_upsert_in_tx(tx, &terminal_id, payloads.party_payload)?;
                 Ok(())
             }).await?;
             Ok(())
@@ -517,9 +476,7 @@ pub mod tests {
 
         assert_eq!(rows.next().unwrap().unwrap().get::<_, String>(0).unwrap(), "SUPPLIER_CREATED");
         assert_eq!(rows.next().unwrap().unwrap().get::<_, String>(0).unwrap(), "SUPPLIER_UPDATED");
-        assert_eq!(rows.next().unwrap().unwrap().get::<_, String>(0).unwrap(), "PARTY_UPSERTED");
         assert_eq!(rows.next().unwrap().unwrap().get::<_, String>(0).unwrap(), "SUPPLIER_UPDATED");
-        assert_eq!(rows.next().unwrap().unwrap().get::<_, String>(0).unwrap(), "PARTY_UPSERTED");
         assert!(rows.next().unwrap().is_none());
     }
 }

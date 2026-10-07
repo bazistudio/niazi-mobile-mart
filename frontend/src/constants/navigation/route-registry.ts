@@ -51,7 +51,6 @@ export const VALID_ROUTES = [
   '/dashboard/organization/products',
   '/dashboard/organization/customers',
   '/dashboard/organization/suppliers',
-  '/dashboard/organization/parties',
   '/dashboard/organization/settings',
 ] as const;
 
