@@ -1,0 +1,198 @@
+use sqlx::PgPool;
+
+use crate::domain::organization::{Branch, DashboardBalancesDto};
+use crate::errors::{AppError, AppResult};
+use crate::repositories::branch_repository::OrganizationDashboardStats;
+
+#[derive(Clone)]
+pub struct PostgresBranchRepository {
+    pool: PgPool,
+}
+
+impl PostgresBranchRepository {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn list_branches(&self) -> AppResult<Vec<Branch>> {
+        let sql = "SELECT id, organization_id, name, code, is_active, created_at, updated_at FROM branches ORDER BY name ASC";
+        let rows = sqlx::query(sql)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to query branches: {e}")))?;
+
+        let mut branches = Vec::with_capacity(rows.len());
+        for row in rows {
+            use sqlx::Row;
+            let is_active_int: i32 = row.try_get(4).unwrap_or(1);
+            branches.push(Branch {
+                id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
+                organization_id: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+                name: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                code: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
+                is_active: is_active_int == 1,
+                created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
+                updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+            });
+        }
+
+        Ok(branches)
+    }
+
+    pub async fn create_branch(&self, dto: &crate::domain::organization::CreateBranchDto) -> AppResult<Branch> {
+        let new_id = uuid::Uuid::new_v4().to_string();
+        let org_id = crate::domain::organization::NIAZI_ORGANIZATION_ID;
+        // Auto-generate code from name if missing
+        let code = dto.code.clone().unwrap_or_else(|| {
+            let sanitized: String = dto.name.chars().filter(|c| c.is_alphanumeric()).collect();
+            let upper = sanitized.to_uppercase();
+            if upper.len() > 4 {
+                upper[..4].to_string()
+            } else {
+                upper
+            }
+        });
+        
+        // ensure code uniqueness
+        let final_code = format!("{}-{}", code, &new_id[..4]).to_uppercase();
+
+        let is_active = dto.is_active.unwrap_or(true);
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let sql = "INSERT INTO branches (id, organization_id, name, code, is_active, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)";
+        sqlx::query(sql)
+            .bind(&new_id)
+            .bind(org_id)
+            .bind(&dto.name)
+            .bind(&final_code)
+            .bind(if is_active { 1 } else { 0 })
+            .bind(&now)
+            .bind(&now)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to create branch: {e}")))?;
+
+        Ok(Branch {
+            id: new_id,
+            organization_id: org_id.to_string(),
+            name: dto.name.clone(),
+            code: final_code,
+            is_active,
+            created_at: now.clone(),
+            updated_at: now,
+        })
+    }
+
+    pub async fn get_branch_by_id(&self, id: &str) -> AppResult<Option<Branch>> {
+        let sql = "SELECT id, organization_id, name, code, is_active, created_at, updated_at FROM branches WHERE id = $1 LIMIT 1";
+        let row_opt = sqlx::query(sql)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Error querying branch by id: {e}")))?;
+
+        match row_opt {
+            Some(row) => {
+                use sqlx::Row;
+                let is_active_int: i32 = row.try_get(4).unwrap_or(1);
+                Ok(Some(Branch {
+                    id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
+                    organization_id: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+                    name: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                    code: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
+                    is_active: is_active_int == 1,
+                    created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
+                    updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub async fn get_main_branch(&self) -> AppResult<Option<Branch>> {
+        let sql = "SELECT id, organization_id, name, code, is_active, created_at, updated_at FROM branches WHERE code = 'MAIN' LIMIT 1";
+        let row_opt = sqlx::query(sql)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Error querying main branch: {e}")))?;
+
+        match row_opt {
+            Some(row) => {
+                use sqlx::Row;
+                let is_active_int: i32 = row.try_get(4).unwrap_or(1);
+                Ok(Some(Branch {
+                    id: row.try_get(0).map_err(|e| AppError::Database(e.to_string()))?,
+                    organization_id: row.try_get(1).map_err(|e| AppError::Database(e.to_string()))?,
+                    name: row.try_get(2).map_err(|e| AppError::Database(e.to_string()))?,
+                    code: row.try_get(3).map_err(|e| AppError::Database(e.to_string()))?,
+                    is_active: is_active_int == 1,
+                    created_at: row.try_get(5).map_err(|e| AppError::Database(e.to_string()))?,
+                    updated_at: row.try_get(6).map_err(|e| AppError::Database(e.to_string()))?,
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub async fn get_dashboard_stats(&self) -> AppResult<OrganizationDashboardStats> {
+        let product_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM products WHERE is_active = 1")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or((0,));
+
+        let category_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM categories WHERE is_active = 1")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or((0,));
+
+        let active_staff_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users WHERE is_active = 1")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or((0,));
+
+        let low_stock_sql = "
+            SELECT COUNT(*) FROM products p 
+            LEFT JOIN (SELECT product_id, SUM(quantity) as total_qty FROM stock GROUP BY product_id) s ON p.id = s.product_id 
+            WHERE p.is_active = 1 AND COALESCE(s.total_qty, 0) <= p.low_stock_threshold
+        ";
+        let low_stock_count: (i64,) = sqlx::query_as(low_stock_sql)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or((0,));
+
+        let active_branch_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM branches WHERE is_active = 1")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or((0,));
+
+        Ok(OrganizationDashboardStats {
+            product_count: product_count.0,
+            category_count: category_count.0,
+            active_staff_count: active_staff_count.0,
+            low_stock_count: low_stock_count.0,
+            active_branch_count: active_branch_count.0,
+        })
+    }
+
+    /// Calculates global aggregate balances across all ledgers (organization-wide, no branch filter)
+    pub async fn get_dashboard_balances(&self) -> AppResult<DashboardBalancesDto> {
+        let customer_receivables: (i64,) = sqlx::query_as(
+            "SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT FROM customer_ledger_entries",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to calculate customer receivables: {e}")))?;
+
+        let supplier_payables: (i64,) = sqlx::query_as(
+            "SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT FROM supplier_ledger_entries",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to calculate supplier payables: {e}")))?;
+
+        Ok(DashboardBalancesDto {
+            customer_receivables: customer_receivables.0,
+            supplier_payables: supplier_payables.0,
+        })
+    }
+}
