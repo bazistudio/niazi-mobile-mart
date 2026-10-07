@@ -333,8 +333,20 @@ export async function completeSaleTx(
 
   // Legacy fallback: single paid_amount + payment_method
   if (tenderInputs.length === 0) {
-    const legacyAmount = Math.max(Number(dto.paid_amount ?? totalAmount), 0);
     const legacyMethod = normalizePaymentMethod(dto.payment_method ?? 'CASH');
+    let rawPaid: number;
+    if (dto.paid_amount !== undefined && dto.paid_amount !== null && !isNaN(Number(dto.paid_amount))) {
+      const val = Number(dto.paid_amount);
+      if (val === 0 && legacyMethod !== 'CREDIT' && customerOpt === null) {
+        // Walk-in customer non-credit sale defaults to full payment
+        rawPaid = totalAmount;
+      } else {
+        rawPaid = val;
+      }
+    } else {
+      rawPaid = legacyMethod === 'CREDIT' ? 0 : totalAmount;
+    }
+    const legacyAmount = Math.max(rawPaid, 0);
     if (legacyMethod !== 'CREDIT' && legacyAmount > 0) {
       tenderInputs.push({
         method: legacyMethod,
@@ -421,19 +433,18 @@ export async function completeSaleTx(
   // Resolve User Short Code (e.g. U01, U17)
   let userCode = 'U01';
   if (userId && userId !== '00000000-0000-0000-0000-000000000001') {
-    const userRow = await client.query(
-      'SELECT username, user_code FROM users WHERE id = $1',
-      [userId]
-    );
-    if (userRow.rows.length > 0) {
-      const u = userRow.rows[0] as Record<string, unknown>;
-      if (u['user_code']) {
-        userCode = String(u['user_code']);
-      } else {
-        // Derive stable short user code from user ID hex suffix
+    try {
+      const userRow = await client.query(
+        'SELECT username FROM users WHERE id = $1',
+        [userId]
+      );
+      if (userRow.rows.length > 0) {
         const shortHex = userId.replace(/-/g, '').slice(-2).toUpperCase();
         userCode = `U${shortHex}`;
       }
+    } catch {
+      const shortHex = userId.replace(/-/g, '').slice(-2).toUpperCase();
+      userCode = `U${shortHex}`;
     }
   }
 
@@ -744,12 +755,14 @@ export async function listSales(pool: Pool, filter?: SaleFilterDto | null): Prom
     params.push(filter.sale_status);
   }
   if (filter?.start_date) {
+    const sDate = filter.start_date.length === 10 ? `${filter.start_date}T00:00:00.000Z` : filter.start_date;
     query += ` AND created_at >= $${paramIndex++}`;
-    params.push(filter.start_date);
+    params.push(sDate);
   }
   if (filter?.end_date) {
+    const eDate = filter.end_date.length === 10 ? `${filter.end_date}T23:59:59.999Z` : filter.end_date;
     query += ` AND created_at <= $${paramIndex++}`;
-    params.push(filter.end_date);
+    params.push(eDate);
   }
 
   query += ' ORDER BY created_at DESC, id DESC';
