@@ -9,7 +9,7 @@ use crate::domain::product::{CreateProductDto, Product, ProductFilter, UpdatePro
 use crate::errors::{AppError, AppResult};
 use crate::repositories::{
     PostgresProductRepository, ProductRepository, SQLiteInventoryRepository, SQLiteProductRepository,
-    SQLiteSyncQueueRepository, SQLiteUserRepository,
+    SQLiteSyncQueueRepository, SQLiteTerminalRepository, SQLiteUserRepository,
 };
 
 #[derive(Clone)]
@@ -64,7 +64,92 @@ impl ProductService {
                 pg_repo.create_product_with_initial_stock(&product_id, &dto, user_id).await
             }
             ProductRepository::SQLite(_) => {
-                Err(crate::errors::AppError::Internal("Product mutation requires PostgreSQL authority.".to_string()))
+                let db = self.db.as_ref().expect("SQLite database connection required");
+                let terminal_repo = SQLiteTerminalRepository::new(db.clone());
+                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+                let terminal_id = current_terminal.id;
+
+                let dto_clone = dto.clone();
+                let product_id_clone = product_id.clone();
+                let user_id_owned = user_id.map(String::from);
+                let prod = with_transaction(db, move |tx| {
+                    let product = SQLiteProductRepository::create_product_in_tx(tx, &product_id_clone, &dto_clone)?;
+
+                    let branch_id = dto_clone
+                        .branch_id
+                        .as_deref()
+                        .filter(|b| b.trim().len() == 36)
+                        .unwrap_or(DEFAULT_MAIN_BRANCH_ID);
+
+                    if let Some(initial_qty) = dto_clone.initial_quantity {
+                        if initial_qty > 0 {
+                            let now = Utc::now().to_rfc3339();
+                            SQLiteInventoryRepository::set_stock_in_tx(tx, &product.id, branch_id, initial_qty, &now)?;
+
+                            let op_id = Uuid::new_v4().to_string();
+                            SQLiteInventoryRepository::insert_movement_in_tx(
+                                tx,
+                                &StockMovement {
+                                    id: op_id.clone(),
+                                    product_id: product.id.clone(),
+                                    branch_id: branch_id.to_string(),
+                                    movement_type: StockMovementType::In,
+                                    quantity: initial_qty,
+                                    previous_stock: 0,
+                                    resulting_stock: initial_qty,
+                                    reason: Some("Opening Stock".to_string()),
+                                    performed_by: user_id_owned.clone(),
+                                    reference_id: Some("OPENING_STOCK".to_string()),
+                                    created_at: now.clone(),
+                                },
+                            )?;
+
+                            let inv_event_dto = crate::domain::inventory::InventoryOperationSyncEventDto {
+                                operation_id: op_id,
+                                operation_type: "INCREASE".to_string(),
+                                product_id: product.id.clone(),
+                                branch_id: branch_id.to_string(),
+                                to_branch_id: None,
+                                quantity: initial_qty,
+                                target_quantity: Some(initial_qty),
+                                reason: Some("Opening Stock".to_string()),
+                                performed_by: user_id_owned,
+                                created_at: now.clone(),
+                            };
+
+                            let inv_payload = serde_json::to_string(&inv_event_dto)
+                                .map_err(|e| crate::db::errors::DbError::ValidationError(e.to_string()))?;
+
+                            let sync_inv_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                                client_event_id: Some(inv_event_dto.operation_id.clone()),
+                                terminal_id: terminal_id.clone(),
+                                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                                branch_id: branch_id.to_string(),
+                                event_type: "INVENTORY_OPERATION_RECORDED".to_string(),
+                                payload: inv_payload,
+                            };
+                            SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_inv_dto)?;
+                        }
+                    }
+
+                    let payload = serde_json::to_string(&product)
+                        .map_err(|e| crate::db::errors::DbError::ValidationError(e.to_string()))?;
+
+                    let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                        client_event_id: Some(product.id.clone()),
+                        terminal_id,
+                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                        branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                        event_type: "PRODUCT_CREATED".to_string(),
+                        payload,
+                    };
+                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+
+                    Ok(product)
+                })
+                .await?;
+
+                Ok(prod)
             }
         }
     }
@@ -94,7 +179,34 @@ impl ProductService {
         match &self.repo {
             ProductRepository::Postgres(pg_repo) => pg_repo.update_product(id, &dto).await,
             ProductRepository::SQLite(_) => {
-                Err(crate::errors::AppError::Internal("Product mutation requires PostgreSQL authority.".to_string()))
+                let db = self.db.as_ref().expect("SQLite database connection required");
+                let terminal_repo = SQLiteTerminalRepository::new(db.clone());
+                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+                let terminal_id = current_terminal.id;
+
+                let id_clone = id.to_string();
+                let dto_clone = dto.clone();
+                let updated = with_transaction(db, move |tx| {
+                    let product = SQLiteProductRepository::update_product_in_tx(tx, &id_clone, &dto_clone)?;
+
+                    let payload = serde_json::to_string(&product)
+                        .map_err(|e| crate::db::errors::DbError::ValidationError(e.to_string()))?;
+
+                    let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                        client_event_id: Some(Uuid::new_v4().to_string()),
+                        terminal_id,
+                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                        branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                        event_type: "PRODUCT_UPDATED".to_string(),
+                        payload,
+                    };
+                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+
+                    Ok(product)
+                })
+                .await?;
+
+                Ok(updated)
             }
         }
     }
@@ -120,7 +232,32 @@ impl ProductService {
         match &self.repo {
             ProductRepository::Postgres(pg_repo) => pg_repo.deactivate_product(id).await,
             ProductRepository::SQLite(_) => {
-                Err(crate::errors::AppError::Internal("Product mutation requires PostgreSQL authority.".to_string()))
+                let db = self.db.as_ref().expect("SQLite database connection required");
+                let terminal_repo = SQLiteTerminalRepository::new(db.clone());
+                let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+                let terminal_id = current_terminal.id;
+
+                let id_clone = id.to_string();
+                with_transaction(db, move |tx| {
+                    SQLiteProductRepository::deactivate_product_in_tx(tx, &id_clone)?;
+
+                    let payload = serde_json::json!({ "id": id_clone }).to_string();
+
+                    let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                        client_event_id: Some(Uuid::new_v4().to_string()),
+                        terminal_id,
+                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                        branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                        event_type: "PRODUCT_DEACTIVATED".to_string(),
+                        payload,
+                    };
+                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+
+                    Ok(())
+                })
+                .await?;
+
+                Ok(())
             }
         }
     }
