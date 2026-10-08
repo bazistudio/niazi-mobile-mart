@@ -18,6 +18,7 @@ export interface Product {
   sku: string;
   barcode: string | null;
   category_id: string;
+  type_id?: string;
   brand_id: string | null;
   company_id: string | null;
   quality_id: string | null;
@@ -30,6 +31,10 @@ export interface Product {
   is_active: boolean;
   description: string | null;
   initial_quantity: number | null;
+  stock?: number;
+  stock_quantity?: number;
+  total_stock?: number;
+  quantity?: number;
   created_at: string;
   updated_at: string;
 }
@@ -143,7 +148,9 @@ function mapProductRow(row: Record<string, unknown>): Product {
       ? isActiveRaw
       : isActiveRaw === 1 || isActiveRaw === '1' || isActiveRaw === 'true' || String(isActiveRaw) === 'true';
 
-  const rawQty = row['initial_quantity'] ?? row['stock_quantity'] ?? row['total_stock'];
+  const rawQty = row['initial_quantity'] ?? row['stock_quantity'] ?? row['total_stock'] ?? row['stock'] ?? row['quantity'];
+  const catId = ((row['category_id'] ?? row['type_id']) as string) ?? '';
+  const numQty = rawQty !== undefined && rawQty !== null ? Number(rawQty) : 0;
 
   return {
     id: row['id'] as string,
@@ -151,7 +158,8 @@ function mapProductRow(row: Record<string, unknown>): Product {
     normalized_name: row['normalized_name'] as string,
     sku: row['sku'] as string,
     barcode: (row['barcode'] as string | null) ?? null,
-    category_id: ((row['category_id'] ?? row['type_id']) as string) ?? '',
+    category_id: catId,
+    type_id: catId,
     brand_id: (row['brand_id'] as string | null) ?? null,
     company_id: (row['company_id'] as string | null) ?? null,
     quality_id: (row['quality_id'] as string | null) ?? null,
@@ -163,7 +171,11 @@ function mapProductRow(row: Record<string, unknown>): Product {
     low_stock_threshold: Number(row['low_stock_threshold']),
     is_active: isActiveBool,
     description: (row['description'] as string | null) ?? null,
-    initial_quantity: rawQty !== undefined && rawQty !== null ? Number(rawQty) : null,
+    initial_quantity: rawQty !== undefined && rawQty !== null ? numQty : null,
+    stock: numQty,
+    stock_quantity: numQty,
+    total_stock: numQty,
+    quantity: numQty,
     created_at: row['created_at'] as string,
     updated_at: row['updated_at'] as string,
   };
