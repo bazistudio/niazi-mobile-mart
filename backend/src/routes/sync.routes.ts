@@ -223,7 +223,7 @@ async function handleInventoryOperation(
   try {
     if (operationType === 'ADJUST' || operationType === 'OPENING_STOCK' || !operationType) {
       // Use adjustStock for ADJUST and opening stock (target absolute quantity)
-      const targetQty = Number(payload['resulting_stock'] ?? payload['quantity'] ?? 0);
+      const targetQty = Number(payload['target_quantity'] ?? payload['resulting_stock'] ?? payload['quantity'] ?? 0);
       await adjustStock(pool, {
         product_id: productId,
         branch_id: targetBranchId,
@@ -232,17 +232,25 @@ async function handleInventoryOperation(
         reference_id: clientEventId,
       });
     } else if (operationType === 'INCREASE' || operationType === 'IN') {
-      // Increase: add delta to current stock
-      const delta = Number(payload['quantity'] ?? 0);
-      const stockRes = await pool.query(
-        'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2',
-        [productId, targetBranchId]
-      );
-      const currentQty = Number(stockRes.rows[0]?.['quantity'] ?? 0);
+      // Increase: if target_quantity is provided (e.g. opening stock), use it as the
+      // authoritative absolute result; otherwise add delta to current stock.
+      const explicitTarget = payload['target_quantity'] != null ? Number(payload['target_quantity']) : null;
+      let finalQty: number;
+      if (explicitTarget !== null) {
+        finalQty = explicitTarget;
+      } else {
+        const delta = Number(payload['quantity'] ?? 0);
+        const stockRes = await pool.query(
+          'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2',
+          [productId, targetBranchId]
+        );
+        const currentQty = Number(stockRes.rows[0]?.['quantity'] ?? 0);
+        finalQty = currentQty + delta;
+      }
       await adjustStock(pool, {
         product_id: productId,
         branch_id: targetBranchId,
-        target_quantity: currentQty + delta,
+        target_quantity: finalQty,
         reason: (payload['reason'] as string | undefined) ?? 'Stock Increase',
         reference_id: clientEventId,
       });
@@ -263,8 +271,8 @@ async function handleInventoryOperation(
         reference_id: clientEventId,
       });
     } else {
-      // Unknown operation type — treat as ADJUST using resulting_stock
-      const targetQty = Number(payload['resulting_stock'] ?? payload['quantity'] ?? 0);
+      // Unknown operation type — treat as ADJUST using target_quantity or resulting_stock
+      const targetQty = Number(payload['target_quantity'] ?? payload['resulting_stock'] ?? payload['quantity'] ?? 0);
       await adjustStock(pool, {
         product_id: productId,
         branch_id: targetBranchId,
