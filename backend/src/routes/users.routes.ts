@@ -169,7 +169,7 @@ export function buildUsersRouter(pool: Pool): Router {
         status: typeof status === 'string' ? status.trim() : 'ACTIVE',
         branch_id: typeof branch_id === 'string' ? branch_id : null,
         access_profile: access_profile && typeof access_profile === 'object'
-          ? (access_profile as { allowed_pages: string[]; allowed_actions: string[] })
+          ? (access_profile as unknown as import('../repositories/users.repo').AccessProfile)
           : undefined,
         must_change_password: typeof must_change_password === 'boolean' ? must_change_password : false,
       });
@@ -243,7 +243,7 @@ export function buildUsersRouter(pool: Pool): Router {
           : branch_id === null ? null
           : undefined,
         access_profile: access_profile && typeof access_profile === 'object'
-          ? (access_profile as { allowed_pages: string[]; allowed_actions: string[] })
+          ? (access_profile as unknown as import('../repositories/users.repo').AccessProfile)
           : undefined,
         must_change_password: typeof must_change_password === 'boolean' ? must_change_password : undefined,
       });

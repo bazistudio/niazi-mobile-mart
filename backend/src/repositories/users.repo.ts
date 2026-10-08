@@ -16,14 +16,21 @@
 
 import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
+import { StaffOperationalLimits, defaultLimitsForRole } from './auth.repo';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * AccessProfile stored in the users table.
+ * MUST include `limits` so that JWTs issued by AuthRepo always carry the
+ * `limits` field required by Rust token_service.rs serde deserialization.
+ */
 export interface AccessProfile {
   allowed_pages: string[];
   allowed_actions: string[];
+  limits: StaffOperationalLimits;
 }
 
 export interface UserRow {
@@ -81,16 +88,27 @@ const SELECT_SAFE_COLS = `
 `;
 
 function mapSafeRow(row: Record<string, unknown>): UserRow {
-  let access_profile: AccessProfile = { allowed_pages: [], allowed_actions: [] };
+  const role = (row['role'] as string) ?? '';
+  let access_profile: AccessProfile = { allowed_pages: [], allowed_actions: [], limits: defaultLimitsForRole(role) };
   try {
     const ap = row['access_profile'];
+    let parsed: Partial<AccessProfile> | null = null;
     if (typeof ap === 'string') {
-      access_profile = JSON.parse(ap) as AccessProfile;
+      parsed = JSON.parse(ap) as Partial<AccessProfile>;
     } else if (ap && typeof ap === 'object') {
-      access_profile = ap as AccessProfile;
+      parsed = ap as Partial<AccessProfile>;
+    }
+    if (parsed) {
+      access_profile = {
+        allowed_pages: Array.isArray(parsed.allowed_pages) ? parsed.allowed_pages : [],
+        allowed_actions: Array.isArray(parsed.allowed_actions) ? parsed.allowed_actions : [],
+        limits: (parsed.limits && typeof parsed.limits === 'object')
+          ? parsed.limits as StaffOperationalLimits
+          : defaultLimitsForRole(role),
+      };
     }
   } catch {
-    // leave default
+    // leave default (already has limits from defaultLimitsForRole)
   }
 
   return {
@@ -151,7 +169,16 @@ export class UsersRepo {
   async createUser(input: CreateUserInput, client?: PoolClient): Promise<UserRow> {
     const executor = client ?? this.pool;
     const id = uuidv4();
-    const defaultProfile: AccessProfile = input.access_profile ?? { allowed_pages: [], allowed_actions: [] };
+    const role = input.role ?? 'STAFF';
+    const defaultProfile: AccessProfile = input.access_profile
+      ? {
+          allowed_pages: input.access_profile.allowed_pages ?? [],
+          allowed_actions: input.access_profile.allowed_actions ?? [],
+          limits: (input.access_profile.limits && typeof input.access_profile.limits === 'object')
+            ? input.access_profile.limits
+            : defaultLimitsForRole(role),
+        }
+      : { allowed_pages: [], allowed_actions: [], limits: defaultLimitsForRole(role) };
     const status = input.status ?? 'ACTIVE';
     const is_active = status === 'ACTIVE';
 
@@ -226,8 +253,25 @@ export class UsersRepo {
       params.push(input.branch_id ?? null);
     }
     if (input.access_profile !== undefined) {
+      // Fetch current role to fill limits if not supplied
+      let updateRole = input.role ?? '';
+      if (!updateRole) {
+        try {
+          const roleRes = await executor.query(`SELECT role FROM users WHERE id = $1 LIMIT 1`, [id]);
+          if (roleRes.rows.length > 0) {
+            updateRole = ((roleRes.rows[0] as Record<string, unknown>)['role'] as string) ?? '';
+          }
+        } catch { /* leave empty — defaultLimitsForRole('') returns conservative defaults */ }
+      }
+      const profileToStore: AccessProfile = {
+        allowed_pages: input.access_profile.allowed_pages ?? [],
+        allowed_actions: input.access_profile.allowed_actions ?? [],
+        limits: (input.access_profile.limits && typeof input.access_profile.limits === 'object')
+          ? input.access_profile.limits
+          : defaultLimitsForRole(updateRole),
+      };
       setClauses.push(`access_profile = $${paramIdx++}::jsonb`);
-      params.push(JSON.stringify(input.access_profile));
+      params.push(JSON.stringify(profileToStore));
     }
     if (input.must_change_password !== undefined) {
       setClauses.push(`must_change_password = $${paramIdx++}`);
@@ -511,16 +555,35 @@ export class UsersRepo {
    * Update a user's access profile (extra permissions).
    * Phase 4: ADMIN can assign additional permissions beyond base role.
    * The user's role remains intact; access_profile adds granular overrides.
+   * Always includes `limits` — fetches user role from DB if not supplied in accessProfile.
    */
-  async updatePermissions(id: string, accessProfile: AccessProfile, client?: PoolClient): Promise<UserRow | null> {
+  async updatePermissions(id: string, accessProfile: Partial<AccessProfile> & { allowed_pages: string[]; allowed_actions: string[] }, client?: PoolClient): Promise<UserRow | null> {
     const executor = client ?? this.pool;
+
+    // Fetch current user role so we can fill limits if caller did not supply them.
+    let userRole = 'STAFF';
+    try {
+      const roleResult = await executor.query(`SELECT role FROM users WHERE id = $1 LIMIT 1`, [id]);
+      if (roleResult.rows.length > 0) {
+        userRole = ((roleResult.rows[0] as Record<string, unknown>)['role'] as string) ?? 'STAFF';
+      }
+    } catch { /* leave default role */ }
+
+    const profileToStore: AccessProfile = {
+      allowed_pages: accessProfile.allowed_pages,
+      allowed_actions: accessProfile.allowed_actions,
+      limits: (accessProfile.limits && typeof accessProfile.limits === 'object')
+        ? accessProfile.limits
+        : defaultLimitsForRole(userRole),
+    };
+
     const result = await executor.query(
       `UPDATE users
          SET access_profile = $2::jsonb,
              updated_at = NOW()
        WHERE id = $1
        RETURNING ${SELECT_SAFE_COLS}`,
-      [id, JSON.stringify(accessProfile)]
+      [id, JSON.stringify(profileToStore)]
     );
     if (result.rows.length === 0) return null;
     return mapSafeRow(result.rows[0] as Record<string, unknown>);

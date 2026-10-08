@@ -25,7 +25,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { AuthRepo } from '../repositories/auth.repo';
+import { AuthRepo, defaultLimitsForRole } from '../repositories/auth.repo';
 import { UsersRepo } from '../repositories/users.repo';
 import { AuthService, AuthServiceError } from '../services/auth.service';
 import { hashArgon2 } from '../services/argon2.service';
@@ -164,7 +164,7 @@ export function buildAuthRouter(pool: Pool): Router {
         role: 'ADMIN',
         status: 'ACTIVE',
         must_change_password: false,
-        access_profile: { allowed_pages: ['*'], allowed_actions: ['*'] },
+        access_profile: { allowed_pages: ['*'], allowed_actions: ['*'], limits: defaultLimitsForRole('ADMIN') },
       });
 
       res.status(201).json({ message: 'Admin account created successfully', user });
@@ -213,7 +213,7 @@ export function buildAuthRouter(pool: Pool): Router {
         role: 'STAFF',
         status: 'PENDING',
         branch_id: typeof branch_id === 'string' ? branch_id : null,
-        access_profile: { allowed_pages: [], allowed_actions: [] },
+        access_profile: { allowed_pages: [], allowed_actions: [], limits: defaultLimitsForRole('STAFF') },
         must_change_password: false,
       });
 

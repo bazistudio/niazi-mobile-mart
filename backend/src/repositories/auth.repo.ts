@@ -69,7 +69,7 @@ export interface AccessProfile {
 }
 
 /** Role-based default limits — mirrors Rust StaffAccessProfile::*_default() constructors. */
-function defaultLimitsForRole(role: string): StaffOperationalLimits {
+export function defaultLimitsForRole(role: string): StaffOperationalLimits {
   const r = role.toUpperCase();
   if (r === 'ADMIN' || r === 'SUPER_ADMIN' || r === 'OWNER') {
     return { max_discount_percent: 100.0, can_price_override: true, can_refund: true, can_void_sale: true, can_view_profit: true };
