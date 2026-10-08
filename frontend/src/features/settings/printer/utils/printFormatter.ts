@@ -339,13 +339,12 @@ const formatA4 = (invoice: UnifiedInvoice, settings: PrinterSettings, title: str
 
 const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width: number, title: string): string => {
   const is58 = width === 58;
-  const pxWidth = is58 ? 218 : 298;
-  const baseFontSize = is58 ? 10 : 12;
+  const pxWidth = is58 ? 220 : 304;
+  const baseFontSize = is58 ? 11 : 13.5;
   const fontFamily = settings.font?.family === 'monospace' ? 'Courier, "Courier New", monospace' : 'Arial, sans-serif';
-  const divider = is58 ? '--------------------------------' : '------------------------------------------';
 
   return `
-    <div style="font-family: ${fontFamily}; font-size: ${baseFontSize}px; width: ${pxWidth}px; margin: 0 auto; line-height: 1.25; color: #000000; background-color: #ffffff; padding: 4px 2px;">
+    <div style="font-family: ${fontFamily}; font-size: ${baseFontSize}px; width: ${pxWidth}px; margin: 0 auto; line-height: 1.3; color: #000000; background-color: #ffffff; padding: 8px 14px; box-sizing: border-box;">
       <style>
         @media print {
           body, html {
@@ -358,21 +357,21 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
       </style>
       
       <!-- Store Header Identity -->
-      <div style="text-align: center; margin-bottom: 6px;">
-        ${!is58 && settings.invoice?.showLogo && invoice.shop.logoUrl ? `<img src="${invoice.shop.logoUrl}" style="max-width: 70%; max-height: 50px; margin-bottom: 4px;" />` : ''}
+      <div style="text-align: center; margin-bottom: 8px;">
+        ${!is58 && settings.invoice?.showLogo && invoice.shop.logoUrl ? `<img src="${invoice.shop.logoUrl}" style="max-width: 70%; max-height: 55px; margin-bottom: 4px;" />` : ''}
         ${settings.invoice?.showShopInfo !== false ? `
-          <div style="font-weight: 900; font-size: ${is58 ? '13px' : '15px'}; text-transform: uppercase; letter-spacing: 0.5px;">${invoice.shop.name}</div>
-          ${invoice.shop.branchName ? `<div style="font-size: ${is58 ? '9.5px' : '10.5px'}; font-weight: bold; margin-top: 1px; color: #333;">[ ${invoice.shop.branchName} ]</div>` : ''}
-          ${invoice.shop.address ? `<div style="font-size: ${is58 ? '9px' : '10px'}; white-space: pre-wrap; margin-top: 1px;">${invoice.shop.address}</div>` : ''}
-          ${invoice.shop.phone || invoice.shop.secondaryPhone ? `<div style="font-size: ${is58 ? '9px' : '10px'}; margin-top: 1px;">Tel: ${invoice.shop.phone}${invoice.shop.secondaryPhone ? ' / ' + invoice.shop.secondaryPhone : ''}</div>` : ''}
-          ${invoice.shop.whatsapp ? `<div style="font-size: ${is58 ? '9px' : '10px'};">WhatsApp: ${invoice.shop.whatsapp}</div>` : ''}
-          ${invoice.shop.taxNumber ? `<div style="font-size: ${is58 ? '9px' : '10px'};">NTN: ${invoice.shop.taxNumber}</div>` : ''}
+          <div style="font-weight: 900; font-size: ${is58 ? '14px' : '17px'}; text-transform: uppercase; letter-spacing: 0.5px;">${invoice.shop.name}</div>
+          ${invoice.shop.branchName ? `<div style="font-size: ${is58 ? '10.5px' : '12px'}; font-weight: bold; margin-top: 2px; color: #222;">[ ${invoice.shop.branchName} ]</div>` : ''}
+          ${invoice.shop.address ? `<div style="font-size: ${is58 ? '10px' : '11px'}; white-space: pre-wrap; margin-top: 2px;">${invoice.shop.address}</div>` : ''}
+          ${invoice.shop.phone || invoice.shop.secondaryPhone ? `<div style="font-size: ${is58 ? '10px' : '11px'}; margin-top: 2px;">Tel: ${invoice.shop.phone}${invoice.shop.secondaryPhone ? ' / ' + invoice.shop.secondaryPhone : ''}</div>` : ''}
+          ${invoice.shop.whatsapp ? `<div style="font-size: ${is58 ? '10px' : '11px'};">WhatsApp: ${invoice.shop.whatsapp}</div>` : ''}
+          ${invoice.shop.taxNumber ? `<div style="font-size: ${is58 ? '10px' : '11px'};">NTN: ${invoice.shop.taxNumber}</div>` : ''}
         ` : ''}
-        <div style="margin-top: 3px; font-weight: bold; font-size: ${is58 ? '10px' : '11px'}; text-transform: uppercase;">*** ${title} ***</div>
+        <div style="margin-top: 4px; font-weight: bold; font-size: ${is58 ? '11px' : '12.5px'}; text-transform: uppercase; letter-spacing: 0.5px;">*** ${title} ***</div>
       </div>
       
       <!-- Meta Information Section -->
-      <div style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 4px 0; margin-bottom: 4px; font-size: ${is58 ? '9px' : '10px'};">
+      <div style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 5px 0; margin-bottom: 6px; font-size: ${is58 ? '10px' : '11.5px'};">
         <div style="display: flex; justify-content: space-between;">
           <span>Invoice #:</span>
           <span style="font-weight: bold;">${invoice.invoiceNo}</span>
@@ -389,7 +388,7 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
         ${invoice.customer ? `
         <div style="display: flex; justify-content: space-between;">
           <span>Customer:</span>
-          <span>${invoice.customer.name}</span>
+          <span style="font-weight: 600;">${invoice.customer.name}</span>
         </div>
         ${invoice.customer.phone ? `
         <div style="display: flex; justify-content: space-between;">
@@ -399,69 +398,69 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
         ` : ''}
       </div>
 
-      <!-- Items Table -->
-      <table style="width: 100%; text-align: left; margin-bottom: 4px; font-size: ${is58 ? '9.5px' : '11px'}; border-collapse: collapse;">
+      <!-- Items Table: Item (1st), Qty (2nd), Price (3rd), Amount (4th) -->
+      <table style="width: 100%; text-align: left; margin-bottom: 6px; font-size: ${is58 ? '10.5px' : '12px'}; border-collapse: collapse;">
         <thead>
           <tr style="border-bottom: 1px dashed #000;">
-            <th style="padding: 2px 0; width: ${is58 ? '14%' : '12%'}; text-align: left;">Qty</th>
-            <th style="padding: 2px 2px; width: ${is58 ? '56%' : '50%'}; text-align: left;">Item</th>
-            ${!is58 ? `<th style="padding: 2px 0; width: 18%; text-align: right;">Price</th>` : ''}
-            <th style="padding: 2px 0; width: ${is58 ? '30%' : '20%'}; text-align: right;">Amount</th>
+            <th style="padding: 3px 2px; width: ${is58 ? '58%' : '46%'}; text-align: left;">Item</th>
+            <th style="padding: 3px 0; width: ${is58 ? '16%' : '12%'}; text-align: center;">Qty</th>
+            ${!is58 ? `<th style="padding: 3px 0; width: 20%; text-align: right;">Price</th>` : ''}
+            <th style="padding: 3px 0; width: ${is58 ? '26%' : '22%'}; text-align: right;">Amount</th>
           </tr>
         </thead>
         <tbody>
           ${invoice.items.map(item => `
             <tr style="vertical-align: top; border-bottom: 1px dotted #ccc;">
-              <td style="padding: 3px 0; font-weight: bold;">${item.qty}</td>
-              <td style="padding: 3px 2px; word-break: break-word;">
-                <div>${item.name}</div>
-                ${item.imei ? `<div style="font-size: 8.5px; color: #333;">IMEI: ${maskImei(item.imei)}</div>` : ''}
+              <td style="padding: 4px 2px; word-break: break-word;">
+                <div style="font-weight: 600;">${item.name}</div>
+                ${item.imei ? `<div style="font-size: 9.5px; color: #333;">IMEI: ${maskImei(item.imei)}</div>` : ''}
               </td>
-              ${!is58 ? `<td style="padding: 3px 0; text-align: right; tabular-nums;">${item.price.toLocaleString()}</td>` : ''}
-              <td style="padding: 3px 0; text-align: right; font-weight: bold; tabular-nums;">${item.total.toLocaleString()}</td>
+              <td style="padding: 4px 0; text-align: center; font-weight: bold;">${item.qty}</td>
+              ${!is58 ? `<td style="padding: 4px 0; text-align: right; tabular-nums;">${item.price.toLocaleString()}</td>` : ''}
+              <td style="padding: 4px 0; text-align: right; font-weight: bold; tabular-nums;">${item.total.toLocaleString()}</td>
             </tr>
           `).join('')}
         </tbody>
       </table>
       
       <!-- Financial Summary Totals -->
-      <div style="border-top: 1px dashed #000; padding-top: 4px; font-size: ${is58 ? '10px' : '11px'};">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+      <div style="border-top: 1px dashed #000; padding-top: 5px; font-size: ${is58 ? '11px' : '12.5px'};">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
           <span>Subtotal:</span>
           <span style="font-weight: bold;">Rs ${invoice.subtotal.toLocaleString()}</span>
         </div>
         
         ${settings.invoice?.showDiscount !== false && invoice.discount > 0 ? `
-        <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
           <span>Discount:</span>
           <span style="font-weight: bold;">- Rs ${invoice.discount.toLocaleString()}</span>
         </div>` : ''}
         
         ${settings.invoice?.showTax && invoice.tax > 0 ? `
-        <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
           <span>Tax:</span>
           <span>+ Rs ${invoice.tax.toLocaleString()}</span>
         </div>` : ''}
         
-        <div style="display: flex; justify-content: space-between; font-weight: 900; font-size: ${is58 ? '12px' : '13px'}; border-top: 1px solid #000; border-bottom: 1px solid #000; margin: 4px 0; padding: 4px 0;">
+        <div style="display: flex; justify-content: space-between; font-weight: 900; font-size: ${is58 ? '13.5px' : '15px'}; border-top: 1px solid #000; border-bottom: 1px solid #000; margin: 5px 0; padding: 5px 0;">
           <span>Grand Total:</span>
           <span>Rs ${invoice.total.toLocaleString()}</span>
         </div>
         
         <!-- Tender & Change Breakdown -->
-        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '9px' : '10px'}; margin-top: 3px;">
+        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '10px' : '11.5px'}; margin-top: 4px;">
           <span>Payment Method:</span>
           <span style="font-weight: bold; text-transform: uppercase;">${invoice.paymentMethod || 'Cash'}</span>
         </div>
         
         ${invoice.tendered && invoice.tendered > 0 ? `
-        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '9px' : '10px'};">
+        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '10px' : '11.5px'};">
           <span>Tendered:</span>
           <span>Rs ${invoice.tendered.toLocaleString()}</span>
         </div>` : ''}
         
         ${invoice.change && invoice.change > 0 ? `
-        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '9.5px' : '10.5px'}; font-weight: bold;">
+        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '10.5px' : '12px'}; font-weight: bold;">
           <span>Change Due:</span>
           <span>Rs ${invoice.change.toLocaleString()}</span>
         </div>` : ''}
@@ -469,27 +468,27 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
       
       <!-- Return Policy & Warranty Instructions -->
       ${invoice.returnPolicy || invoice.shop.returnPolicy ? `
-      <div style="border-top: 1px dashed #000; margin-top: 6px; padding-top: 4px; text-align: center; font-size: ${is58 ? '8px' : '9px'};">
+      <div style="border-top: 1px dashed #000; margin-top: 8px; padding-top: 5px; text-align: center; font-size: ${is58 ? '9px' : '10.5px'};">
         <div style="font-weight: bold; margin-bottom: 1px;">Return Policy:</div>
         <div>${invoice.returnPolicy || invoice.shop.returnPolicy}</div>
       </div>` : ''}
 
       ${invoice.warrantyInstructions || invoice.shop.warrantyInstructions ? `
-      <div style="border-top: 1px dotted #000; margin-top: 4px; padding-top: 3px; text-align: center; font-size: ${is58 ? '7.5px' : '8.5px'}; color: #222;">
+      <div style="border-top: 1px dotted #000; margin-top: 5px; padding-top: 4px; text-align: center; font-size: ${is58 ? '8.5px' : '10px'}; color: #222;">
         <div style="font-weight: bold; margin-bottom: 1px;">Warranty Terms:</div>
         <div>${invoice.warrantyInstructions || invoice.shop.warrantyInstructions}</div>
       </div>` : ''}
       
       <!-- Barcode Section -->
       ${settings.invoice?.showBarcode !== false ? `
-      <div style="margin-top: 6px;">
-        ${generateBarcodeSvg(invoice.invoiceNo, pxWidth - 10, is58 ? 32 : 38)}
+      <div style="margin-top: 8px;">
+        ${generateBarcodeSvg(invoice.invoiceNo, pxWidth - 28, is58 ? 32 : 38)}
       </div>` : ''}
       
       <!-- Footer & Branding -->
-      <div style="text-align: center; margin-top: 8px; font-size: ${is58 ? '8.5px' : '9.5px'}; border-top: 1px dashed #000; padding-top: 4px;">
+      <div style="text-align: center; margin-top: 10px; font-size: ${is58 ? '9.5px' : '10.5px'}; border-top: 1px dashed #000; padding-top: 5px;">
         <div style="font-weight: bold;">${invoice.shop.footerText || 'Thank you for shopping with us!'}</div>
-        <div style="font-size: 8px; color: #555; margin-top: 3px; letter-spacing: 0.5px;">Powered by Niazi Mobile Mart</div>
+        <div style="font-size: 9px; color: #555; margin-top: 4px; letter-spacing: 0.5px;">Powered by Niazi Mobile Mart</div>
       </div>
     </div>
   `;
