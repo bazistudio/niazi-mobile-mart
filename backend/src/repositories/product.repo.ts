@@ -143,6 +143,8 @@ function mapProductRow(row: Record<string, unknown>): Product {
       ? isActiveRaw
       : isActiveRaw === 1 || isActiveRaw === '1' || isActiveRaw === 'true' || String(isActiveRaw) === 'true';
 
+  const rawQty = row['initial_quantity'] ?? row['stock_quantity'] ?? row['total_stock'];
+
   return {
     id: row['id'] as string,
     name: row['name'] as string,
@@ -161,7 +163,7 @@ function mapProductRow(row: Record<string, unknown>): Product {
     low_stock_threshold: Number(row['low_stock_threshold']),
     is_active: isActiveBool,
     description: (row['description'] as string | null) ?? null,
-    initial_quantity: null,
+    initial_quantity: rawQty !== undefined && rawQty !== null ? Number(rawQty) : null,
     created_at: row['created_at'] as string,
     updated_at: row['updated_at'] as string,
   };
@@ -721,10 +723,13 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
   const selectCols = getSelectCols(caps);
 
   const sql = `
-    SELECT ${selectCols}
-    FROM products
-    WHERE ${conditions.join(' AND ')}
-    ORDER BY name ASC
+    SELECT ${selectCols.split(', ').map(c => c.includes(' AS ') ? `p.${c}` : `p.${c}`).join(', ')},
+           COALESCE(SUM(s.quantity), 0)::bigint AS initial_quantity
+    FROM products p
+    LEFT JOIN stock s ON p.id = s.product_id
+    WHERE ${conditions.map(c => c.replace(/\b(name|sku|barcode|brand_id|company_id|quality_id|color_id|description|type_id|category_id)\b/g, 'p.$1')).join(' AND ')}
+    GROUP BY p.id, p.name, p.normalized_name, p.sku, p.barcode, p.${caps.catCol}, p.brand_id, p.company_id, p.quality_id, p.color_id, p.unit_id, p.purchase_price, p.average_cost, p.sale_price, p.low_stock_threshold, p.is_active, p.description, p.created_at, p.updated_at
+    ORDER BY p.name ASC
   `;
 
   const res = await pool.query(sql, params);
