@@ -92,7 +92,8 @@ export const printFormatter = {
       tendered: order.tenderedAmount ?? order.totalPaid,
       change: order.changeReturned ?? order.change,
       shop,
-      returnPolicy: shop.footerText ? undefined : 'Goods once sold can only be returned/exchanged within 3 days with original receipt.'
+      returnPolicy: shop.returnPolicy || 'Goods once sold can only be returned/exchanged within 3 days with original receipt.',
+      warrantyInstructions: shop.warrantyInstructions || undefined
     };
     return renderDocument(invoice, settings, 'Sale Receipt');
   },
@@ -361,8 +362,10 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
         ${!is58 && settings.invoice?.showLogo && invoice.shop.logoUrl ? `<img src="${invoice.shop.logoUrl}" style="max-width: 70%; max-height: 50px; margin-bottom: 4px;" />` : ''}
         ${settings.invoice?.showShopInfo !== false ? `
           <div style="font-weight: 900; font-size: ${is58 ? '13px' : '15px'}; text-transform: uppercase; letter-spacing: 0.5px;">${invoice.shop.name}</div>
+          ${invoice.shop.branchName ? `<div style="font-size: ${is58 ? '9.5px' : '10.5px'}; font-weight: bold; margin-top: 1px; color: #333;">[ ${invoice.shop.branchName} ]</div>` : ''}
           ${invoice.shop.address ? `<div style="font-size: ${is58 ? '9px' : '10px'}; white-space: pre-wrap; margin-top: 1px;">${invoice.shop.address}</div>` : ''}
-          ${invoice.shop.phone ? `<div style="font-size: ${is58 ? '9px' : '10px'}; margin-top: 1px;">Tel: ${invoice.shop.phone}</div>` : ''}
+          ${invoice.shop.phone || invoice.shop.secondaryPhone ? `<div style="font-size: ${is58 ? '9px' : '10px'}; margin-top: 1px;">Tel: ${invoice.shop.phone}${invoice.shop.secondaryPhone ? ' / ' + invoice.shop.secondaryPhone : ''}</div>` : ''}
+          ${invoice.shop.whatsapp ? `<div style="font-size: ${is58 ? '9px' : '10px'};">WhatsApp: ${invoice.shop.whatsapp}</div>` : ''}
           ${invoice.shop.taxNumber ? `<div style="font-size: ${is58 ? '9px' : '10px'};">NTN: ${invoice.shop.taxNumber}</div>` : ''}
         ` : ''}
         <div style="margin-top: 3px; font-weight: bold; font-size: ${is58 ? '10px' : '11px'}; text-transform: uppercase;">*** ${title} ***</div>
@@ -387,7 +390,13 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
         <div style="display: flex; justify-content: space-between;">
           <span>Customer:</span>
           <span>${invoice.customer.name}</span>
+        </div>
+        ${invoice.customer.phone ? `
+        <div style="display: flex; justify-content: space-between;">
+          <span>Cust Phone:</span>
+          <span>${invoice.customer.phone}</span>
         </div>` : ''}
+        ` : ''}
       </div>
 
       <!-- Items Table -->
@@ -458,11 +467,18 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
         </div>` : ''}
       </div>
       
-      <!-- Return Policy -->
+      <!-- Return Policy & Warranty Instructions -->
+      ${invoice.returnPolicy || invoice.shop.returnPolicy ? `
       <div style="border-top: 1px dashed #000; margin-top: 6px; padding-top: 4px; text-align: center; font-size: ${is58 ? '8px' : '9px'};">
         <div style="font-weight: bold; margin-bottom: 1px;">Return Policy:</div>
-        <div>${invoice.returnPolicy || 'Exchange/Return within 3 days with original receipt.'}</div>
-      </div>
+        <div>${invoice.returnPolicy || invoice.shop.returnPolicy}</div>
+      </div>` : ''}
+
+      ${invoice.warrantyInstructions || invoice.shop.warrantyInstructions ? `
+      <div style="border-top: 1px dotted #000; margin-top: 4px; padding-top: 3px; text-align: center; font-size: ${is58 ? '7.5px' : '8.5px'}; color: #222;">
+        <div style="font-weight: bold; margin-bottom: 1px;">Warranty Terms:</div>
+        <div>${invoice.warrantyInstructions || invoice.shop.warrantyInstructions}</div>
+      </div>` : ''}
       
       <!-- Barcode Section -->
       ${settings.invoice?.showBarcode !== false ? `

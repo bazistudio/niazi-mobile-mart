@@ -3,12 +3,17 @@ export type ConnectionType = 'BROWSER_PRINT' | 'USB' | 'LAN' | 'BLUETOOTH';
 
 export interface ShopHeader {
   name: string;
+  branchName?: string;
   address: string;
   phone: string;
+  secondaryPhone?: string;
+  whatsapp?: string;
   email: string;
   taxNumber: string;
   footerText: string;
   logoUrl?: string;
+  returnPolicy?: string;
+  warrantyInstructions?: string;
 }
 
 export interface PrinterSettings {
@@ -49,6 +54,7 @@ export interface UnifiedInvoice {
   customer?: {
     name: string;
     phone?: string;
+    address?: string;
   };
   cashier?: string;
   items: {
@@ -67,4 +73,5 @@ export interface UnifiedInvoice {
   change?: number;
   shop: ShopHeader;
   returnPolicy?: string;
+  warrantyInstructions?: string;
 }
