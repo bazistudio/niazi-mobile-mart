@@ -510,6 +510,23 @@ export async function createProduct(
       ]
     );
 
+    // Insert a zero-quantity stock guard row so that products without initial
+    // stock still appear in LEFT JOIN queries with quantity = 0.
+    // branch_id is optional here; use caller-supplied or null.
+    const branchIdForGuard = dto.branch_id ?? null;
+    if (branchIdForGuard) {
+      try {
+        await client.query(
+          `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+           VALUES ($1, $2, 0, $3)
+           ON CONFLICT (product_id, branch_id) DO NOTHING`,
+          [id, branchIdForGuard, NOW_ISO()]
+        );
+      } catch {
+        // Non-fatal: guard row is best-effort; stock will appear when sync arrives.
+      }
+    }
+
     await client.query('COMMIT');
     const product = mapProductRow(res.rows[0]!);
     client.release();
@@ -754,7 +771,12 @@ export async function getProductById(pool: Pool, id: string): Promise<Product | 
   const caps = await getSchemaCaps(pool);
   const selectCols = getSelectCols(caps);
   const res = await pool.query(
-    `SELECT ${selectCols} FROM products WHERE id = $1`,
+    `SELECT ${selectCols.split(', ').map(c => c.includes(' AS ') ? `p.${c}` : `p.${c}`).join(', ')},
+            COALESCE(SUM(s.quantity), 0)::bigint AS initial_quantity
+     FROM products p
+     LEFT JOIN stock s ON p.id = s.product_id
+     WHERE p.id = $1
+     GROUP BY p.id, p.name, p.normalized_name, p.sku, p.barcode, p.${caps.catCol}, p.brand_id, p.company_id, p.quality_id, p.color_id, p.unit_id, p.purchase_price, p.average_cost, p.sale_price, p.low_stock_threshold, p.is_active, p.description, p.created_at, p.updated_at`,
     [id]
   );
   if (res.rows.length === 0) {
