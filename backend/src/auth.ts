@@ -27,9 +27,18 @@ export type UserRole =
   | 'Cashier'
   | 'Salesman';
 
+export interface StaffOperationalLimits {
+  max_discount_percent: number;
+  can_price_override: boolean;
+  can_refund: boolean;
+  can_void_sale: boolean;
+  can_view_profit: boolean;
+}
+
 export interface StaffAccessProfile {
   allowed_pages: string[];
   allowed_actions: string[];
+  limits: StaffOperationalLimits;
 }
 
 /**

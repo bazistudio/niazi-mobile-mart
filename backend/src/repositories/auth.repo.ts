@@ -44,9 +44,41 @@ export interface UserRow {
   updated_at: string;
 }
 
+/**
+ * Operational limits — must exactly mirror Rust StaffOperationalLimits in access_control.rs.
+ * Required in the JWT access_profile claim so Rust desktop serde can deserialize it.
+ */
+export interface StaffOperationalLimits {
+  max_discount_percent: number;
+  can_price_override: boolean;
+  can_refund: boolean;
+  can_void_sale: boolean;
+  can_view_profit: boolean;
+}
+
+/**
+ * Full access profile — must exactly mirror Rust StaffAccessProfile in access_control.rs.
+ * The `limits` field MUST be present in JWTs issued by TypeScript; without it the Rust
+ * desktop token_service.rs serde deserialization fails with "Invalid or corrupted
+ * authentication token".
+ */
 export interface AccessProfile {
   allowed_pages: string[];
   allowed_actions: string[];
+  limits: StaffOperationalLimits;
+}
+
+/** Role-based default limits — mirrors Rust StaffAccessProfile::*_default() constructors. */
+function defaultLimitsForRole(role: string): StaffOperationalLimits {
+  const r = role.toUpperCase();
+  if (r === 'ADMIN' || r === 'SUPER_ADMIN' || r === 'OWNER') {
+    return { max_discount_percent: 100.0, can_price_override: true, can_refund: true, can_void_sale: true, can_view_profit: true };
+  }
+  if (r === 'SHOP_ADMIN' || r === 'SHOPADMIN') {
+    return { max_discount_percent: 25.0, can_price_override: true, can_refund: true, can_void_sale: true, can_view_profit: true };
+  }
+  // All other roles: conservative defaults (mirrors cashier/salesman/manager/staff)
+  return { max_discount_percent: 0.0, can_price_override: false, can_refund: false, can_void_sale: false, can_view_profit: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -75,16 +107,33 @@ const SELECT_USER_COLS = `
 `;
 
 function mapRow(row: Record<string, unknown>): UserRow {
-  let access_profile: AccessProfile = { allowed_pages: [], allowed_actions: [] };
+  const role = (row['role'] as string) ?? '';
+  let access_profile: AccessProfile = {
+    allowed_pages: [],
+    allowed_actions: [],
+    limits: defaultLimitsForRole(role),
+  };
   try {
     const ap = row['access_profile'];
+    let parsed: Partial<AccessProfile> | null = null;
     if (typeof ap === 'string') {
-      access_profile = JSON.parse(ap) as AccessProfile;
+      parsed = JSON.parse(ap) as Partial<AccessProfile>;
     } else if (ap && typeof ap === 'object') {
-      access_profile = ap as AccessProfile;
+      parsed = ap as Partial<AccessProfile>;
+    }
+    if (parsed) {
+      access_profile = {
+        allowed_pages: Array.isArray(parsed.allowed_pages) ? parsed.allowed_pages : [],
+        allowed_actions: Array.isArray(parsed.allowed_actions) ? parsed.allowed_actions : [],
+        // Preserve stored limits if present; otherwise fall back to role-based defaults.
+        // This guarantees `limits` is ALWAYS populated so Rust serde never fails.
+        limits: (parsed.limits && typeof parsed.limits === 'object')
+          ? parsed.limits as StaffOperationalLimits
+          : defaultLimitsForRole(role),
+      };
     }
   } catch {
-    // leave default
+    // leave default (already has limits from defaultLimitsForRole)
   }
 
   return {
