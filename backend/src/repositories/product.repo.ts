@@ -512,8 +512,8 @@ export async function createProduct(
 
     // Insert a zero-quantity stock guard row so that products without initial
     // stock still appear in LEFT JOIN queries with quantity = 0.
-    // branch_id is optional here; use caller-supplied or null.
-    const branchIdForGuard = dto.branch_id ?? null;
+    // branch_id is optional here; use caller-supplied or default MAIN branch ID.
+    const branchIdForGuard = dto.branch_id ?? '00000000-0000-0000-0000-000000000002';
     if (branchIdForGuard) {
       try {
         await client.query(
