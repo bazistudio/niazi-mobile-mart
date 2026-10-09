@@ -111,7 +111,7 @@ export const productService = {
     const initialQty = Number(productData.initial_quantity ?? productData.initialQuantity ?? productData.quantity ?? 0);
 
     let branchId = productData.branch_id || productData.branchId || null;
-    if (initialQty > 0 && !branchId) {
+    if (!branchId) {
       branchId = getActiveBranchId();
     }
 
@@ -143,9 +143,9 @@ export const productService = {
       sale_price: Math.round(Number(productData.price || productData.sale_price || 0)),
       low_stock_threshold: Number(productData.lowStockThreshold || productData.minStock || 5),
       description: productData.description || null,
-      initial_quantity: initialQty > 0 ? initialQty : null,
-      branch_id: initialQty > 0 ? branchId : null,
-      initial_branch_id: initialQty > 0 ? branchId : null,
+      initial_quantity: initialQty > 0 ? initialQty : 0,
+      branch_id: branchId,
+      initial_branch_id: branchId,
     });
 
     const [categories, brands, companies, colors, qualities] = await Promise.all([
