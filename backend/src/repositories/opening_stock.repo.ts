@@ -55,16 +55,16 @@ export async function importOpeningStock(
     // Ensure opening_stock_entries table exists
     await client.query(`
       CREATE TABLE IF NOT EXISTS opening_stock_entries (
-        id UUID PRIMARY KEY,
-        organization_id UUID NOT NULL,
-        branch_id UUID NOT NULL,
-        product_id UUID NOT NULL,
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        branch_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
         quantity BIGINT NOT NULL,
         unit_cost BIGINT NOT NULL DEFAULT 0,
         reference_number VARCHAR(100),
-        performed_by UUID,
+        performed_by TEXT,
         notes TEXT,
-        created_at TIMESTAMPTZ NOT NULL
+        created_at TEXT NOT NULL
       )
     `);
 
@@ -102,7 +102,7 @@ export async function importOpeningStock(
         `INSERT INTO opening_stock_entries (
            id, organization_id, branch_id, product_id, quantity, unit_cost, reference_number, performed_by, notes, created_at
          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [entryId, orgId, branchId, item.product_id, item.quantity, unitCost, refNo, userId ?? null, item.notes ?? null, now]
+        [entryId, orgId, branchId, item.product_id, item.quantity, unitCost, refNo, userId ? String(userId) : null, item.notes ?? null, now]
       );
 
       // 2. Fetch current stock & update/upsert stock
@@ -123,8 +123,8 @@ export async function importOpeningStock(
         ]);
       } else {
         await client.query(
-          `INSERT INTO stock (product_id, branch_id, quantity, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $4)`,
+          `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+           VALUES ($1, $2, $3, $4)`,
           [item.product_id, branchId, item.quantity, now]
         );
       }
