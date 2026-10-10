@@ -86,7 +86,7 @@ export async function getInvoicePrinterSettings(
   // Ensure table exists
   await pool.query(`
     CREATE TABLE IF NOT EXISTS invoice_printer_settings (
-      branch_id TEXT PRIMARY KEY,
+      branch_id TEXT PRIMARY KEY REFERENCES branches(id) ON DELETE CASCADE,
       shop_name TEXT NOT NULL DEFAULT 'Niazi Mobile Mart',
       branch_name TEXT NOT NULL DEFAULT 'Main Branch',
       address TEXT NOT NULL DEFAULT '',
