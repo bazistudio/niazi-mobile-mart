@@ -9,8 +9,7 @@
  *   - validation functions
  *   - mapping helpers  (raw DTO  → domain view model)
  *
- * Example already shipped (used as reference pattern):
- *   frontend/src/features/parties/domain/party.domain.ts
+
  *
  * Future domain modules added here:
  *   @/core/domain/product.domain.ts

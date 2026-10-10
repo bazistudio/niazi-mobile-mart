@@ -11,7 +11,7 @@ use crate::repositories::{
     SQLiteUserRepository, TerminalRepository, UserRepository,
 };
 use crate::services::{
-    CashService, CatalogService, CustomerService, ExpenseService, InventoryService, PartyService,
+    CashService, CatalogService, CustomerService, ExpenseService, InventoryService,
     ProductService, ProfitService, PurchaseReturnService, PurchaseService, SaleService, SalesReturnService, SupplierService,
 };
 
@@ -62,7 +62,6 @@ pub struct AppState {
     pub product_service: ProductService,
     pub inventory_service: InventoryService,
     pub customer_service: CustomerService,
-    pub party_service: PartyService,
     pub sale_service: SaleService,
     pub supplier_service: SupplierService,
     pub purchase_service: PurchaseService,
@@ -87,7 +86,6 @@ impl AppState {
         let product_service = ProductService::new_sqlite(db.clone());
         let inventory_service = InventoryService::new_sqlite(db.clone());
         let customer_service = CustomerService::new_sqlite(db.clone());
-        let party_service = PartyService::new_sqlite(db.clone());
         let sale_service = SaleService::new_sqlite(db.clone());
         let supplier_service = SupplierService::new_sqlite(db.clone());
         let purchase_service = PurchaseService::new_sqlite(db.clone());
@@ -110,7 +108,6 @@ impl AppState {
             product_service,
             inventory_service,
             customer_service,
-            party_service,
             sale_service,
             supplier_service,
             purchase_service,
@@ -135,7 +132,6 @@ impl AppState {
         let product_service = ProductService::new_postgres(pool.clone());
         let inventory_service = InventoryService::new_postgres(pool.clone());
         let customer_service = CustomerService::new_postgres(pool.clone());
-        let party_service = PartyService::new_postgres(pool.clone());
         let sale_service = SaleService::new_postgres(pool.clone());
         let supplier_service = SupplierService::new_postgres(pool.clone());
         let purchase_service = PurchaseService::new_postgres(pool.clone());
@@ -158,7 +154,6 @@ impl AppState {
             product_service,
             inventory_service,
             customer_service,
-            party_service,
             sale_service,
             supplier_service,
             purchase_service,

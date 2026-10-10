@@ -34,7 +34,6 @@ export const organizationNavigation: NavigationGroup[] = [
       { name: 'Products', href: '/dashboard/organization/products', icon: Package },
       { name: 'Customers', href: '/dashboard/organization/customers', icon: UserCheck },
       { name: 'Suppliers', href: '/dashboard/organization/suppliers', icon: Truck },
-      { name: 'Parties', href: '/dashboard/organization/parties', icon: Contact2 },
       { name: 'Settings', href: '/dashboard/organization/settings', icon: Settings },
     ],
   },

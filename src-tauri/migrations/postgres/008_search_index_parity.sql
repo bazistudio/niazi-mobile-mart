@@ -26,8 +26,7 @@
 --   * IDEMPOTENT: IF NOT EXISTS guards every statement.
 --   * Non-blocking on small tables at current shop scale.
 
-CREATE INDEX IF NOT EXISTS idx_parties_display_name_lower
-    ON parties (lower(display_name));
+
 
 CREATE INDEX IF NOT EXISTS idx_customers_name_lower
     ON customers (lower(name));

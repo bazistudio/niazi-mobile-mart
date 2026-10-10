@@ -1628,40 +1628,7 @@ export const tauriClient = {
     }
   },
 
-  // â”€â”€ Party Domain (Phase 1.1 canonical party identity) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Desktop only: parties live in the local SQLite database and sync through the
-  // outbox. Browser (web preview) mode has no party store.
-  async partyList(filter?: PartyFilter): Promise<PartySummaryDto[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<PartySummaryDto[]>('storage_party_list', { filter });
-    }
-    return [];
-  },
 
-  async partyGet(id: string): Promise<PartySummaryDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<PartySummaryDto>('storage_party_get', { id });
-    }
-    throw new Error(PARTY_DESKTOP_ONLY_MESSAGE);
-  },
-
-  async partyCreate(dto: CreatePartyDto): Promise<PartySummaryDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<PartySummaryDto>('storage_party_create', { dto });
-    }
-    throw new Error(PARTY_DESKTOP_ONLY_MESSAGE);
-  },
-
-  async partyUpdate(id: string, dto: UpdatePartyDto): Promise<PartySummaryDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<PartySummaryDto>('storage_party_update', { id, dto });
-    }
-    throw new Error(PARTY_DESKTOP_ONLY_MESSAGE);
-  },
 
   // â”€â”€ Sales & Checkout Domain (Phase 4B Typed Storage Bridge) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async saleComplete(dto: CompleteSaleDto): Promise<SaleResultDto> {
@@ -3185,73 +3152,7 @@ export interface SyncQueueItem {
   updated_at: string;
 }
 
-// â”€â”€ Party Domain (Phase 1.1) â€” mirrors src-tauri/src/domain/party.rs â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-export const PARTY_DESKTOP_ONLY_MESSAGE = 'Parties are available in the Niazi desktop app only.';
-
-export type PartyType = 'CUSTOMER' | 'SUPPLIER' | 'BOTH';
-
-export interface Party {
-  id: string;
-  display_name: string;
-  company_name?: string | null;
-  phone: string;
-  alternate_phone?: string | null;
-  email?: string | null;
-  address?: string | null;
-  notes?: string | null;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-/** Party with linked roles and read-only balances (whole PKR). */
-export interface PartySummaryDto {
-  party: Party;
-  /** null when no role is linked yet */
-  party_type: PartyType | null;
-  customer_id?: string | null;
-  customer_code?: string | null;
-  customer_credit_limit?: number | null;
-  supplier_id?: string | null;
-  supplier_code?: string | null;
-  customer_receivable: number;
-  supplier_payable: number;
-}
-
-export interface CreatePartyDto {
-  party_type: PartyType;
-  display_name: string;
-  company_name?: string | null;
-  phone: string;
-  alternate_phone?: string | null;
-  email?: string | null;
-  address?: string | null;
-  notes?: string | null;
-  /** customer role only; whole PKR; 0 = unlimited */
-  credit_limit?: number | null;
-}
-
-/** Partial update; for optional text fields an empty string clears the value. */
-export interface UpdatePartyDto {
-  display_name?: string;
-  company_name?: string;
-  phone?: string;
-  alternate_phone?: string;
-  email?: string;
-  address?: string;
-  notes?: string;
-  is_active?: boolean;
-}
-
-export interface PartyFilter {
-  search?: string;
-  /** CUSTOMER / SUPPLIER = has that role (includes BOTH); BOTH = both roles */
-  party_type?: PartyType;
-  is_active?: boolean;
-  limit?: number;
-  offset?: number;
-}
 
 
 
