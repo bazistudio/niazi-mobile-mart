@@ -5,9 +5,14 @@
  *
  *   POST /api/v1/sync/push
  *     Receives batched outbox events from desktop Rust sync worker.
- *     Processes PRODUCT_CREATED, PRODUCT_UPDATED, INVENTORY_OPERATION_RECORDED.
- *     Writes to change_log and sync_audit for idempotency.
- *     Returns per-event ack: { results: [{ client_event_id, server_event_id, status }] }
+ *     Processes PRODUCT_CREATED, PRODUCT_UPDATED, INVENTORY_OPERATION_RECORDED,
+ *     and PARTY_UPSERTED (change_log broadcast only).
+ *     All other event types in KNOWN_SERVER_EVENT_TYPES are explicitly rejected
+ *     with FAILED_PERMANENT / UNSUPPORTED_EVENT (no active server handler yet).
+ *     Truly unknown event types (not in the registry) are rejected with UNKNOWN_EVENT_TYPE.
+ *     Business write, sync_audit, and change_log are coordinated in a single PostgreSQL
+ *     transaction — partial success is not possible.
+ *     Returns per-event ack: { results: [{ client_event_id, server_event_id, status, error? }] }
  *
  *   GET  /api/v1/sync/pull?after_sequence=N&limit=100
  *     Returns change_log rows after the given sequence for a given organization.
@@ -15,16 +20,25 @@
  *
  * Security: Both routes require a valid Bearer JWT (authMiddleware).
  * Idempotency: sync_audit.client_event_id is UNIQUE — duplicate pushes are silently skipped.
+ *
+ * Supported event types (active server handlers):
+ *   PRODUCT_CREATED, PRODUCT_UPDATED, INVENTORY_OPERATION_RECORDED, PARTY_UPSERTED
+ *
+ * Explicitly rejected event types (no server handler — UNSUPPORTED_EVENT):
+ *   SALE_CREATED, SALES_RETURN_CREATED, PURCHASE_CREATED, PURCHASE_RETURN_CREATED,
+ *   EXPENSE_CREATED, CUSTOMER_CREATED, CUSTOMER_UPDATED, CUSTOMER_PAYMENT_RECORDED,
+ *   SUPPLIER_CREATED, SUPPLIER_UPDATED, SUPPLIER_PAYMENT_RECORDED, PRODUCT_DEACTIVATED,
+ *   CATEGORY_CREATED, BRAND_CREATED, UNIT_CREATED, COMPANY_CREATED, QUALITY_CREATED,
+ *   COLOR_CREATED
  */
 
 import { Router, Request, Response } from 'express';
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { authMiddleware, RequestIdentity } from '../auth';
 import {
   createProductWithInitialStock,
   updateProduct,
-  adjustStock,
   getProductById,
   CreateProductDto,
   UpdateProductDto,
@@ -41,6 +55,48 @@ function NOW_ISO(): string {
   return new Date().toISOString();
 }
 
+/**
+ * Event types the server push handler explicitly knows about.
+ * This must stay in sync with KNOWN_SERVER_EVENT_TYPES in src-tauri/src/domain/sync_queue.rs.
+ *
+ * ACTIVE HANDLERS (business write performed):
+ *   PRODUCT_CREATED, PRODUCT_UPDATED, INVENTORY_OPERATION_RECORDED
+ *
+ * DOWNSTREAM COMPATIBILITY HANDLERS (change_log write only, no separate data table):
+ *   PARTY_UPSERTED
+ *
+ * EXPLICITLY UNSUPPORTED (FAILED_PERMANENT — no active server handler yet):
+ *   All remaining types below. The client must NOT retry FAILED_PERMANENT events
+ *   without a corresponding server upgrade.
+ */
+const KNOWN_SERVER_EVENT_TYPES = new Set([
+  // Active handlers
+  'PRODUCT_CREATED',
+  'PRODUCT_UPDATED',
+  'INVENTORY_OPERATION_RECORDED',
+  // Downstream compatibility — change_log only
+  'PARTY_UPSERTED',
+  // Explicitly unsupported (no handler implemented)
+  'SALE_CREATED',
+  'SALES_RETURN_CREATED',
+  'PURCHASE_CREATED',
+  'PURCHASE_RETURN_CREATED',
+  'EXPENSE_CREATED',
+  'CUSTOMER_CREATED',
+  'CUSTOMER_UPDATED',
+  'CUSTOMER_PAYMENT_RECORDED',
+  'SUPPLIER_CREATED',
+  'SUPPLIER_UPDATED',
+  'SUPPLIER_PAYMENT_RECORDED',
+  'PRODUCT_DEACTIVATED',
+  'CATEGORY_CREATED',
+  'BRAND_CREATED',
+  'UNIT_CREATED',
+  'COMPANY_CREATED',
+  'QUALITY_CREATED',
+  'COLOR_CREATED',
+]);
+
 // ---------------------------------------------------------------------------
 // Entity-type helpers
 // ---------------------------------------------------------------------------
@@ -51,34 +107,59 @@ function entityTypeForEvent(eventType: string): string {
   if (eventType.startsWith('SALE')) return 'SALE';
   if (eventType.startsWith('CUSTOMER')) return 'CUSTOMER';
   if (eventType.startsWith('SUPPLIER')) return 'SUPPLIER';
+  if (eventType === 'PARTY_UPSERTED') return 'PARTY';
   return 'UNKNOWN';
 }
 
 function entityIdFromPayload(payload: Record<string, unknown>, eventType: string): string {
-  // PRODUCT_CREATED / PRODUCT_UPDATED: payload.id is the product UUID
   if (typeof payload['id'] === 'string') return payload['id'];
-  // INVENTORY_OPERATION_RECORDED: payload.product_id
   if (typeof payload['product_id'] === 'string') return payload['product_id'];
+  if (typeof payload['party_id'] === 'string') return payload['party_id'];
   return 'unknown';
 }
 
 // ---------------------------------------------------------------------------
-// Terminal auto-registration
+// Terminal auto-registration — with branch → organization validation
 // ---------------------------------------------------------------------------
 
 /**
  * Upsert a terminal into the `terminals` table.
  * This is needed because sync_audit has a FK on terminal_id.
  * If the terminal is unknown (newly registered desktop), we register it on first push.
+ *
+ * Security: validates that branchId belongs to organizationId before registration.
+ * Rejects cross-organization terminal registration attempts.
  */
 async function ensureTerminal(
-  pool: Pool,
+  client: PoolClient,
   terminalId: string,
   organizationId: string,
   branchId: string
 ): Promise<void> {
+  // Validate that the branch belongs to the authenticated organization.
+  // This prevents cross-organization terminal registration via a spoofed branchId.
+  const branchCheck = await client.query<{ organization_id: string; is_active: number }>(
+    `SELECT organization_id, is_active FROM branches WHERE id = $1 LIMIT 1`,
+    [branchId]
+  );
+
+  if (branchCheck.rows.length === 0) {
+    throw new Error(`INVALID_BRANCH: Branch ${branchId} does not exist`);
+  }
+
+  const branch = branchCheck.rows[0]!;
+  if (branch.organization_id !== organizationId) {
+    throw new Error(
+      `CROSS_ORG_BRANCH: Branch ${branchId} belongs to organization ${branch.organization_id}, not ${organizationId}`
+    );
+  }
+
+  if (!branch.is_active) {
+    throw new Error(`INACTIVE_BRANCH: Branch ${branchId} is inactive`);
+  }
+
   const now = NOW_ISO();
-  await pool.query(
+  await client.query(
     `INSERT INTO terminals (id, organization_id, branch_id, device_name, is_active, is_offline_terminal, registered_centrally, created_at, updated_at, last_seen_at)
      VALUES ($1, $2, $3, 'Desktop Terminal', 1, 1, 1, $4, $5, $6)
      ON CONFLICT (id) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at, updated_at = EXCLUDED.updated_at`,
@@ -91,7 +172,7 @@ async function ensureTerminal(
 // ---------------------------------------------------------------------------
 
 async function handleProductCreated(
-  pool: Pool,
+  client: PoolClient,
   payload: Record<string, unknown>,
   userId: string
 ): Promise<{ status: 'SYNCED' | 'FAILED_PERMANENT' | 'DEPENDENCY_NOT_FOUND'; error?: string }> {
@@ -101,9 +182,8 @@ async function handleProductCreated(
   }
 
   // Check if product already exists (idempotency at product level)
-  const existing = await getProductById(pool, id);
+  const existing = await getProductById(client as unknown as Pool, id);
   if (existing) {
-    // Already exists — treat as SYNCED (idempotent)
     return { status: 'SYNCED' };
   }
 
@@ -127,11 +207,10 @@ async function handleProductCreated(
   };
 
   try {
-    await createProductWithInitialStock(pool, id, dto, userId);
+    await createProductWithInitialStock(client as unknown as Pool, id, dto, userId);
     return { status: 'SYNCED' };
   } catch (err: any) {
     const msg = String(err?.message ?? err);
-    // FK violation: depends on another entity not yet synced
     if (msg.includes('foreign key') || msg.includes('violates') || msg.includes('23503')) {
       return { status: 'DEPENDENCY_NOT_FOUND', error: msg };
     }
@@ -144,7 +223,7 @@ async function handleProductCreated(
 // ---------------------------------------------------------------------------
 
 async function handleProductUpdated(
-  pool: Pool,
+  client: PoolClient,
   payload: Record<string, unknown>
 ): Promise<{ status: 'SYNCED' | 'FAILED_PERMANENT' | 'DEPENDENCY_NOT_FOUND'; error?: string }> {
   const id = payload['id'] as string | undefined;
@@ -170,7 +249,7 @@ async function handleProductUpdated(
   };
 
   try {
-    await updateProduct(pool, id, dto);
+    await updateProduct(client as unknown as Pool, id, dto);
     return { status: 'SYNCED' };
   } catch (err: any) {
     const msg = String(err?.message ?? err);
@@ -186,101 +265,141 @@ async function handleProductUpdated(
 // ---------------------------------------------------------------------------
 
 async function handleInventoryOperation(
-  pool: Pool,
+  client: PoolClient,
   payload: Record<string, unknown>,
   clientEventId: string,
   branchId: string
-): Promise<{ status: 'SYNCED' | 'FAILED_PERMANENT' | 'DEPENDENCY_NOT_FOUND'; error?: string }> {
+): Promise<{ status: 'SYNCED' | 'FAILED_PERMANENT' | 'DEPENDENCY_NOT_FOUND' | 'CONFLICT'; error?: string }> {
   const productId = payload['product_id'] as string | undefined;
   if (!productId || typeof productId !== 'string' || productId.length !== 36) {
     return { status: 'FAILED_PERMANENT', error: 'INVENTORY_OPERATION_RECORDED payload missing product_id' };
   }
 
   // Idempotency: check if this exact stock movement was already applied
-  // by looking for a stock_movements record with reference_id = clientEventId
   try {
-    const dupCheck = await pool.query(
+    const dupCheck = await client.query(
       'SELECT id FROM stock_movements WHERE reference_id = $1 LIMIT 1',
       [clientEventId]
     );
     if (dupCheck.rows.length > 0) {
-      // Already applied — idempotent success
       return { status: 'SYNCED' };
     }
   } catch {
-    // stock_movements table may not have reference_id — continue anyway
+    // stock_movements table may not have reference_id — continue
   }
 
   // Ensure product exists before adjusting stock
-  const product = await getProductById(pool, productId);
+  const product = await getProductById(client as unknown as Pool, productId);
   if (!product) {
     return { status: 'DEPENDENCY_NOT_FOUND', error: `Product ${productId} not found` };
   }
 
   const operationType = payload['operation_type'] as string | undefined;
   const targetBranchId = (payload['branch_id'] as string | undefined) ?? branchId;
+  const now = NOW_ISO();
 
   try {
     if (operationType === 'ADJUST' || operationType === 'OPENING_STOCK' || !operationType) {
-      // Use adjustStock for ADJUST and opening stock (target absolute quantity)
-      const targetQty = Number(payload['target_quantity'] ?? payload['resulting_stock'] ?? payload['quantity'] ?? 0);
-      await adjustStock(pool, {
-        product_id: productId,
-        branch_id: targetBranchId,
-        target_quantity: targetQty,
-        reason: (payload['reason'] as string | undefined) ?? 'Sync Adjustment',
-        reference_id: clientEventId,
-      });
+      // Absolute target quantity — safe to use direct SET
+      const targetQty = Math.max(0, Math.round(Number(
+        payload['target_quantity'] ?? payload['resulting_stock'] ?? payload['quantity'] ?? 0
+      )));
+      await client.query(
+        `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (product_id, branch_id) DO UPDATE
+           SET quantity = EXCLUDED.quantity, updated_at = EXCLUDED.updated_at`,
+        [productId, targetBranchId, targetQty, now]
+      );
     } else if (operationType === 'INCREASE' || operationType === 'IN') {
-      // Increase: if target_quantity is provided (e.g. opening stock), use it as the
-      // authoritative absolute result; otherwise add delta to current stock.
-      const explicitTarget = payload['target_quantity'] != null ? Number(payload['target_quantity']) : null;
-      let finalQty: number;
-      if (explicitTarget !== null) {
-        finalQty = explicitTarget;
+      if (payload['target_quantity'] != null) {
+        // Authoritative absolute target — use direct SET
+        const targetQty = Math.max(0, Math.round(Number(payload['target_quantity'])));
+        await client.query(
+          `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (product_id, branch_id) DO UPDATE
+             SET quantity = EXCLUDED.quantity, updated_at = EXCLUDED.updated_at`,
+          [productId, targetBranchId, targetQty, now]
+        );
       } else {
-        const delta = Number(payload['quantity'] ?? 0);
-        const stockRes = await pool.query(
-          'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2',
+        // Relative delta — use atomic increment; no application-level read
+        const delta = Math.max(0, Math.round(Number(payload['quantity'] ?? 0)));
+        await client.query(
+          `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (product_id, branch_id) DO UPDATE
+             SET quantity = stock.quantity + $3, updated_at = $4`,
+          [productId, targetBranchId, delta, now]
+        );
+      }
+    } else if (operationType === 'DECREASE' || operationType === 'OUT') {
+      // Atomic decrement: only succeeds when sufficient stock exists.
+      // Returns 0 rows if quantity < delta — triggers CONFLICT (not silent clamp).
+      const delta = Math.max(0, Math.round(Number(payload['quantity'] ?? 0)));
+      const decreaseRes = await client.query<{ quantity: number }>(
+        `UPDATE stock
+         SET quantity = quantity - $1, updated_at = $2
+         WHERE product_id = $3 AND branch_id = $4 AND quantity >= $1
+         RETURNING quantity`,
+        [delta, now, productId, targetBranchId]
+      );
+      if (decreaseRes.rowCount === 0) {
+        // Either stock row missing or insufficient quantity
+        const stockRow = await client.query<{ quantity: number }>(
+          'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2 LIMIT 1',
           [productId, targetBranchId]
         );
-        const currentQty = Number(stockRes.rows[0]?.['quantity'] ?? 0);
-        finalQty = currentQty + delta;
+        const available = stockRow.rows[0]?.quantity ?? 0;
+        return {
+          status: 'CONFLICT',
+          error: `INSUFFICIENT_STOCK: product=${productId} branch=${targetBranchId} available=${available} requested=${delta}`,
+        };
       }
-      await adjustStock(pool, {
-        product_id: productId,
-        branch_id: targetBranchId,
-        target_quantity: finalQty,
-        reason: (payload['reason'] as string | undefined) ?? 'Stock Increase',
-        reference_id: clientEventId,
-      });
-    } else if (operationType === 'DECREASE' || operationType === 'OUT') {
-      // Decrease: subtract delta from current stock
-      const delta = Number(payload['quantity'] ?? 0);
-      const stockRes = await pool.query(
-        'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2',
-        [productId, targetBranchId]
+    } else if (operationType === 'TRANSFER') {
+      // Transfer: deduct from source branch, credit destination branch atomically.
+      const toBranchId = payload['to_branch_id'] as string | undefined;
+      if (!toBranchId || typeof toBranchId !== 'string' || toBranchId.length !== 36) {
+        return { status: 'FAILED_PERMANENT', error: 'TRANSFER payload missing to_branch_id' };
+      }
+      const delta = Math.max(0, Math.round(Number(payload['quantity'] ?? 0)));
+
+      // Atomic source deduction — fails if insufficient
+      const srcRes = await client.query<{ quantity: number }>(
+        `UPDATE stock
+         SET quantity = quantity - $1, updated_at = $2
+         WHERE product_id = $3 AND branch_id = $4 AND quantity >= $1
+         RETURNING quantity`,
+        [delta, now, productId, targetBranchId]
       );
-      const currentQty = Number(stockRes.rows[0]?.['quantity'] ?? 0);
-      const newQty = Math.max(0, currentQty - delta);
-      await adjustStock(pool, {
-        product_id: productId,
-        branch_id: targetBranchId,
-        target_quantity: newQty,
-        reason: (payload['reason'] as string | undefined) ?? 'Stock Decrease',
-        reference_id: clientEventId,
-      });
+      if (srcRes.rowCount === 0) {
+        const stockRow = await client.query<{ quantity: number }>(
+          'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2 LIMIT 1',
+          [productId, targetBranchId]
+        );
+        const available = stockRow.rows[0]?.quantity ?? 0;
+        return {
+          status: 'CONFLICT',
+          error: `INSUFFICIENT_STOCK_FOR_TRANSFER: product=${productId} src=${targetBranchId} available=${available} requested=${delta}`,
+        };
+      }
+
+      // Atomic destination credit — must succeed or the whole transaction rolls back
+      await client.query(
+        `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (product_id, branch_id) DO UPDATE
+           SET quantity = stock.quantity + $3, updated_at = $4`,
+        [productId, toBranchId, delta, now]
+      );
     } else {
-      // Unknown operation type — treat as ADJUST using target_quantity or resulting_stock
-      const targetQty = Number(payload['target_quantity'] ?? payload['resulting_stock'] ?? payload['quantity'] ?? 0);
-      await adjustStock(pool, {
-        product_id: productId,
-        branch_id: targetBranchId,
-        target_quantity: targetQty,
-        reason: (payload['reason'] as string | undefined) ?? `Sync ${operationType}`,
-        reference_id: clientEventId,
-      });
+      // Unknown operation sub-type within INVENTORY_OPERATION_RECORDED
+      return {
+        status: 'FAILED_PERMANENT',
+        error: `UNSUPPORTED_OPERATION_TYPE: ${operationType} is not a recognized inventory operation`,
+      };
     }
+
     return { status: 'SYNCED' };
   } catch (err: any) {
     return { status: 'FAILED_PERMANENT', error: String(err?.message ?? err) };
@@ -288,11 +407,11 @@ async function handleInventoryOperation(
 }
 
 // ---------------------------------------------------------------------------
-// change_log + sync_audit writers
+// change_log + sync_audit writers (transactional — called inside BEGIN/COMMIT)
 // ---------------------------------------------------------------------------
 
 async function writeChangeLog(
-  pool: Pool,
+  client: PoolClient,
   opts: {
     organizationId: string;
     branchId: string;
@@ -304,7 +423,7 @@ async function writeChangeLog(
   }
 ): Promise<string> {
   const now = NOW_ISO();
-  const res = await pool.query<{ sequence: string }>(
+  const res = await client.query<{ sequence: string }>(
     `INSERT INTO change_log (organization_id, branch_id, client_event_id, event_type, entity_type, entity_id, payload, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING sequence::text`,
@@ -323,7 +442,7 @@ async function writeChangeLog(
 }
 
 async function writeSyncAudit(
-  pool: Pool,
+  client: PoolClient,
   opts: {
     clientEventId: string;
     terminalId: string;
@@ -336,8 +455,8 @@ async function writeSyncAudit(
 ): Promise<void> {
   const id = uuidv4();
   const now = NOW_ISO();
-  // ON CONFLICT DO NOTHING ensures idempotency — duplicate client_event_id is silently ignored
-  await pool.query(
+  // ON CONFLICT DO NOTHING: idempotency — duplicate client_event_id is silently ignored
+  await client.query(
     `INSERT INTO sync_audit (id, client_event_id, terminal_id, organization_id, branch_id, event_type, payload, status, processed_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      ON CONFLICT (client_event_id) DO NOTHING`,
@@ -407,56 +526,126 @@ export function buildSyncRouter(pool: Pool): Router {
         continue;
       }
 
-      // Idempotency: check sync_audit first
+      // --- Idempotency guard: check sync_audit before acquiring transaction ---
+      // If already processed, ack immediately without touching the DB further.
       try {
         const existing = await pool.query(
           'SELECT id FROM sync_audit WHERE client_event_id = $1 LIMIT 1',
           [clientEventId]
         );
         if (existing.rows.length > 0) {
-          // Already processed — ack as SYNCED without reprocessing
           results.push({ client_event_id: clientEventId, server_event_id: null, status: 'SYNCED' });
           continue;
         }
       } catch {
-        // sync_audit table may not exist yet — continue
+        // sync_audit may not exist yet — proceed
       }
 
-      // Ensure terminal is registered (auto-register on first push)
-      try {
-        await ensureTerminal(pool, terminalId, organizationId, branchId);
-      } catch {
-        // Non-fatal: proceed even if terminal upsert fails (FK may be absent in some schema versions)
+      // --- Classify event type BEFORE entering transaction ---
+      // Truly unknown events (not in registry) are rejected immediately.
+      if (eventType === '' || !KNOWN_SERVER_EVENT_TYPES.has(eventType)) {
+        results.push({
+          client_event_id: clientEventId,
+          server_event_id: null,
+          status: 'FAILED_PERMANENT',
+          error: `UNKNOWN_EVENT_TYPE: ${eventType} is not in the server event registry`,
+        });
+        continue;
       }
 
-      // Process the event by type
-      let processResult: { status: 'SYNCED' | 'FAILED_PERMANENT' | 'DEPENDENCY_NOT_FOUND'; error?: string };
+      // Known but explicitly unsupported event types — reject with FAILED_PERMANENT.
+      // These have active Rust outbox producers but no implemented server handler.
+      // Client must NOT retry without a corresponding server upgrade.
+      const unsupportedEventTypes = new Set([
+        'SALE_CREATED',
+        'SALES_RETURN_CREATED',
+        'PURCHASE_CREATED',
+        'PURCHASE_RETURN_CREATED',
+        'EXPENSE_CREATED',
+        'CUSTOMER_CREATED',
+        'CUSTOMER_UPDATED',
+        'CUSTOMER_PAYMENT_RECORDED',
+        'SUPPLIER_CREATED',
+        'SUPPLIER_UPDATED',
+        'SUPPLIER_PAYMENT_RECORDED',
+        'PRODUCT_DEACTIVATED',
+        'CATEGORY_CREATED',
+        'BRAND_CREATED',
+        'UNIT_CREATED',
+        'COMPANY_CREATED',
+        'QUALITY_CREATED',
+        'COLOR_CREATED',
+      ]);
 
-      switch (eventType) {
-        case 'PRODUCT_CREATED':
-          processResult = await handleProductCreated(pool, payload, userId);
-          break;
-        case 'PRODUCT_UPDATED':
-          processResult = await handleProductUpdated(pool, payload);
-          break;
-        case 'INVENTORY_OPERATION_RECORDED':
-          processResult = await handleInventoryOperation(pool, payload, clientEventId, branchId);
-          break;
-        default:
-          // Unknown event type — log to change_log but mark as SYNCED so sync worker moves on
-          processResult = { status: 'SYNCED' };
-          break;
+      if (unsupportedEventTypes.has(eventType)) {
+        results.push({
+          client_event_id: clientEventId,
+          server_event_id: null,
+          status: 'FAILED_PERMANENT',
+          error: `UNSUPPORTED_EVENT: ${eventType} is recognized but has no active server handler in this version`,
+        });
+        continue;
       }
 
-      const entityType = entityTypeForEvent(eventType);
-      const entityId = entityIdFromPayload(payload, eventType);
-
+      // --- Acquire a pooled client and run the event in a single transaction ---
+      // Business write + change_log + sync_audit are committed atomically.
+      // Any failure rolls back all three — the event must not be permanently marked
+      // successful unless the authoritative operation was performed.
+      const client = await pool.connect();
+      let processResult: {
+        status: 'SYNCED' | 'FAILED_PERMANENT' | 'DEPENDENCY_NOT_FOUND' | 'CONFLICT';
+        error?: string;
+      };
       let serverEventId: string | null = null;
 
-      if (processResult.status === 'SYNCED') {
-        // Write to change_log for downstream pull consumers
+      try {
+        await client.query('BEGIN');
+
+        // Validate terminal and branch→org membership inside the transaction.
+        // ensureTerminal throws for invalid branch or cross-org mismatch.
         try {
-          serverEventId = await writeChangeLog(pool, {
+          await ensureTerminal(client, terminalId, organizationId, branchId);
+        } catch (termErr: any) {
+          const msg = String(termErr?.message ?? termErr);
+          // Cross-org or invalid branch is a permanent failure — reject the event.
+          // Inactive branch gets FAILED_PERMANENT so the operator can investigate.
+          await client.query('ROLLBACK');
+          results.push({
+            client_event_id: clientEventId,
+            server_event_id: null,
+            status: 'FAILED_PERMANENT',
+            error: `TERMINAL_REGISTRATION_FAILED: ${msg}`,
+          });
+          continue;
+        }
+
+        // --- Dispatch to active event handler ---
+        if (eventType === 'PRODUCT_CREATED') {
+          processResult = await handleProductCreated(client, payload, userId);
+        } else if (eventType === 'PRODUCT_UPDATED') {
+          processResult = await handleProductUpdated(client, payload);
+        } else if (eventType === 'INVENTORY_OPERATION_RECORDED') {
+          processResult = await handleInventoryOperation(client, payload, clientEventId, branchId);
+        } else if (eventType === 'PARTY_UPSERTED') {
+          // Downstream compatibility path: no separate data table.
+          // The change_log write below propagates the party identity update to pull consumers.
+          processResult = { status: 'SYNCED' };
+        } else {
+          // Should be unreachable: filtered above. Defensive catch-all.
+          processResult = {
+            status: 'FAILED_PERMANENT',
+            error: `UNSUPPORTED_EVENT: ${eventType} reached dispatch without a handler`,
+          };
+        }
+
+        if (processResult.status === 'SYNCED') {
+          // --- Atomic: change_log then sync_audit in the same transaction ---
+          // If either write fails, the transaction rolls back and the event is NOT
+          // permanently marked successful. The client will retry.
+          const entityType = entityTypeForEvent(eventType);
+          const entityId = entityIdFromPayload(payload, eventType);
+
+          serverEventId = await writeChangeLog(client, {
             organizationId,
             branchId,
             clientEventId,
@@ -465,14 +654,8 @@ export function buildSyncRouter(pool: Pool): Router {
             entityId,
             payloadStr,
           });
-        } catch (err) {
-          // change_log write failure is logged but does not cause FAILED_PERMANENT
-          console.error(`[sync/push] change_log write failed for ${clientEventId}:`, (err as Error).message);
-        }
 
-        // Write to sync_audit for idempotency tracking
-        try {
-          await writeSyncAudit(pool, {
+          await writeSyncAudit(client, {
             clientEventId,
             terminalId,
             organizationId,
@@ -481,9 +664,23 @@ export function buildSyncRouter(pool: Pool): Router {
             payloadStr,
             status: 'SYNCED',
           });
-        } catch (err) {
-          console.error(`[sync/push] sync_audit write failed for ${clientEventId}:`, (err as Error).message);
+
+          await client.query('COMMIT');
+        } else {
+          // Non-SYNCED result: roll back the transaction.
+          // CONFLICT and DEPENDENCY_NOT_FOUND are retriable — the client will retry.
+          // FAILED_PERMANENT is terminal — the client must not retry without investigation.
+          await client.query('ROLLBACK');
         }
+      } catch (txErr: any) {
+        try { await client.query('ROLLBACK'); } catch { /* already rolled back */ }
+        processResult = {
+          status: 'FAILED_PERMANENT',
+          error: `TRANSACTION_ERROR: ${String(txErr?.message ?? txErr)}`,
+        };
+        serverEventId = null;
+      } finally {
+        client.release();
       }
 
       results.push({
@@ -507,7 +704,6 @@ export function buildSyncRouter(pool: Pool): Router {
     const afterSequence = Math.max(0, parseInt(String(req.query['after_sequence'] ?? '0'), 10));
     const rawLimit = parseInt(String(req.query['limit'] ?? '100'), 10);
     const limit = Math.min(Math.max(1, isNaN(rawLimit) ? 100 : rawLimit), 500);
-    // Fetch one extra row to determine has_more
     const fetchLimit = limit + 1;
 
     try {
