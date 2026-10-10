@@ -707,3 +707,153 @@ export async function updateCustomerTx(
 
   return mapCustomerRow(result.rows[0]);
 }
+
+// ─── Payment Recording ───────────────────────────────────────────────────────
+
+export interface RecordCustomerPaymentDto {
+  amount: number;              // whole PKR rupees, must be > 0
+  payment_method: string;      // CASH | BANK | EASYPAISA | JAZZCASH | …
+  notes?: string | null;
+  reference_number?: string | null; // external / idempotency key
+}
+
+export interface CustomerPaymentResult {
+  payment_id: string;
+  reference_number: string;
+  new_balance: number;
+}
+
+/**
+ * Record a customer receivable payment (credit entry in customer_ledger_entries).
+ *
+ * Flow (atomic transaction):
+ *   1. Validate customer exists.
+ *   2. Read current balance (SUM debit - SUM credit) FOR UPDATE on the customer row.
+ *   3. Compute balance_after = current_balance - amount  (payment reduces receivable).
+ *   4. Generate receipt number via counters table: RCP-000001 format.
+ *   5. INSERT customer_ledger_entries (entry_type='PAYMENT', credit=amount, debit=0).
+ *   6. If payment_method='CASH': INSERT cash_movements (IN) into open session.
+ *   7. COMMIT.
+ *
+ * Mirrors the Tauri / SQLite path in postgres_customer_repo.rs::record_payment().
+ */
+export async function recordCustomerPayment(
+  pool: Pool,
+  customerId: string,
+  dto: RecordCustomerPaymentDto,
+  performedBy?: string | null
+): Promise<CustomerPaymentResult> {
+  if (!dto.amount || dto.amount <= 0) {
+    throw new CustomerRepoError('Payment amount must be greater than zero', 400, 'VALIDATION');
+  }
+
+  const { v4: uuidv4 } = await import('uuid');
+  const client: PoolClient = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // 1. Lock customer row to ensure serializable payment ordering
+    const custResult = await client.query(
+      `SELECT id, name FROM customers WHERE id = $1 FOR UPDATE`,
+      [customerId]
+    );
+    if (!custResult.rows[0]) {
+      throw new CustomerRepoError(`Customer '${customerId}' not found`, 404, 'NOT_FOUND');
+    }
+    const customerName = custResult.rows[0].name as string;
+
+    // 2. Compute current balance
+    const balResult = await client.query<{ balance: string }>(
+      `SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT AS balance
+       FROM customer_ledger_entries
+       WHERE customer_id = $1`,
+      [customerId]
+    );
+    const currentBalance = Number(balResult.rows[0]?.balance ?? 0);
+
+    // 3. balance_after = receivable decreases when customer pays
+    const balanceAfter = currentBalance - dto.amount;
+
+    // 4. Atomic receipt number: RCP-000001
+    await client.query(
+      `UPDATE counters SET value = value + 1 WHERE name = 'receipt_number'`
+    );
+    const counterResult = await client.query<{ value: number }>(
+      `SELECT value FROM counters WHERE name = 'receipt_number'`
+    );
+    const counterValue = Number(counterResult.rows[0]?.value ?? 1);
+    const receiptNumber = dto.reference_number?.trim() || `RCP-${String(counterValue).padStart(6, '0')}`;
+
+    // 5. INSERT customer_ledger_entries
+    const entryId = uuidv4();
+    const now = new Date().toISOString();
+    const paymentMethod = (dto.payment_method ?? 'CASH').toUpperCase();
+    const description = dto.notes?.trim()
+      ? `Payment received (${paymentMethod}) - ${dto.notes.trim()}`
+      : `Payment received (${paymentMethod})`;
+
+    await client.query(
+      `INSERT INTO customer_ledger_entries
+         (id, customer_id, reference_id, reference_number, entry_type,
+          debit, credit, balance_after, description, performed_by, created_at)
+       VALUES ($1, $2, $3, $4, 'PAYMENT', 0, $5, $6, $7, $8, $9)`,
+      [
+        entryId,
+        customerId,
+        entryId,           // self-reference for direct payments
+        receiptNumber,
+        dto.amount,
+        balanceAfter,
+        description,
+        performedBy ?? null,
+        now,
+      ]
+    );
+
+    // 6. Cash movement (IN) for CASH payments
+    if (paymentMethod === 'CASH') {
+      const sessionResult = await client.query<{ id: string }>(
+        `SELECT id FROM cash_sessions
+         WHERE status = 'OPEN'
+         ORDER BY created_at DESC LIMIT 1`
+      );
+      const sessionId = sessionResult.rows[0]?.id ?? null;
+      const movementId = uuidv4();
+
+      await client.query(
+        `INSERT INTO cash_movements
+           (id, session_id, branch_id, movement_type, direction, amount,
+            reference_id, reference_number, payment_method, description, performed_by, created_at)
+         VALUES ($1, $2,
+           (SELECT branch_id FROM cash_sessions WHERE id = $2),
+           'CUSTOMER_PAYMENT', 'IN', $3, $4, $5, 'CASH', $6, $7, $8)`,
+        [
+          movementId,
+          sessionId,
+          dto.amount,
+          entryId,
+          receiptNumber,
+          `Customer payment: ${customerName} - ${receiptNumber}`,
+          performedBy ?? null,
+          now,
+        ]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    return {
+      payment_id: entryId,
+      reference_number: receiptNumber,
+      new_balance: balanceAfter,
+    };
+  } catch (err: unknown) {
+    await client.query('ROLLBACK');
+    if (err instanceof CustomerRepoError) throw err;
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new CustomerRepoError(`Failed to record customer payment: ${msg}`, 500);
+  } finally {
+    client.release();
+  }
+}

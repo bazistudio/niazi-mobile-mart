@@ -1,4 +1,52 @@
-import { tauriClient } from '@/lib/tauri/tauriClient';
+/**
+ * Ledger REST API client.
+ *
+ * Replaces the previous Tauri IPC implementation entirely.
+ * All calls go through httpClient → real Express REST endpoints.
+ *
+ * Endpoints used:
+ *   GET  /api/v1/customers/:id/ledger   → CustomerStatementDto
+ *   POST /api/v1/customers/:id/payments → CustomerPaymentResult
+ *   GET  /api/v1/suppliers/:id/ledger   → SupplierStatementDto
+ *   POST /api/v1/suppliers/:id/payments → SupplierPaymentResult
+ */
+
+import { httpClient } from '@/lib/http/httpClient';
+
+// ─── Statement DTOs (mirrors backend CustomerStatementDto / SupplierStatementDto) ──
+
+export interface LedgerStatementEntry {
+  id: string;
+  date: string;
+  reference_number: string | null;
+  description: string;
+  entry_type: string;          // 'SALE' | 'PAYMENT' | 'ADJUSTMENT' | 'PURCHASE' | …
+  debit: number;
+  credit: number;
+  balance: number;
+}
+
+export interface CustomerStatementDto {
+  customer_id: string;
+  customer_name: string;
+  customer_code: string;
+  phone: string;
+  credit_limit: number;
+  current_balance: number;
+  entries: LedgerStatementEntry[];
+}
+
+export interface SupplierStatementDto {
+  supplier_id: string;
+  supplier_name: string;
+  supplier_code: string;
+  phone: string;
+  credit_limit: number;
+  current_balance: number;
+  entries: LedgerStatementEntry[];
+}
+
+// ─── Legacy adapter types (used by LedgerBook / useLedger hook) ──────────────
 
 export interface LedgerTimelineEntry {
   id: string;
@@ -8,26 +56,11 @@ export interface LedgerTimelineEntry {
   runningBalance: number;
   timestamp: number;
   description: string;
+  entry_type: string;
+  debit: number;
+  credit: number;
   debitAccount: string;
   creditAccount: string;
-}
-
-export interface PaymentAllocationData {
-  _id: string;
-  paymentEntryId: string;
-  invoiceId: string;
-  amountAllocated: number;
-  createdAt: string;
-}
-
-export interface OpenInvoiceData {
-  _id: string;
-  orderNumber: string;
-  totalAmount: number;
-  paidAmount: number;
-  remainingAmount: number;
-  paymentStatus: 'pending' | 'partially_paid';
-  createdAt: string;
 }
 
 export interface PartyLedgerResponse {
@@ -35,8 +68,9 @@ export interface PartyLedgerResponse {
   message: string;
   data: {
     timeline: LedgerTimelineEntry[];
-    allocations: PaymentAllocationData[];
-    openInvoices: OpenInvoiceData[];
+    allocations: unknown[];
+    openInvoices: unknown[];
+    statement: CustomerStatementDto | SupplierStatementDto | null;
   };
 }
 
@@ -44,209 +78,148 @@ export interface RecordPaymentPayload {
   partyId: string;
   partyType: 'CUSTOMER' | 'SUPPLIER';
   amount: number;
-  method: 'cash' | 'card' | 'transfer' | 'credit' | string;
+  method: string;
   notes?: string;
   idempotencyKey?: string;
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function mapCustomerEntry(entry: LedgerStatementEntry): LedgerTimelineEntry {
+  const isPayment = entry.entry_type === 'PAYMENT';
+  return {
+    id: entry.id,
+    transactionId: entry.reference_number || entry.id,
+    type: isPayment ? 'payment' : 'invoice',
+    amount: isPayment ? entry.credit : entry.debit,
+    runningBalance: entry.balance,
+    timestamp: new Date(entry.date).getTime() || Date.now(),
+    description: entry.description,
+    entry_type: entry.entry_type,
+    debit: entry.debit,
+    credit: entry.credit,
+    debitAccount: isPayment ? 'cash' : 'receivable',
+    creditAccount: isPayment ? 'receivable' : 'sales',
+  };
+}
+
+function mapSupplierEntry(entry: LedgerStatementEntry): LedgerTimelineEntry {
+  const isPayment = entry.entry_type === 'PAYMENT';
+  return {
+    id: entry.id,
+    transactionId: entry.reference_number || entry.id,
+    type: isPayment ? 'payment' : 'supplier_invoice',
+    amount: isPayment ? entry.debit : entry.credit,
+    runningBalance: entry.balance,
+    timestamp: new Date(entry.date).getTime() || Date.now(),
+    description: entry.description,
+    entry_type: entry.entry_type,
+    debit: entry.debit,
+    credit: entry.credit,
+    debitAccount: isPayment ? 'payable' : 'purchases',
+    creditAccount: isPayment ? 'cash' : 'payable',
+  };
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
 export const ledgerApi = {
-  getPartyLedger: async (partyId: string, partyType: 'CUSTOMER' | 'SUPPLIER'): Promise<PartyLedgerResponse> => {
-    if (partyType === 'CUSTOMER') {
-      try {
-        const statement = await tauriClient.customerGetStatement(partyId);
-
-        const timeline: LedgerTimelineEntry[] = statement.entries.map((entry) => {
-          const isPayment = entry.entry_type === 'PAYMENT';
-          const timestamp = new Date(entry.date).getTime() || Date.now();
-          return {
-            id: entry.id,
-            transactionId: entry.reference_number || entry.id,
-            type: isPayment ? 'payment' : 'invoice',
-            amount: isPayment ? entry.credit : entry.debit,
-            runningBalance: entry.balance,
-            timestamp,
-            description: entry.description,
-            // In POS customer accounting:
-            // Debit receivable = credit sale was given to customer
-            // Credit receivable = customer made payment
-            debitAccount: isPayment ? 'cash' : 'receivable',
-            creditAccount: isPayment ? 'receivable' : 'sales',
-          };
-        });
-
-        // Retrieve open (unpaid or partially paid) sales for this customer
-        let openInvoices: OpenInvoiceData[] = [];
-        try {
-          const sales = await tauriClient.saleList({ customer_id: partyId });
-          openInvoices = sales
-            .filter((s) => s.payment_status === 'UNPAID' || s.payment_status === 'PARTIALLY_PAID')
-            .map((s) => ({
-              _id: s.id,
-              orderNumber: s.invoice_number,
-              totalAmount: s.total_amount,
-              paidAmount: s.paid_amount,
-              remainingAmount: s.total_amount - s.paid_amount,
-              paymentStatus: s.payment_status === 'PARTIALLY_PAID' ? 'partially_paid' : 'pending',
-              createdAt: s.created_at,
-            }));
-        } catch (saleErr) {
-          console.warn('Could not fetch open invoices for customer:', saleErr);
-        }
-
+  /**
+   * Fetch the full ledger statement for a customer or supplier.
+   * Returns a PartyLedgerResponse with timeline + raw statement for summary cards.
+   */
+  getPartyLedger: async (
+    partyId: string,
+    partyType: 'CUSTOMER' | 'SUPPLIER'
+  ): Promise<PartyLedgerResponse> => {
+    try {
+      if (partyType === 'CUSTOMER') {
+        const statement = await httpClient.get<CustomerStatementDto>(
+          `/api/v1/customers/${encodeURIComponent(partyId)}/ledger`
+        );
         return {
           success: true,
-          message: 'Customer ledger statement retrieved',
+          message: 'Customer ledger loaded',
           data: {
-            timeline,
-            allocations: [],
-            openInvoices,
-          },
-        };
-      } catch (err: any) {
-        console.error('Failed to get customer ledger via Tauri IPC:', err);
-        return {
-          success: false,
-          message: err?.toString() || 'Failed to retrieve ledger',
-          data: {
-            timeline: [],
+            timeline: (statement.entries || []).map(mapCustomerEntry),
             allocations: [],
             openInvoices: [],
+            statement,
+          },
+        };
+      } else {
+        const statement = await httpClient.get<SupplierStatementDto>(
+          `/api/v1/suppliers/${encodeURIComponent(partyId)}/ledger`
+        );
+        return {
+          success: true,
+          message: 'Supplier ledger loaded',
+          data: {
+            timeline: (statement.entries || []).map(mapSupplierEntry),
+            allocations: [],
+            openInvoices: [],
+            statement,
           },
         };
       }
-    }
-
-    // Native Tauri handling for SUPPLIER
-    try {
-      const statement = await tauriClient.supplierGetStatement(partyId);
-
-      const timeline: LedgerTimelineEntry[] = statement.rows.map((row, idx) => {
-        const isPayment = row.entry_type === 'PAYMENT';
-        const timestamp = new Date(row.date).getTime() || Date.now();
-        return {
-          id: `${partyId}_${idx}`,
-          transactionId: row.reference_number || `TX-${idx}`,
-          type: isPayment ? 'payment' : 'supplier_invoice',
-          amount: isPayment ? row.credit : row.debit,
-          runningBalance: row.balance,
-          timestamp,
-          description: row.description || (isPayment ? 'Supplier Payment' : 'Supplier Purchase'),
-          debitAccount: isPayment ? 'payable' : 'purchases',
-          creditAccount: isPayment ? 'cash' : 'payable',
-        };
-      });
-
-      // Retrieve open (unpaid or partially paid) purchases for this supplier
-      let openInvoices: OpenInvoiceData[] = [];
-      try {
-        const purchases = await tauriClient.purchaseList({ supplier_id: partyId });
-        openInvoices = purchases
-          .filter((p) => p.payment_status === 'UNPAID' || p.payment_status === 'PARTIALLY_PAID')
-          .map((p) => ({
-            _id: p.id,
-            orderNumber: p.purchase_number,
-            totalAmount: p.total_amount,
-            paidAmount: p.paid_amount,
-            remainingAmount: p.total_amount - p.paid_amount,
-            paymentStatus: p.payment_status === 'PARTIALLY_PAID' ? 'partially_paid' : 'pending',
-            createdAt: p.created_at,
-          }));
-      } catch (purErr) {
-        console.warn('Could not fetch open purchases for supplier:', purErr);
-      }
-
-      return {
-        success: true,
-        message: 'Supplier ledger statement retrieved',
-        data: {
-          timeline,
-          allocations: [],
-          openInvoices,
-        },
-      };
-    } catch (err: any) {
-      console.error('Failed to get supplier ledger via Tauri IPC:', err);
+    } catch (err: unknown) {
+      console.error('[ledgerApi.getPartyLedger] Error:', err);
       return {
         success: false,
-        message: err?.toString() || 'Failed to retrieve supplier ledger',
-        data: {
-          timeline: [],
-          allocations: [],
-          openInvoices: [],
-        },
+        message: err instanceof Error ? err.message : 'Failed to load ledger',
+        data: { timeline: [], allocations: [], openInvoices: [], statement: null },
       };
     }
   },
 
-  getCustomerLedger: async (customerId: string): Promise<PartyLedgerResponse> => {
-    return await ledgerApi.getPartyLedger(customerId, 'CUSTOMER');
-  },
+  /** Shorthand helpers */
+  getCustomerLedger: (customerId: string) => ledgerApi.getPartyLedger(customerId, 'CUSTOMER'),
+  getSupplierLedger: (supplierId: string) => ledgerApi.getPartyLedger(supplierId, 'SUPPLIER'),
 
-  getSupplierLedger: async (supplierId: string): Promise<PartyLedgerResponse> => {
-    return await ledgerApi.getPartyLedger(supplierId, 'SUPPLIER');
-  },
-
+  /**
+   * Record a customer receivable payment or supplier payable payout.
+   * Calls POST /api/v1/customers/:id/payments or POST /api/v1/suppliers/:id/payments.
+   */
   recordPayment: async (
     payload: RecordPaymentPayload
   ): Promise<{ success: boolean; data: { paymentId: string; newBalance: number; receiptNumber?: string } }> => {
+    const body = {
+      amount: Math.round(payload.amount),
+      payment_method: payload.method?.toUpperCase() || 'CASH',
+      notes: payload.notes || null,
+      reference_number: payload.idempotencyKey || null,
+    };
+
     if (payload.partyType === 'CUSTOMER') {
-      try {
-        const res = await tauriClient.customerRecordPayment({
-          customer_id: payload.partyId,
-          amount: payload.amount,
-          payment_method: payload.method,
-          reference_number: payload.idempotencyKey || null,
-          notes: payload.notes || null,
-        });
-
-        return {
-          success: true,
-          data: {
-            paymentId: res.payment_id,
-            receiptNumber: res.receipt_number,
-            newBalance: res.new_balance,
-          },
-        };
-      } catch (err: any) {
-        console.error('Failed to record customer payment via Tauri IPC:', err);
-        throw new Error(err?.toString() || 'Failed to record customer payment');
-      }
-    }
-
-    // Native supplier payment
-    try {
-      const res = await tauriClient.supplierRecordPayment({
-        supplier_id: payload.partyId,
-        amount: payload.amount,
-        payment_method: payload.method,
-        reference_number: payload.idempotencyKey || null,
-        notes: payload.notes || null,
-      });
-
+      const res = await httpClient.post<{ payment_id: string; reference_number: string; new_balance: number }>(
+        `/api/v1/customers/${encodeURIComponent(payload.partyId)}/payments`,
+        body
+      );
       return {
         success: true,
         data: {
           paymentId: res.payment_id,
-          receiptNumber: res.receipt_number,
+          receiptNumber: res.reference_number,
           newBalance: res.new_balance,
         },
       };
-    } catch (err: any) {
-      console.error('Failed to record supplier payment via Tauri IPC:', err);
-      throw new Error(err?.toString() || 'Failed to record supplier payment');
+    } else {
+      const res = await httpClient.post<{ payment_id: string; reference_number: string; new_balance: number }>(
+        `/api/v1/suppliers/${encodeURIComponent(payload.partyId)}/payments`,
+        body
+      );
+      return {
+        success: true,
+        data: {
+          paymentId: res.payment_id,
+          receiptNumber: res.reference_number,
+          newBalance: res.new_balance,
+        },
+      };
     }
   },
 
-  recordPayout: async (
-    payload: RecordPaymentPayload
-  ): Promise<{ success: boolean; data: { paymentId: string; newBalance: number; shopCashBalance: number } }> => {
-    return {
-      success: true,
-      data: {
-        paymentId: `payout_${Date.now()}`,
-        newBalance: 0,
-        shopCashBalance: 0,
-      },
-    };
-  },
+  /** Alias kept for backward compat with supplier payment calls */
+  recordPayout: (payload: RecordPaymentPayload) =>
+    ledgerApi.recordPayment({ ...payload, partyType: 'SUPPLIER' }),
 };
