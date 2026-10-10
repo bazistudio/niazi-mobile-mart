@@ -169,16 +169,19 @@ export function createProductRouter(pool: Pool): Router {
       const initialQty = dto.initial_quantity ?? 0;
       const branchId = dto.branch_id ?? identity.branch_id ?? null;
 
+      // Always spread resolved branchId so createProduct can insert the stock guard row.
+      const dtoWithBranch = { ...dto, branch_id: branchId };
+
       let product;
       if (initialQty > 0 && branchId) {
         product = await createProductWithInitialStock(
           pool,
           id,
-          { ...dto, branch_id: branchId },
+          dtoWithBranch,
           identity.user_id
         );
       } else {
-        product = await createProduct(pool, id, dto);
+        product = await createProduct(pool, id, dtoWithBranch);
       }
 
       res.status(201).json(product);
