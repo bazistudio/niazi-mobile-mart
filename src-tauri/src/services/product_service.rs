@@ -81,6 +81,36 @@ impl ProductService {
                         .filter(|b| b.trim().len() == 36)
                         .unwrap_or(DEFAULT_MAIN_BRANCH_ID);
 
+                    // IMPORTANT: Enqueue PRODUCT_CREATED *before* INVENTORY_OPERATION_RECORDED so
+                    // the central backend (PostgreSQL) creates the product row first. If the
+                    // inventory event arrives before the product row exists it causes a FK
+                    // violation and the whole sync batch is rejected.
+                    //
+                    // Also inject initial_quantity into the payload so the Axum backend's
+                    // create_product_tx can write the stock row via its own path as a safety net.
+                    let product_payload_value = {
+                        let initial_qty = dto_clone.initial_quantity.filter(|&q| q > 0);
+                        let mut v = serde_json::to_value(&product)
+                            .map_err(|e| crate::db::errors::DbError::ValidationError(e.to_string()))?;
+                        if let (Some(qty), Some(obj)) = (initial_qty, v.as_object_mut()) {
+                            obj.insert("initial_quantity".to_string(), serde_json::Value::Number(qty.into()));
+                            obj.insert("branch_id".to_string(), serde_json::Value::String(branch_id.to_string()));
+                        }
+                        v
+                    };
+                    let product_payload = serde_json::to_string(&product_payload_value)
+                        .map_err(|e| crate::db::errors::DbError::ValidationError(e.to_string()))?;
+
+                    let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                        client_event_id: Some(product.id.clone()),
+                        terminal_id: terminal_id.clone(),
+                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                        branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
+                        event_type: "PRODUCT_CREATED".to_string(),
+                        payload: product_payload,
+                    };
+                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+
                     if let Some(initial_qty) = dto_clone.initial_quantity {
                         if initial_qty > 0 {
                             let now = Utc::now().to_rfc3339();
@@ -122,7 +152,7 @@ impl ProductService {
 
                             let sync_inv_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
                                 client_event_id: Some(inv_event_dto.operation_id.clone()),
-                                terminal_id: terminal_id.clone(),
+                                terminal_id,
                                 organization_id: NIAZI_ORGANIZATION_ID.to_string(),
                                 branch_id: branch_id.to_string(),
                                 event_type: "INVENTORY_OPERATION_RECORDED".to_string(),
@@ -131,19 +161,6 @@ impl ProductService {
                             SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_inv_dto)?;
                         }
                     }
-
-                    let payload = serde_json::to_string(&product)
-                        .map_err(|e| crate::db::errors::DbError::ValidationError(e.to_string()))?;
-
-                    let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
-                        client_event_id: Some(product.id.clone()),
-                        terminal_id,
-                        organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-                        branch_id: DEFAULT_MAIN_BRANCH_ID.to_string(),
-                        event_type: "PRODUCT_CREATED".to_string(),
-                        payload,
-                    };
-                    SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
 
                     Ok(product)
                 })
