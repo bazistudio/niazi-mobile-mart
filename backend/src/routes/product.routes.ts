@@ -172,12 +172,14 @@ export function createProductRouter(pool: Pool): Router {
         (dto as any).quantity ??
         0
       );
-      const branchId =
+      const rawBranch = String(
         dto.branch_id ??
         (dto as any).branchId ??
         (dto as any).initial_branch_id ??
         identity.branch_id ??
-        '00000000-0000-0000-0000-000000000002'; // Default MAIN branch ID
+        ''
+      ).trim();
+      const branchId = rawBranch.length === 36 ? rawBranch : '00000000-0000-0000-0000-000000000002';
 
       // Always spread resolved branchId and initial_quantity so createProduct/createProductWithInitialStock receive normalized values.
       const dtoWithBranch = {

@@ -513,7 +513,8 @@ export async function createProduct(
     // Insert a zero-quantity stock guard row so that products without initial
     // stock still appear in LEFT JOIN queries with quantity = 0.
     // branch_id is optional here; use caller-supplied or default MAIN branch ID.
-    const branchIdForGuard = dto.branch_id ?? '00000000-0000-0000-0000-000000000002';
+    const rawBranch = (dto.branch_id ?? '').trim();
+    const branchIdForGuard = rawBranch.length === 36 ? rawBranch : '00000000-0000-0000-0000-000000000002';
     if (branchIdForGuard) {
       try {
         await client.query(
@@ -522,15 +523,15 @@ export async function createProduct(
            ON CONFLICT (product_id, branch_id) DO NOTHING`,
           [id, branchIdForGuard, NOW_ISO()]
         );
-      } catch {
-        // Non-fatal: guard row is best-effort; stock will appear when sync arrives.
+      } catch (err) {
+        console.warn(`[createProduct] Guard stock row insertion notice for ${id}:`, err);
       }
     }
 
     await client.query('COMMIT');
-    const product = mapProductRow(res.rows[0]!);
     client.release();
-    return product;
+    const product = await getProductById(pool, id);
+    return product || mapProductRow(res.rows[0]!);
   } catch (err: unknown) {
     try {
       await client.query('ROLLBACK');
@@ -667,9 +668,9 @@ export async function createProductWithInitialStock(
     }
 
     await client.query('COMMIT');
-    const result = { ...product, initial_quantity: dto.initial_quantity ?? null };
     client.release();
-    return result;
+    const result = await getProductById(pool, id);
+    return result || { ...product, initial_quantity: dto.initial_quantity ?? null };
   } catch (err: unknown) {
     // Attempt ROLLBACK. If ROLLBACK itself fails, pass the rollback error to
     // client.release() so the pg pool destroys and replaces this connection
@@ -936,9 +937,9 @@ export async function updateProduct(
     );
 
     await client.query('COMMIT');
-    const updated = mapProductRow(updateRes.rows[0]!);
     client.release();
-    return updated;
+    const updated = await getProductById(pool, id);
+    return updated || mapProductRow(updateRes.rows[0]!);
   } catch (err: unknown) {
     try {
       await client.query('ROLLBACK');
