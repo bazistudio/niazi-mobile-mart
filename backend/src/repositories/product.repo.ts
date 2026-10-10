@@ -614,57 +614,60 @@ export async function createProductWithInitialStock(
     const qty = dto.initial_quantity ?? 0;
     const branchId = dto.branch_id ?? null;
 
-    if (qty > 0 && branchId !== null) {
-      // 1. Ensure opening_stock_entries table exists with TEXT entity ID column types
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS opening_stock_entries (
-          id TEXT PRIMARY KEY,
-          organization_id TEXT NOT NULL,
-          branch_id TEXT NOT NULL,
-          product_id TEXT NOT NULL,
-          quantity BIGINT NOT NULL,
-          unit_cost BIGINT NOT NULL DEFAULT 0,
-          reference_number VARCHAR(100),
-          performed_by TEXT,
-          notes TEXT,
-          created_at TEXT NOT NULL
-        )
-      `);
-
-      // 2. Resolve Organization ID for branch
-      const orgRow = await client.query('SELECT organization_id FROM branches WHERE id = $1', [branchId]);
-      const orgId = ((orgRow.rows[0] as Record<string, unknown>)?.['organization_id'] as string) ?? '00000000-0000-0000-0000-000000000001';
-
-      const entryId = uuidv4();
-      const refNo = `OP-${Date.now()}`;
-      const unitCost = Math.round(Number(dto.purchase_price || 0));
-
-      // 3. INSERT opening_stock_entries audit row
-      await client.query(
-        `INSERT INTO opening_stock_entries (
-           id, organization_id, branch_id, product_id, quantity, unit_cost, reference_number, performed_by, notes, created_at
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [entryId, orgId, branchId, id, qty, unitCost, refNo, userId ? String(userId) : null, 'Opening Stock during Product Add', now]
-      );
-
-      // 4. UPSERT stock
+    if (branchId !== null) {
+      // 1. Always initialize stock row for baseline if it doesn't exist yet.
+      // ON CONFLICT DO NOTHING ensures that retried or delayed PRODUCT_CREATED events
+      // never overwrite stock established by a subsequent inventory operation.
       await client.query(
         `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
          VALUES ($1, $2, $3, $4)
-         ON CONFLICT (product_id, branch_id)
-         DO UPDATE SET quantity = EXCLUDED.quantity, updated_at = EXCLUDED.updated_at`,
+         ON CONFLICT (product_id, branch_id) DO NOTHING`,
         [id, branchId, qty, now]
       );
 
-      // 5. INSERT stock_movements
-      const movementId = uuidv4();
-      await client.query(
-        `INSERT INTO stock_movements (
-           id, product_id, branch_id, movement_type, quantity,
-           previous_stock, resulting_stock, reason, performed_by, reference_id, created_at
-         ) VALUES ($1, $2, $3, 'IN', $4, 0, $5, 'Opening Stock', $6, $7, $8)`,
-        [movementId, id, branchId, qty, qty, userId ?? null, entryId, now]
-      );
+      if (qty > 0) {
+        // 2. Ensure opening_stock_entries table exists with TEXT entity ID column types
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS opening_stock_entries (
+            id TEXT PRIMARY KEY,
+            organization_id TEXT NOT NULL,
+            branch_id TEXT NOT NULL,
+            product_id TEXT NOT NULL,
+            quantity BIGINT NOT NULL,
+            unit_cost BIGINT NOT NULL DEFAULT 0,
+            reference_number VARCHAR(100),
+            performed_by TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL
+          )
+        `);
+
+        // 3. Resolve Organization ID for branch
+        const orgRow = await client.query('SELECT organization_id FROM branches WHERE id = $1', [branchId]);
+        const orgId = ((orgRow.rows[0] as Record<string, unknown>)?.['organization_id'] as string) ?? '00000000-0000-0000-0000-000000000001';
+
+        const entryId = uuidv4();
+        const refNo = `OP-${Date.now()}`;
+        const unitCost = Math.round(Number(dto.purchase_price || 0));
+
+        // 4. INSERT opening_stock_entries audit row
+        await client.query(
+          `INSERT INTO opening_stock_entries (
+             id, organization_id, branch_id, product_id, quantity, unit_cost, reference_number, performed_by, notes, created_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [entryId, orgId, branchId, id, qty, unitCost, refNo, userId ? String(userId) : null, 'Opening Stock during Product Add', now]
+        );
+
+        // 5. INSERT stock_movements
+        const movementId = uuidv4();
+        await client.query(
+          `INSERT INTO stock_movements (
+             id, product_id, branch_id, movement_type, quantity,
+             previous_stock, resulting_stock, reason, performed_by, reference_id, created_at
+           ) VALUES ($1, $2, $3, 'IN', $4, 0, $5, 'Opening Stock', $6, $7, $8)`,
+          [movementId, id, branchId, qty, qty, userId ?? null, entryId, now]
+        );
+      }
     }
 
     await client.query('COMMIT');

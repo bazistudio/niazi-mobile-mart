@@ -89,7 +89,7 @@ impl ProductService {
                     // Also inject initial_quantity into the payload so the Axum backend's
                     // create_product_tx can write the stock row via its own path as a safety net.
                     let product_payload_value = {
-                        let initial_qty = dto_clone.initial_quantity.filter(|&q| q > 0);
+                        let initial_qty = dto_clone.initial_quantity.or(Some(0));
                         let mut v = serde_json::to_value(&product)
                             .map_err(|e| crate::db::errors::DbError::ValidationError(e.to_string()))?;
                         if let (Some(qty), Some(obj)) = (initial_qty, v.as_object_mut()) {
@@ -111,55 +111,54 @@ impl ProductService {
                     };
                     SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
 
-                    if let Some(initial_qty) = dto_clone.initial_quantity {
-                        if initial_qty > 0 {
-                            let now = Utc::now().to_rfc3339();
-                            SQLiteInventoryRepository::set_stock_in_tx(tx, &product.id, branch_id, initial_qty, &now)?;
+                    let initial_qty = dto_clone.initial_quantity.unwrap_or(0);
+                    let now = Utc::now().to_rfc3339();
+                    SQLiteInventoryRepository::set_stock_in_tx(tx, &product.id, branch_id, initial_qty, &now)?;
 
-                            let op_id = Uuid::new_v4().to_string();
-                            SQLiteInventoryRepository::insert_movement_in_tx(
-                                tx,
-                                &StockMovement {
-                                    id: op_id.clone(),
-                                    product_id: product.id.clone(),
-                                    branch_id: branch_id.to_string(),
-                                    movement_type: StockMovementType::In,
-                                    quantity: initial_qty,
-                                    previous_stock: 0,
-                                    resulting_stock: initial_qty,
-                                    reason: Some("Opening Stock".to_string()),
-                                    performed_by: user_id_owned.clone(),
-                                    reference_id: Some("OPENING_STOCK".to_string()),
-                                    created_at: now.clone(),
-                                },
-                            )?;
-
-                            let inv_event_dto = crate::domain::inventory::InventoryOperationSyncEventDto {
-                                operation_id: op_id,
-                                operation_type: "INCREASE".to_string(),
+                    if initial_qty > 0 {
+                        let op_id = Uuid::new_v4().to_string();
+                        SQLiteInventoryRepository::insert_movement_in_tx(
+                            tx,
+                            &StockMovement {
+                                id: op_id.clone(),
                                 product_id: product.id.clone(),
                                 branch_id: branch_id.to_string(),
-                                to_branch_id: None,
+                                movement_type: StockMovementType::In,
                                 quantity: initial_qty,
-                                target_quantity: Some(initial_qty),
+                                previous_stock: 0,
+                                resulting_stock: initial_qty,
                                 reason: Some("Opening Stock".to_string()),
-                                performed_by: user_id_owned,
+                                performed_by: user_id_owned.clone(),
+                                reference_id: Some("OPENING_STOCK".to_string()),
                                 created_at: now.clone(),
-                            };
+                            },
+                        )?;
 
-                            let inv_payload = serde_json::to_string(&inv_event_dto)
-                                .map_err(|e| crate::db::errors::DbError::ValidationError(e.to_string()))?;
+                        let inv_event_dto = crate::domain::inventory::InventoryOperationSyncEventDto {
+                            operation_id: op_id,
+                            operation_type: "INCREASE".to_string(),
+                            product_id: product.id.clone(),
+                            branch_id: branch_id.to_string(),
+                            to_branch_id: None,
+                            quantity: initial_qty,
+                            target_quantity: Some(initial_qty),
+                            reason: Some("Opening Stock".to_string()),
+                            performed_by: user_id_owned,
+                            created_at: now.clone(),
+                        };
 
-                            let sync_inv_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
-                                client_event_id: Some(inv_event_dto.operation_id.clone()),
-                                terminal_id,
-                                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
-                                branch_id: branch_id.to_string(),
-                                event_type: "INVENTORY_OPERATION_RECORDED".to_string(),
-                                payload: inv_payload,
-                            };
-                            SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_inv_dto)?;
-                        }
+                        let inv_payload = serde_json::to_string(&inv_event_dto)
+                            .map_err(|e| crate::db::errors::DbError::ValidationError(e.to_string()))?;
+
+                        let sync_inv_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                            client_event_id: Some(inv_event_dto.operation_id.clone()),
+                            terminal_id,
+                            organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                            branch_id: branch_id.to_string(),
+                            event_type: "INVENTORY_OPERATION_RECORDED".to_string(),
+                            payload: inv_payload,
+                        };
+                        SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_inv_dto)?;
                     }
 
                     Ok(product)
