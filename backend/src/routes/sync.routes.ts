@@ -35,7 +35,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
-import { authMiddleware, RequestIdentity } from '../auth';
+import { authMiddleware, RequestIdentity, NIAZI_ORGANIZATION_ID } from '../auth';
 import {
   createProductWithInitialStock,
   updateProduct,
@@ -48,7 +48,7 @@ import {
 // Constants
 // ---------------------------------------------------------------------------
 
-const NIAZI_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
+// NIAZI_ORGANIZATION_ID is imported from auth.ts — the single source of truth.
 const DEFAULT_MAIN_BRANCH_ID = '00000000-0000-0000-0000-000000000002';
 
 function NOW_ISO(): string {

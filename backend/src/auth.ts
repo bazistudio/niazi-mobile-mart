@@ -71,7 +71,9 @@ interface Claims {
 
 // --- Constants ---
 
-const NIAZI_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
+// Canonical single-organization UUID seeded by migration 001_initial_schema.sql.
+// This is the ONLY place this constant should be defined. All other files must import it.
+export const NIAZI_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
 
 // --- Key Loading ---
 

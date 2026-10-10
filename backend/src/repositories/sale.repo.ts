@@ -699,6 +699,9 @@ export async function completeSaleTx(
   }
 
   // Step 15: Record Cash Movement for CASH portion
+  // F-07 Fix: Reject the entire sale if a CASH payment is tendered but no cash session is open.
+  // Previously openSessionId was silently set to null, creating orphaned cash_movements rows
+  // that could never be reconciled against a cash session.
   const allocatedCash = salePayments
     .filter((p) => p.payment_method === 'CASH')
     .reduce((sum, p) => sum + p.amount, 0);
@@ -709,6 +712,17 @@ export async function completeSaleTx(
       [branchId]
     );
     const openSessionId: string | null = ((openSessionRow.rows[0] as Record<string, unknown>)?.['id'] as string) ?? null;
+
+    // Enforce: a CASH payment requires an open cash session. Without one, the cash movement
+    // cannot be tied to a session for reconciliation. Reject with a clear message so the
+    // cashier opens a session before accepting cash.
+    if (!openSessionId) {
+      throw Object.assign(
+        new Error('No open cash session found for this branch. Please open a cash session before accepting cash payments.'),
+        { statusCode: 400 }
+      );
+    }
+
     const cashMvId = uuidv4();
     const desc = `Retail Sale Payment ${invoiceNumber}`;
 

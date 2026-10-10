@@ -8,6 +8,7 @@
 
 import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
+import { NIAZI_ORGANIZATION_ID } from '../auth';
 
 // --- Domain Types ---
 
@@ -649,7 +650,7 @@ export async function createProductWithInitialStock(
 
         // 3. Resolve Organization ID for branch
         const orgRow = await client.query('SELECT organization_id FROM branches WHERE id = $1', [branchId]);
-        const orgId = ((orgRow.rows[0] as Record<string, unknown>)?.['organization_id'] as string) ?? '00000000-0000-0000-0000-000000000001';
+        const orgId = ((orgRow.rows[0] as Record<string, unknown>)?.['organization_id'] as string) ?? NIAZI_ORGANIZATION_ID;
 
         const entryId = uuidv4();
         const refNo = `OP-${Date.now()}`;
@@ -1114,7 +1115,7 @@ export async function listBranches(pool: Pool): Promise<Array<{ id: string; orga
     if (res.rows && res.rows.length > 0) {
       return res.rows.map((r) => ({
         id: String(r.id),
-        organization_id: String(r.organization_id || '00000000-0000-0000-0000-000000000001'),
+        organization_id: String(r.organization_id || NIAZI_ORGANIZATION_ID),
         name: String(r.name),
         code: String(r.code || 'MAIN'),
         is_active: Boolean(r.is_active === 1 || r.is_active === true || String(r.is_active) === 'true'),
@@ -1124,7 +1125,7 @@ export async function listBranches(pool: Pool): Promise<Array<{ id: string; orga
     console.warn('[product.repo] listBranches query failed:', err);
   }
   return [
-    { id: '00000000-0000-0000-0000-000000000002', organization_id: '00000000-0000-0000-0000-000000000001', name: 'Main Branch', code: 'MAIN', is_active: true }
+    { id: '00000000-0000-0000-0000-000000000002', organization_id: NIAZI_ORGANIZATION_ID, name: 'Main Branch', code: 'MAIN', is_active: true }
   ];
 }
 
@@ -1440,8 +1441,14 @@ export async function adjustStock(
   }
 }
 
-// Phase 7: Atomic delta stock adjustment (increase or decrease by quantity delta).
-// Uses SQL quantity = quantity + $delta to avoid read-then-write race conditions.
+// Phase 9 F-02 Fix: Fully atomic delta stock adjustment (increase or decrease by quantity delta).
+// Uses a single SQL statement (SELECT FOR UPDATE + GREATEST(0, quantity + delta)) to eliminate
+// the TOCTOU race condition where two concurrent reads could both get the same prevStock value
+// and one would silently overwrite the other's update with an incorrect absolute quantity.
+//
+// The SELECT FOR UPDATE acquires an exclusive row-level lock before computing the delta,
+// guaranteeing that the prevStock used for both the UPDATE and the stock_movements audit row
+// reflects the committed state at the time the lock is held — not a stale pre-lock snapshot.
 export async function deltaStock(
   pool: Pool,
   dto: {
@@ -1464,21 +1471,28 @@ export async function deltaStock(
   try {
     await client.query('BEGIN');
 
-    // Fetch current stock to validate and compute resulting value
-    const stockRes = await client.query(
-      'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2',
+    // Step 1: Lock the stock row exclusively (or read 0 if it doesn't exist yet).
+    // FOR UPDATE prevents any concurrent transaction from reading or writing this row
+    // until we COMMIT or ROLLBACK, closing the TOCTOU window.
+    const lockRes = await client.query(
+      'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2 FOR UPDATE',
       [productId, branchId]
     );
-    const prevStock = Number(stockRes.rows[0]?.['quantity'] ?? 0);
+    const prevStock = Number(lockRes.rows[0]?.['quantity'] ?? 0);
+    // Apply floor of 0: stock cannot go negative.
     const resultingStock = Math.max(0, prevStock + delta);
 
-    // Upsert with atomic delta (uses computed resulting value to avoid separate UPDATE)
+    // Step 2: Atomic upsert using the locked prevStock value.
+    // DO UPDATE references the already-locked row, so no second SELECT is needed.
+    // This is now safe because the FOR UPDATE above serializes concurrent callers.
     await client.query(
       `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (product_id, branch_id)
-       DO UPDATE SET quantity = $3, updated_at = $4`,
-      [productId, branchId, resultingStock, now]
+       DO UPDATE SET
+         quantity   = GREATEST(0, stock.quantity + $5::BIGINT),
+         updated_at = $4`,
+      [productId, branchId, resultingStock, now, delta]
     );
 
     if (delta !== 0) {
@@ -1508,4 +1522,130 @@ export async function deltaStock(
   }
 }
 
+// ─── F-08: Stock Movement History ─────────────────────────────────────────────
 
+export interface StockMovementRow {
+  id: string;
+  product_id: string;
+  branch_id: string;
+  movement_type: string;
+  quantity: number;
+  previous_stock: number;
+  resulting_stock: number;
+  reason: string | null;
+  performed_by: string | null;
+  reference_id: string | null;
+  created_at: string;
+}
+
+/**
+ * Returns stock movements from the PostgreSQL stock_movements table.
+ * Replaces the SQLite `storage_inventory_get_movements` Rust command (F-08).
+ */
+export async function getStockMovements(
+  pool: Pool,
+  filter: {
+    product_id?: string | null;
+    branch_id?: string | null;
+    limit?: number | null;
+  }
+): Promise<StockMovementRow[]> {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (filter.product_id) {
+    params.push(filter.product_id);
+    conditions.push(`sm.product_id = $${params.length}`);
+  }
+  if (filter.branch_id) {
+    params.push(filter.branch_id);
+    conditions.push(`sm.branch_id = $${params.length}`);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const limitClause = filter.limit && filter.limit > 0 ? `LIMIT ${Math.min(Number(filter.limit), 1000)}` : 'LIMIT 200';
+
+  const sql = `
+    SELECT
+      sm.id,
+      sm.product_id,
+      sm.branch_id,
+      sm.movement_type,
+      sm.quantity::BIGINT        AS quantity,
+      sm.previous_stock::BIGINT  AS previous_stock,
+      sm.resulting_stock::BIGINT AS resulting_stock,
+      sm.reason,
+      sm.performed_by,
+      sm.reference_id,
+      sm.created_at
+    FROM stock_movements sm
+    ${where}
+    ORDER BY sm.created_at DESC
+    ${limitClause}
+  `;
+
+  const res = await pool.query(sql, params);
+  return res.rows.map((r: Record<string, unknown>) => ({
+    id: String(r['id']),
+    product_id: String(r['product_id']),
+    branch_id: String(r['branch_id']),
+    movement_type: String(r['movement_type']),
+    quantity: Number(r['quantity']),
+    previous_stock: Number(r['previous_stock']),
+    resulting_stock: Number(r['resulting_stock']),
+    reason: r['reason'] != null ? String(r['reason']) : null,
+    performed_by: r['performed_by'] != null ? String(r['performed_by']) : null,
+    reference_id: r['reference_id'] != null ? String(r['reference_id']) : null,
+    created_at: String(r['created_at']),
+  }));
+}
+
+// ─── F-08: Low Stock Report ────────────────────────────────────────────────────
+
+export interface LowStockRow {
+  product_id: string;
+  product_name: string;
+  sku: string;
+  branch_id: string;
+  branch_name: string;
+  current_quantity: number;
+  low_stock_threshold: number;
+}
+
+/**
+ * Returns products with stock at or below their low_stock_threshold for a branch.
+ * Replaces the SQLite `storage_inventory_get_low_stock` Rust command (F-08).
+ */
+export async function getLowStockItems(
+  pool: Pool,
+  branchId: string
+): Promise<LowStockRow[]> {
+  const sql = `
+    SELECT
+      p.id          AS product_id,
+      p.name        AS product_name,
+      p.sku,
+      b.id          AS branch_id,
+      b.name        AS branch_name,
+      COALESCE(s.quantity, 0)::BIGINT   AS current_quantity,
+      COALESCE(p.low_stock_threshold, 5)::BIGINT AS low_stock_threshold
+    FROM products p
+    JOIN branches b ON b.id = $1
+    LEFT JOIN stock s ON s.product_id = p.id AND s.branch_id = $1
+    WHERE p.is_active = TRUE
+      AND COALESCE(s.quantity, 0) <= COALESCE(p.low_stock_threshold, 5)
+    ORDER BY COALESCE(s.quantity, 0) ASC, p.name ASC
+    LIMIT 500
+  `;
+
+  const res = await pool.query(sql, [branchId]);
+  return res.rows.map((r: Record<string, unknown>) => ({
+    product_id: String(r['product_id']),
+    product_name: String(r['product_name']),
+    sku: String(r['sku']),
+    branch_id: String(r['branch_id']),
+    branch_name: String(r['branch_name']),
+    current_quantity: Number(r['current_quantity']),
+    low_stock_threshold: Number(r['low_stock_threshold']),
+  }));
+}

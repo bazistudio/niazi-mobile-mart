@@ -5,7 +5,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, RequestIdentity } from '../auth';
+import { authMiddleware, authorizePermission, RequestIdentity, NIAZI_ORGANIZATION_ID } from '../auth';
 import {
   closeCashSession,
   getCurrentCashSession,
@@ -61,7 +61,7 @@ export function createCashRouter(pool: Pool): Router {
     }
 
     try {
-      const branchId = (req.query['branch_id'] as string) || identity.branch_id || '00000000-0000-0000-0000-000000000001';
+      const branchId = (req.query['branch_id'] as string) || identity.branch_id || NIAZI_ORGANIZATION_ID;
       const session = await getCurrentCashSession(pool, branchId);
       res.status(200).json({ session });
     } catch (err) {

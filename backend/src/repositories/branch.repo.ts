@@ -23,6 +23,7 @@
  */
 
 import { Pool } from 'pg';
+import { NIAZI_ORGANIZATION_ID } from '../auth';
 
 // ─── Domain types ──────────────────────────────────────────────────────────────
 
@@ -111,9 +112,9 @@ export class BranchRepo {
     const codeSuffix = id.replace(/-/g, '').substring(0, 4).toUpperCase();
     const code = `${codePrefix}-${codeSuffix}`;
 
-    // Default organization ID (the seeded org ID from 001_initial_schema.sql)
+    // Default organization ID — single source of truth in auth.ts.
     const organizationId =
-      dto.organization_id?.trim() || '00000000-0000-0000-0000-000000000001';
+      dto.organization_id?.trim() || NIAZI_ORGANIZATION_ID;
 
     try {
       const result = await this.pool.query<Branch>(

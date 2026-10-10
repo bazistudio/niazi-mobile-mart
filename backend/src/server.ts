@@ -79,6 +79,8 @@ import {
   getStockMapForBranch,
   adjustStock,
   deltaStock,
+  getStockMovements,
+  getLowStockItems,
 } from './repositories/product.repo';
 import { transferStock, StockTransferRepoError } from './repositories/stock_transfer.repo';
 import { authMiddleware, isAdmin, RequestIdentity } from './auth';
@@ -659,6 +661,49 @@ async function main(): Promise<void> {
           return;
         }
         res.status(500).json({ error: err.message || 'Failed to transfer stock' });
+      }
+    }
+  );
+
+  // ── GET /api/v1/inventory/movements — F-08: replaces SQLite Rust IPC path ──────
+  // Previously: tauriClient.inventoryGetMovements() invoked storage_inventory_get_movements (SQLite).
+  // Now: all clients (Tauri desktop and web) use this PostgreSQL-backed endpoint.
+  app.get(
+    ['/api/inventory/movements', '/api/v1/inventory/movements', '/api/stock/movements'],
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const productId = (req.query['product_id'] as string | undefined) || null;
+        const branchId = (req.query['branch_id'] as string | undefined) || null;
+        const limit = req.query['limit'] ? Number(req.query['limit']) : null;
+
+        const movements = await getStockMovements(pool, { product_id: productId, branch_id: branchId, limit });
+        res.status(200).json(movements);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message || 'Failed to fetch stock movements' });
+      }
+    }
+  );
+
+  // ── GET /api/v1/inventory/low-stock — F-08: replaces SQLite Rust IPC path ────
+  // Previously: tauriClient.inventoryGetLowStock() invoked storage_inventory_get_low_stock (SQLite).
+  // Now: all clients (Tauri desktop and web) use this PostgreSQL-backed endpoint.
+  app.get(
+    ['/api/inventory/low-stock', '/api/v1/inventory/low-stock', '/api/stock/low-stock'],
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const identity = req.identity as RequestIdentity;
+        // Use query param branch_id if provided; fall back to JWT claim branch
+        const branchId = (req.query['branch_id'] as string | undefined) || identity.branch_id;
+        if (!branchId || branchId.trim().length < 32) {
+          res.status(400).json({ error: 'branch_id is required' });
+          return;
+        }
+        const items = await getLowStockItems(pool, branchId.trim());
+        res.status(200).json(items);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message || 'Failed to fetch low stock items' });
       }
     }
   );

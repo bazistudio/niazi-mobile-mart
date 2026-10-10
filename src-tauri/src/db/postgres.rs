@@ -82,9 +82,14 @@ impl PostgresAdapter {
         &self.pool
     }
 
-    /// Executes PostgreSQL schema migrations (001 to 012) against the connection pool.
+    /// Executes all PostgreSQL schema migrations (001 to 024) against the connection pool.
+    ///
+    /// NOTE: The authoritative production migration runner is the TypeScript runner in
+    /// `backend/src/migrate.ts`, which runs at server startup via `runMigrations(pool)`.
+    /// This Rust runner is retained for integration testing and as a fallback. It must
+    /// remain in sync with the TypeScript runner — add every new migration to both.
     pub async fn run_migrations(&self) -> DbResult<()> {
-        info!("Running PostgreSQL schema migrations...");
+        info!("Running PostgreSQL schema migrations (001 to 024)...");
         let schema_001 = include_str!("../../migrations/postgres/001_initial_schema.sql");
         let schema_002 = include_str!("../../migrations/postgres/002_add_terminals_and_sync_queue.sql");
         let schema_003 = include_str!("../../migrations/postgres/003_add_change_log.sql");
@@ -101,6 +106,14 @@ impl PostgresAdapter {
         let schema_014 = include_str!("../../migrations/postgres/014_opening_stock_and_user_counters.sql");
         let schema_015 = include_str!("../../migrations/postgres/015_product_compatible_models.sql");
         let schema_016 = include_str!("../../migrations/postgres/016_users_status_and_access_profile.sql");
+        let schema_017 = include_str!("../../migrations/postgres/017_ensure_stock_tables.sql");
+        let schema_018 = include_str!("../../migrations/postgres/018_fix_opening_stock_entries_types.sql");
+        let schema_019 = include_str!("../../migrations/postgres/019_backfill_missing_stock_rows.sql");
+        let schema_020 = include_str!("../../migrations/postgres/020_ensure_product_stock_trigger.sql");
+        let schema_021 = include_str!("../../migrations/postgres/021_stock_transfers_table.sql");
+        let schema_022 = include_str!("../../migrations/postgres/022_repair_jobs_table.sql");
+        let schema_023 = include_str!("../../migrations/postgres/023_payment_method_easypaisa_jazzcash.sql");
+        let schema_024 = include_str!("../../migrations/postgres/024_backfill_stock_all_active_branches.sql");
 
         let mut tx = self.pool.begin().await.map_err(|e| {
             DbError::MigrationError(format!("Failed to begin migration transaction: {e}"))
@@ -186,11 +199,51 @@ impl PostgresAdapter {
             .await
             .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 016: {e}")))?;
 
+        sqlx::raw_sql(schema_017)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 017: {e}")))?;
+
+        sqlx::raw_sql(schema_018)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 018: {e}")))?;
+
+        sqlx::raw_sql(schema_019)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 019: {e}")))?;
+
+        sqlx::raw_sql(schema_020)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 020: {e}")))?;
+
+        sqlx::raw_sql(schema_021)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 021: {e}")))?;
+
+        sqlx::raw_sql(schema_022)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 022: {e}")))?;
+
+        sqlx::raw_sql(schema_023)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 023: {e}")))?;
+
+        sqlx::raw_sql(schema_024)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 024: {e}")))?;
+
         tx.commit().await.map_err(|e| {
             DbError::MigrationError(format!("Failed to commit migration transaction: {e}"))
         })?;
 
-        info!("PostgreSQL schema migrations applied successfully (001 to 016).");
+        info!("PostgreSQL schema migrations applied successfully (001 to 024).");
         Ok(())
     }
 

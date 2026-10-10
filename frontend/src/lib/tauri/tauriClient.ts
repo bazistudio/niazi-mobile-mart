@@ -1164,25 +1164,22 @@ export const tauriClient = {
     branchId?: string,
     limit?: number
   ): Promise<StockMovement[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<StockMovement[]>('storage_inventory_get_movements', {
-        productId,
-        branchId,
-        limit,
-      });
-    }
-    return [];
+    // F-08 Fix: Removed SQLite/Tauri IPC path. Reads from PostgreSQL via backend REST API
+    // for both Tauri desktop and web environments, ensuring movement history reflects
+    // the central authoritative stock_movements table rather than the local SQLite copy.
+    const params = new URLSearchParams();
+    if (productId) params.set('product_id', productId);
+    if (branchId) params.set('branch_id', branchId);
+    if (limit != null) params.set('limit', String(limit));
+    const qs = params.toString();
+    return await httpFetch<StockMovement[]>(`/api/v1/inventory/movements${qs ? `?${qs}` : ''}`);
   },
 
   async inventoryGetLowStock(branchId: string): Promise<LowStockItemDto[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<LowStockItemDto[]>('storage_inventory_get_low_stock', {
-        branchId,
-      });
-    }
-    return [];
+    // F-08 Fix: Removed SQLite/Tauri IPC path. Reads from PostgreSQL via backend REST API
+    // for both Tauri desktop and web environments, ensuring low-stock data reflects
+    // the central authoritative stock table rather than the local SQLite copy.
+    return await httpFetch<LowStockItemDto[]>(`/api/v1/inventory/low-stock?branch_id=${encodeURIComponent(branchId)}`);
   },
 
   // â”€â”€ Organization & Branch Operations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
