@@ -5,7 +5,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, isAdmin, RequestIdentity } from '../auth';
+import { authMiddleware, authorizePermission, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity } from '../auth';
 import {
   createSalesReturn,
   getSaleReturnableInfo,
@@ -59,6 +59,13 @@ export function createReturnsRouter(pool: Pool): Router {
     try {
       const saleId = req.params['saleId'] as string;
       const info = await getSaleReturnableInfo(pool, saleId);
+
+      // F-11 Security Fix: Check branch access on original sale before returning returnable info
+      if (!canAccessBranch(identity, info.branch_id)) {
+        res.status(403).json({ error: 'Access denied: sale belongs to a different branch' });
+        return;
+      }
+
       res.status(200).json(info);
     } catch (err) {
       sendError(req, res, err);
@@ -70,14 +77,14 @@ export function createReturnsRouter(pool: Pool): Router {
     const identity = req.identity as RequestIdentity;
 
     // Returns require management permissions (Admin or ShopAdmin)
-    if (!isAdmin(identity)) {
+    if (!isBranchAdmin(identity)) {
       res.status(403).json({ error: 'Access denied: Sales returns require Admin or ShopAdmin permissions' });
       return;
     }
 
     try {
       const dto = req.body as CreateSalesReturnDto;
-      const result = await createSalesReturn(pool, dto, identity.user_id);
+      const result = await createSalesReturn(pool, dto, identity.user_id, identity.branch_id, isOrgAdmin(identity));
       res.status(201).json(result);
     } catch (err) {
       sendError(req, res, err);
@@ -95,8 +102,22 @@ export function createReturnsRouter(pool: Pool): Router {
     }
 
     try {
+      const callerIsOrgAdmin = isOrgAdmin(identity);
+      const requestedBranch = (req.query['branch_id'] as string) || null;
+      let effectiveBranchId: string | undefined = undefined;
+
+      if (callerIsOrgAdmin) {
+        effectiveBranchId = requestedBranch || undefined;
+      } else {
+        if (!identity.branch_id) {
+          res.status(403).json({ error: 'Access denied: User has no assigned branch' });
+          return;
+        }
+        effectiveBranchId = identity.branch_id;
+      }
+
       const returns = await listSalesReturns(pool, {
-        branch_id: (req.query['branch_id'] as string) || identity.branch_id || undefined,
+        branch_id: effectiveBranchId,
         customer_id: (req.query['customer_id'] as string) || undefined,
         sale_id: (req.query['sale_id'] as string) || undefined,
       });

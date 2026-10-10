@@ -169,13 +169,47 @@ export function resolveIdentity(token: string): RequestIdentity {
 // --- Authorization ---
 
 /**
- * Checks if identity has an administrative role.
- * Case-insensitive comparison supporting ADMIN, ShopAdmin, SUPER_ADMIN, OWNER.
- * Mirrors RequestIdentity::is_admin() in identity.rs.
+ * Checks if identity has Organization-wide Administrative authority.
+ * Organization admins are identified ONLY by their role claim (ADMIN, SUPER_ADMIN, OWNER).
+ * UI page permissions (access_profile.allowed_pages '*') do NOT grant backend cross-branch authority.
+ * Security fix (Phase 10 Blocker 1): removed wildcard page-permission escalation.
+ */
+export function isOrgAdmin(identity: RequestIdentity): boolean {
+  if (!identity) return false;
+  const r = String(identity.role || '').toUpperCase();
+  if (r === 'ADMIN' || r === 'SUPER_ADMIN' || r === 'OWNER') return true;
+  return false;
+}
+
+/**
+ * Checks if identity has Branch-level Administrative authority.
+ * Includes Organization Admins as well as SHOP_ADMIN / SHOPADMIN role.
+ */
+export function isBranchAdmin(identity: RequestIdentity): boolean {
+  if (!identity) return false;
+  if (isOrgAdmin(identity)) return true;
+  const r = String(identity.role || '').toUpperCase();
+  return r === 'SHOPADMIN' || r === 'SHOP_ADMIN' || r === 'MANAGER';
+}
+
+/**
+ * General admin check. Retained for backward compatibility.
  */
 export function isAdmin(identity: RequestIdentity): boolean {
-  const r = String(identity.role || '').toUpperCase();
-  return r === 'ADMIN' || r === 'SHOPADMIN' || r === 'SHOP_ADMIN' || r === 'SUPER_ADMIN' || r === 'OWNER';
+  return isBranchAdmin(identity);
+}
+
+/**
+ * Checks if identity is authorized to access a specific target branch.
+ * Org admins can access any branch.
+ * Branch users can only access their assigned identity.branch_id.
+ */
+export function canAccessBranch(identity: RequestIdentity, targetBranchId: string | null | undefined): boolean {
+  if (!identity) return false;
+  if (isOrgAdmin(identity)) return true;
+  if (!targetBranchId || !targetBranchId.trim()) return false;
+  if (!identity.branch_id) return false;
+  return identity.branch_id === targetBranchId.trim();
 }
 
 /**

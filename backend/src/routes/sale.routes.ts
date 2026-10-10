@@ -15,7 +15,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, isAdmin, RequestIdentity } from '../auth';
+import { authMiddleware, authorizePermission, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity } from '../auth';
 import {
   completeSale,
   getSaleById,
@@ -57,19 +57,6 @@ function sendError(_req: Request, res: Response, err: unknown): void {
   res.status(500).json({ error: message });
 }
 
-// ─── Branch Access Helper ─────────────────────────────────────────────────────
-
-/**
- * Checks if identity has access to a given branch.
- * Mirrors AuthService::require_branch_access in src-tauri/src/services/auth_service.rs.
- */
-function canAccessBranch(identity: RequestIdentity, branchId: string): boolean {
-  if (isAdmin(identity)) return true;
-  if (identity.access_profile.allowed_pages.some((p) => p === '*')) return true;
-  if (!identity.branch_id) return true;
-  return identity.branch_id === branchId;
-}
-
 // ─── Router Factory ───────────────────────────────────────────────────────────
 
 export function createSaleRouter(pool: Pool): Router {
@@ -89,12 +76,12 @@ export function createSaleRouter(pool: Pool): Router {
 
     try {
       const dto = req.body as CompleteSaleDto;
-      const callerIsAdmin = isAdmin(identity);
+      const callerIsOrgAdmin = isOrgAdmin(identity);
 
       // P1 security fix: branch is resolved from server-side JWT identity, NOT from client DTO.
-      // Non-admins always sell from their assigned branch regardless of what the client sends.
-      // Admins may select a branch explicitly via dto.branch_id; if omitted, identity branch is used.
-      const result = await completeSale(pool, dto, identity.user_id, identity.branch_id, callerIsAdmin);
+      // Non-org-admins always sell from their assigned branch regardless of what the client sends.
+      // Org admins may select a branch explicitly via dto.branch_id; if omitted, identity branch is used.
+      const result = await completeSale(pool, dto, identity.user_id, identity.branch_id, callerIsOrgAdmin);
       res.status(201).json(result);
     } catch (err) {
       sendError(req, res, err);
@@ -112,13 +99,23 @@ export function createSaleRouter(pool: Pool): Router {
     }
 
     try {
-      const isOrgAdmin =
-        isAdmin(identity) ||
-        identity.access_profile.allowed_pages.some((p) => p === '*');
+      const callerIsOrgAdmin = isOrgAdmin(identity);
+      const requestedBranch = (req.query['branch_id'] as string) || null;
+      let effectiveBranchId: string | null = null;
+
+      if (callerIsOrgAdmin) {
+        effectiveBranchId = requestedBranch;
+      } else {
+        if (!identity.branch_id) {
+          res.status(403).json({ error: 'Access denied: User has no assigned branch' });
+          return;
+        }
+        effectiveBranchId = identity.branch_id;
+      }
 
       const filter: SaleFilterDto = {
         customer_id: (req.query['customer_id'] as string) || null,
-        branch_id: (req.query['branch_id'] as string) || null,
+        branch_id: effectiveBranchId,
         payment_status: (req.query['payment_status'] as string) || null,
         sale_status: (req.query['sale_status'] as string) || null,
         start_date: (req.query['start_date'] as string) || null,
@@ -126,11 +123,6 @@ export function createSaleRouter(pool: Pool): Router {
         limit: req.query['limit'] ? parseInt(req.query['limit'] as string, 10) : 50,
         offset: req.query['offset'] ? parseInt(req.query['offset'] as string, 10) : null,
       };
-
-      // Non-org-admin users are restricted to their own branch
-      if (!isOrgAdmin && !filter.branch_id) {
-        filter.branch_id = identity.branch_id;
-      }
 
       const sales = await listSales(pool, filter);
       res.status(200).json(sales);

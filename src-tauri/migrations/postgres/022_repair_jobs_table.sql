@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS repair_jobs (
   id                   UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
   job_id               VARCHAR(50)  NOT NULL UNIQUE,  -- Human-readable ticket e.g. REP-0001
-  customer_id          UUID         REFERENCES parties(id) ON DELETE SET NULL,
+  customer_id          TEXT         REFERENCES parties(id) ON DELETE SET NULL,
   customer_name        TEXT         NOT NULL,           -- Denormalized for display even if party deleted
   customer_phone       TEXT,
 
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS repair_jobs (
   -- Problem and inspection
   problem_description  TEXT         NOT NULL DEFAULT '',
   initial_inspection   TEXT         NOT NULL DEFAULT '[]',  -- JSON array of strings
-  technician_id        UUID         REFERENCES users(id) ON DELETE SET NULL,
+  technician_id        TEXT         REFERENCES users(id) ON DELETE SET NULL,
 
   -- Job metadata
   priority             TEXT         NOT NULL DEFAULT 'Normal'
@@ -69,8 +69,8 @@ CREATE TABLE IF NOT EXISTS repair_jobs (
   warranty_status      TEXT         CHECK (warranty_status IN ('Active', 'Expired', 'Voided')),
 
   -- Audit
-  branch_id            UUID         REFERENCES branches(id) ON DELETE SET NULL,
-  performed_by         UUID         REFERENCES users(id) ON DELETE SET NULL,
+  branch_id            TEXT         REFERENCES branches(id) ON DELETE SET NULL,
+  performed_by         TEXT         REFERENCES users(id) ON DELETE SET NULL,
   created_at           TEXT         NOT NULL,
   updated_at           TEXT         NOT NULL
 );
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS repair_jobs (
 CREATE TABLE IF NOT EXISTS repair_parts (
   id           UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
   repair_job_id UUID   NOT NULL REFERENCES repair_jobs(id) ON DELETE CASCADE,
-  product_id   UUID    REFERENCES products(id) ON DELETE SET NULL,
+  product_id   TEXT    REFERENCES products(id) ON DELETE SET NULL,
   product_name TEXT    NOT NULL,   -- Denormalized snapshot
   product_sku  TEXT    NOT NULL DEFAULT '',
   qty          BIGINT  NOT NULL CHECK (qty > 0),

@@ -3,15 +3,15 @@
 -- Additive only. Safe to run multiple times (idempotent CREATE IF NOT EXISTS).
 
 CREATE TABLE IF NOT EXISTS stock_transfers (
-  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  product_id      UUID        NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
-  source_branch_id      UUID  NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
-  destination_branch_id UUID  NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
-  quantity        BIGINT      NOT NULL CHECK (quantity > 0),
-  reason          TEXT,
-  notes           TEXT,
-  performed_by    UUID        REFERENCES users(id) ON DELETE SET NULL,
-  created_at      TEXT        NOT NULL
+  id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id            TEXT        NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+  source_branch_id      TEXT        NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  destination_branch_id TEXT        NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  quantity              BIGINT      NOT NULL CHECK (quantity > 0),
+  reason                TEXT,
+  notes                 TEXT,
+  performed_by          TEXT        REFERENCES users(id) ON DELETE SET NULL,
+  created_at            TEXT        NOT NULL
 );
 
 -- Index for audit queries by branch (source or destination)

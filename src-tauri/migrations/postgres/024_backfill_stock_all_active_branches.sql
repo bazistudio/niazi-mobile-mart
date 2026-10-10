@@ -20,5 +20,5 @@ INSERT INTO stock (product_id, branch_id, quantity, updated_at)
 SELECT p.id, b.id, 0, NOW()::text
 FROM products p
 CROSS JOIN branches b
-WHERE b.is_active = true
+WHERE b.is_active = 1
 ON CONFLICT (product_id, branch_id) DO NOTHING;

@@ -163,7 +163,9 @@ export async function getSaleReturnableInfo(pool: Pool, saleId: string): Promise
 export async function createSalesReturn(
   pool: Pool,
   dto: CreateSalesReturnDto,
-  userId: string | null
+  userId: string | null,
+  callerBranchId?: string | null,
+  isOrgAdmin: boolean = false
 ): Promise<SalesReturnResultDto> {
   if (!dto.lines || dto.lines.length === 0) {
     throw new ReturnsRepoError('Cannot process return with no items selected', 400);
@@ -180,6 +182,17 @@ export async function createSalesReturn(
     }
     const sale = saleRes.rows[0] as Record<string, unknown>;
     const branchId = sale['branch_id'] as string;
+
+    // F-11 / Phase 13 Security Fix: Ensure non-org-admins are assigned a branch and it matches the original sale branch
+    if (!isOrgAdmin) {
+      if (!callerBranchId || !callerBranchId.trim()) {
+        throw new ReturnsRepoError('Access denied: User has no assigned branch', 403);
+      }
+      if (callerBranchId.trim() !== branchId) {
+        throw new ReturnsRepoError('Access denied: Cannot process return for sale belonging to another branch', 403);
+      }
+    }
+
     const customerId = (sale['customer_id'] as string | null) ?? null;
     const customerName = (sale['customer_name_snapshot'] as string | null) ?? null;
 

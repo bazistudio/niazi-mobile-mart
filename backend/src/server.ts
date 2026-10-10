@@ -83,7 +83,9 @@ import {
   getLowStockItems,
 } from './repositories/product.repo';
 import { transferStock, StockTransferRepoError } from './repositories/stock_transfer.repo';
-import { authMiddleware, isAdmin, RequestIdentity } from './auth';
+import { authMiddleware, isAdmin, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity } from './auth';
+
+// --- (Main server function continues) ---
 
 function loadEnv(): void {
   const envPaths = [
@@ -483,21 +485,23 @@ async function main(): Promise<void> {
     }
   });
 
-  // ── GET /api/inventory — P2/P7 fix: add authMiddleware, enforce branch scope ──
+  // ── GET /api/inventory — P2/P7/F-12/F-13 fix: add authMiddleware, enforce branch scope ──
   app.get(['/api/inventory', '/api/v1/inventory', '/api/stock'], authMiddleware, async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      const callerIsAdmin = isAdmin(identity);
+      const callerIsOrgAdmin = isOrgAdmin(identity);
 
-      // P7: Non-admins can only see their own branch's stock.
-      // Admins may query any branch or all branches (no branch_id = all branches).
+      // F-12/F-13 Fix: Non-org-admins can ONLY see their assigned branch's stock.
+      // Org Admins may query any specific branch or all branches (no branch_id = all branches).
       let branchId: string | undefined;
-      if (!callerIsAdmin) {
-        // Force to identity branch regardless of query param
-        branchId = identity.branch_id ?? undefined;
+      if (!callerIsOrgAdmin) {
+        if (!identity.branch_id) {
+          res.status(403).json({ error: 'Access denied: User has no assigned branch' });
+          return;
+        }
+        branchId = identity.branch_id;
       } else {
-        // Admin: allow explicit branch_id query param, or undefined (all branches)
-        branchId = (req.query['branch_id'] as string) || undefined;
+        branchId = (req.query['branch_id'] as string) || (req.query['branchId'] as string) || undefined;
       }
 
       const stockMap = await getStockMapForBranch(pool, branchId);
@@ -507,7 +511,7 @@ async function main(): Promise<void> {
     }
   });
 
-  // ── POST /api/inventory/adjust — P2/P3 fix: require auth + admin-only ────────
+  // ── POST /api/inventory/adjust — P2/P3/F-13 fix: require auth + admin-only ────────
   app.post(
     ['/api/inventory/adjust', '/api/v1/inventory/adjust', '/api/stock/adjust'],
     authMiddleware,
@@ -515,8 +519,8 @@ async function main(): Promise<void> {
       try {
         const identity = req.identity as RequestIdentity;
 
-        // P3: Only admins may manually adjust stock
-        if (!isAdmin(identity)) {
+        // P3/F-13: Branch or Org admins may adjust stock within their permitted branch
+        if (!isBranchAdmin(identity)) {
           res.status(403).json({ error: 'Forbidden: stock adjustments require administrator role' });
           return;
         }
@@ -533,10 +537,14 @@ async function main(): Promise<void> {
           return;
         }
 
-        // P3: Branch must be explicitly provided; no hardcoded fallback
         const branchId = (req.body?.branch_id || req.body?.branchId) as string | undefined;
         if (!branchId || !branchId.trim()) {
           res.status(400).json({ error: 'branch_id is required for stock adjustment' });
+          return;
+        }
+
+        if (!canAccessBranch(identity, branchId)) {
+          res.status(403).json({ error: 'Access denied: cannot adjust stock for a different branch' });
           return;
         }
 
@@ -545,7 +553,7 @@ async function main(): Promise<void> {
 
         const newStock = await adjustStock(pool, {
           product_id: productId,
-          branch_id: branchId,
+          branch_id: branchId.trim(),
           target_quantity: targetQty,
           reason,
           reference_id: referenceId,
@@ -566,7 +574,7 @@ async function main(): Promise<void> {
       try {
         const identity = req.identity as RequestIdentity;
 
-        if (!isAdmin(identity)) {
+        if (!isBranchAdmin(identity)) {
           res.status(403).json({ error: 'Forbidden: stock delta adjustments require administrator role' });
           return;
         }
@@ -589,12 +597,17 @@ async function main(): Promise<void> {
           return;
         }
 
+        if (!canAccessBranch(identity, branchId)) {
+          res.status(403).json({ error: 'Access denied: cannot apply stock delta for a different branch' });
+          return;
+        }
+
         const reason = req.body?.reason;
         const referenceId = req.body?.reference_id || req.body?.referenceId;
 
         const newStock = await deltaStock(pool, {
           product_id: productId,
-          branch_id: branchId,
+          branch_id: branchId.trim(),
           delta,
           reason,
           reference_id: referenceId,
@@ -615,8 +628,8 @@ async function main(): Promise<void> {
       try {
         const identity = req.identity as RequestIdentity;
 
-        // P4: Only admins may transfer stock between branches
-        if (!isAdmin(identity)) {
+        // Transfers between branches require Branch or Org Admin permissions
+        if (!isBranchAdmin(identity)) {
           res.status(403).json({ error: 'Forbidden: stock transfers require administrator role' });
           return;
         }
@@ -645,6 +658,17 @@ async function main(): Promise<void> {
           return;
         }
 
+        // Phase 13 Fix: Both source and destination branches must be authorized for the caller
+        if (!canAccessBranch(identity, sourceId)) {
+          res.status(403).json({ error: 'Access denied: cannot transfer stock from a branch you do not manage' });
+          return;
+        }
+
+        if (!canAccessBranch(identity, destId)) {
+          res.status(403).json({ error: 'Access denied: cannot transfer stock to a branch you do not manage' });
+          return;
+        }
+
         const result = await transferStock(pool, {
           source_branch_id: sourceId.trim(),
           destination_branch_id: destId.trim(),
@@ -665,19 +689,29 @@ async function main(): Promise<void> {
     }
   );
 
-  // ── GET /api/v1/inventory/movements — F-08: replaces SQLite Rust IPC path ──────
-  // Previously: tauriClient.inventoryGetMovements() invoked storage_inventory_get_movements (SQLite).
-  // Now: all clients (Tauri desktop and web) use this PostgreSQL-backed endpoint.
+  // ── GET /api/v1/inventory/movements — F-08/F-12: stock movement ledger ────────
   app.get(
     ['/api/inventory/movements', '/api/v1/inventory/movements', '/api/stock/movements'],
     authMiddleware,
     async (req: Request, res: Response) => {
       try {
+        const identity = req.identity as RequestIdentity;
         const productId = (req.query['product_id'] as string | undefined) || null;
-        const branchId = (req.query['branch_id'] as string | undefined) || null;
+        const requestedBranch = (req.query['branch_id'] as string | undefined) || null;
         const limit = req.query['limit'] ? Number(req.query['limit']) : null;
 
-        const movements = await getStockMovements(pool, { product_id: productId, branch_id: branchId, limit });
+        let effectiveBranchId: string | null = null;
+        if (isOrgAdmin(identity)) {
+          effectiveBranchId = requestedBranch;
+        } else {
+          if (!identity.branch_id) {
+            res.status(403).json({ error: 'Access denied: User has no assigned branch' });
+            return;
+          }
+          effectiveBranchId = identity.branch_id;
+        }
+
+        const movements = await getStockMovements(pool, { product_id: productId, branch_id: effectiveBranchId, limit });
         res.status(200).json(movements);
       } catch (err: any) {
         res.status(500).json({ error: err.message || 'Failed to fetch stock movements' });
@@ -685,22 +719,31 @@ async function main(): Promise<void> {
     }
   );
 
-  // ── GET /api/v1/inventory/low-stock — F-08: replaces SQLite Rust IPC path ────
-  // Previously: tauriClient.inventoryGetLowStock() invoked storage_inventory_get_low_stock (SQLite).
-  // Now: all clients (Tauri desktop and web) use this PostgreSQL-backed endpoint.
+  // ── GET /api/v1/inventory/low-stock — F-08/F-12: branch low stock ────────────
   app.get(
     ['/api/inventory/low-stock', '/api/v1/inventory/low-stock', '/api/stock/low-stock'],
     authMiddleware,
     async (req: Request, res: Response) => {
       try {
         const identity = req.identity as RequestIdentity;
-        // Use query param branch_id if provided; fall back to JWT claim branch
-        const branchId = (req.query['branch_id'] as string | undefined) || identity.branch_id;
-        if (!branchId || branchId.trim().length < 32) {
+        const requestedBranch = (req.query['branch_id'] as string | undefined) || null;
+
+        let effectiveBranchId: string;
+        if (isOrgAdmin(identity)) {
+          effectiveBranchId = requestedBranch || identity.branch_id || '';
+        } else {
+          if (!identity.branch_id) {
+            res.status(403).json({ error: 'Access denied: User has no assigned branch' });
+            return;
+          }
+          effectiveBranchId = identity.branch_id;
+        }
+
+        if (!effectiveBranchId || effectiveBranchId.trim().length < 32) {
           res.status(400).json({ error: 'branch_id is required' });
           return;
         }
-        const items = await getLowStockItems(pool, branchId.trim());
+        const items = await getLowStockItems(pool, effectiveBranchId.trim());
         res.status(200).json(items);
       } catch (err: any) {
         res.status(500).json({ error: err.message || 'Failed to fetch low stock items' });
