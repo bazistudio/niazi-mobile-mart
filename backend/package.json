@@ -1,6 +1,6 @@
 {
   "name": "niazi-mobile-mart-product-backend",
-  "version": "1.3.23",
+  "version": "1.3.24",
   "private": true,
   "description": "Niazi Mobile Mart TypeScript Product Backend",
   "type": "commonjs",
