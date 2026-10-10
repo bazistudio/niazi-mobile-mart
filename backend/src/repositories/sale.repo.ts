@@ -120,7 +120,10 @@ export class SaleRepoError extends Error {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const DEFAULT_MAIN_BRANCH_ID = '00000000-0000-0000-0000-000000000001';
+// NOTE: This constant is intentionally removed. Branch resolution must use
+// authenticated identity or database lookup. No hardcoded UUID fallback is safe.
+// Kept as a named error for clarity if branch cannot be resolved.
+// (P8 fix: was incorrectly pointing to org UUID 000...0001, not a branch UUID)
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -208,28 +211,71 @@ function mapSaleRow(row: Record<string, unknown>): Sale {
  * Core sale transaction logic.
  * Mirrors PostgresSaleRepository::complete_sale_tx() in postgres_sale_repo.rs exactly.
  * Uses an already-acquired PoolClient; caller manages BEGIN/COMMIT/ROLLBACK.
+ *
+ * P1 fix: identityBranchId is the branch from the server-verified JWT, NOT from the client DTO.
+ * For non-admins this MUST be set and will override any client-supplied dto.branch_id.
+ * For admins, dto.branch_id is accepted if present, otherwise identityBranchId is used.
  */
 export async function completeSaleTx(
   client: PoolClient,
   dto: CompleteSaleDto,
   userId: string | null,
-  saleIdOverride?: string | null
+  saleIdOverride?: string | null,
+  identityBranchId?: string | null,
+  callerIsAdmin?: boolean
 ): Promise<SaleResultDto> {
   // Step 1: Empty cart check
   if (!dto.items || dto.items.length === 0) {
     throw new SaleRepoError('Cannot complete sale with empty cart', 400);
   }
 
-  // Step 2: Resolve Branch ID
+  // Step 2: Resolve Branch ID — P1 security fix
+  // Non-admins: always use identity branch from JWT; ignore client dto.branch_id.
+  // Admins: may use dto.branch_id if provided, otherwise fall back to identity branch.
+  // No hardcoded UUID fallback is ever allowed.
   let branchId: string;
-  const rawBranchId = dto.branch_id?.trim();
-  if (rawBranchId && rawBranchId.length > 0) {
-    branchId = rawBranchId;
+  if (!callerIsAdmin) {
+    // Non-admin: enforce identity branch from server-side JWT
+    if (!identityBranchId || !identityBranchId.trim()) {
+      throw new SaleRepoError(
+        'Branch assignment is required. Your account is not assigned to a branch. Contact your administrator.',
+        403
+      );
+    }
+    branchId = identityBranchId.trim();
   } else {
-    const branchRow = await client.query(
-      "SELECT id FROM branches WHERE code = 'MAIN' LIMIT 1"
-    );
-    branchId = (branchRow.rows[0]?.id as string) ?? DEFAULT_MAIN_BRANCH_ID;
+    // Admin: prefer explicit dto.branch_id selection, fall back to identity branch
+    const rawBranchId = dto.branch_id?.trim();
+    if (rawBranchId && rawBranchId.length > 0) {
+      branchId = rawBranchId;
+    } else if (identityBranchId && identityBranchId.trim().length > 0) {
+      branchId = identityBranchId.trim();
+    } else {
+      // Admin with no branch context: resolve MAIN from DB (no hardcoded UUID)
+      const branchRow = await client.query(
+        "SELECT id FROM branches WHERE code = 'MAIN' AND is_active = TRUE LIMIT 1"
+      );
+      if (branchRow.rows.length === 0) {
+        throw new SaleRepoError(
+          'Cannot resolve MAIN branch. Please select a branch explicitly.',
+          400
+        );
+      }
+      branchId = branchRow.rows[0].id as string;
+    }
+  }
+
+  // P1 fix: Validate the resolved branch exists and is active
+  const branchValidRow = await client.query(
+    'SELECT id, is_active FROM branches WHERE id = $1',
+    [branchId]
+  );
+  if (branchValidRow.rows.length === 0) {
+    throw new SaleRepoError(`Branch '${branchId}' not found`, 400);
+  }
+  const branchActive = branchValidRow.rows[0]?.['is_active'];
+  if (branchActive === false || branchActive === 0) {
+    throw new SaleRepoError(`Branch '${branchId}' is inactive`, 400);
   }
 
   // Step 3: Validate Customer if provided
@@ -412,11 +458,23 @@ export async function completeSaleTx(
   const uid = userId ?? null;
 
   // Step 9: Validate stock availability for all lines (FOR UPDATE lock)
+  // P1 fix: if no stock row exists for (product, branch), fail explicitly — do NOT treat as zero.
+  // A missing stock row means inventory was never initialized for this branch; silently proceeding
+  // would allow phantom sales with no real stock deduction.
   for (const line of preparedLines) {
     const stockRow = await client.query(
       'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2 FOR UPDATE',
       [line.product_id, branchId]
     );
+
+    if (stockRow.rows.length === 0) {
+      throw new SaleRepoError(
+        `Stock record not found for product '${line.product_name}' at this branch. ` +
+        `Please initialize stock before selling.`,
+        400
+      );
+    }
+
     const currentStock = Number((stockRow.rows[0] as Record<string, unknown>)?.['quantity'] ?? 0);
 
     if (currentStock < line.quantity) {
@@ -566,17 +624,28 @@ export async function completeSaleTx(
        line.unit_price, line.cost_price, line.quantity, line.discount, line.line_total, now]
     );
 
-    const currentStockRow = await client.query(
-      'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2',
-      [line.product_id, branchId]
+    // P1 fix: Use atomic relative UPDATE (quantity = quantity - $1) instead of read-then-write.
+    // This eliminates the race condition where a second concurrent sale could read the same
+    // pre-deduction quantity and both succeed. RETURNING gives us the before/after for movement record.
+    const stockUpdateRes = await client.query(
+      `UPDATE stock
+         SET quantity = quantity - $1, updated_at = $2
+         WHERE product_id = $3 AND branch_id = $4
+         RETURNING (quantity + $1) AS previous_stock, quantity AS new_stock`,
+      [line.quantity, now, line.product_id, branchId]
     );
-    const currentStock = Number((currentStockRow.rows[0] as Record<string, unknown>)?.['quantity'] ?? 0);
-    const newStock = currentStock - line.quantity;
 
-    await client.query(
-      'UPDATE stock SET quantity = $1, updated_at = $2 WHERE product_id = $3 AND branch_id = $4',
-      [newStock, now, line.product_id, branchId]
-    );
+    if (stockUpdateRes.rowCount === 0) {
+      // Should not happen since Step 9 already checked, but guard against TOCTOU
+      throw new SaleRepoError(
+        `Stock deduction failed for product '${line.product_name}': row disappeared unexpectedly`,
+        500
+      );
+    }
+
+    const stockUpdateRow = stockUpdateRes.rows[0] as Record<string, unknown>;
+    const currentStock = Number(stockUpdateRow['previous_stock'] ?? 0);
+    const newStock = Number(stockUpdateRow['new_stock'] ?? 0);
 
     const movementId = uuidv4();
     const reason = `Sale Checkout ${invoiceNumber}`;
@@ -669,12 +738,14 @@ export async function completeSaleTx(
 export async function completeSale(
   pool: Pool,
   dto: CompleteSaleDto,
-  userId: string | null
+  userId: string | null,
+  identityBranchId?: string | null,
+  callerIsAdmin?: boolean
 ): Promise<SaleResultDto> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const result = await completeSaleTx(client, dto, userId);
+    const result = await completeSaleTx(client, dto, userId, null, identityBranchId, callerIsAdmin);
     await client.query('COMMIT');
     return result;
   } catch (err) {

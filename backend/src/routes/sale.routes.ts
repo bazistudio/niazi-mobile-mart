@@ -89,13 +89,12 @@ export function createSaleRouter(pool: Pool): Router {
 
     try {
       const dto = req.body as CompleteSaleDto;
+      const callerIsAdmin = isAdmin(identity);
 
-      // Enforce branch: if dto has no branch_id, use identity's branch (mirrors require_branch_access)
-      if (!dto.branch_id && identity.branch_id) {
-        dto.branch_id = identity.branch_id;
-      }
-
-      const result = await completeSale(pool, dto, identity.user_id);
+      // P1 security fix: branch is resolved from server-side JWT identity, NOT from client DTO.
+      // Non-admins always sell from their assigned branch regardless of what the client sends.
+      // Admins may select a branch explicitly via dto.branch_id; if omitted, identity branch is used.
+      const result = await completeSale(pool, dto, identity.user_id, identity.branch_id, callerIsAdmin);
       res.status(201).json(result);
     } catch (err) {
       sendError(req, res, err);

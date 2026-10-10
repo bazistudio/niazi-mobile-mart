@@ -69,14 +69,21 @@ export async function importOpeningStock(
     `);
 
     // Resolve Branch & Org
+    // P8 fix: No hardcoded UUID fallback. Resolve MAIN branch from DB, or fail explicitly.
     let branchId = dto.branch_id?.trim();
     if (!branchId || branchId.length === 0) {
-      const bRow = await client.query("SELECT id FROM branches WHERE code = 'MAIN' LIMIT 1");
-      branchId = (bRow.rows[0]?.id as string) ?? '00000000-0000-0000-0000-000000000001';
+      const bRow = await client.query("SELECT id FROM branches WHERE code = 'MAIN' AND is_active = TRUE LIMIT 1");
+      if (bRow.rows.length === 0) {
+        throw new OpeningStockRepoError('Cannot resolve MAIN branch. Please provide an explicit branch_id.', 400);
+      }
+      branchId = bRow.rows[0]?.id as string;
     }
 
     const orgRow = await client.query('SELECT organization_id FROM branches WHERE id = $1', [branchId]);
-    const orgId = ((orgRow.rows[0] as Record<string, unknown>)?.['organization_id'] as string) ?? '00000000-0000-0000-0000-000000000001';
+    if (orgRow.rows.length === 0) {
+      throw new OpeningStockRepoError(`Branch '${branchId}' not found`, 404);
+    }
+    const orgId = (orgRow.rows[0] as Record<string, unknown>)?.['organization_id'] as string;
 
     const now = new Date().toISOString();
     const refNo = dto.reference_number || `OP-${Date.now()}`;

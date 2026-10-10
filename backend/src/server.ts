@@ -54,6 +54,7 @@ import { buildSupplierRouter } from './routes/supplier.routes';
 import { buildExpenseRouter } from './routes/expense.routes';
 import { buildBranchRouter } from './routes/branch.routes';
 import { buildSyncRouter } from './routes/sync.routes';
+import { buildRepairRouter } from './routes/repair.routes';
 import { BranchRepo } from './repositories/branch.repo';
 import {
   listBrands,
@@ -78,6 +79,8 @@ import {
   getStockMapForBranch,
   adjustStock,
 } from './repositories/product.repo';
+import { transferStock, StockTransferRepoError } from './repositories/stock_transfer.repo';
+import { authMiddleware, isAdmin, RequestIdentity } from './auth';
 
 function loadEnv(): void {
   const envPaths = [
@@ -217,6 +220,13 @@ async function main(): Promise<void> {
   // -------------------------------------------------------------------------
   const syncRouter = buildSyncRouter(pool);
   app.use('/api/v1/sync', syncRouter);
+
+  // -------------------------------------------------------------------------
+  // Repair job routes — TypeScript Online Authority (P6)
+  // -------------------------------------------------------------------------
+  const repairRouter = buildRepairRouter(pool);
+  app.use('/api/repairs', repairRouter);
+  app.use('/api/v1/repairs', repairRouter);
 
   const productRouter = createProductRouter(pool);
   app.use('/api/products', productRouter);
@@ -470,36 +480,138 @@ async function main(): Promise<void> {
     }
   });
 
-  app.get(['/api/inventory', '/api/v1/inventory', '/api/stock'], async (req: Request, res: Response) => {
-    const branchId = req.query['branch_id'] as string | undefined;
-    const stockMap = await getStockMapForBranch(pool, branchId);
-    res.status(200).json(stockMap);
-  });
-
-  app.post(['/api/inventory/adjust', '/api/v1/inventory/adjust', '/api/stock/adjust'], async (req: Request, res: Response) => {
+  // ── GET /api/inventory — P2/P7 fix: add authMiddleware, enforce branch scope ──
+  app.get(['/api/inventory', '/api/v1/inventory', '/api/stock'], authMiddleware, async (req: Request, res: Response) => {
     try {
-      const productId = req.body?.product_id || req.body?.productId;
-      if (!productId || typeof productId !== 'string') {
-        res.status(400).json({ error: 'product_id is required' });
-        return;
-      }
-      const targetQty = Number(req.body?.target_quantity ?? req.body?.targetQuantity ?? req.body?.quantity ?? 0);
-      const branchId = req.body?.branch_id || req.body?.branchId;
-      const reason = req.body?.reason;
-      const referenceId = req.body?.reference_id || req.body?.referenceId;
+      const identity = req.identity as RequestIdentity;
+      const callerIsAdmin = isAdmin(identity);
 
-      const newStock = await adjustStock(pool, {
-        product_id: productId,
-        branch_id: branchId,
-        target_quantity: targetQty,
-        reason,
-        reference_id: referenceId,
-      });
-      res.status(200).json({ data: newStock, newStock });
+      // P7: Non-admins can only see their own branch's stock.
+      // Admins may query any branch or all branches (no branch_id = all branches).
+      let branchId: string | undefined;
+      if (!callerIsAdmin) {
+        // Force to identity branch regardless of query param
+        branchId = identity.branch_id ?? undefined;
+      } else {
+        // Admin: allow explicit branch_id query param, or undefined (all branches)
+        branchId = (req.query['branch_id'] as string) || undefined;
+      }
+
+      const stockMap = await getStockMapForBranch(pool, branchId);
+      res.status(200).json(stockMap);
     } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Failed to adjust stock' });
+      res.status(500).json({ error: err.message || 'Failed to fetch inventory' });
     }
   });
+
+  // ── POST /api/inventory/adjust — P2/P3 fix: require auth + admin-only ────────
+  app.post(
+    ['/api/inventory/adjust', '/api/v1/inventory/adjust', '/api/stock/adjust'],
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const identity = req.identity as RequestIdentity;
+
+        // P3: Only admins may manually adjust stock
+        if (!isAdmin(identity)) {
+          res.status(403).json({ error: 'Forbidden: stock adjustments require administrator role' });
+          return;
+        }
+
+        const productId = req.body?.product_id || req.body?.productId;
+        if (!productId || typeof productId !== 'string') {
+          res.status(400).json({ error: 'product_id is required' });
+          return;
+        }
+
+        const targetQty = Number(req.body?.target_quantity ?? req.body?.targetQuantity ?? req.body?.quantity ?? 0);
+        if (isNaN(targetQty) || targetQty < 0) {
+          res.status(400).json({ error: 'target_quantity must be a non-negative number' });
+          return;
+        }
+
+        // P3: Branch must be explicitly provided; no hardcoded fallback
+        const branchId = (req.body?.branch_id || req.body?.branchId) as string | undefined;
+        if (!branchId || !branchId.trim()) {
+          res.status(400).json({ error: 'branch_id is required for stock adjustment' });
+          return;
+        }
+
+        const reason = req.body?.reason;
+        const referenceId = req.body?.reference_id || req.body?.referenceId;
+
+        const newStock = await adjustStock(pool, {
+          product_id: productId,
+          branch_id: branchId,
+          target_quantity: targetQty,
+          reason,
+          reference_id: referenceId,
+        });
+        res.status(200).json({ data: newStock, newStock });
+      } catch (err: any) {
+        const statusCode = err?.statusCode ?? 500;
+        res.status(statusCode).json({ error: err.message || 'Failed to adjust stock' });
+      }
+    }
+  );
+
+  // ── POST /api/v1/inventory/transfer — P4: real stock transfer endpoint ────────
+  app.post(
+    ['/api/inventory/transfer', '/api/v1/inventory/transfer', '/api/stock/transfer'],
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const identity = req.identity as RequestIdentity;
+
+        // P4: Only admins may transfer stock between branches
+        if (!isAdmin(identity)) {
+          res.status(403).json({ error: 'Forbidden: stock transfers require administrator role' });
+          return;
+        }
+
+        const sourceId = (req.body?.source_branch_id || req.body?.sourceBranchId || req.body?.from_branch_id) as string | undefined;
+        const destId = (req.body?.destination_branch_id || req.body?.destinationBranchId || req.body?.to_branch_id) as string | undefined;
+        const productId = (req.body?.product_id || req.body?.productId) as string | undefined;
+        const quantity = Number(req.body?.quantity ?? 0);
+        const reason = req.body?.reason as string | undefined;
+        const notes = req.body?.notes as string | undefined;
+
+        if (!sourceId || !sourceId.trim()) {
+          res.status(400).json({ error: 'source_branch_id is required' });
+          return;
+        }
+        if (!destId || !destId.trim()) {
+          res.status(400).json({ error: 'destination_branch_id is required' });
+          return;
+        }
+        if (!productId || !productId.trim()) {
+          res.status(400).json({ error: 'product_id is required' });
+          return;
+        }
+        if (!quantity || quantity <= 0 || !Number.isInteger(quantity)) {
+          res.status(400).json({ error: 'quantity must be a positive integer' });
+          return;
+        }
+
+        const result = await transferStock(pool, {
+          source_branch_id: sourceId.trim(),
+          destination_branch_id: destId.trim(),
+          product_id: productId.trim(),
+          quantity,
+          reason: reason ?? null,
+          notes: notes ?? null,
+        }, identity.user_id);
+
+        res.status(200).json(result);
+      } catch (err: any) {
+        if (err instanceof StockTransferRepoError) {
+          res.status(err.statusCode).json({ error: err.message });
+          return;
+        }
+        res.status(500).json({ error: err.message || 'Failed to transfer stock' });
+      }
+    }
+  );
 
   app.get(['/health', '/api/health', '/api/v1/health'], (_req: Request, res: Response) => {
     res.status(200).json({ status: 'ok', service: 'niazi-product-backend' });

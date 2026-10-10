@@ -446,8 +446,13 @@ export async function resolveProductSku(
     const row = counterRes.rows[0]!;
     const seq = Number(row['next_val'] ?? row['next_value'] ?? 1);
     return `${prefix}${String(seq).padStart(6, '0')}`;
-  } catch {
-    return `${prefix}${String(Date.now() % 1000000).padStart(6, '0')}`;
+  } catch (err) {
+    // P9 fix: Do NOT fall back to timestamp-based SKU — timestamps are not unique under concurrent
+    // inserts and can produce colliding SKUs. Fail explicitly so the caller can retry or alert.
+    throw new RepoError(
+      `Failed to generate SKU: counter table unavailable. Original error: ${err instanceof Error ? err.message : String(err)}`,
+      500
+    );
   }
 }
 
@@ -1380,9 +1385,12 @@ export async function adjustStock(
     reference_id?: string | null;
   }
 ): Promise<number> {
-  const branchId = (dto.branch_id && dto.branch_id.trim().length === 36)
-    ? dto.branch_id.trim()
-    : '00000000-0000-0000-0000-000000000002';
+  // P3/P8 fix: Require explicit branch_id. No hardcoded UUID fallback is safe here —
+  // a missing branch_id would silently mutate the wrong branch's stock.
+  if (!dto.branch_id || dto.branch_id.trim().length < 32) {
+    throw new RepoError('branch_id is required for stock adjustment', 400);
+  }
+  const branchId = dto.branch_id.trim();
   const productId = dto.product_id;
   const targetQuantity = Math.max(0, Math.round(Number(dto.target_quantity ?? 0)));
   const now = NOW_ISO();
