@@ -55,6 +55,7 @@ import { buildExpenseRouter } from './routes/expense.routes';
 import { buildBranchRouter } from './routes/branch.routes';
 import { buildSyncRouter } from './routes/sync.routes';
 import { buildRepairRouter } from './routes/repair.routes';
+import { createSettingsRouter } from './routes/settings.routes';
 import { BranchRepo } from './repositories/branch.repo';
 import {
   listBrands,
@@ -266,6 +267,10 @@ async function main(): Promise<void> {
   const searchRouter = createSearchRouter(pool);
   app.use('/api/search', searchRouter);
   app.use('/api/v1/search', searchRouter);
+
+  const settingsRouter = createSettingsRouter(pool);
+  app.use('/api/settings', settingsRouter);
+  app.use('/api/v1/settings', settingsRouter);
 
   app.get(['/api/organization/balances', '/api/v1/organization/balances'], async (_req: Request, res: Response) => {
     try {
