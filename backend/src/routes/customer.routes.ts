@@ -163,6 +163,52 @@ export function createCustomerRouter(pool: Pool): Router {
     }
   });
 
+  // ── PUT /api/customers/:id ──────────────────────────────────────────────────
+  router.put('/:id', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    const denied = authorizePermission(identity, 'customers', null);
+    if (denied) {
+      res.status(403).json({ error: 'FORBIDDEN', message: denied });
+      return;
+    }
+
+    try {
+      const id = req.params['id'] as string;
+      const dto = req.body as UpdateCustomerDto;
+
+      const validationErr = validateUpdateCustomer(dto);
+      if (validationErr) {
+        res.status(400).json({ error: 'UPDATE_FAILED', message: validationErr });
+        return;
+      }
+
+      const updated = await updateCustomer(pool, id, dto);
+      res.status(200).json(updated);
+    } catch (err) {
+      sendError(req, res, err);
+    }
+  });
+
+  // ── DELETE /api/customers/:id ───────────────────────────────────────────────
+  router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    const denied = authorizePermission(identity, 'customers', null);
+    if (denied) {
+      res.status(403).json({ error: 'FORBIDDEN', message: denied });
+      return;
+    }
+
+    try {
+      const id = req.params['id'] as string;
+      await deactivateCustomer(pool, id);
+      res.status(200).json({ success: true, message: 'Customer deactivated successfully' });
+    } catch (err) {
+      sendError(req, res, err);
+    }
+  });
+
   return router;
 }
 
@@ -232,6 +278,52 @@ export function createCustomerV1Router(pool: Pool): Router {
         res.status(404).json({ error: 'NOT_FOUND', message: err.message });
         return;
       }
+      sendError(req, res, err);
+    }
+  });
+
+  // ── PUT /api/v1/customers/:id ───────────────────────────────────────────────
+  router.put('/:id', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    const denied = authorizePermission(identity, 'customers', null);
+    if (denied) {
+      res.status(403).json({ error: 'FORBIDDEN', message: denied });
+      return;
+    }
+
+    try {
+      const id = req.params['id'] as string;
+      const dto = req.body as UpdateCustomerDto;
+
+      const validationErr = validateUpdateCustomer(dto);
+      if (validationErr) {
+        res.status(400).json({ error: 'UPDATE_FAILED', message: validationErr });
+        return;
+      }
+
+      const updated = await updateCustomer(pool, id, dto);
+      res.status(200).json(updated);
+    } catch (err) {
+      sendError(req, res, err);
+    }
+  });
+
+  // ── DELETE /api/v1/customers/:id ────────────────────────────────────────────
+  router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    const denied = authorizePermission(identity, 'customers', null);
+    if (denied) {
+      res.status(403).json({ error: 'FORBIDDEN', message: denied });
+      return;
+    }
+
+    try {
+      const id = req.params['id'] as string;
+      await deactivateCustomer(pool, id);
+      res.status(200).json({ success: true, message: 'Customer deactivated successfully' });
+    } catch (err) {
       sendError(req, res, err);
     }
   });
