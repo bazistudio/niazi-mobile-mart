@@ -53,6 +53,7 @@ import { buildUsersRouter } from './routes/users.routes';
 import { buildSupplierRouter } from './routes/supplier.routes';
 import { buildExpenseRouter } from './routes/expense.routes';
 import { buildBranchRouter } from './routes/branch.routes';
+import { buildSyncRouter } from './routes/sync.routes';
 import { BranchRepo } from './repositories/branch.repo';
 import {
   listBrands,
@@ -210,6 +211,12 @@ async function main(): Promise<void> {
   app.use('/api/branches', branchRouter);
   app.use('/api/v1/branches', branchRouter);
   app.use('/api/shops', branchRouter);
+
+  // -------------------------------------------------------------------------
+  // Sync routes — Desktop offline-first sync push/pull
+  // -------------------------------------------------------------------------
+  const syncRouter = buildSyncRouter(pool);
+  app.use('/api/v1/sync', syncRouter);
 
   const productRouter = createProductRouter(pool);
   app.use('/api/products', productRouter);
