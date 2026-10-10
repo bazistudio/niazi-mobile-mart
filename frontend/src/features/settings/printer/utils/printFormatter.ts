@@ -69,9 +69,9 @@ export const printFormatter = {
     const invoice: UnifiedInvoice = {
       invoiceNo: order.displayNumber || order.orderNumber || order.transactionId || (order._id ? `TP-${order._id.slice(-6).toUpperCase()}` : `TP-${Date.now().toString().slice(-6)}`),
       date: new Date(order.createdAt || Date.now()).toLocaleString(),
-      customer: order.partyId 
-        ? { name: order.partyId.companyName || order.partyId.contactPerson || 'Walk-in Customer', phone: order.partyId.phone } 
-        : (order.customerId ? { name: order.customerId.name || 'Walk-in Customer', phone: order.customerId.phone } : undefined),
+      customer: order.customerId
+        ? { name: order.customerId.name || 'Walk-in Customer', phone: order.customerId.phone }
+        : (order.customer ? { name: order.customer.name || 'Walk-in Customer', phone: order.customer.phone } : undefined),
       cashier: order.cashierName || order.cashier || 'Cashier',
       items: (order.items || []).map((i: any) => {
         const price = i.salePrice ?? i.price ?? i.unitPrice ?? 0;
@@ -102,7 +102,7 @@ export const printFormatter = {
     const invoice: UnifiedInvoice = {
       invoiceNo: purchase.invoiceNumber || (purchase._id ? purchase._id.slice(-6).toUpperCase() : `PO-${Date.now().toString().slice(-6)}`),
       date: new Date(purchase.issuedAt || purchase.createdAt || Date.now()).toLocaleString(),
-      customer: purchase.supplierId ? { name: purchase.supplierId.name || 'Supplier' } : undefined,
+      customer: purchase.supplierName ? { name: purchase.supplierName } : (purchase.supplier ? { name: purchase.supplier.name || 'Supplier' } : undefined),
       items: (purchase.items || []).map((i: any) => ({ 
         name: i.name || i.productName || 'Item', 
         qty: i.quantity || 1, 
@@ -139,7 +139,7 @@ export const printFormatter = {
     const invoice: UnifiedInvoice = {
       invoiceNo: ledger.transactionId || (ledger.id ? ledger.id.slice(-8).toUpperCase() : ledger._id?.slice(-8).toUpperCase() || `RCP-${Date.now().toString().slice(-6)}`),
       date: new Date(ledger.createdAt || ledger.timestamp || Date.now()).toLocaleString(),
-      customer: { name: ledger.customerId?.name || ledger.supplierId?.name || 'Party' },
+      customer: { name: ledger.customerId?.name || ledger.customer?.name || ledger.customerName || 'Customer' },
       items: [{ name: `Payment: ${ledger.description || ledger.type || 'Ledger Settlement'}`, qty: 1, price: ledger.amount || 0, total: ledger.amount || 0 }],
       subtotal: ledger.amount || 0,
       discount: 0,
@@ -151,34 +151,36 @@ export const printFormatter = {
     return renderDocument(invoice, settings, 'Payment Receipt');
   },
 
-  formatLedgerStatement: (party: any, timeline: any[], settings: PrinterSettings, shop: ShopHeader, filterTitle: string = 'Full Ledger'): string => {
-    const title = (party.type === 'CUSTOMER' ? 'Customer' : 'Supplier') + ' Ledger Statement';
-    
+  formatLedgerStatement: (customer: any, timeline: any[], settings: PrinterSettings, shop: ShopHeader, filterTitle: string = 'Full Ledger'): string => {
+    // Renders a customer account statement. The party domain was removed in v1.3.26;
+    // this function now accepts a customer object (id, name, phone, balance).
+    const title = 'Customer Account Statement';
+
     let html = '';
     html += '<div style="font-family: ' + (settings.font?.family || 'sans-serif') + '; font-size: ' + (settings.font?.size || 12) + 'px; padding: 20px; max-width: 800px; margin: 0 auto; color: #000; background: #fff;">';
     html += '<div style="text-align: center; margin-bottom: 20px;">';
-    
+
     if (settings.invoice?.showLogo && shop.logoUrl) {
       html += '<img src="' + shop.logoUrl + '" style="max-height: 80px;" />';
     }
-    
+
     if (settings.invoice?.showShopInfo !== false) {
       html += '<h1 style="margin: 5px 0; font-size: 20px; font-weight: bold;">' + shop.name + '</h1>';
       if (shop.address) html += '<p style="margin: 2px 0; white-space: pre-wrap;">' + shop.address + '</p>';
       if (shop.phone) html += '<p style="margin: 2px 0;">' + shop.phone + '</p>';
     }
-    
+
     html += '<h2 style="margin: 10px 0; border: 1px solid #000; display: inline-block; padding: 5px 15px; border-radius: 4px; font-size: 14px;">' + title + '</h2>';
     html += '</div>';
 
     html += '<div style="display: flex; justify-content: space-between; margin-bottom: 20px; border-bottom: 1px solid #000; padding-bottom: 10px; font-size: 12px;">';
     html += '<div>';
-    html += '<p style="margin: 2px 0;"><strong>Party:</strong> ' + party.name + '</p>';
-    html += '<p style="margin: 2px 0;"><strong>Type:</strong> ' + party.type + '</p>';
+    html += '<p style="margin: 2px 0;"><strong>Customer:</strong> ' + (customer.name || 'Customer') + '</p>';
+    if (customer.phone) html += '<p style="margin: 2px 0;"><strong>Phone:</strong> ' + customer.phone + '</p>';
     html += '</div>';
     html += '<div style="text-align: right;">';
     html += '<p style="margin: 2px 0;"><strong>Filter:</strong> ' + filterTitle + '</p>';
-    html += '<p style="margin: 2px 0;"><strong>Current Balance:</strong> Rs ' + Math.abs(party.balance || 0).toLocaleString() + ((party.balance || 0) < 0 ? ' CR' : ' DR') + '</p>';
+    html += '<p style="margin: 2px 0;"><strong>Current Balance:</strong> Rs ' + Math.abs(customer.balance || 0).toLocaleString() + ((customer.balance || 0) < 0 ? ' CR' : ' DR') + '</p>';
     html += '</div>';
     html += '</div>';
 
@@ -196,10 +198,8 @@ export const printFormatter = {
     html += '<tbody>';
 
     (timeline || []).forEach(entry => {
-      const isPayment = entry.type === 'payment';
-      const isCustomer = party.type === 'CUSTOMER';
-      const showDebit = isCustomer ? !isPayment : isPayment;
-      const showCredit = isCustomer ? isPayment : !isPayment;
+      // Customer ledger: sales are debits (money owed), payments are credits (money received)
+      const isPayment = entry.type === 'payment' || entry.type === 'PAYMENT';
       const bal = entry.runningBalance || 0;
 
       let displayDesc = entry.description || '';
@@ -207,11 +207,11 @@ export const printFormatter = {
       else if (displayDesc.toLowerCase().includes('cash')) displayDesc = 'Cash';
 
       html += '<tr style="border-bottom: 1px solid #eee;">';
-      html += '<td style="padding: 5px;">' + new Date(entry.timestamp).toLocaleDateString() + '</td>';
-      html += '<td style="padding: 5px;">' + (entry.transactionId || '-') + '</td>';
+      html += '<td style="padding: 5px;">' + new Date(entry.timestamp || entry.createdAt).toLocaleDateString() + '</td>';
+      html += '<td style="padding: 5px;">' + (entry.transactionId || entry.invoiceNo || '-') + '</td>';
       html += '<td style="padding: 5px;">' + displayDesc + '</td>';
-      html += '<td style="text-align: right; padding: 5px;">' + (showDebit ? (entry.amount || 0).toLocaleString() : '-') + '</td>';
-      html += '<td style="text-align: right; padding: 5px;">' + (showCredit ? (entry.amount || 0).toLocaleString() : '-') + '</td>';
+      html += '<td style="text-align: right; padding: 5px;">' + (!isPayment ? (entry.amount || 0).toLocaleString() : '-') + '</td>';
+      html += '<td style="text-align: right; padding: 5px;">' + (isPayment ? (entry.amount || 0).toLocaleString() : '-') + '</td>';
       html += '<td style="text-align: right; padding: 5px;">Rs ' + Math.abs(bal).toLocaleString() + (bal < 0 ? ' CR' : ' DR') + '</td>';
       html += '</tr>';
     });
