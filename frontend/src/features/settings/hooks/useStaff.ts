@@ -48,6 +48,28 @@ export function useUpdateStaffStatus() {
   });
 }
 
+export function useSuspendStaff() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => settingsApi.suspendStaff(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: STAFF_QUERY_KEY });
+    },
+  });
+}
+
+export function useReactivateStaff() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => settingsApi.reactivateStaff(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: STAFF_QUERY_KEY });
+    },
+  });
+}
+
 export function useChangeStaffPin() {
   const queryClient = useQueryClient();
 

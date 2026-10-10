@@ -49,7 +49,6 @@ steps:
       - '--vpc-connector=niazi-vpc-conn'
       - '--vpc-egress=private-ranges-only'
       - '--allow-unauthenticated'
-      - '--set-env-vars=RUST_UPSTREAM_URL=http://127.0.0.1:8081'
       - '--set-secrets=DATABASE_URL=DATABASE_URL:latest'
       - '--set-secrets=JWT_PRIVATE_KEY=JWT_PRIVATE_KEY:latest'
       - '--set-secrets=JWT_PUBLIC_KEY=JWT_PUBLIC_KEY:latest'

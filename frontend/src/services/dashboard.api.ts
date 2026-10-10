@@ -103,13 +103,20 @@ export const dashboardApi = {
       hourlyMap[i] = { sales: 0, count: 0 };
     }
 
+    const isSameDay = (date1: Date, date2: Date) =>
+      date1.getFullYear() === date2.getFullYear() &&
+      date1.getMonth() === date2.getMonth() &&
+      date1.getDate() === date2.getDate();
+
     for (const s of sales) {
-      if (s.sale_status === 'COMPLETED' && (s.created_at || '').startsWith(todayStr)) {
+      if (s.sale_status === 'COMPLETED' && s.created_at) {
         const d = new Date(s.created_at);
-        const hour = d.getHours();
-        if (hourlyMap[hour]) {
-          hourlyMap[hour].sales += s.total_amount || 0;
-          hourlyMap[hour].count += 1;
+        if (isSameDay(d, now)) {
+          const hour = d.getHours();
+          if (hourlyMap[hour]) {
+            hourlyMap[hour].sales += s.total_amount || 0;
+            hourlyMap[hour].count += 1;
+          }
         }
       }
     }

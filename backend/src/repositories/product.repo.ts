@@ -8,6 +8,7 @@
 
 import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
+import { NIAZI_ORGANIZATION_ID } from '../auth';
 
 // --- Domain Types ---
 
@@ -18,6 +19,7 @@ export interface Product {
   sku: string;
   barcode: string | null;
   category_id: string;
+  type_id?: string;
   brand_id: string | null;
   company_id: string | null;
   quality_id: string | null;
@@ -30,6 +32,10 @@ export interface Product {
   is_active: boolean;
   description: string | null;
   initial_quantity: number | null;
+  stock?: number;
+  stock_quantity?: number;
+  total_stock?: number;
+  quantity?: number;
   created_at: string;
   updated_at: string;
 }
@@ -96,8 +102,8 @@ export class RepoError extends Error {
 // --- Utilities ---
 
 export interface SchemaCaps {
-  catCol: 'category_id';
-  catTable: 'categories';
+  catCol: 'type_id' | 'category_id';
+  catTable: 'product_types' | 'categories';
   isActiveBool: boolean;
 }
 
@@ -107,19 +113,29 @@ export async function getSchemaCaps(pool: Pool): Promise<SchemaCaps> {
   if (cachedCaps) return cachedCaps;
   try {
     const colRes = await pool.query<{ column_name: string; data_type: string }>(
-      `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'products' AND column_name = 'is_active'`
+      `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'products'`
     );
     let isActiveBool = false;
+    let catCol: 'type_id' | 'category_id' = 'category_id';
+    let catTable: 'product_types' | 'categories' = 'categories';
     for (const r of colRes.rows) {
       if (r.column_name === 'is_active' && r.data_type.toLowerCase().includes('bool')) {
         isActiveBool = true;
       }
+      if (r.column_name === 'type_id') {
+        catCol = 'type_id';
+        catTable = 'product_types';
+      }
     }
-    cachedCaps = { catCol: 'category_id', catTable: 'categories', isActiveBool };
+    cachedCaps = { catCol, catTable, isActiveBool };
   } catch {
-    cachedCaps = { catCol: 'category_id', catTable: 'categories', isActiveBool: false };
+    cachedCaps = { catCol: 'type_id', catTable: 'product_types', isActiveBool: false };
   }
   return cachedCaps;
+}
+
+function getSelectCols(caps: SchemaCaps): string {
+  return `id, name, normalized_name, sku, barcode, ${caps.catCol} AS category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
 }
 
 /**
@@ -133,13 +149,18 @@ function mapProductRow(row: Record<string, unknown>): Product {
       ? isActiveRaw
       : isActiveRaw === 1 || isActiveRaw === '1' || isActiveRaw === 'true' || String(isActiveRaw) === 'true';
 
+  const rawQty = row['initial_quantity'] ?? row['stock_quantity'] ?? row['total_stock'] ?? row['stock'] ?? row['quantity'];
+  const catId = ((row['category_id'] ?? row['type_id']) as string) ?? '';
+  const numQty = rawQty !== undefined && rawQty !== null ? Number(rawQty) : 0;
+
   return {
     id: row['id'] as string,
     name: row['name'] as string,
     normalized_name: row['normalized_name'] as string,
     sku: row['sku'] as string,
     barcode: (row['barcode'] as string | null) ?? null,
-    category_id: (row['category_id'] as string) ?? '',
+    category_id: catId,
+    type_id: catId,
     brand_id: (row['brand_id'] as string | null) ?? null,
     company_id: (row['company_id'] as string | null) ?? null,
     quality_id: (row['quality_id'] as string | null) ?? null,
@@ -151,7 +172,11 @@ function mapProductRow(row: Record<string, unknown>): Product {
     low_stock_threshold: Number(row['low_stock_threshold']),
     is_active: isActiveBool,
     description: (row['description'] as string | null) ?? null,
-    initial_quantity: null,
+    initial_quantity: rawQty !== undefined && rawQty !== null ? numQty : null,
+    stock: numQty,
+    stock_quantity: numQty,
+    total_stock: numQty,
+    quantity: numQty,
     created_at: row['created_at'] as string,
     updated_at: row['updated_at'] as string,
   };
@@ -185,6 +210,178 @@ export function sanitizeOptionalUuid(val?: string | null): string | null {
 
 const NOW_ISO = () => new Date().toISOString();
 
+export const DEFAULT_CATEGORIES = [
+  { id: '00000000-0000-0000-0000-000000000010', name: 'General', code: 'GEN' },
+  { id: '00000000-0000-0000-0000-000000000011', name: 'Mobiles', code: 'MOB' },
+  { id: '00000000-0000-0000-0000-000000000012', name: 'Accessories', code: 'ACC' },
+];
+
+export const DEFAULT_UNITS = [
+  { id: '00000000-0000-0000-0000-000000000020', name: 'Piece', symbol: 'PCS' },
+  { id: '00000000-0000-0000-0000-000000000021', name: 'Box', symbol: 'BOX' },
+  { id: '00000000-0000-0000-0000-000000000022', name: 'Set', symbol: 'SET' },
+];
+
+export async function ensureDefaultCategories(pool: Pool): Promise<Array<{ id: string; name: string; code?: string }>> {
+  const caps = await getSchemaCaps(pool);
+  const now = NOW_ISO();
+  for (const cat of DEFAULT_CATEGORIES) {
+    try {
+      await pool.query(
+        `INSERT INTO ${caps.catTable} (id, name, code, is_active, created_at, updated_at)
+         VALUES ($1, $2, $3, 1, $4, $4)
+         ON CONFLICT (id) DO NOTHING`,
+        [cat.id, cat.name, cat.code, now]
+      );
+    } catch {
+      // ignore insert failure
+    }
+  }
+  return DEFAULT_CATEGORIES;
+}
+
+export async function ensureDefaultUnits(pool: Pool): Promise<Array<{ id: string; name: string; code?: string }>> {
+  const now = NOW_ISO();
+  for (const u of DEFAULT_UNITS) {
+    try {
+      await pool.query(
+        `INSERT INTO units (id, name, symbol, conversion_factor, is_active, created_at, updated_at)
+         VALUES ($1, $2, $3, 1, 1, $4, $4)
+         ON CONFLICT (id) DO NOTHING`,
+        [u.id, u.name, u.symbol, now]
+      );
+    } catch {
+      // ignore
+    }
+  }
+  return DEFAULT_UNITS.map(u => ({ id: u.id, name: u.name, code: u.symbol }));
+}
+
+export async function resolveEffectiveCategoryId(pool: Pool, inputCategoryId?: string | null): Promise<string> {
+  const caps = await getSchemaCaps(pool);
+  const trimmed = (inputCategoryId ?? '').trim();
+
+  if (trimmed.length > 0) {
+    try {
+      const checkRes = await pool.query<{ id: string }>(
+        `SELECT id FROM ${caps.catTable} WHERE id = $1 OR name ILIKE $1 OR code ILIKE $1`,
+        [trimmed]
+      );
+      if (checkRes.rows.length > 0) {
+        return checkRes.rows[0]!.id;
+      }
+    } catch {
+      // ignore check error
+    }
+  }
+
+  try {
+    const existingRes = await pool.query<{ id: string }>(
+      `SELECT id FROM ${caps.catTable} ORDER BY created_at ASC LIMIT 1`
+    );
+    if (existingRes.rows.length > 0) {
+      return existingRes.rows[0]!.id;
+    }
+  } catch {
+    // ignore
+  }
+
+  const seeded = await ensureDefaultCategories(pool);
+  return seeded[0]!.id;
+}
+
+export async function resolveEffectiveUnitId(pool: Pool, inputUnitId?: string | null): Promise<string | null> {
+  const trimmed = (inputUnitId ?? '').trim();
+
+  if (trimmed.length > 0) {
+    try {
+      const checkRes = await pool.query<{ id: string }>(
+        `SELECT id FROM units WHERE id = $1 OR name ILIKE $1 OR symbol ILIKE $1`,
+        [trimmed]
+      );
+      if (checkRes.rows.length > 0) {
+        return checkRes.rows[0]!.id;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  try {
+    const existingRes = await pool.query<{ id: string }>(
+      `SELECT id FROM units ORDER BY name ASC LIMIT 1`
+    );
+    if (existingRes.rows.length > 0) {
+      return existingRes.rows[0]!.id;
+    }
+  } catch {
+    // ignore
+  }
+
+  const seeded = await ensureDefaultUnits(pool);
+  return seeded[0]!.id;
+}
+
+export async function resolveEffectiveBrandId(pool: Pool, inputBrandId?: string | null): Promise<string | null> {
+  const trimmed = (inputBrandId ?? '').trim();
+  if (!trimmed) return null;
+  try {
+    const res = await pool.query<{ id: string }>(
+      `SELECT id FROM brands WHERE id = $1 OR name ILIKE $1`,
+      [trimmed]
+    );
+    if (res.rows.length > 0) return res.rows[0]!.id;
+  } catch {
+    // ignore
+  }
+  return UUID_REGEX.test(trimmed) ? trimmed : null;
+}
+
+export async function resolveEffectiveCompanyId(pool: Pool, inputCompanyId?: string | null): Promise<string | null> {
+  const trimmed = (inputCompanyId ?? '').trim();
+  if (!trimmed) return null;
+  try {
+    const res = await pool.query<{ id: string }>(
+      `SELECT id FROM companies WHERE id = $1 OR name ILIKE $1`,
+      [trimmed]
+    );
+    if (res.rows.length > 0) return res.rows[0]!.id;
+  } catch {
+    // ignore
+  }
+  return UUID_REGEX.test(trimmed) ? trimmed : null;
+}
+
+export async function resolveEffectiveQualityId(pool: Pool, inputQualityId?: string | null): Promise<string | null> {
+  const trimmed = (inputQualityId ?? '').trim();
+  if (!trimmed) return null;
+  try {
+    const res = await pool.query<{ id: string }>(
+      `SELECT id FROM qualities WHERE id = $1 OR name ILIKE $1`,
+      [trimmed]
+    );
+    if (res.rows.length > 0) return res.rows[0]!.id;
+  } catch {
+    // ignore
+  }
+  return UUID_REGEX.test(trimmed) ? trimmed : null;
+}
+
+export async function resolveEffectiveColorId(pool: Pool, inputColorId?: string | null): Promise<string | null> {
+  const trimmed = (inputColorId ?? '').trim();
+  if (!trimmed) return null;
+  try {
+    const res = await pool.query<{ id: string }>(
+      `SELECT id FROM colors WHERE id = $1 OR name ILIKE $1`,
+      [trimmed]
+    );
+    if (res.rows.length > 0) return res.rows[0]!.id;
+  } catch {
+    // ignore
+  }
+  return UUID_REGEX.test(trimmed) ? trimmed : null;
+}
+
 // --- SKU Resolution ---
 
 /**
@@ -204,12 +401,13 @@ export async function resolveProductSku(
     return trimmed;
   }
 
+  const caps = await getSchemaCaps(pool);
   let catName = '';
   let catCode = '';
 
   try {
     const ptRes = await pool.query<{ name: string; code: string }>(
-      `SELECT name, code FROM categories WHERE id = $1`,
+      `SELECT name, code FROM ${caps.catTable} WHERE id = $1`,
       [categoryId]
     );
 
@@ -249,8 +447,13 @@ export async function resolveProductSku(
     const row = counterRes.rows[0]!;
     const seq = Number(row['next_val'] ?? row['next_value'] ?? 1);
     return `${prefix}${String(seq).padStart(6, '0')}`;
-  } catch {
-    return `${prefix}${String(Date.now() % 1000000).padStart(6, '0')}`;
+  } catch (err) {
+    // P9 fix: Do NOT fall back to timestamp-based SKU — timestamps are not unique under concurrent
+    // inserts and can produce colliding SKUs. Fail explicitly so the caller can retry or alert.
+    throw new RepoError(
+      `Failed to generate SKU: counter table unavailable. Original error: ${err instanceof Error ? err.message : String(err)}`,
+      500
+    );
   }
 }
 
@@ -266,9 +469,11 @@ export async function createProduct(
   dto: CreateProductDto
 ): Promise<Product> {
   const caps = await getSchemaCaps(pool);
-  const resolvedSku = await resolveProductSku(pool, dto.category_id, dto.sku);
+  const categoryId = await resolveEffectiveCategoryId(pool, dto.category_id);
+  const unitId = await resolveEffectiveUnitId(pool, dto.unit_id);
+  const resolvedSku = await resolveProductSku(pool, categoryId, dto.sku);
   const activeVal = caps.isActiveBool ? true : 1;
-  const selectCols = `id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+  const selectCols = getSelectCols(caps);
 
   const client = await pool.connect();
   try {
@@ -283,7 +488,7 @@ export async function createProduct(
 
     const res = await client.query(
       `INSERT INTO products (
-         id, name, normalized_name, sku, barcode, category_id, brand_id,
+         id, name, normalized_name, sku, barcode, ${caps.catCol}, brand_id,
          company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price,
          low_stock_threshold, is_active, description, created_at, updated_at
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
@@ -294,12 +499,12 @@ export async function createProduct(
         normalizedName,
         resolvedSku,
         barcodeVal,
-        dto.category_id,
+        categoryId,
         sanitizeOptionalUuid(dto.brand_id),
         sanitizeOptionalUuid(dto.company_id),
         sanitizeOptionalUuid(dto.quality_id),
         sanitizeOptionalUuid(dto.color_id),
-        sanitizeOptionalUuid(dto.unit_id),
+        unitId,
         dto.purchase_price,
         avgCost,
         dto.sale_price,
@@ -311,10 +516,28 @@ export async function createProduct(
       ]
     );
 
+    // Insert a zero-quantity stock guard row so that products without initial
+    // stock still appear in LEFT JOIN queries with quantity = 0.
+    // branch_id is optional here; use caller-supplied or default MAIN branch ID.
+    const rawBranch = (dto.branch_id ?? '').trim();
+    const branchIdForGuard = rawBranch.length === 36 ? rawBranch : '00000000-0000-0000-0000-000000000002';
+    if (branchIdForGuard) {
+      try {
+        await client.query(
+          `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+           VALUES ($1, $2, 0, $3)
+           ON CONFLICT (product_id, branch_id) DO NOTHING`,
+          [id, branchIdForGuard, NOW_ISO()]
+        );
+      } catch (err) {
+        console.warn(`[createProduct] Guard stock row insertion notice for ${id}:`, err);
+      }
+    }
+
     await client.query('COMMIT');
-    const product = mapProductRow(res.rows[0]!);
     client.release();
-    return product;
+    const product = await getProductById(pool, id);
+    return product || mapProductRow(res.rows[0]!);
   } catch (err: unknown) {
     try {
       await client.query('ROLLBACK');
@@ -346,9 +569,11 @@ export async function createProductWithInitialStock(
   userId: string
 ): Promise<Product> {
   const caps = await getSchemaCaps(pool);
-  const resolvedSku = await resolveProductSku(pool, dto.category_id, dto.sku);
+  const categoryId = await resolveEffectiveCategoryId(pool, dto.category_id);
+  const unitId = await resolveEffectiveUnitId(pool, dto.unit_id);
+  const resolvedSku = await resolveProductSku(pool, categoryId, dto.sku);
   const activeVal = caps.isActiveBool ? true : 1;
-  const selectCols = `id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+  const selectCols = getSelectCols(caps);
 
   const client = await pool.connect();
   try {
@@ -363,7 +588,7 @@ export async function createProductWithInitialStock(
 
     const insertRes = await client.query(
       `INSERT INTO products (
-         id, name, normalized_name, sku, barcode, category_id, brand_id,
+         id, name, normalized_name, sku, barcode, ${caps.catCol}, brand_id,
          company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price,
          low_stock_threshold, is_active, description, created_at, updated_at
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
@@ -374,12 +599,12 @@ export async function createProductWithInitialStock(
         normalizedName,
         resolvedSku,
         barcodeVal,
-        dto.category_id,
+        categoryId,
         sanitizeOptionalUuid(dto.brand_id),
         sanitizeOptionalUuid(dto.company_id),
         sanitizeOptionalUuid(dto.quality_id),
         sanitizeOptionalUuid(dto.color_id),
-        sanitizeOptionalUuid(dto.unit_id),
+        unitId,
         dto.purchase_price,
         avgCost,
         dto.sale_price,
@@ -395,63 +620,66 @@ export async function createProductWithInitialStock(
     const qty = dto.initial_quantity ?? 0;
     const branchId = dto.branch_id ?? null;
 
-    if (qty > 0 && branchId !== null) {
-      // 1. Ensure opening_stock_entries table exists
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS opening_stock_entries (
-          id UUID PRIMARY KEY,
-          organization_id UUID NOT NULL,
-          branch_id UUID NOT NULL,
-          product_id UUID NOT NULL,
-          quantity BIGINT NOT NULL,
-          unit_cost BIGINT NOT NULL DEFAULT 0,
-          reference_number VARCHAR(100),
-          performed_by UUID,
-          notes TEXT,
-          created_at TIMESTAMPTZ NOT NULL
-        )
-      `);
-
-      // 2. Resolve Organization ID for branch
-      const orgRow = await client.query('SELECT organization_id FROM branches WHERE id = $1', [branchId]);
-      const orgId = ((orgRow.rows[0] as Record<string, unknown>)?.['organization_id'] as string) ?? '00000000-0000-0000-0000-000000000001';
-
-      const entryId = uuidv4();
-      const refNo = `OP-${Date.now()}`;
-      const unitCost = Math.round(Number(dto.purchase_price || 0));
-
-      // 3. INSERT opening_stock_entries audit row
-      await client.query(
-        `INSERT INTO opening_stock_entries (
-           id, organization_id, branch_id, product_id, quantity, unit_cost, reference_number, performed_by, notes, created_at
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [entryId, orgId, branchId, id, qty, unitCost, refNo, userId ?? null, 'Opening Stock during Product Add', now]
-      );
-
-      // 4. UPSERT stock
+    if (branchId !== null) {
+      // 1. Always initialize stock row for baseline if it doesn't exist yet.
+      // ON CONFLICT DO NOTHING ensures that retried or delayed PRODUCT_CREATED events
+      // never overwrite stock established by a subsequent inventory operation.
       await client.query(
         `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
          VALUES ($1, $2, $3, $4)
-         ON CONFLICT (product_id, branch_id)
-         DO UPDATE SET quantity = EXCLUDED.quantity, updated_at = EXCLUDED.updated_at`,
+         ON CONFLICT (product_id, branch_id) DO NOTHING`,
         [id, branchId, qty, now]
       );
 
-      // 5. INSERT stock_movements
-      const movementId = uuidv4();
-      await client.query(
-        `INSERT INTO stock_movements (
-           id, product_id, branch_id, movement_type, quantity,
-           previous_stock, resulting_stock, reason, performed_by, reference_id, created_at
-         ) VALUES ($1, $2, $3, 'IN', $4, 0, $5, 'Opening Stock', $6, $7, $8)`,
-        [movementId, id, branchId, qty, qty, userId ?? null, entryId, now]
-      );
+      if (qty > 0) {
+        // 2. Ensure opening_stock_entries table exists with TEXT entity ID column types
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS opening_stock_entries (
+            id TEXT PRIMARY KEY,
+            organization_id TEXT NOT NULL,
+            branch_id TEXT NOT NULL,
+            product_id TEXT NOT NULL,
+            quantity BIGINT NOT NULL,
+            unit_cost BIGINT NOT NULL DEFAULT 0,
+            reference_number VARCHAR(100),
+            performed_by TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL
+          )
+        `);
+
+        // 3. Resolve Organization ID for branch
+        const orgRow = await client.query('SELECT organization_id FROM branches WHERE id = $1', [branchId]);
+        const orgId = ((orgRow.rows[0] as Record<string, unknown>)?.['organization_id'] as string) ?? NIAZI_ORGANIZATION_ID;
+
+        const entryId = uuidv4();
+        const refNo = `OP-${Date.now()}`;
+        const unitCost = Math.round(Number(dto.purchase_price || 0));
+
+        // 4. INSERT opening_stock_entries audit row
+        await client.query(
+          `INSERT INTO opening_stock_entries (
+             id, organization_id, branch_id, product_id, quantity, unit_cost, reference_number, performed_by, notes, created_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [entryId, orgId, branchId, id, qty, unitCost, refNo, userId ? String(userId) : null, 'Opening Stock during Product Add', now]
+        );
+
+        // 5. INSERT stock_movements
+        const movementId = uuidv4();
+        await client.query(
+          `INSERT INTO stock_movements (
+             id, product_id, branch_id, movement_type, quantity,
+             previous_stock, resulting_stock, reason, performed_by, reference_id, created_at
+           ) VALUES ($1, $2, $3, 'IN', $4, 0, $5, 'Opening Stock', $6, $7, $8)`,
+          [movementId, id, branchId, qty, qty, userId ?? null, entryId, now]
+        );
+      }
     }
 
     await client.query('COMMIT');
-    const result = { ...product, initial_quantity: dto.initial_quantity ?? null };
     client.release();
-    return result;
+    const result = await getProductById(pool, id);
+    return result || { ...product, initial_quantity: dto.initial_quantity ?? null };
   } catch (err: unknown) {
     // Attempt ROLLBACK. If ROLLBACK itself fails, pass the rollback error to
     // client.release() so the pg pool destroys and replaces this connection
@@ -492,7 +720,7 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
   }
 
   if (filter.category_id != null) {
-    conditions.push(`category_id = $${idx}`);
+    conditions.push(`${caps.catCol} = $${idx}`);
     params.push(filter.category_id);
     idx++;
   }
@@ -531,13 +759,16 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
     conditions.push(`(is_active::text = '1' OR is_active::text = 'true')`);
   }
 
-  const selectCols = `id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+  const selectCols = getSelectCols(caps);
 
   const sql = `
-    SELECT ${selectCols}
-    FROM products
-    WHERE ${conditions.join(' AND ')}
-    ORDER BY name ASC
+    SELECT ${selectCols.split(', ').map(c => c.includes(' AS ') ? `p.${c}` : `p.${c}`).join(', ')},
+           COALESCE(SUM(s.quantity), 0)::bigint AS initial_quantity
+    FROM products p
+    LEFT JOIN stock s ON p.id = s.product_id
+    WHERE ${conditions.map(c => c.replace(/\b(name|sku|barcode|brand_id|company_id|quality_id|color_id|description|type_id|category_id)\b/g, 'p.$1')).join(' AND ')}
+    GROUP BY p.id, p.name, p.normalized_name, p.sku, p.barcode, p.${caps.catCol}, p.brand_id, p.company_id, p.quality_id, p.color_id, p.unit_id, p.purchase_price, p.average_cost, p.sale_price, p.low_stock_threshold, p.is_active, p.description, p.created_at, p.updated_at
+    ORDER BY p.name ASC
   `;
 
   const res = await pool.query(sql, params);
@@ -548,9 +779,14 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
 
 export async function getProductById(pool: Pool, id: string): Promise<Product | null> {
   const caps = await getSchemaCaps(pool);
-  const selectCols = `id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+  const selectCols = getSelectCols(caps);
   const res = await pool.query(
-    `SELECT ${selectCols} FROM products WHERE id = $1`,
+    `SELECT ${selectCols.split(', ').map(c => c.includes(' AS ') ? `p.${c}` : `p.${c}`).join(', ')},
+            COALESCE(SUM(s.quantity), 0)::bigint AS initial_quantity
+     FROM products p
+     LEFT JOIN stock s ON p.id = s.product_id
+     WHERE p.id = $1
+     GROUP BY p.id, p.name, p.normalized_name, p.sku, p.barcode, p.${caps.catCol}, p.brand_id, p.company_id, p.quality_id, p.color_id, p.unit_id, p.purchase_price, p.average_cost, p.sale_price, p.low_stock_threshold, p.is_active, p.description, p.created_at, p.updated_at`,
     [id]
   );
   if (res.rows.length === 0) {
@@ -579,7 +815,7 @@ export async function updateProduct(
   dto: UpdateProductDto
 ): Promise<Product> {
   const caps = await getSchemaCaps(pool);
-  const selectCols = `id, name, normalized_name, sku, barcode, category_id, brand_id, company_id, quality_id, color_id, unit_id, purchase_price, average_cost, sale_price, low_stock_threshold, is_active, description, created_at, updated_at`;
+  const selectCols = getSelectCols(caps);
 
   const client = await pool.connect();
   try {
@@ -611,17 +847,30 @@ export async function updateProduct(
           : null
         : current.barcode;
 
-    const newCategoryId = dto.category_id ?? current.category_id;
+    const newCategoryId =
+      dto.category_id !== undefined && dto.category_id !== null && dto.category_id.trim().length > 0
+        ? await resolveEffectiveCategoryId(pool, dto.category_id)
+        : current.category_id;
     const newBrandId =
-      dto.brand_id !== undefined ? sanitizeOptionalUuid(dto.brand_id) : current.brand_id;
+      dto.brand_id !== undefined
+        ? (dto.brand_id ? await resolveEffectiveBrandId(pool, dto.brand_id) : null)
+        : current.brand_id;
     const newCompanyId =
-      dto.company_id !== undefined ? sanitizeOptionalUuid(dto.company_id) : current.company_id;
+      dto.company_id !== undefined
+        ? (dto.company_id ? await resolveEffectiveCompanyId(pool, dto.company_id) : null)
+        : current.company_id;
     const newQualityId =
-      dto.quality_id !== undefined ? sanitizeOptionalUuid(dto.quality_id) : current.quality_id;
+      dto.quality_id !== undefined
+        ? (dto.quality_id ? await resolveEffectiveQualityId(pool, dto.quality_id) : null)
+        : current.quality_id;
     const newColorId =
-      dto.color_id !== undefined ? sanitizeOptionalUuid(dto.color_id) : current.color_id;
+      dto.color_id !== undefined
+        ? (dto.color_id ? await resolveEffectiveColorId(pool, dto.color_id) : null)
+        : current.color_id;
     const newUnitId =
-      dto.unit_id !== undefined ? sanitizeOptionalUuid(dto.unit_id) : current.unit_id;
+      dto.unit_id !== undefined
+        ? (dto.unit_id ? await resolveEffectiveUnitId(pool, dto.unit_id) : null)
+        : current.unit_id;
 
     const newPurchasePrice =
       dto.purchase_price !== undefined && dto.purchase_price !== null
@@ -653,13 +902,13 @@ export async function updateProduct(
     const now = NOW_ISO();
     const activeVal = caps.isActiveBool ? newIsActive : (newIsActive ? 1 : 0);
 
-    await client.query(
+    const updateRes = await client.query(
       `UPDATE products SET
          name = $1,
          normalized_name = $2,
          sku = $3,
          barcode = $4,
-         category_id = $5,
+         ${caps.catCol} = $5,
          brand_id = $6,
          company_id = $7,
          quality_id = $8,
@@ -672,7 +921,8 @@ export async function updateProduct(
          description = $15,
          is_active = $16,
          updated_at = $17
-       WHERE id = $18`,
+       WHERE id = $18
+       RETURNING ${selectCols}`,
       [
         newName,
         newNormalizedName,
@@ -696,28 +946,9 @@ export async function updateProduct(
     );
 
     await client.query('COMMIT');
-    const updated = {
-      ...current,
-      name: newName,
-      normalized_name: newNormalizedName,
-      sku: current.sku,
-      barcode: newBarcode,
-      category_id: newCategoryId,
-      brand_id: newBrandId,
-      company_id: newCompanyId,
-      quality_id: newQualityId,
-      color_id: newColorId,
-      unit_id: newUnitId,
-      purchase_price: newPurchasePrice,
-      average_cost: newAvgCost,
-      sale_price: newSalePrice,
-      low_stock_threshold: newThreshold,
-      description: newDescription,
-      is_active: newIsActive,
-      updated_at: now,
-    };
     client.release();
-    return updated;
+    const updated = await getProductById(pool, id);
+    return updated || mapProductRow(updateRes.rows[0]!);
   } catch (err: unknown) {
     try {
       await client.query('ROLLBACK');
@@ -818,8 +1049,9 @@ export async function listBrands(pool: Pool): Promise<Array<{ id: string; name: 
 }
 
 export async function listCategories(pool: Pool): Promise<Array<{ id: string; name: string; code?: string }>> {
+  const caps = await getSchemaCaps(pool);
   try {
-    const res = await pool.query('SELECT id, name, code FROM categories ORDER BY name ASC');
+    const res = await pool.query(`SELECT id, name, code FROM ${caps.catTable} ORDER BY name ASC`);
     if (res.rows && res.rows.length > 0) {
       return res.rows.map((r) => ({ id: String(r.id), name: String(r.name), code: r.code ? String(r.code) : undefined }));
     }
@@ -883,7 +1115,7 @@ export async function listBranches(pool: Pool): Promise<Array<{ id: string; orga
     if (res.rows && res.rows.length > 0) {
       return res.rows.map((r) => ({
         id: String(r.id),
-        organization_id: String(r.organization_id || '00000000-0000-0000-0000-000000000001'),
+        organization_id: String(r.organization_id || NIAZI_ORGANIZATION_ID),
         name: String(r.name),
         code: String(r.code || 'MAIN'),
         is_active: Boolean(r.is_active === 1 || r.is_active === true || String(r.is_active) === 'true'),
@@ -893,7 +1125,7 @@ export async function listBranches(pool: Pool): Promise<Array<{ id: string; orga
     console.warn('[product.repo] listBranches query failed:', err);
   }
   return [
-    { id: '00000000-0000-0000-0000-000000000002', organization_id: '00000000-0000-0000-0000-000000000001', name: 'Main Branch', code: 'MAIN', is_active: true }
+    { id: '00000000-0000-0000-0000-000000000002', organization_id: NIAZI_ORGANIZATION_ID, name: 'Main Branch', code: 'MAIN', is_active: true }
   ];
 }
 
@@ -923,3 +1155,497 @@ export async function getStockMapForBranch(pool: Pool, branchId?: string): Promi
   }
 }
 
+// --- Classification Creation Functions ---
+
+export async function createCategory(
+  pool: Pool,
+  dto: { name: string; code?: string; description?: string }
+): Promise<{ id: string; name: string; code: string; description?: string | null }> {
+  const caps = await getSchemaCaps(pool);
+  const id = uuidv4();
+  const name = dto.name.trim();
+  const code = (dto.code || name.substring(0, 4)).toUpperCase().replace(/[^A-Z0-9]/g, 'X').padEnd(3, 'X');
+  const description = dto.description ?? null;
+  const now = NOW_ISO();
+
+  const res = await pool.query(
+    `INSERT INTO ${caps.catTable} (id, name, code, description, is_active, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 1, $5, $5)
+     RETURNING id, name, code, description`,
+    [id, name, code, description, now]
+  );
+  return res.rows[0]!;
+}
+
+export async function createBrand(
+  pool: Pool,
+  dto: { name: string; code?: string; description?: string }
+): Promise<{ id: string; name: string; code: string; description?: string | null }> {
+  const id = uuidv4();
+  const name = dto.name.trim();
+  const code = (dto.code || name.substring(0, 4)).toUpperCase().replace(/[^A-Z0-9]/g, 'X').padEnd(3, 'X');
+  const description = dto.description ?? null;
+  const now = NOW_ISO();
+
+  const res = await pool.query(
+    `INSERT INTO brands (id, name, code, description, is_active, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 1, $5, $5)
+     RETURNING id, name, code, description`,
+    [id, name, code, description, now]
+  );
+  return res.rows[0]!;
+}
+
+export async function createCompany(
+  pool: Pool,
+  dto: { name: string; code?: string; description?: string }
+): Promise<{ id: string; name: string; code: string; description?: string | null }> {
+  const id = uuidv4();
+  const name = dto.name.trim();
+  const code = (dto.code || name.substring(0, 4)).toUpperCase().replace(/[^A-Z0-9]/g, 'X').padEnd(3, 'X');
+  const description = dto.description ?? null;
+  const now = NOW_ISO();
+
+  const res = await pool.query(
+    `INSERT INTO companies (id, name, code, description, is_active, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 1, $5, $5)
+     RETURNING id, name, code, description`,
+    [id, name, code, description, now]
+  );
+  return res.rows[0]!;
+}
+
+export async function createQuality(
+  pool: Pool,
+  dto: { name: string; code?: string; description?: string }
+): Promise<{ id: string; name: string; code: string; description?: string | null }> {
+  const id = uuidv4();
+  const name = dto.name.trim();
+  const code = (dto.code || name.substring(0, 4)).toUpperCase().replace(/[^A-Z0-9]/g, 'X').padEnd(3, 'X');
+  const description = dto.description ?? null;
+  const now = NOW_ISO();
+
+  const res = await pool.query(
+    `INSERT INTO qualities (id, name, code, description, is_active, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 1, $5, $5)
+     RETURNING id, name, code, description`,
+    [id, name, code, description, now]
+  );
+  return res.rows[0]!;
+}
+
+export async function createColor(
+  pool: Pool,
+  dto: { name: string; code?: string; description?: string }
+): Promise<{ id: string; name: string; code: string; description?: string | null }> {
+  const id = uuidv4();
+  const name = dto.name.trim();
+  const code = (dto.code || name.substring(0, 4)).toUpperCase().replace(/[^A-Z0-9]/g, 'X').padEnd(3, 'X');
+  const description = dto.description ?? null;
+  const now = NOW_ISO();
+
+  const res = await pool.query(
+    `INSERT INTO colors (id, name, code, description, is_active, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 1, $5, $5)
+     RETURNING id, name, code, description`,
+    [id, name, code, description, now]
+  );
+  return res.rows[0]!;
+}
+
+export async function createUnit(
+  pool: Pool,
+  dto: { name: string; symbol?: string; code?: string }
+): Promise<{ id: string; name: string; code: string }> {
+  const id = uuidv4();
+  const name = dto.name.trim();
+  const symbol = (dto.symbol || dto.code || name.substring(0, 3)).toUpperCase();
+  const now = NOW_ISO();
+
+  const res = await pool.query(
+    `INSERT INTO units (id, name, symbol, conversion_factor, is_active, created_at, updated_at)
+     VALUES ($1, $2, $3, 1, 1, $4, $4)
+     RETURNING id, name, symbol AS code`,
+    [id, name, symbol, now]
+  );
+  return res.rows[0]!;
+}
+
+// --- Classification Update Functions ---
+
+export async function updateCategory(
+  pool: Pool,
+  id: string,
+  dto: { name: string }
+): Promise<{ id: string; name: string; code: string }> {
+  const caps = await getSchemaCaps(pool);
+  const name = dto.name.trim();
+  const now = NOW_ISO();
+  const res = await pool.query(
+    `UPDATE ${caps.catTable} SET name = $1, updated_at = $2 WHERE id = $3 RETURNING id, name, code`,
+    [name, now, id]
+  );
+  if (res.rows.length === 0) {
+    throw new RepoError('Category not found', 404);
+  }
+  return res.rows[0]!;
+}
+
+export async function updateBrand(
+  pool: Pool,
+  id: string,
+  dto: { name: string }
+): Promise<{ id: string; name: string; code: string }> {
+  const name = dto.name.trim();
+  const now = NOW_ISO();
+  const res = await pool.query(
+    `UPDATE brands SET name = $1, updated_at = $2 WHERE id = $3 RETURNING id, name, code`,
+    [name, now, id]
+  );
+  if (res.rows.length === 0) {
+    throw new RepoError('Brand not found', 404);
+  }
+  return res.rows[0]!;
+}
+
+export async function updateCompany(
+  pool: Pool,
+  id: string,
+  dto: { name: string }
+): Promise<{ id: string; name: string; code: string }> {
+  const name = dto.name.trim();
+  const now = NOW_ISO();
+  const res = await pool.query(
+    `UPDATE companies SET name = $1, updated_at = $2 WHERE id = $3 RETURNING id, name, code`,
+    [name, now, id]
+  );
+  if (res.rows.length === 0) {
+    throw new RepoError('Company not found', 404);
+  }
+  return res.rows[0]!;
+}
+
+export async function updateQuality(
+  pool: Pool,
+  id: string,
+  dto: { name: string }
+): Promise<{ id: string; name: string; code: string }> {
+  const name = dto.name.trim();
+  const now = NOW_ISO();
+  const res = await pool.query(
+    `UPDATE qualities SET name = $1, updated_at = $2 WHERE id = $3 RETURNING id, name, code`,
+    [name, now, id]
+  );
+  if (res.rows.length === 0) {
+    throw new RepoError('Quality not found', 404);
+  }
+  return res.rows[0]!;
+}
+
+export async function updateColor(
+  pool: Pool,
+  id: string,
+  dto: { name: string }
+): Promise<{ id: string; name: string; code: string }> {
+  const name = dto.name.trim();
+  const now = NOW_ISO();
+  const res = await pool.query(
+    `UPDATE colors SET name = $1, updated_at = $2 WHERE id = $3 RETURNING id, name, code`,
+    [name, now, id]
+  );
+  if (res.rows.length === 0) {
+    throw new RepoError('Color not found', 404);
+  }
+  return res.rows[0]!;
+}
+
+export async function updateUnit(
+  pool: Pool,
+  id: string,
+  dto: { name: string; symbol?: string; code?: string }
+): Promise<{ id: string; name: string; code: string }> {
+  const name = dto.name.trim();
+  const now = NOW_ISO();
+  const res = await pool.query(
+    `UPDATE units SET name = $1, updated_at = $2 WHERE id = $3 RETURNING id, name, symbol AS code`,
+    [name, now, id]
+  );
+  if (res.rows.length === 0) {
+    throw new RepoError('Unit not found', 404);
+  }
+  return res.rows[0]!;
+}
+
+export async function adjustStock(
+  pool: Pool,
+  dto: {
+    product_id: string;
+    branch_id?: string | null;
+    target_quantity: number;
+    reason?: string | null;
+    reference_id?: string | null;
+  }
+): Promise<number> {
+  // P3/P8 fix: Require explicit branch_id. No hardcoded UUID fallback is safe here —
+  // a missing branch_id would silently mutate the wrong branch's stock.
+  if (!dto.branch_id || dto.branch_id.trim().length < 32) {
+    throw new RepoError('branch_id is required for stock adjustment', 400);
+  }
+  const branchId = dto.branch_id.trim();
+  const productId = dto.product_id;
+  const targetQuantity = Math.max(0, Math.round(Number(dto.target_quantity ?? 0)));
+  const now = NOW_ISO();
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const stockRes = await client.query(
+      'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2',
+      [productId, branchId]
+    );
+    const prevStock = Number(stockRes.rows[0]?.['quantity'] ?? 0);
+    const diff = targetQuantity - prevStock;
+
+    await client.query(
+      `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (product_id, branch_id)
+       DO UPDATE SET quantity = EXCLUDED.quantity, updated_at = EXCLUDED.updated_at`,
+      [productId, branchId, targetQuantity, now]
+    );
+
+    if (diff !== 0) {
+      const movementId = uuidv4();
+      const movementType = diff > 0 ? 'IN' : 'OUT';
+      const absQty = Math.abs(diff);
+      const reason = dto.reason || 'Manual Adjustment';
+      const refId = dto.reference_id || 'STOCK_ADJUST';
+
+      await client.query(
+        `INSERT INTO stock_movements (
+           id, product_id, branch_id, movement_type, quantity,
+           previous_stock, resulting_stock, reason, reference_id, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [movementId, productId, branchId, movementType, absQty, prevStock, targetQuantity, reason, refId, now]
+      );
+    }
+
+    await client.query('COMMIT');
+    client.release();
+    return targetQuantity;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    client.release();
+    throw err;
+  }
+}
+
+// Phase 9 F-02 Fix: Fully atomic delta stock adjustment (increase or decrease by quantity delta).
+// Uses a single SQL statement (SELECT FOR UPDATE + GREATEST(0, quantity + delta)) to eliminate
+// the TOCTOU race condition where two concurrent reads could both get the same prevStock value
+// and one would silently overwrite the other's update with an incorrect absolute quantity.
+//
+// The SELECT FOR UPDATE acquires an exclusive row-level lock before computing the delta,
+// guaranteeing that the prevStock used for both the UPDATE and the stock_movements audit row
+// reflects the committed state at the time the lock is held — not a stale pre-lock snapshot.
+export async function deltaStock(
+  pool: Pool,
+  dto: {
+    product_id: string;
+    branch_id: string;
+    delta: number;            // positive = increase, negative = decrease
+    reason?: string | null;
+    reference_id?: string | null;
+  }
+): Promise<number> {
+  if (!dto.branch_id || dto.branch_id.trim().length < 32) {
+    throw new RepoError('branch_id is required for stock delta adjustment', 400);
+  }
+  const branchId = dto.branch_id.trim();
+  const productId = dto.product_id;
+  const delta = Math.round(Number(dto.delta ?? 0));
+  const now = NOW_ISO();
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Step 1: Lock the stock row exclusively (or read 0 if it doesn't exist yet).
+    // FOR UPDATE prevents any concurrent transaction from reading or writing this row
+    // until we COMMIT or ROLLBACK, closing the TOCTOU window.
+    const lockRes = await client.query(
+      'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2 FOR UPDATE',
+      [productId, branchId]
+    );
+    const prevStock = Number(lockRes.rows[0]?.['quantity'] ?? 0);
+    // Apply floor of 0: stock cannot go negative.
+    const resultingStock = Math.max(0, prevStock + delta);
+
+    // Step 2: Atomic upsert using the locked prevStock value.
+    // DO UPDATE references the already-locked row, so no second SELECT is needed.
+    // This is now safe because the FOR UPDATE above serializes concurrent callers.
+    await client.query(
+      `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (product_id, branch_id)
+       DO UPDATE SET
+         quantity   = GREATEST(0, stock.quantity + $5::BIGINT),
+         updated_at = $4`,
+      [productId, branchId, resultingStock, now, delta]
+    );
+
+    if (delta !== 0) {
+      const movementId = uuidv4();
+      const movementType = delta > 0 ? 'IN' : 'OUT';
+      const absQty = Math.abs(delta);
+      const reason = dto.reason || (delta > 0 ? 'Stock Increase' : 'Stock Decrease');
+      const refId = dto.reference_id || 'STOCK_DELTA';
+
+      await client.query(
+        `INSERT INTO stock_movements (
+           id, product_id, branch_id, movement_type, quantity,
+           previous_stock, resulting_stock, reason, reference_id, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [movementId, productId, branchId, movementType, absQty,
+         prevStock, resultingStock, reason, refId, now]
+      );
+    }
+
+    await client.query('COMMIT');
+    client.release();
+    return resultingStock;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    client.release();
+    throw err;
+  }
+}
+
+// ─── F-08: Stock Movement History ─────────────────────────────────────────────
+
+export interface StockMovementRow {
+  id: string;
+  product_id: string;
+  branch_id: string;
+  movement_type: string;
+  quantity: number;
+  previous_stock: number;
+  resulting_stock: number;
+  reason: string | null;
+  performed_by: string | null;
+  reference_id: string | null;
+  created_at: string;
+}
+
+/**
+ * Returns stock movements from the PostgreSQL stock_movements table.
+ * Replaces the SQLite `storage_inventory_get_movements` Rust command (F-08).
+ */
+export async function getStockMovements(
+  pool: Pool,
+  filter: {
+    product_id?: string | null;
+    branch_id?: string | null;
+    limit?: number | null;
+  }
+): Promise<StockMovementRow[]> {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (filter.product_id) {
+    params.push(filter.product_id);
+    conditions.push(`sm.product_id = $${params.length}`);
+  }
+  if (filter.branch_id) {
+    params.push(filter.branch_id);
+    conditions.push(`sm.branch_id = $${params.length}`);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const limitClause = filter.limit && filter.limit > 0 ? `LIMIT ${Math.min(Number(filter.limit), 1000)}` : 'LIMIT 200';
+
+  const sql = `
+    SELECT
+      sm.id,
+      sm.product_id,
+      sm.branch_id,
+      sm.movement_type,
+      sm.quantity::BIGINT        AS quantity,
+      sm.previous_stock::BIGINT  AS previous_stock,
+      sm.resulting_stock::BIGINT AS resulting_stock,
+      sm.reason,
+      sm.performed_by,
+      sm.reference_id,
+      sm.created_at
+    FROM stock_movements sm
+    ${where}
+    ORDER BY sm.created_at DESC
+    ${limitClause}
+  `;
+
+  const res = await pool.query(sql, params);
+  return res.rows.map((r: Record<string, unknown>) => ({
+    id: String(r['id']),
+    product_id: String(r['product_id']),
+    branch_id: String(r['branch_id']),
+    movement_type: String(r['movement_type']),
+    quantity: Number(r['quantity']),
+    previous_stock: Number(r['previous_stock']),
+    resulting_stock: Number(r['resulting_stock']),
+    reason: r['reason'] != null ? String(r['reason']) : null,
+    performed_by: r['performed_by'] != null ? String(r['performed_by']) : null,
+    reference_id: r['reference_id'] != null ? String(r['reference_id']) : null,
+    created_at: String(r['created_at']),
+  }));
+}
+
+// ─── F-08: Low Stock Report ────────────────────────────────────────────────────
+
+export interface LowStockRow {
+  product_id: string;
+  product_name: string;
+  sku: string;
+  branch_id: string;
+  branch_name: string;
+  current_quantity: number;
+  low_stock_threshold: number;
+}
+
+/**
+ * Returns products with stock at or below their low_stock_threshold for a branch.
+ * Replaces the SQLite `storage_inventory_get_low_stock` Rust command (F-08).
+ */
+export async function getLowStockItems(
+  pool: Pool,
+  branchId: string
+): Promise<LowStockRow[]> {
+  const sql = `
+    SELECT
+      p.id          AS product_id,
+      p.name        AS product_name,
+      p.sku,
+      b.id          AS branch_id,
+      b.name        AS branch_name,
+      COALESCE(s.quantity, 0)::BIGINT   AS current_quantity,
+      COALESCE(p.low_stock_threshold, 5)::BIGINT AS low_stock_threshold
+    FROM products p
+    JOIN branches b ON b.id = $1
+    LEFT JOIN stock s ON s.product_id = p.id AND s.branch_id = $1
+    WHERE p.is_active = TRUE
+      AND COALESCE(s.quantity, 0) <= COALESCE(p.low_stock_threshold, 5)
+    ORDER BY COALESCE(s.quantity, 0) ASC, p.name ASC
+    LIMIT 500
+  `;
+
+  const res = await pool.query(sql, [branchId]);
+  return res.rows.map((r: Record<string, unknown>) => ({
+    product_id: String(r['product_id']),
+    product_name: String(r['product_name']),
+    sku: String(r['sku']),
+    branch_id: String(r['branch_id']),
+    branch_name: String(r['branch_name']),
+    current_quantity: Number(r['current_quantity']),
+    low_stock_threshold: Number(r['low_stock_threshold']),
+  }));
+}

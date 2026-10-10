@@ -23,7 +23,7 @@ export const StockTransferModal: React.FC<StockTransferModalProps> = ({
   onSuccess,
 }) => {
   const { role } = usePermissions();
-  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN' || role === 'SHOP_ADMIN';
   const products = useInventoryStore((state) => state.products);
   const fetchProducts = useInventoryStore((state) => state.fetchProducts);
 

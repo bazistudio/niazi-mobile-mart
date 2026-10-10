@@ -41,8 +41,6 @@ import {
   validateUpdateCustomer,
 } from '../repositories/customer.repo';
 
-import { proxyToCentralServer } from '../server';
-
 // ─── Error Response Helper ────────────────────────────────────────────────────
 
 function isDbConnectionError(err: unknown): boolean {
@@ -58,19 +56,10 @@ function isDbConnectionError(err: unknown): boolean {
   );
 }
 
-function sendError(req: Request, res: Response, err: unknown): void {
+function sendError(_req: Request, res: Response, err: unknown): void {
   console.error('[customer.routes] Error handled by sendError:', err);
   if (isDbConnectionError(err)) {
-    if (req.method === 'GET' || req.method === 'HEAD') {
-      console.warn('[customer.routes] DB connection unavailable on read; proxying to Central Server...');
-      proxyToCentralServer(req, res);
-      return;
-    }
-    console.error('[customer.routes] DB connection error on write route — returning 502, NOT proxying to prevent duplicate data');
-    res.status(502).json({
-      error: 'Database connection error',
-      message: 'Write outcome is unknown. The operation was not automatically retried to prevent duplicate data.',
-    });
+    res.status(503).json({ error: 'Database service unavailable', message: (err as Error).message });
     return;
   }
   if (err instanceof CustomerRepoError) {
@@ -174,6 +163,52 @@ export function createCustomerRouter(pool: Pool): Router {
     }
   });
 
+  // ── PUT /api/customers/:id ──────────────────────────────────────────────────
+  router.put('/:id', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    const denied = authorizePermission(identity, 'customers', null);
+    if (denied) {
+      res.status(403).json({ error: 'FORBIDDEN', message: denied });
+      return;
+    }
+
+    try {
+      const id = req.params['id'] as string;
+      const dto = req.body as UpdateCustomerDto;
+
+      const validationErr = validateUpdateCustomer(dto);
+      if (validationErr) {
+        res.status(400).json({ error: 'UPDATE_FAILED', message: validationErr });
+        return;
+      }
+
+      const updated = await updateCustomer(pool, id, dto);
+      res.status(200).json(updated);
+    } catch (err) {
+      sendError(req, res, err);
+    }
+  });
+
+  // ── DELETE /api/customers/:id ───────────────────────────────────────────────
+  router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    const denied = authorizePermission(identity, 'customers', null);
+    if (denied) {
+      res.status(403).json({ error: 'FORBIDDEN', message: denied });
+      return;
+    }
+
+    try {
+      const id = req.params['id'] as string;
+      await deactivateCustomer(pool, id);
+      res.status(200).json({ success: true, message: 'Customer deactivated successfully' });
+    } catch (err) {
+      sendError(req, res, err);
+    }
+  });
+
   return router;
 }
 
@@ -243,6 +278,52 @@ export function createCustomerV1Router(pool: Pool): Router {
         res.status(404).json({ error: 'NOT_FOUND', message: err.message });
         return;
       }
+      sendError(req, res, err);
+    }
+  });
+
+  // ── PUT /api/v1/customers/:id ───────────────────────────────────────────────
+  router.put('/:id', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    const denied = authorizePermission(identity, 'customers', null);
+    if (denied) {
+      res.status(403).json({ error: 'FORBIDDEN', message: denied });
+      return;
+    }
+
+    try {
+      const id = req.params['id'] as string;
+      const dto = req.body as UpdateCustomerDto;
+
+      const validationErr = validateUpdateCustomer(dto);
+      if (validationErr) {
+        res.status(400).json({ error: 'UPDATE_FAILED', message: validationErr });
+        return;
+      }
+
+      const updated = await updateCustomer(pool, id, dto);
+      res.status(200).json(updated);
+    } catch (err) {
+      sendError(req, res, err);
+    }
+  });
+
+  // ── DELETE /api/v1/customers/:id ────────────────────────────────────────────
+  router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    const denied = authorizePermission(identity, 'customers', null);
+    if (denied) {
+      res.status(403).json({ error: 'FORBIDDEN', message: denied });
+      return;
+    }
+
+    try {
+      const id = req.params['id'] as string;
+      await deactivateCustomer(pool, id);
+      res.status(200).json({ success: true, message: 'Customer deactivated successfully' });
+    } catch (err) {
       sendError(req, res, err);
     }
   });

@@ -190,6 +190,7 @@ export const UserFormDrawer: React.FC<UserFormDrawerProps> = ({
               onChange={setPin}
               length={4}
               disabled={isPending}
+              showToggle
             />
           )}
         </div>

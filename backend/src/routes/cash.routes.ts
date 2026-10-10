@@ -5,7 +5,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, RequestIdentity } from '../auth';
+import { authMiddleware, authorizePermission, RequestIdentity, NIAZI_ORGANIZATION_ID } from '../auth';
 import {
   closeCashSession,
   getCurrentCashSession,
@@ -17,7 +17,6 @@ import {
   OpenCashSessionDto,
   RecordCashMovementDto,
 } from '../repositories/cash.repo';
-import { proxyToCentralServer } from '../server';
 
 function isDbConnectionError(err: unknown): boolean {
   if (!err) return false;
@@ -32,15 +31,10 @@ function isDbConnectionError(err: unknown): boolean {
   );
 }
 
-function sendError(req: Request, res: Response, err: unknown): void {
+function sendError(_req: Request, res: Response, err: unknown): void {
   console.error('[cash.routes] Error handled by sendError:', err);
   if (isDbConnectionError(err)) {
-    if (req.method === 'GET' || req.method === 'HEAD') {
-      console.warn('[cash.routes] DB connection unavailable on read; proxying...');
-      proxyToCentralServer(req, res);
-      return;
-    }
-    res.status(502).json({ error: 'Database connection error' });
+    res.status(503).json({ error: 'Database service unavailable', message: (err as Error).message });
     return;
   }
   if (err instanceof CashRepoError) {
@@ -67,7 +61,7 @@ export function createCashRouter(pool: Pool): Router {
     }
 
     try {
-      const branchId = (req.query['branch_id'] as string) || identity.branch_id || '00000000-0000-0000-0000-000000000001';
+      const branchId = (req.query['branch_id'] as string) || identity.branch_id || NIAZI_ORGANIZATION_ID;
       const session = await getCurrentCashSession(pool, branchId);
       res.status(200).json({ session });
     } catch (err) {

@@ -11,7 +11,7 @@ import { usePermissions } from '@/lib/auth/usePermissions';
 
 export function InventoryProductsPage() {
   const { role } = usePermissions();
-  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN' || role === 'SHOP_ADMIN';
 
   const { filters } = useInventoryFilters();
   const [editingProduct, setEditingProduct] = useState<InventoryProduct | null>(null);

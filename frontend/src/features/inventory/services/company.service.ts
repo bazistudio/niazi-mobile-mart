@@ -1,4 +1,4 @@
-import { isTauriEnvironment, tauriClient } from '@/lib/tauri/tauriClient';
+import { isTauriEnvironment, tauriClient, httpFetch } from '@/lib/tauri/tauriClient';
 import { ProductCompany } from '../types';
 
 const STORAGE_KEY = 'niazi_master_companies';
@@ -23,41 +23,47 @@ function getStoredCompanies(): ProductCompany[] {
   return DEFAULT_COMPANIES;
 }
 
+function saveStoredCompanies(list: ProductCompany[]) {
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
 export const companyService = {
   getCompanies: async (): Promise<ProductCompany[]> => {
     if (isTauriEnvironment()) {
       try {
         const list = await tauriClient.companyList();
         if (list && list.length > 0) {
-          // Perform one-time migration of legacy localStorage custom companies into DB
-          try {
-            const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-            if (raw) {
-              const legacy: ProductCompany[] = JSON.parse(raw);
-              if (Array.isArray(legacy)) {
-                for (const item of legacy) {
-                  const clean = item.name?.trim();
-                  if (clean && !list.some(c => c.name.toLowerCase() === clean.toLowerCase())) {
-                    await tauriClient.companyCreate({ name: clean });
-                  }
-                }
-              }
-              localStorage.removeItem(STORAGE_KEY);
-            }
-          } catch {
-            // Ignore legacy migration error
-          }
-
-          const refreshed = await tauriClient.companyList();
-          return refreshed.map((c) => ({
+          return list.map((c) => ({
             id: c.id,
             name: c.name,
             organizationId: '00000000-0000-0000-0000-000000000001',
           }));
         }
       } catch (err) {
-        console.warn('Tauri companyList fallback to local storage', err);
+        console.warn('Tauri companyList fallback to stored companies', err);
       }
+      return getStoredCompanies();
+    }
+
+    try {
+      const list = await httpFetch<any[]>('/api/companies');
+      if (list && list.length > 0) {
+        const mapped = list.map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          organizationId: c.organization_id || '00000000-0000-0000-0000-000000000001',
+        }));
+        saveStoredCompanies(mapped);
+        return mapped;
+      }
+    } catch (err) {
+      console.warn('API companyList failed, using cache', err);
     }
     return getStoredCompanies();
   },
@@ -67,21 +73,31 @@ export const companyService = {
     if (isTauriEnvironment()) {
       try {
         const created = await tauriClient.companyCreate({ name: cleanName });
-        return {
+        const compObj = {
           id: created.id,
           name: created.name,
           organizationId: '00000000-0000-0000-0000-000000000001',
         };
+        const current = getStoredCompanies();
+        saveStoredCompanies([...current.filter(c => c.id !== compObj.id), compObj]);
+        return compObj;
       } catch (err) {
         console.warn('Tauri companyCreate fallback to local storage', err);
       }
     }
-    const newCompany: ProductCompany = {
-      id: `cmp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      name: cleanName,
-      organizationId: data.organizationId || '00000000-0000-0000-0000-000000000001',
+
+    const created = await httpFetch<any>('/api/companies', {
+      method: 'POST',
+      body: JSON.stringify({ name: cleanName }),
+    });
+    const compObj: ProductCompany = {
+      id: created.id,
+      name: created.name,
+      organizationId: created.organization_id || '00000000-0000-0000-0000-000000000001',
     };
-    return newCompany;
+    const current = getStoredCompanies();
+    saveStoredCompanies([...current.filter(c => c.id !== compObj.id), compObj]);
+    return compObj;
   },
 
   updateCompany: async (id: string, data: { name: string }): Promise<ProductCompany> => {
@@ -89,16 +105,31 @@ export const companyService = {
     if (isTauriEnvironment()) {
       try {
         const updated = await tauriClient.companyUpdate(id, { name: cleanName });
-        return {
+        const compObj = {
           id: updated.id,
           name: updated.name,
           organizationId: '00000000-0000-0000-0000-000000000001',
         };
+        const current = getStoredCompanies();
+        saveStoredCompanies(current.map(c => c.id === id ? compObj : c));
+        return compObj;
       } catch (err) {
         console.warn('Tauri companyUpdate fallback to local storage', err);
       }
     }
-    return { id, name: cleanName, organizationId: '00000000-0000-0000-0000-000000000001' };
+
+    const updated = await httpFetch<any>(`/api/companies/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: cleanName }),
+    });
+    const compObj: ProductCompany = {
+      id: updated.id,
+      name: updated.name,
+      organizationId: '00000000-0000-0000-0000-000000000001',
+    };
+    const current = getStoredCompanies();
+    saveStoredCompanies(current.map(c => c.id === id ? compObj : c));
+    return compObj;
   },
 
   deleteCompany: async (_id: string): Promise<void> => {

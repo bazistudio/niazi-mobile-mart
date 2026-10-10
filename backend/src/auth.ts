@@ -5,11 +5,40 @@ import jwt from 'jsonwebtoken';
 
 // --- Types ---
 
-export type UserRole = 'Admin' | 'ShopAdmin' | 'Cashier' | 'Salesman';
+/**
+ * All supported user roles — must match Rust UserRole enum in domain/user.rs.
+ * Phase 1 fix: expanded from 4 to 9 roles to match Rust definition exactly.
+ * Supports both PascalCase (legacy frontend) and SCREAMING_SNAKE_CASE (Rust/DB) variants.
+ */
+export type UserRole =
+  // Canonical SCREAMING_SNAKE_CASE values (stored in PostgreSQL, issued in JWT)
+  | 'ADMIN'
+  | 'SHOP_ADMIN'
+  | 'MANAGER'
+  | 'ACCOUNTANT'
+  | 'SALESMAN'
+  | 'CASHIER'
+  | 'REPAIR_MECHANIC'
+  | 'STAFF'
+  | 'PUBLIC_USER'
+  // Legacy PascalCase aliases (may appear in old tokens or frontend code)
+  | 'Admin'
+  | 'ShopAdmin'
+  | 'Cashier'
+  | 'Salesman';
+
+export interface StaffOperationalLimits {
+  max_discount_percent: number;
+  can_price_override: boolean;
+  can_refund: boolean;
+  can_void_sale: boolean;
+  can_view_profit: boolean;
+}
 
 export interface StaffAccessProfile {
   allowed_pages: string[];
   allowed_actions: string[];
+  limits: StaffOperationalLimits;
 }
 
 /**
@@ -42,7 +71,9 @@ interface Claims {
 
 // --- Constants ---
 
-const NIAZI_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
+// Canonical single-organization UUID seeded by migration 001_initial_schema.sql.
+// This is the ONLY place this constant should be defined. All other files must import it.
+export const NIAZI_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
 
 // --- Key Loading ---
 
@@ -138,13 +169,47 @@ export function resolveIdentity(token: string): RequestIdentity {
 // --- Authorization ---
 
 /**
- * Checks if identity has an administrative role.
- * Case-insensitive comparison supporting ADMIN, ShopAdmin, SUPER_ADMIN, OWNER.
- * Mirrors RequestIdentity::is_admin() in identity.rs.
+ * Checks if identity has Organization-wide Administrative authority.
+ * Organization admins are identified ONLY by their role claim (ADMIN, SUPER_ADMIN, OWNER).
+ * UI page permissions (access_profile.allowed_pages '*') do NOT grant backend cross-branch authority.
+ * Security fix (Phase 10 Blocker 1): removed wildcard page-permission escalation.
+ */
+export function isOrgAdmin(identity: RequestIdentity): boolean {
+  if (!identity) return false;
+  const r = String(identity.role || '').toUpperCase();
+  if (r === 'ADMIN' || r === 'SUPER_ADMIN' || r === 'OWNER') return true;
+  return false;
+}
+
+/**
+ * Checks if identity has Branch-level Administrative authority.
+ * Includes Organization Admins as well as SHOP_ADMIN / SHOPADMIN role.
+ */
+export function isBranchAdmin(identity: RequestIdentity): boolean {
+  if (!identity) return false;
+  if (isOrgAdmin(identity)) return true;
+  const r = String(identity.role || '').toUpperCase();
+  return r === 'SHOPADMIN' || r === 'SHOP_ADMIN' || r === 'MANAGER';
+}
+
+/**
+ * General admin check. Retained for backward compatibility.
  */
 export function isAdmin(identity: RequestIdentity): boolean {
-  const r = String(identity.role || '').toUpperCase();
-  return r === 'ADMIN' || r === 'SHOPADMIN' || r === 'SHOP_ADMIN' || r === 'SUPER_ADMIN' || r === 'OWNER';
+  return isBranchAdmin(identity);
+}
+
+/**
+ * Checks if identity is authorized to access a specific target branch.
+ * Org admins can access any branch.
+ * Branch users can only access their assigned identity.branch_id.
+ */
+export function canAccessBranch(identity: RequestIdentity, targetBranchId: string | null | undefined): boolean {
+  if (!identity) return false;
+  if (isOrgAdmin(identity)) return true;
+  if (!targetBranchId || !targetBranchId.trim()) return false;
+  if (!identity.branch_id) return false;
+  return identity.branch_id === targetBranchId.trim();
 }
 
 /**
@@ -162,13 +227,13 @@ export function authorizePermission(
   }
 
   if (page !== null) {
-    if (!hasPageAccess(identity.access_profile, page)) {
+    if (!hasPageAccess(identity.access_profile, page, identity.role)) {
       return `Access denied: You do not have permission to access page '${page}'`;
     }
   }
 
   if (action !== null) {
-    if (!hasActionAccess(identity.access_profile, action)) {
+    if (!hasActionAccess(identity.access_profile, action, identity.role)) {
       return `Access denied: You do not have permission to execute action '${action}'`;
     }
   }
@@ -178,16 +243,32 @@ export function authorizePermission(
 
 /**
  * Mirrors StaffAccessProfile::has_page_access() in access_control.rs.
+ * Falls back to allowing staff roles (SALESMAN, CASHIER, STAFF, MANAGER) when allowed_pages is empty.
  */
-function hasPageAccess(profile: StaffAccessProfile, page: string): boolean {
-  return profile.allowed_pages.some((p) => p === '*' || p === page);
+function hasPageAccess(profile: StaffAccessProfile, page: string, role?: UserRole): boolean {
+  if (profile && Array.isArray(profile.allowed_pages) && profile.allowed_pages.length > 0) {
+    return profile.allowed_pages.some((p) => p === '*' || p === page);
+  }
+  const r = String(role || '').toUpperCase();
+  if (r === 'SALESMAN' || r === 'CASHIER' || r === 'STAFF' || r === 'MANAGER' || r === 'ACCOUNTANT') {
+    return true;
+  }
+  return false;
 }
 
 /**
  * Mirrors StaffAccessProfile::has_action_access() in access_control.rs.
+ * Falls back to allowing staff roles (SALESMAN, CASHIER, STAFF, MANAGER) when allowed_actions is empty.
  */
-function hasActionAccess(profile: StaffAccessProfile, action: string): boolean {
-  return profile.allowed_actions.some((a) => a === '*' || a === action);
+function hasActionAccess(profile: StaffAccessProfile, action: string, role?: UserRole): boolean {
+  if (profile && Array.isArray(profile.allowed_actions) && profile.allowed_actions.length > 0) {
+    return profile.allowed_actions.some((a) => a === '*' || a === action);
+  }
+  const r = String(role || '').toUpperCase();
+  if (r === 'SALESMAN' || r === 'CASHIER' || r === 'STAFF' || r === 'MANAGER' || r === 'ACCOUNTANT') {
+    return true;
+  }
+  return false;
 }
 
 // --- Express Middleware ---

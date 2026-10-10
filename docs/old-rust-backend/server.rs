@@ -137,6 +137,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/api/health", get(health_handler))
         .route("/api/v1/health", get(health_handler))
+        // ── Internal-only argon2 helper endpoint ─────────────────────────────
+        // Called exclusively by the TypeScript Express backend (127.0.0.1) as
+        // part of the Phase 1 auth migration.  Never exposed externally — the
+        // TypeScript reverse-proxy sits in front and this route is NOT mounted
+        // by the TypeScript Express router so it stays inaccessible from the
+        // public internet.
+        .route("/internal/argon2/verify", axum::routing::post(internal_argon2_verify_handler))
+        .route("/internal/argon2/hash", axum::routing::post(internal_argon2_hash_handler))
         .route("/api/auth/bootstrap-status", get(bootstrap_status_handler))
         .route("/api/v1/auth/bootstrap-status", get(bootstrap_status_handler))
         .route("/api/auth/bootstrap-first-admin", axum::routing::post(bootstrap_first_admin_handler))
@@ -478,6 +486,50 @@ async fn credential_snapshots_handler(
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// Internal argon2 helper endpoints (TypeScript auth integration)
+// These routes are NOT exposed externally -- the TypeScript reverse-proxy does
+// not forward /internal/* routes, keeping them localhost-only.
+// ---------------------------------------------------------------------------
+
+#[derive(serde::Deserialize)]
+struct Argon2VerifyPayload {
+    hash: String,
+    plaintext: String,
+}
+
+#[derive(serde::Deserialize)]
+struct Argon2HashPayload {
+    plaintext: String,
+}
+
+/// POST /internal/argon2/verify
+/// Verifies plaintext against an Argon2id PHC hash string.
+/// Returns {"valid": true|false}
+async fn internal_argon2_verify_handler(
+    Json(payload): Json<Argon2VerifyPayload>,
+) -> impl IntoResponse {
+    use niazi_mobile_mart_lib::services::hasher::verify_credential;
+    let valid = verify_credential(&payload.plaintext, &payload.hash);
+    (StatusCode::OK, Json(json!({ "valid": valid })))
+}
+
+/// POST /internal/argon2/hash
+/// Hashes a plaintext credential with Argon2id.
+/// Used by TypeScript when creating or resetting user passwords.
+async fn internal_argon2_hash_handler(
+    Json(payload): Json<Argon2HashPayload>,
+) -> impl IntoResponse {
+    use niazi_mobile_mart_lib::services::hasher::hash_credential;
+    match hash_credential(&payload.plaintext) {
+        Ok(hash) => (StatusCode::OK, Json(json!({ "hash": hash }))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        ),
+    }
+}
 
 /// GET /api/health
 /// Infrastructure-level health check.

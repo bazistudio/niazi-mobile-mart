@@ -1100,31 +1100,35 @@ export const tauriClient = {
     }
   },
 
-  // â”€â”€ Inventory Foundation Domain (Phase 4A Typed Storage Bridge) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€ Inventory Foundation Domain (Phase 7: all paths redirect to TypeScript Express) â”€â”€
+  // Phase 7: inventoryIncrease and inventoryDecrease now route to the PostgreSQL backend
+  // via the atomic /api/v1/inventory/delta endpoint. The Tauri IPC (SQLite) path is retired.
   async inventoryIncrease(dto: IncreaseStockDto): Promise<number> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('storage_inventory_increase', { dto });
-    }
-    const stockMap = getStoredWebStockMap();
-    const current = stockMap[dto.product_id] || 0;
-    const next = current + (dto.quantity || 0);
-    stockMap[dto.product_id] = next;
-    saveStoredWebStockMap(stockMap);
-    return next;
+    const res = await httpFetch<{ data?: number; newStock?: number }>('/api/v1/inventory/delta', {
+      method: 'POST',
+      body: JSON.stringify({
+        product_id: dto.product_id,
+        branch_id: dto.branch_id,
+        delta: Math.abs(dto.quantity || 0),
+        reason: dto.reason ?? 'Stock Increase',
+        reference_id: dto.reference_id ?? null,
+      }),
+    });
+    return typeof res.data === 'number' ? res.data : typeof res === 'number' ? res : 0;
   },
 
   async inventoryDecrease(dto: DecreaseStockDto): Promise<number> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('storage_inventory_decrease', { dto });
-    }
-    const stockMap = getStoredWebStockMap();
-    const current = stockMap[dto.product_id] || 0;
-    const next = Math.max(0, current - (dto.quantity || 0));
-    stockMap[dto.product_id] = next;
-    saveStoredWebStockMap(stockMap);
-    return next;
+    const res = await httpFetch<{ data?: number; newStock?: number }>('/api/v1/inventory/delta', {
+      method: 'POST',
+      body: JSON.stringify({
+        product_id: dto.product_id,
+        branch_id: dto.branch_id,
+        delta: -Math.abs(dto.quantity || 0),
+        reason: dto.reason ?? 'Stock Decrease',
+        reference_id: dto.reference_id ?? null,
+      }),
+    });
+    return typeof res.data === 'number' ? res.data : typeof res === 'number' ? res : 0;
   },
 
   async inventoryAdjust(dto: AdjustStockDto): Promise<number> {
@@ -1160,25 +1164,22 @@ export const tauriClient = {
     branchId?: string,
     limit?: number
   ): Promise<StockMovement[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<StockMovement[]>('storage_inventory_get_movements', {
-        productId,
-        branchId,
-        limit,
-      });
-    }
-    return [];
+    // F-08 Fix: Removed SQLite/Tauri IPC path. Reads from PostgreSQL via backend REST API
+    // for both Tauri desktop and web environments, ensuring movement history reflects
+    // the central authoritative stock_movements table rather than the local SQLite copy.
+    const params = new URLSearchParams();
+    if (productId) params.set('product_id', productId);
+    if (branchId) params.set('branch_id', branchId);
+    if (limit != null) params.set('limit', String(limit));
+    const qs = params.toString();
+    return await httpFetch<StockMovement[]>(`/api/v1/inventory/movements${qs ? `?${qs}` : ''}`);
   },
 
   async inventoryGetLowStock(branchId: string): Promise<LowStockItemDto[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<LowStockItemDto[]>('storage_inventory_get_low_stock', {
-        branchId,
-      });
-    }
-    return [];
+    // F-08 Fix: Removed SQLite/Tauri IPC path. Reads from PostgreSQL via backend REST API
+    // for both Tauri desktop and web environments, ensuring low-stock data reflects
+    // the central authoritative stock table rather than the local SQLite copy.
+    return await httpFetch<LowStockItemDto[]>(`/api/v1/inventory/low-stock?branch_id=${encodeURIComponent(branchId)}`);
   },
 
   // â”€â”€ Organization & Branch Operations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2060,10 +2061,7 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<DashboardBalancesDto>('organization_get_dashboard_balances');
     }
-    return {
-      customer_receivables: 0,
-      supplier_payables: 0,
-    };
+    return await httpFetch<DashboardBalancesDto>('/api/organization/balances');
   },
 
   async profitGetDashboardSummary(branchId?: string | null): Promise<DashboardProfitSummaryDto> {

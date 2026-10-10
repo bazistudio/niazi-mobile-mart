@@ -6,8 +6,7 @@ import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
 import { authMiddleware, authorizePermission, isAdmin, RequestIdentity } from '../auth';
-import { getProfitSummary, ProfitRepoError } from '../repositories/profit.repo';
-import { proxyToCentralServer } from '../server';
+import { getProfitSummary, getDashboardProfitSummary, ProfitRepoError } from '../repositories/profit.repo';
 
 function isDbConnectionError(err: unknown): boolean {
   if (!err) return false;
@@ -22,15 +21,10 @@ function isDbConnectionError(err: unknown): boolean {
   );
 }
 
-function sendError(req: Request, res: Response, err: unknown): void {
+function sendError(_req: Request, res: Response, err: unknown): void {
   console.error('[reports.routes] Error handled by sendError:', err);
   if (isDbConnectionError(err)) {
-    if (req.method === 'GET' || req.method === 'HEAD') {
-      console.warn('[reports.routes] DB connection unavailable on read; proxying...');
-      proxyToCentralServer(req, res);
-      return;
-    }
-    res.status(502).json({ error: 'Database connection error' });
+    res.status(503).json({ error: 'Database service unavailable', message: (err as Error).message });
     return;
   }
   if (err instanceof ProfitRepoError) {
@@ -47,10 +41,39 @@ export function createReportsRouter(pool: Pool): Router {
   router.use(authMiddleware);
 
   // ── GET /api/reports/profit ───────────────────────────────────────────────
-  router.get('/profit', async (req: Request, res: Response): Promise<void> => {
+  router.get(['/profit', '/profit/dashboard'], async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;
 
-    // Financial reporting is restricted to Admin or ShopAdmin
+    if (!isAdmin(identity)) {
+      res.status(403).json({ error: 'Access denied: Profit reporting requires Admin or ShopAdmin permissions' });
+      return;
+    }
+
+    try {
+      const startDate = (req.query['start_date'] as string) || undefined;
+      const endDate = (req.query['end_date'] as string) || undefined;
+      const branchId = (req.query['branch_id'] as string) || identity.branch_id || undefined;
+
+      if (startDate || endDate) {
+        const summary = await getProfitSummary(pool, {
+          branch_id: branchId,
+          start_date: startDate,
+          end_date: endDate,
+        });
+        res.status(200).json(summary);
+      } else {
+        const dashboardSummary = await getDashboardProfitSummary(pool, branchId);
+        res.status(200).json(dashboardSummary);
+      }
+    } catch (err) {
+      sendError(req, res, err);
+    }
+  });
+
+  // ── GET /api/reports/profit/summary ───────────────────────────────────────
+  router.get('/profit/summary', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
     if (!isAdmin(identity)) {
       res.status(403).json({ error: 'Access denied: Profit reporting requires Admin or ShopAdmin permissions' });
       return;

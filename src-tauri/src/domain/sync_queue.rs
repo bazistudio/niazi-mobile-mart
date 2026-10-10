@@ -38,11 +38,28 @@ impl SyncQueueStatus {
 
 pub const MAX_RETRIES: i32 = 10;
 
-/// Exhaustive registry of server-side sync event types the push handler recognises.
+/// Exhaustive registry of event types the server push handler **recognises**.
+///
+/// Being in this list does NOT mean the server has an active data handler —
+/// it means the server will not reject the type as `UNKNOWN_EVENT_TYPE`.
 ///
 /// **SYNC-B1**: Any event type NOT in this list MUST be rejected with
 /// `FAILED_PERMANENT` / `UNKNOWN_EVENT_TYPE` by the server push handler rather
 /// than silently falling through to a spurious `SYNCED` response.
+///
+/// Handler status as of Phase 6 (v1.3.30+ baseline):
+///
+///   Active handlers (business write performed by server):
+///     PRODUCT_CREATED, PRODUCT_UPDATED, INVENTORY_OPERATION_RECORDED
+///
+///   Downstream compatibility (change_log broadcast only, no data table write):
+///     PARTY_UPSERTED
+///
+///   Explicitly unsupported (FAILED_PERMANENT / UNSUPPORTED_EVENT returned):
+///     All remaining types below — they are in the registry so the client
+///     knows the server is aware of them, but no handler is implemented yet.
+///     The client MUST NOT retry a FAILED_PERMANENT event without a
+///     corresponding server upgrade that adds the handler.
 ///
 /// When a new event type is added to the server handler it MUST also be added
 /// here, and the corresponding unit test (`test_sync_b1_registry_is_not_empty`)

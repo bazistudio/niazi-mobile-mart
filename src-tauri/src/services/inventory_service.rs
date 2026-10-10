@@ -8,11 +8,12 @@ use crate::domain::inventory::{
     AdjustStockDto, DecreaseStockDto, IncreaseStockDto, InventoryOperationSyncEventDto,
     LowStockItemDto, StockMovement, StockMovementType, TransferStockDto,
 };
+use crate::domain::organization::NIAZI_ORGANIZATION_ID;
 use crate::errors::{AppError, AppResult};
 use crate::repositories::{
     InventoryRepository, PostgresInventoryRepository, PostgresProductRepository, ProductRepository,
-    SQLiteInventoryRepository, SQLiteProductRepository, SQLiteTerminalRepository,
-    SQLiteUserRepository,
+    SQLiteInventoryRepository, SQLiteProductRepository, SQLiteSyncQueueRepository,
+    SQLiteTerminalRepository, SQLiteUserRepository,
 };
 
 #[derive(Clone)]
@@ -53,7 +54,70 @@ impl InventoryService {
             return pg_repo.increase_stock(&dto, user_id).await;
         }
 
-        Err(AppError::Internal("Inventory mutation requires PostgreSQL authority.".to_string()))
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let terminal_repo = SQLiteTerminalRepository::new(db.clone());
+        let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+        let terminal_id = current_terminal.id;
+
+        let dto_clone = dto.clone();
+        let user_id_owned = user_id.map(String::from);
+
+        let new_stock = with_transaction(db, move |tx| {
+            let now = Utc::now().to_rfc3339();
+            let prev = SQLiteInventoryRepository::get_stock_in_tx(tx, &dto_clone.product_id, &dto_clone.branch_id)?;
+            let new_qty = prev + dto_clone.quantity;
+
+            SQLiteInventoryRepository::set_stock_in_tx(tx, &dto_clone.product_id, &dto_clone.branch_id, new_qty, &now)?;
+
+            let op_id = Uuid::new_v4().to_string();
+            SQLiteInventoryRepository::insert_movement_in_tx(
+                tx,
+                &StockMovement {
+                    id: op_id.clone(),
+                    product_id: dto_clone.product_id.clone(),
+                    branch_id: dto_clone.branch_id.clone(),
+                    movement_type: StockMovementType::In,
+                    quantity: dto_clone.quantity,
+                    previous_stock: prev,
+                    resulting_stock: new_qty,
+                    reason: dto_clone.reason.clone(),
+                    performed_by: user_id_owned.clone(),
+                    reference_id: dto_clone.reference_id.clone(),
+                    created_at: now.clone(),
+                },
+            )?;
+
+            let inv_event = InventoryOperationSyncEventDto {
+                operation_id: op_id,
+                operation_type: "INCREASE".to_string(),
+                product_id: dto_clone.product_id.clone(),
+                branch_id: dto_clone.branch_id.clone(),
+                to_branch_id: None,
+                quantity: dto_clone.quantity,
+                target_quantity: Some(new_qty),
+                reason: dto_clone.reason.clone(),
+                performed_by: user_id_owned,
+                created_at: now,
+            };
+
+            let payload = serde_json::to_string(&inv_event)
+                .map_err(|e| DbError::ValidationError(e.to_string()))?;
+
+            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                client_event_id: Some(inv_event.operation_id.clone()),
+                terminal_id,
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: dto_clone.branch_id.clone(),
+                event_type: "INVENTORY_OPERATION_RECORDED".to_string(),
+                payload,
+            };
+            SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+
+            Ok(new_qty)
+        })
+        .await?;
+
+        Ok(new_stock)
     }
 
     /// Atomically decreases stock and records an OUT movement ledger entry.
@@ -67,7 +131,77 @@ impl InventoryService {
             return pg_repo.decrease_stock(&dto, user_id).await;
         }
 
-        Err(AppError::Internal("Inventory mutation requires PostgreSQL authority.".to_string()))
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let terminal_repo = SQLiteTerminalRepository::new(db.clone());
+        let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+        let terminal_id = current_terminal.id;
+
+        let dto_clone = dto.clone();
+        let user_id_owned = user_id.map(String::from);
+
+        let new_stock = with_transaction(db, move |tx| {
+            let now = Utc::now().to_rfc3339();
+            let prev = SQLiteInventoryRepository::get_stock_in_tx(tx, &dto_clone.product_id, &dto_clone.branch_id)?;
+            if prev < dto_clone.quantity {
+                return Err(DbError::ConstraintViolation(format!(
+                    "Insufficient stock for product '{}': available {prev}, requested {}",
+                    dto_clone.product_id, dto_clone.quantity
+                )));
+            }
+
+            let new_qty = prev - dto_clone.quantity;
+
+            SQLiteInventoryRepository::set_stock_in_tx(tx, &dto_clone.product_id, &dto_clone.branch_id, new_qty, &now)?;
+
+            let op_id = Uuid::new_v4().to_string();
+            SQLiteInventoryRepository::insert_movement_in_tx(
+                tx,
+                &StockMovement {
+                    id: op_id.clone(),
+                    product_id: dto_clone.product_id.clone(),
+                    branch_id: dto_clone.branch_id.clone(),
+                    movement_type: StockMovementType::Out,
+                    quantity: dto_clone.quantity,
+                    previous_stock: prev,
+                    resulting_stock: new_qty,
+                    reason: dto_clone.reason.clone(),
+                    performed_by: user_id_owned.clone(),
+                    reference_id: dto_clone.reference_id.clone(),
+                    created_at: now.clone(),
+                },
+            )?;
+
+            let inv_event = InventoryOperationSyncEventDto {
+                operation_id: op_id,
+                operation_type: "DECREASE".to_string(),
+                product_id: dto_clone.product_id.clone(),
+                branch_id: dto_clone.branch_id.clone(),
+                to_branch_id: None,
+                quantity: dto_clone.quantity,
+                target_quantity: Some(new_qty),
+                reason: dto_clone.reason.clone(),
+                performed_by: user_id_owned,
+                created_at: now,
+            };
+
+            let payload = serde_json::to_string(&inv_event)
+                .map_err(|e| DbError::ValidationError(e.to_string()))?;
+
+            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                client_event_id: Some(inv_event.operation_id.clone()),
+                terminal_id,
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: dto_clone.branch_id.clone(),
+                event_type: "INVENTORY_OPERATION_RECORDED".to_string(),
+                payload,
+            };
+            SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+
+            Ok(new_qty)
+        })
+        .await?;
+
+        Ok(new_stock)
     }
 
     /// Atomically adjusts stock to a target quantity and records an ADJUSTMENT movement ledger entry.
@@ -84,7 +218,79 @@ impl InventoryService {
             return pg_repo.adjust_stock(&dto, user_id).await;
         }
 
-        Err(AppError::Internal("Inventory mutation requires PostgreSQL authority.".to_string()))
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let terminal_repo = SQLiteTerminalRepository::new(db.clone());
+        let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+        let terminal_id = current_terminal.id;
+
+        let dto_clone = dto.clone();
+        let user_id_owned = user_id.map(String::from);
+
+        let new_stock = with_transaction(db, move |tx| {
+            let now = Utc::now().to_rfc3339();
+            let prev = SQLiteInventoryRepository::get_stock_in_tx(tx, &dto_clone.product_id, &dto_clone.branch_id)?;
+            let target = dto_clone.target_quantity;
+            if prev == target {
+                return Err(DbError::ConstraintViolation(format!(
+                    "Stock for product '{}' is already {target}",
+                    dto_clone.product_id
+                )));
+            }
+
+            let delta = (target - prev).abs();
+            let mtype = if target > prev { StockMovementType::In } else if target < prev { StockMovementType::Out } else { StockMovementType::Adjustment };
+
+            SQLiteInventoryRepository::set_stock_in_tx(tx, &dto_clone.product_id, &dto_clone.branch_id, target, &now)?;
+
+            let op_id = Uuid::new_v4().to_string();
+            SQLiteInventoryRepository::insert_movement_in_tx(
+                tx,
+                &StockMovement {
+                    id: op_id.clone(),
+                    product_id: dto_clone.product_id.clone(),
+                    branch_id: dto_clone.branch_id.clone(),
+                    movement_type: mtype,
+                    quantity: delta,
+                    previous_stock: prev,
+                    resulting_stock: target,
+                    reason: Some(dto_clone.reason.clone()),
+                    performed_by: user_id_owned.clone(),
+                    reference_id: None,
+                    created_at: now.clone(),
+                },
+            )?;
+
+            let inv_event = InventoryOperationSyncEventDto {
+                operation_id: op_id,
+                operation_type: "ADJUST".to_string(),
+                product_id: dto_clone.product_id.clone(),
+                branch_id: dto_clone.branch_id.clone(),
+                to_branch_id: None,
+                quantity: delta,
+                target_quantity: Some(target),
+                reason: Some(dto_clone.reason.clone()),
+                performed_by: user_id_owned,
+                created_at: now,
+            };
+
+            let payload = serde_json::to_string(&inv_event)
+                .map_err(|e| DbError::ValidationError(e.to_string()))?;
+
+            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                client_event_id: Some(inv_event.operation_id.clone()),
+                terminal_id,
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: dto_clone.branch_id.clone(),
+                event_type: "INVENTORY_OPERATION_RECORDED".to_string(),
+                payload,
+            };
+            SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+
+            Ok(target)
+        })
+        .await?;
+
+        Ok(new_stock)
     }
 
     /// Atomically transfers stock from one controlled branch to another.
@@ -100,7 +306,98 @@ impl InventoryService {
             return pg_repo.transfer_stock(&dto, user_id).await;
         }
 
-        Err(AppError::Internal("Inventory mutation requires PostgreSQL authority.".to_string()))
+        let db = self.db.as_ref().expect("SQLite database connection required");
+        let terminal_repo = SQLiteTerminalRepository::new(db.clone());
+        let current_terminal = terminal_repo.get_or_create_current_terminal().await?;
+        let terminal_id = current_terminal.id;
+
+        let dto_clone = dto.clone();
+        let user_id_owned = user_id.map(String::from);
+
+        with_transaction(db, move |tx| {
+            let now = Utc::now().to_rfc3339();
+            let from_prev = SQLiteInventoryRepository::get_stock_in_tx(tx, &dto_clone.product_id, &dto_clone.from_branch_id)?;
+            if from_prev < dto_clone.quantity {
+                return Err(DbError::ConstraintViolation(format!(
+                    "Transfer failed: source branch has insufficient stock ({from_prev})"
+                )));
+            }
+
+            let to_prev = SQLiteInventoryRepository::get_stock_in_tx(tx, &dto_clone.product_id, &dto_clone.to_branch_id)?;
+
+            let from_new = from_prev - dto_clone.quantity;
+            let to_new = to_prev + dto_clone.quantity;
+
+            SQLiteInventoryRepository::set_stock_in_tx(tx, &dto_clone.product_id, &dto_clone.from_branch_id, from_new, &now)?;
+            SQLiteInventoryRepository::set_stock_in_tx(tx, &dto_clone.product_id, &dto_clone.to_branch_id, to_new, &now)?;
+
+            let op_id = Uuid::new_v4().to_string();
+
+            SQLiteInventoryRepository::insert_movement_in_tx(
+                tx,
+                &StockMovement {
+                    id: Uuid::new_v4().to_string(),
+                    product_id: dto_clone.product_id.clone(),
+                    branch_id: dto_clone.from_branch_id.clone(),
+                    movement_type: StockMovementType::Out,
+                    quantity: dto_clone.quantity,
+                    previous_stock: from_prev,
+                    resulting_stock: from_new,
+                    reason: dto_clone.reason.clone(),
+                    performed_by: user_id_owned.clone(),
+                    reference_id: dto_clone.reference_id.clone(),
+                    created_at: now.clone(),
+                },
+            )?;
+
+            SQLiteInventoryRepository::insert_movement_in_tx(
+                tx,
+                &StockMovement {
+                    id: Uuid::new_v4().to_string(),
+                    product_id: dto_clone.product_id.clone(),
+                    branch_id: dto_clone.to_branch_id.clone(),
+                    movement_type: StockMovementType::In,
+                    quantity: dto_clone.quantity,
+                    previous_stock: to_prev,
+                    resulting_stock: to_new,
+                    reason: dto_clone.reason.clone(),
+                    performed_by: user_id_owned.clone(),
+                    reference_id: dto_clone.reference_id.clone(),
+                    created_at: now.clone(),
+                },
+            )?;
+
+            let inv_event = InventoryOperationSyncEventDto {
+                operation_id: op_id,
+                operation_type: "TRANSFER".to_string(),
+                product_id: dto_clone.product_id.clone(),
+                branch_id: dto_clone.from_branch_id.clone(),
+                to_branch_id: Some(dto_clone.to_branch_id.clone()),
+                quantity: dto_clone.quantity,
+                target_quantity: None,
+                reason: dto_clone.reason.clone(),
+                performed_by: user_id_owned,
+                created_at: now,
+            };
+
+            let payload = serde_json::to_string(&inv_event)
+                .map_err(|e| DbError::ValidationError(e.to_string()))?;
+
+            let sync_dto = crate::domain::sync_queue::EnqueueOfflineEventDto {
+                client_event_id: Some(inv_event.operation_id.clone()),
+                terminal_id,
+                organization_id: NIAZI_ORGANIZATION_ID.to_string(),
+                branch_id: dto_clone.from_branch_id.clone(),
+                event_type: "INVENTORY_OPERATION_RECORDED".to_string(),
+                payload,
+            };
+            SQLiteSyncQueueRepository::enqueue_in_tx(tx, sync_dto)?;
+
+            Ok(())
+        })
+        .await?;
+
+        Ok(())
     }
 
     pub async fn get_stock(&self, product_id: &str, branch_id: &str) -> AppResult<i64> {

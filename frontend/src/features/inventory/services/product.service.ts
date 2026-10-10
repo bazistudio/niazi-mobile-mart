@@ -111,23 +111,23 @@ export const productService = {
     const initialQty = Number(productData.initial_quantity ?? productData.initialQuantity ?? productData.quantity ?? 0);
 
     let branchId = productData.branch_id || productData.branchId || null;
-    if (initialQty > 0 && !branchId) {
+    if (!branchId) {
       branchId = getActiveBranchId();
     }
 
     const rawCatId = productData.categoryId || productData.category_id;
-    if (!rawCatId || rawCatId.length !== 36) {
+    if (!rawCatId || typeof rawCatId !== 'string' || rawCatId.trim().length === 0) {
       throw new Error("Invalid or missing Type (Category) ID. Please select a valid Type from the dropdown.");
     }
-    const categoryId = rawCatId;
+    const categoryId = rawCatId.trim();
 
-    const parseUuidOrNull = (val: any) => (typeof val === 'string' && val.trim().length === 36) ? val.trim() : null;
+    const parseValueOrNull = (val: any) => (typeof val === 'string' && val.trim().length > 0) ? val.trim() : null;
 
-    const brandId = parseUuidOrNull(productData.brandId || productData.brand_id);
-    const companyId = parseUuidOrNull(productData.companyId || productData.company_id);
-    const colorId = parseUuidOrNull(productData.colorId || productData.color_id);
-    const qualityId = parseUuidOrNull(productData.qualityId || productData.quality_id);
-    const unitId = parseUuidOrNull(productData.unitId || productData.unit_id);
+    const brandId = parseValueOrNull(productData.brandId || productData.brand_id);
+    const companyId = parseValueOrNull(productData.companyId || productData.company_id);
+    const colorId = parseValueOrNull(productData.colorId || productData.color_id);
+    const qualityId = parseValueOrNull(productData.qualityId || productData.quality_id);
+    const unitId = parseValueOrNull(productData.unitId || productData.unit_id);
 
     const created = await tauriClient.productCreate({
       name: productData.name,
@@ -143,9 +143,9 @@ export const productService = {
       sale_price: Math.round(Number(productData.price || productData.sale_price || 0)),
       low_stock_threshold: Number(productData.lowStockThreshold || productData.minStock || 5),
       description: productData.description || null,
-      initial_quantity: initialQty > 0 ? initialQty : null,
-      branch_id: initialQty > 0 ? branchId : null,
-      initial_branch_id: initialQty > 0 ? branchId : null,
+      initial_quantity: initialQty > 0 ? initialQty : 0,
+      branch_id: branchId,
+      initial_branch_id: branchId,
     });
 
     const [categories, brands, companies, colors, qualities] = await Promise.all([
@@ -187,14 +187,25 @@ export const productService = {
   },
 
   updateProduct: async (id: string, productData: any): Promise<InventoryProduct> => {
+    const parseValueOrUndefined = (val: any) => (typeof val === 'string' && val.trim().length > 0) ? val.trim() : undefined;
+
     const rawCatId = productData.categoryId || productData.category_id;
-    const categoryId = (rawCatId && rawCatId.length === 36) ? rawCatId : undefined;
+    const categoryId = parseValueOrUndefined(rawCatId);
 
     const rawBrandId = productData.brandId || productData.brand_id;
-    const brandId = (rawBrandId && rawBrandId.length === 36) ? rawBrandId : undefined;
+    const brandId = parseValueOrUndefined(rawBrandId);
+
+    const rawCompId = productData.companyId || productData.company_id;
+    const companyId = parseValueOrUndefined(rawCompId);
+
+    const rawColorId = productData.colorId || productData.color_id;
+    const colorId = parseValueOrUndefined(rawColorId);
+
+    const rawQualityId = productData.qualityId || productData.quality_id;
+    const qualityId = parseValueOrUndefined(rawQualityId);
 
     const rawUnitId = productData.unitId || productData.unit_id;
-    const unitId = (rawUnitId && rawUnitId.length === 36) ? rawUnitId : undefined;
+    const unitId = parseValueOrUndefined(rawUnitId);
 
     const updated = await tauriClient.productUpdate(id, {
       name: productData.name,
@@ -202,9 +213,9 @@ export const productService = {
       barcode: productData.barcode || null,
       category_id: categoryId,
       brand_id: brandId,
-      company_id: productData.companyId || productData.company_id || null,
-      color_id: productData.colorId || productData.color_id || null,
-      quality_id: productData.qualityId || productData.quality_id || null,
+      company_id: companyId,
+      color_id: colorId,
+      quality_id: qualityId,
       unit_id: unitId,
       purchase_price: productData.purchasePrice !== undefined ? Math.round(Number(productData.purchasePrice)) : undefined,
       sale_price: productData.price !== undefined ? Math.round(Number(productData.price)) : undefined,
@@ -239,6 +250,8 @@ export const productService = {
     const colorName = updated.color_id ? (colors.find(c => c.id === updated.color_id)?.name || updated.color_id) : '-';
     const qualityName = updated.quality_id ? (qualities.find(q => q.id === updated.quality_id)?.name || updated.quality_id) : '-';
     const currentStock = productData.quantity !== undefined ? Number(productData.quantity) : (stockMap[updated.id] ?? 0);
+
+    platformAdapter.emitEvent('inventory-updated');
 
     return {
       id: updated.id,

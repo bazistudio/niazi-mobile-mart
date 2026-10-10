@@ -32,8 +32,6 @@ import {
 } from '../repositories/product.repo';
 import { importOpeningStock, ImportOpeningStockDto } from '../repositories/opening_stock.repo';
 
-import { proxyToCentralServer } from '../server';
-
 // ─── Error Response Helper ────────────────────────────────────────────────────
 
 function isDbConnectionError(err: unknown): boolean {
@@ -51,22 +49,10 @@ function isDbConnectionError(err: unknown): boolean {
 
 export { authorizePermission };
 
-export function sendError(req: Request, res: Response, err: unknown): void {
+export function sendError(_req: Request, res: Response, err: unknown): void {
   console.error('[product.routes] Error handled by sendError:', err);
   if (isDbConnectionError(err)) {
-    // Only proxy read-only requests. Write requests (POST/PUT/DELETE/PATCH) must NOT be
-    // automatically retried through Rust: if the TS transaction already committed server-side
-    // before the connection dropped, a proxy retry would create a duplicate record.
-    if (req.method === 'GET' || req.method === 'HEAD') {
-      console.warn('[product.routes] DB connection unavailable on read; proxying to Central Server Cloud Run...');
-      proxyToCentralServer(req, res);
-      return;
-    }
-    console.error('[product.routes] DB connection error on write route — returning 502, NOT proxying to prevent duplicate data');
-    res.status(502).json({
-      error: 'Database connection error',
-      message: 'Write outcome is unknown. The operation was not automatically retried to prevent duplicate data.',
-    });
+    res.status(503).json({ error: 'Database service unavailable', message: (err as Error).message });
     return;
   }
   if (err instanceof RepoError) {
@@ -180,19 +166,38 @@ export function createProductRouter(pool: Pool): Router {
       }
 
       const id = uuidv4();
-      const initialQty = dto.initial_quantity ?? 0;
-      const branchId = dto.branch_id ?? identity.branch_id ?? null;
+      const initialQty = Number(
+        dto.initial_quantity ??
+        (dto as any).initialQuantity ??
+        (dto as any).quantity ??
+        0
+      );
+      const rawBranch = String(
+        dto.branch_id ??
+        (dto as any).branchId ??
+        (dto as any).initial_branch_id ??
+        identity.branch_id ??
+        ''
+      ).trim();
+      const branchId = rawBranch.length === 36 ? rawBranch : '00000000-0000-0000-0000-000000000002';
+
+      // Always spread resolved branchId and initial_quantity so createProduct/createProductWithInitialStock receive normalized values.
+      const dtoWithBranch = {
+        ...dto,
+        branch_id: branchId,
+        initial_quantity: initialQty > 0 ? initialQty : null,
+      };
 
       let product;
       if (initialQty > 0 && branchId) {
         product = await createProductWithInitialStock(
           pool,
           id,
-          { ...dto, branch_id: branchId },
+          dtoWithBranch,
           identity.user_id
         );
       } else {
-        product = await createProduct(pool, id, dto);
+        product = await createProduct(pool, id, dtoWithBranch);
       }
 
       res.status(201).json(product);

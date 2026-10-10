@@ -55,28 +55,35 @@ export async function importOpeningStock(
     // Ensure opening_stock_entries table exists
     await client.query(`
       CREATE TABLE IF NOT EXISTS opening_stock_entries (
-        id UUID PRIMARY KEY,
-        organization_id UUID NOT NULL,
-        branch_id UUID NOT NULL,
-        product_id UUID NOT NULL,
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        branch_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
         quantity BIGINT NOT NULL,
         unit_cost BIGINT NOT NULL DEFAULT 0,
         reference_number VARCHAR(100),
-        performed_by UUID,
+        performed_by TEXT,
         notes TEXT,
-        created_at TIMESTAMPTZ NOT NULL
+        created_at TEXT NOT NULL
       )
     `);
 
     // Resolve Branch & Org
+    // P8 fix: No hardcoded UUID fallback. Resolve MAIN branch from DB, or fail explicitly.
     let branchId = dto.branch_id?.trim();
     if (!branchId || branchId.length === 0) {
-      const bRow = await client.query("SELECT id FROM branches WHERE code = 'MAIN' LIMIT 1");
-      branchId = (bRow.rows[0]?.id as string) ?? '00000000-0000-0000-0000-000000000001';
+      const bRow = await client.query("SELECT id FROM branches WHERE code = 'MAIN' AND is_active = TRUE LIMIT 1");
+      if (bRow.rows.length === 0) {
+        throw new OpeningStockRepoError('Cannot resolve MAIN branch. Please provide an explicit branch_id.', 400);
+      }
+      branchId = bRow.rows[0]?.id as string;
     }
 
     const orgRow = await client.query('SELECT organization_id FROM branches WHERE id = $1', [branchId]);
-    const orgId = ((orgRow.rows[0] as Record<string, unknown>)?.['organization_id'] as string) ?? '00000000-0000-0000-0000-000000000001';
+    if (orgRow.rows.length === 0) {
+      throw new OpeningStockRepoError(`Branch '${branchId}' not found`, 404);
+    }
+    const orgId = (orgRow.rows[0] as Record<string, unknown>)?.['organization_id'] as string;
 
     const now = new Date().toISOString();
     const refNo = dto.reference_number || `OP-${Date.now()}`;
@@ -102,7 +109,7 @@ export async function importOpeningStock(
         `INSERT INTO opening_stock_entries (
            id, organization_id, branch_id, product_id, quantity, unit_cost, reference_number, performed_by, notes, created_at
          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [entryId, orgId, branchId, item.product_id, item.quantity, unitCost, refNo, userId ?? null, item.notes ?? null, now]
+        [entryId, orgId, branchId, item.product_id, item.quantity, unitCost, refNo, userId ? String(userId) : null, item.notes ?? null, now]
       );
 
       // 2. Fetch current stock & update/upsert stock
@@ -123,8 +130,8 @@ export async function importOpeningStock(
         ]);
       } else {
         await client.query(
-          `INSERT INTO stock (product_id, branch_id, quantity, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $4)`,
+          `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+           VALUES ($1, $2, $3, $4)`,
           [item.product_id, branchId, item.quantity, now]
         );
       }

@@ -1,6 +1,6 @@
 [package]
 name = "niazi-mobile-mart"
-version = "1.3.13"
+version = "1.3.30"
 description = "Niazi Mobile Mart - Desktop ERP & POS"
 authors = ["Niazi Mobile Mart"]
 edition = "2021"
@@ -12,10 +12,6 @@ crate-type = ["staticlib", "rlib"]
 [[bin]]
 name = "niazi-mobile-mart"
 path = "src/main.rs"
-
-[[bin]]
-name = "niazi-server"
-path = "src/bin/server.rs"
 
 [dev-dependencies]
 # Test-only RSA key generation for JWT unit tests (no embedded private keys in source).
@@ -33,8 +29,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
 tokio = { version = "1.43", features = ["sync", "rt", "rt-multi-thread", "macros", "time", "net", "signal"] }
-axum = "0.7"
-tower-http = { version = "0.5", features = ["cors"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 tracing-appender = "0.2"

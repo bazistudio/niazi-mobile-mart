@@ -4,7 +4,7 @@ import { usePermissions } from '@/lib/auth/usePermissions';
 
 export function InventoryImportPage() {
   const { role } = usePermissions();
-  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN' || role === 'SHOP_ADMIN';
 
   if (!isOrgAdmin) {
     return (

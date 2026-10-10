@@ -13,7 +13,8 @@ import { usePermissions } from '@/lib/auth/usePermissions';
 import { PERMISSIONS } from '@/constants/permissions';
 import {
   useStaff,
-  useUpdateStaffStatus,
+  useSuspendStaff,
+  useReactivateStaff,
   useApproveStaff,
   useRejectStaff,
   useResetStaffPassword,
@@ -27,7 +28,8 @@ export const WorkforcePage: React.FC = () => {
   const canManageUsers = hasPermission(PERMISSIONS.USERS_MANAGE);
 
   const { data: staffList = [], isLoading, isError, error } = useStaff();
-  const updateStatus = useUpdateStaffStatus();
+  const suspendStaff = useSuspendStaff();
+  const reactivateStaff = useReactivateStaff();
   const approveStaff = useApproveStaff();
   const rejectStaff = useRejectStaff();
   const resetStaffPassword = useResetStaffPassword();
@@ -105,9 +107,13 @@ export const WorkforcePage: React.FC = () => {
       setChangePinStaff(staff);
     } else if (mode === 'disable') {
       try {
-        const nextStatus = staff.status === 'active' ? 'suspended' : 'active';
-        await updateStatus.mutateAsync({ id: staff._id, status: nextStatus });
-        toast.success(`Employee status changed to ${nextStatus}`);
+        if (staff.status === 'active') {
+          await suspendStaff.mutateAsync(staff._id);
+          toast.success(`${staff.name} has been suspended.`);
+        } else {
+          await reactivateStaff.mutateAsync(staff._id);
+          toast.success(`${staff.name} has been reactivated.`);
+        }
       } catch (err: any) {
         toast.error(err.message || 'Failed to update employee status');
       }

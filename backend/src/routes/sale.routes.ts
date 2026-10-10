@@ -15,7 +15,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, isAdmin, RequestIdentity } from '../auth';
+import { authMiddleware, authorizePermission, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity } from '../auth';
 import {
   completeSale,
   getSaleById,
@@ -27,8 +27,6 @@ import {
   CompleteSaleDto,
   SaleFilterDto,
 } from '../repositories/sale.repo';
-
-import { proxyToCentralServer } from '../server';
 
 // ─── Error Response Helper ────────────────────────────────────────────────────
 
@@ -45,23 +43,10 @@ function isDbConnectionError(err: unknown): boolean {
   );
 }
 
-function sendError(req: Request, res: Response, err: unknown): void {
+function sendError(_req: Request, res: Response, err: unknown): void {
   console.error('[sale.routes] Error handled by sendError:', err);
   if (isDbConnectionError(err)) {
-    // Only proxy read-only requests. Write requests (POST/PUT/DELETE/PATCH) must NOT be
-    // automatically retried through Rust: if the TS transaction already committed server-side
-    // before the connection dropped, a proxy retry would create a duplicate record (duplicate
-    // sale, double stock deduction, double payment).
-    if (req.method === 'GET' || req.method === 'HEAD') {
-      console.warn('[sale.routes] DB connection unavailable on read; proxying to Central Server...');
-      proxyToCentralServer(req, res);
-      return;
-    }
-    console.error('[sale.routes] DB connection error on write route — returning 502, NOT proxying to prevent duplicate data');
-    res.status(502).json({
-      error: 'Database connection error',
-      message: 'Write outcome is unknown. The operation was not automatically retried to prevent duplicate data.',
-    });
+    res.status(503).json({ error: 'Database service unavailable', message: (err as Error).message });
     return;
   }
   if (err instanceof SaleRepoError) {
@@ -70,19 +55,6 @@ function sendError(req: Request, res: Response, err: unknown): void {
   }
   const message = err instanceof Error ? err.message : 'Internal server error';
   res.status(500).json({ error: message });
-}
-
-// ─── Branch Access Helper ─────────────────────────────────────────────────────
-
-/**
- * Checks if identity has access to a given branch.
- * Mirrors AuthService::require_branch_access in src-tauri/src/services/auth_service.rs.
- */
-function canAccessBranch(identity: RequestIdentity, branchId: string): boolean {
-  if (isAdmin(identity)) return true;
-  if (identity.access_profile.allowed_pages.some((p) => p === '*')) return true;
-  if (!identity.branch_id) return true;
-  return identity.branch_id === branchId;
 }
 
 // ─── Router Factory ───────────────────────────────────────────────────────────
@@ -104,13 +76,12 @@ export function createSaleRouter(pool: Pool): Router {
 
     try {
       const dto = req.body as CompleteSaleDto;
+      const callerIsOrgAdmin = isOrgAdmin(identity);
 
-      // Enforce branch: if dto has no branch_id, use identity's branch (mirrors require_branch_access)
-      if (!dto.branch_id && identity.branch_id) {
-        dto.branch_id = identity.branch_id;
-      }
-
-      const result = await completeSale(pool, dto, identity.user_id);
+      // P1 security fix: branch is resolved from server-side JWT identity, NOT from client DTO.
+      // Non-org-admins always sell from their assigned branch regardless of what the client sends.
+      // Org admins may select a branch explicitly via dto.branch_id; if omitted, identity branch is used.
+      const result = await completeSale(pool, dto, identity.user_id, identity.branch_id, callerIsOrgAdmin);
       res.status(201).json(result);
     } catch (err) {
       sendError(req, res, err);
@@ -128,13 +99,23 @@ export function createSaleRouter(pool: Pool): Router {
     }
 
     try {
-      const isOrgAdmin =
-        isAdmin(identity) ||
-        identity.access_profile.allowed_pages.some((p) => p === '*');
+      const callerIsOrgAdmin = isOrgAdmin(identity);
+      const requestedBranch = (req.query['branch_id'] as string) || null;
+      let effectiveBranchId: string | null = null;
+
+      if (callerIsOrgAdmin) {
+        effectiveBranchId = requestedBranch;
+      } else {
+        if (!identity.branch_id) {
+          res.status(403).json({ error: 'Access denied: User has no assigned branch' });
+          return;
+        }
+        effectiveBranchId = identity.branch_id;
+      }
 
       const filter: SaleFilterDto = {
         customer_id: (req.query['customer_id'] as string) || null,
-        branch_id: (req.query['branch_id'] as string) || null,
+        branch_id: effectiveBranchId,
         payment_status: (req.query['payment_status'] as string) || null,
         sale_status: (req.query['sale_status'] as string) || null,
         start_date: (req.query['start_date'] as string) || null,
@@ -142,11 +123,6 @@ export function createSaleRouter(pool: Pool): Router {
         limit: req.query['limit'] ? parseInt(req.query['limit'] as string, 10) : 50,
         offset: req.query['offset'] ? parseInt(req.query['offset'] as string, 10) : null,
       };
-
-      // Non-org-admin users are restricted to their own branch
-      if (!isOrgAdmin && !filter.branch_id) {
-        filter.branch_id = identity.branch_id;
-      }
 
       const sales = await listSales(pool, filter);
       res.status(200).json(sales);

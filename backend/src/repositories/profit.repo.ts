@@ -33,11 +33,43 @@ export interface ProductProfitDto {
   gross_margin: number;
 }
 
+export interface ProfitMetricsDto {
+  gross_revenue: number;
+  discounts: number;
+  net_revenue: number;
+  cogs: number;
+  gross_profit: number;
+  gross_margin: number;
+  orders_count: number;
+}
+
+export interface DashboardProfitSummaryDto {
+  today: ProfitMetricsDto;
+  this_month: ProfitMetricsDto;
+  total: ProfitMetricsDto;
+}
+
 export class ProfitRepoError extends Error {
   constructor(message: string, public readonly statusCode: number = 400) {
     super(message);
     this.name = 'ProfitRepoError';
   }
+}
+
+function parseLocalDateStart(dateStr: string): string {
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+    return new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0).toISOString();
+  }
+  return dateStr;
+}
+
+function parseLocalDateEnd(dateStr: string): string {
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+    return new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59, 999).toISOString();
+  }
+  return dateStr;
 }
 
 export async function getProfitSummary(
@@ -53,12 +85,14 @@ export async function getProfitSummary(
     params.push(filter.branch_id);
   }
   if (filter?.start_date) {
+    const sDate = filter.start_date.length === 10 ? parseLocalDateStart(filter.start_date) : filter.start_date;
     salesWhere += ` AND created_at >= $${pIdx++}`;
-    params.push(filter.start_date);
+    params.push(sDate);
   }
   if (filter?.end_date) {
+    const eDate = filter.end_date.length === 10 ? parseLocalDateEnd(filter.end_date) : filter.end_date;
     salesWhere += ` AND created_at <= $${pIdx++}`;
-    params.push(filter.end_date);
+    params.push(eDate);
   }
 
   const salesSummaryQuery = `
@@ -80,12 +114,14 @@ export async function getProfitSummary(
     lineParams.push(filter.branch_id);
   }
   if (filter?.start_date) {
+    const sDate = filter.start_date.length === 10 ? parseLocalDateStart(filter.start_date) : filter.start_date;
     linesWhere += ` AND created_at >= $${lpIdx++}`;
-    lineParams.push(filter.start_date);
+    lineParams.push(sDate);
   }
   if (filter?.end_date) {
+    const eDate = filter.end_date.length === 10 ? parseLocalDateEnd(filter.end_date) : filter.end_date;
     linesWhere += ` AND created_at <= $${lpIdx++}`;
-    lineParams.push(filter.end_date);
+    lineParams.push(eDate);
   }
   linesWhere += ')';
 
@@ -131,4 +167,45 @@ export async function getProfitSummary(
     console.error('[profit.repo] Error fetching profit summary:', err);
     throw new ProfitRepoError('Failed to fetch profit summary report', 500);
   }
+}
+
+async function getPeriodProfitMetrics(
+  pool: Pool,
+  startDate?: string,
+  endDate?: string,
+  branchId?: string | null
+): Promise<ProfitMetricsDto> {
+  const summary = await getProfitSummary(pool, {
+    start_date: startDate,
+    end_date: endDate,
+    branch_id: branchId,
+  });
+
+  return {
+    gross_revenue: summary.gross_sales,
+    discounts: summary.total_discounts,
+    net_revenue: summary.net_sales,
+    cogs: summary.total_cogs,
+    gross_profit: summary.gross_profit,
+    gross_margin: summary.gross_margin,
+    orders_count: summary.total_invoices,
+  };
+}
+
+export async function getDashboardProfitSummary(
+  pool: Pool,
+  branchId?: string | null
+): Promise<DashboardProfitSummaryDto> {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString();
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).toISOString();
+
+  const [today, this_month, total] = await Promise.all([
+    getPeriodProfitMetrics(pool, todayStart, todayEnd, branchId),
+    getPeriodProfitMetrics(pool, monthStart, undefined, branchId),
+    getPeriodProfitMetrics(pool, undefined, undefined, branchId),
+  ]);
+
+  return { today, this_month, total };
 }

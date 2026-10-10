@@ -99,6 +99,7 @@ export interface SaleFilterDto {
   branch_id?: string | null;
   payment_status?: string | null;
   sale_status?: string | null;
+  search?: string | null;
   start_date?: string | null;
   end_date?: string | null;
   limit?: number | null;
@@ -119,7 +120,10 @@ export class SaleRepoError extends Error {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const DEFAULT_MAIN_BRANCH_ID = '00000000-0000-0000-0000-000000000001';
+// NOTE: This constant is intentionally removed. Branch resolution must use
+// authenticated identity or database lookup. No hardcoded UUID fallback is safe.
+// Kept as a named error for clarity if branch cannot be resolved.
+// (P8 fix: was incorrectly pointing to org UUID 000...0001, not a branch UUID)
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -127,14 +131,27 @@ const DEFAULT_MAIN_BRANCH_ID = '00000000-0000-0000-0000-000000000001';
  * Mirrors normalize_payment_method() in src-tauri/src/domain/sales.rs.
  */
 function normalizePaymentMethod(method: string): string {
+  if (!method) return 'CASH';
   const m = method.trim().toUpperCase();
   if (m === 'CASH') return 'CASH';
-  if (m === 'CARD') return 'CARD';
-  if (m === 'BANK' || m === 'BANK_TRANSFER') return 'BANK_TRANSFER';
+  if (m === 'CARD' || m === 'DEBIT_CARD' || m === 'CREDIT_CARD' || m === 'CARD_PAYMENT') return 'CARD';
+  if (m === 'BANK' || m === 'BANK_TRANSFER' || m === 'BANK TRANSFER') return 'BANK_TRANSFER';
   if (m === 'EASYPAISA') return 'EASYPAISA';
   if (m === 'JAZZCASH') return 'JAZZCASH';
-  if (m === 'CREDIT') return 'CREDIT';
-  return 'CASH';
+  if (
+    m === 'CREDIT' ||
+    m === 'DEBT' ||
+    m === 'DEBIT' ||
+    m === 'UDHAR' ||
+    m === 'CUSTOMER_CREDIT' ||
+    m === 'ON_ACCOUNT' ||
+    m === 'DUE' ||
+    m === 'CUSTOMER_LEDGER' ||
+    m === 'RECEIVABLE'
+  ) {
+    return 'CREDIT';
+  }
+  return m || 'CASH';
 }
 
 /**
@@ -194,28 +211,71 @@ function mapSaleRow(row: Record<string, unknown>): Sale {
  * Core sale transaction logic.
  * Mirrors PostgresSaleRepository::complete_sale_tx() in postgres_sale_repo.rs exactly.
  * Uses an already-acquired PoolClient; caller manages BEGIN/COMMIT/ROLLBACK.
+ *
+ * P1 fix: identityBranchId is the branch from the server-verified JWT, NOT from the client DTO.
+ * For non-admins this MUST be set and will override any client-supplied dto.branch_id.
+ * For admins, dto.branch_id is accepted if present, otherwise identityBranchId is used.
  */
 export async function completeSaleTx(
   client: PoolClient,
   dto: CompleteSaleDto,
   userId: string | null,
-  saleIdOverride?: string | null
+  saleIdOverride?: string | null,
+  identityBranchId?: string | null,
+  callerIsAdmin?: boolean
 ): Promise<SaleResultDto> {
   // Step 1: Empty cart check
   if (!dto.items || dto.items.length === 0) {
     throw new SaleRepoError('Cannot complete sale with empty cart', 400);
   }
 
-  // Step 2: Resolve Branch ID
+  // Step 2: Resolve Branch ID — P1 security fix
+  // Non-admins: always use identity branch from JWT; ignore client dto.branch_id.
+  // Admins: may use dto.branch_id if provided, otherwise fall back to identity branch.
+  // No hardcoded UUID fallback is ever allowed.
   let branchId: string;
-  const rawBranchId = dto.branch_id?.trim();
-  if (rawBranchId && rawBranchId.length > 0) {
-    branchId = rawBranchId;
+  if (!callerIsAdmin) {
+    // Non-admin: enforce identity branch from server-side JWT
+    if (!identityBranchId || !identityBranchId.trim()) {
+      throw new SaleRepoError(
+        'Branch assignment is required. Your account is not assigned to a branch. Contact your administrator.',
+        403
+      );
+    }
+    branchId = identityBranchId.trim();
   } else {
-    const branchRow = await client.query(
-      "SELECT id FROM branches WHERE code = 'MAIN' LIMIT 1"
-    );
-    branchId = (branchRow.rows[0]?.id as string) ?? DEFAULT_MAIN_BRANCH_ID;
+    // Admin: prefer explicit dto.branch_id selection, fall back to identity branch
+    const rawBranchId = dto.branch_id?.trim();
+    if (rawBranchId && rawBranchId.length > 0) {
+      branchId = rawBranchId;
+    } else if (identityBranchId && identityBranchId.trim().length > 0) {
+      branchId = identityBranchId.trim();
+    } else {
+      // Admin with no branch context: resolve MAIN from DB (no hardcoded UUID)
+      const branchRow = await client.query(
+        "SELECT id FROM branches WHERE code = 'MAIN' AND is_active = TRUE LIMIT 1"
+      );
+      if (branchRow.rows.length === 0) {
+        throw new SaleRepoError(
+          'Cannot resolve MAIN branch. Please select a branch explicitly.',
+          400
+        );
+      }
+      branchId = branchRow.rows[0].id as string;
+    }
+  }
+
+  // P1 fix: Validate the resolved branch exists and is active
+  const branchValidRow = await client.query(
+    'SELECT id, is_active FROM branches WHERE id = $1',
+    [branchId]
+  );
+  if (branchValidRow.rows.length === 0) {
+    throw new SaleRepoError(`Branch '${branchId}' not found`, 400);
+  }
+  const branchActive = branchValidRow.rows[0]?.['is_active'];
+  if (branchActive === false || branchActive === 0) {
+    throw new SaleRepoError(`Branch '${branchId}' is inactive`, 400);
   }
 
   // Step 3: Validate Customer if provided
@@ -284,7 +344,10 @@ export async function completeSaleTx(
     const salePrice = Number(prod['sale_price'] ?? 0);
     const purchasePrice = Number(prod['purchase_price'] ?? 0);
     const avgCost = Number(prod['average_cost'] ?? 0);
-    const costPrice = avgCost > 0 ? avgCost : purchasePrice;
+    let costPrice = avgCost > 0 ? avgCost : purchasePrice;
+    if (purchasePrice > 0 && avgCost > purchasePrice * 3) {
+      costPrice = purchasePrice;
+    }
 
     const lineDisc = Math.max(Number(item.discount ?? 0), 0);
     const subtotalLine = salePrice * item.quantity;
@@ -333,8 +396,20 @@ export async function completeSaleTx(
 
   // Legacy fallback: single paid_amount + payment_method
   if (tenderInputs.length === 0) {
-    const legacyAmount = Math.max(Number(dto.paid_amount ?? totalAmount), 0);
     const legacyMethod = normalizePaymentMethod(dto.payment_method ?? 'CASH');
+    let rawPaid: number;
+    if (dto.paid_amount !== undefined && dto.paid_amount !== null && !isNaN(Number(dto.paid_amount))) {
+      const val = Number(dto.paid_amount);
+      if (val === 0 && legacyMethod !== 'CREDIT' && customerOpt === null) {
+        // Walk-in customer non-credit sale defaults to full payment
+        rawPaid = totalAmount;
+      } else {
+        rawPaid = val;
+      }
+    } else {
+      rawPaid = legacyMethod === 'CREDIT' ? 0 : totalAmount;
+    }
+    const legacyAmount = Math.max(rawPaid, 0);
     if (legacyMethod !== 'CREDIT' && legacyAmount > 0) {
       tenderInputs.push({
         method: legacyMethod,
@@ -383,11 +458,23 @@ export async function completeSaleTx(
   const uid = userId ?? null;
 
   // Step 9: Validate stock availability for all lines (FOR UPDATE lock)
+  // P1 fix: if no stock row exists for (product, branch), fail explicitly — do NOT treat as zero.
+  // A missing stock row means inventory was never initialized for this branch; silently proceeding
+  // would allow phantom sales with no real stock deduction.
   for (const line of preparedLines) {
     const stockRow = await client.query(
       'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2 FOR UPDATE',
       [line.product_id, branchId]
     );
+
+    if (stockRow.rows.length === 0) {
+      throw new SaleRepoError(
+        `Stock record not found for product '${line.product_name}' at this branch. ` +
+        `Please initialize stock before selling.`,
+        400
+      );
+    }
+
     const currentStock = Number((stockRow.rows[0] as Record<string, unknown>)?.['quantity'] ?? 0);
 
     if (currentStock < line.quantity) {
@@ -421,19 +508,18 @@ export async function completeSaleTx(
   // Resolve User Short Code (e.g. U01, U17)
   let userCode = 'U01';
   if (userId && userId !== '00000000-0000-0000-0000-000000000001') {
-    const userRow = await client.query(
-      'SELECT username, user_code FROM users WHERE id = $1',
-      [userId]
-    );
-    if (userRow.rows.length > 0) {
-      const u = userRow.rows[0] as Record<string, unknown>;
-      if (u['user_code']) {
-        userCode = String(u['user_code']);
-      } else {
-        // Derive stable short user code from user ID hex suffix
+    try {
+      const userRow = await client.query(
+        'SELECT username FROM users WHERE id = $1',
+        [userId]
+      );
+      if (userRow.rows.length > 0) {
         const shortHex = userId.replace(/-/g, '').slice(-2).toUpperCase();
         userCode = `U${shortHex}`;
       }
+    } catch {
+      const shortHex = userId.replace(/-/g, '').slice(-2).toUpperCase();
+      userCode = `U${shortHex}`;
     }
   }
 
@@ -538,17 +624,28 @@ export async function completeSaleTx(
        line.unit_price, line.cost_price, line.quantity, line.discount, line.line_total, now]
     );
 
-    const currentStockRow = await client.query(
-      'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2',
-      [line.product_id, branchId]
+    // P1 fix: Use atomic relative UPDATE (quantity = quantity - $1) instead of read-then-write.
+    // This eliminates the race condition where a second concurrent sale could read the same
+    // pre-deduction quantity and both succeed. RETURNING gives us the before/after for movement record.
+    const stockUpdateRes = await client.query(
+      `UPDATE stock
+         SET quantity = quantity - $1, updated_at = $2
+         WHERE product_id = $3 AND branch_id = $4
+         RETURNING (quantity + $1) AS previous_stock, quantity AS new_stock`,
+      [line.quantity, now, line.product_id, branchId]
     );
-    const currentStock = Number((currentStockRow.rows[0] as Record<string, unknown>)?.['quantity'] ?? 0);
-    const newStock = currentStock - line.quantity;
 
-    await client.query(
-      'UPDATE stock SET quantity = $1, updated_at = $2 WHERE product_id = $3 AND branch_id = $4',
-      [newStock, now, line.product_id, branchId]
-    );
+    if (stockUpdateRes.rowCount === 0) {
+      // Should not happen since Step 9 already checked, but guard against TOCTOU
+      throw new SaleRepoError(
+        `Stock deduction failed for product '${line.product_name}': row disappeared unexpectedly`,
+        500
+      );
+    }
+
+    const stockUpdateRow = stockUpdateRes.rows[0] as Record<string, unknown>;
+    const currentStock = Number(stockUpdateRow['previous_stock'] ?? 0);
+    const newStock = Number(stockUpdateRow['new_stock'] ?? 0);
 
     const movementId = uuidv4();
     const reason = `Sale Checkout ${invoiceNumber}`;
@@ -602,6 +699,9 @@ export async function completeSaleTx(
   }
 
   // Step 15: Record Cash Movement for CASH portion
+  // F-07 Fix: Reject the entire sale if a CASH payment is tendered but no cash session is open.
+  // Previously openSessionId was silently set to null, creating orphaned cash_movements rows
+  // that could never be reconciled against a cash session.
   const allocatedCash = salePayments
     .filter((p) => p.payment_method === 'CASH')
     .reduce((sum, p) => sum + p.amount, 0);
@@ -612,6 +712,17 @@ export async function completeSaleTx(
       [branchId]
     );
     const openSessionId: string | null = ((openSessionRow.rows[0] as Record<string, unknown>)?.['id'] as string) ?? null;
+
+    // Enforce: a CASH payment requires an open cash session. Without one, the cash movement
+    // cannot be tied to a session for reconciliation. Reject with a clear message so the
+    // cashier opens a session before accepting cash.
+    if (!openSessionId) {
+      throw Object.assign(
+        new Error('No open cash session found for this branch. Please open a cash session before accepting cash payments.'),
+        { statusCode: 400 }
+      );
+    }
+
     const cashMvId = uuidv4();
     const desc = `Retail Sale Payment ${invoiceNumber}`;
 
@@ -641,12 +752,14 @@ export async function completeSaleTx(
 export async function completeSale(
   pool: Pool,
   dto: CompleteSaleDto,
-  userId: string | null
+  userId: string | null,
+  identityBranchId?: string | null,
+  callerIsAdmin?: boolean
 ): Promise<SaleResultDto> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const result = await completeSaleTx(client, dto, userId);
+    const result = await completeSaleTx(client, dto, userId, null, identityBranchId, callerIsAdmin);
     await client.query('COMMIT');
     return result;
   } catch (err) {
@@ -718,6 +831,22 @@ export async function getSalePayments(pool: Pool, saleId: string): Promise<SaleP
   });
 }
 
+function parseLocalDateStart(dateStr: string): string {
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+    return new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0).toISOString();
+  }
+  return dateStr;
+}
+
+function parseLocalDateEnd(dateStr: string): string {
+  const parts = dateStr.split('-').map(Number);
+  if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+    return new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59, 999).toISOString();
+  }
+  return dateStr;
+}
+
 export async function listSales(pool: Pool, filter?: SaleFilterDto | null): Promise<Sale[]> {
   let query = `SELECT id, invoice_number, branch_id, customer_id, customer_name_snapshot,
                       subtotal, discount, tax_amount, total_amount, paid_amount, change_amount,
@@ -743,13 +872,21 @@ export async function listSales(pool: Pool, filter?: SaleFilterDto | null): Prom
     query += ` AND sale_status = $${paramIndex++}`;
     params.push(filter.sale_status);
   }
+  if (filter?.search && filter.search.trim()) {
+    const term = `%${filter.search.trim()}%`;
+    query += ` AND (invoice_number ILIKE $${paramIndex} OR customer_name_snapshot ILIKE $${paramIndex} OR notes ILIKE $${paramIndex})`;
+    paramIndex++;
+    params.push(term);
+  }
   if (filter?.start_date) {
+    const sDate = filter.start_date.length === 10 ? parseLocalDateStart(filter.start_date) : filter.start_date;
     query += ` AND created_at >= $${paramIndex++}`;
-    params.push(filter.start_date);
+    params.push(sDate);
   }
   if (filter?.end_date) {
+    const eDate = filter.end_date.length === 10 ? parseLocalDateEnd(filter.end_date) : filter.end_date;
     query += ` AND created_at <= $${paramIndex++}`;
-    params.push(filter.end_date);
+    params.push(eDate);
   }
 
   query += ' ORDER BY created_at DESC, id DESC';

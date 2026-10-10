@@ -163,7 +163,9 @@ export async function getSaleReturnableInfo(pool: Pool, saleId: string): Promise
 export async function createSalesReturn(
   pool: Pool,
   dto: CreateSalesReturnDto,
-  userId: string | null
+  userId: string | null,
+  callerBranchId?: string | null,
+  isOrgAdmin: boolean = false
 ): Promise<SalesReturnResultDto> {
   if (!dto.lines || dto.lines.length === 0) {
     throw new ReturnsRepoError('Cannot process return with no items selected', 400);
@@ -180,6 +182,17 @@ export async function createSalesReturn(
     }
     const sale = saleRes.rows[0] as Record<string, unknown>;
     const branchId = sale['branch_id'] as string;
+
+    // F-11 / Phase 13 Security Fix: Ensure non-org-admins are assigned a branch and it matches the original sale branch
+    if (!isOrgAdmin) {
+      if (!callerBranchId || !callerBranchId.trim()) {
+        throw new ReturnsRepoError('Access denied: User has no assigned branch', 403);
+      }
+      if (callerBranchId.trim() !== branchId) {
+        throw new ReturnsRepoError('Access denied: Cannot process return for sale belonging to another branch', 403);
+      }
+    }
+
     const customerId = (sale['customer_id'] as string | null) ?? null;
     const customerName = (sale['customer_name_snapshot'] as string | null) ?? null;
 
@@ -308,17 +321,28 @@ export async function createSalesReturn(
       );
 
       // Restore Stock (IN)
-      const stockRes = await client.query('SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2', [
-        rLine.product_id,
-        branchId,
-      ]);
-      const currentStock = Number((stockRes.rows[0] as Record<string, unknown>)?.['quantity'] ?? 0);
-      const newStock = currentStock + rLine.quantity;
-
-      await client.query(
-        'UPDATE stock SET quantity = $1, updated_at = $2 WHERE product_id = $3 AND branch_id = $4',
-        [newStock, now, rLine.product_id, branchId]
+      // P5 fix: Use atomic relative UPDATE (quantity = quantity + $1) instead of read-then-write.
+      // Eliminates the race condition where concurrent operations could read the same
+      // pre-restoration quantity. RETURNING gives us before/after for the movement record.
+      const stockRestoreRes = await client.query(
+        `UPDATE stock
+           SET quantity = quantity + $1, updated_at = $2
+           WHERE product_id = $3 AND branch_id = $4
+           RETURNING (quantity - $1) AS previous_stock, quantity AS new_stock`,
+        [rLine.quantity, now, rLine.product_id, branchId]
       );
+
+      if (stockRestoreRes.rowCount === 0) {
+        throw new ReturnsRepoError(
+          `Stock record not found for product '${rLine.product_name}' at branch '${branchId}'. ` +
+          `Cannot restore stock without an existing stock row.`,
+          400
+        );
+      }
+
+      const restoreRow = stockRestoreRes.rows[0] as Record<string, unknown>;
+      const currentStock = Number(restoreRow['previous_stock'] ?? 0);
+      const newStock = Number(restoreRow['new_stock'] ?? 0);
 
       // Insert stock_movements (IN)
       const mvId = uuidv4();
