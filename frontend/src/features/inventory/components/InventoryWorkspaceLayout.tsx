@@ -11,7 +11,7 @@ export function InventoryWorkspaceLayout({ children }: { children?: React.ReactN
   const location = useLocation();
   const pathname = location.pathname;
   const { role } = usePermissions();
-  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN' || role === 'SHOP_ADMIN';
 
   const [formatInMillions, setFormatInMillions] = useState(false);
   const { isAddProductOpen, setAddProductOpen } = useInventoryUIStore();

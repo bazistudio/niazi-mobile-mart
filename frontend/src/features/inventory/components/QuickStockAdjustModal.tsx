@@ -24,7 +24,7 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
 }) => {
   const { hasPermission, role } = usePermissions();
   const canManageInventory = hasPermission(PERMISSIONS.INVENTORY_EDIT);
-  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN' || role === 'SHOP_ADMIN';
   const fetchProducts = useInventoryStore(state => state.fetchProducts);
 
   const [direction, setDirection] = useState<'increase' | 'decrease'>(isOrgAdmin ? 'increase' : 'decrease');

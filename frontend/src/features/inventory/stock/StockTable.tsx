@@ -24,7 +24,7 @@ function SortIcon({ field, activeField, direction }: { field: SortField; activeF
 export const StockTable = ({ products, isLoading }: StockTableProps) => {
   const { hasPermission, role } = usePermissions();
   const canAdjustStock = hasPermission(PERMISSIONS.INVENTORY_EDIT);
-  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN' || role === 'SHOP_ADMIN';
 
   const sort = selectSortConfig();
   const setSort = selectSetSort();
