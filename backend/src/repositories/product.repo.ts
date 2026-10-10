@@ -614,19 +614,19 @@ export async function createProductWithInitialStock(
     const branchId = dto.branch_id ?? null;
 
     if (qty > 0 && branchId !== null) {
-      // 1. Ensure opening_stock_entries table exists
+      // 1. Ensure opening_stock_entries table exists with TEXT entity ID column types
       await client.query(`
         CREATE TABLE IF NOT EXISTS opening_stock_entries (
-          id UUID PRIMARY KEY,
-          organization_id UUID NOT NULL,
-          branch_id UUID NOT NULL,
-          product_id UUID NOT NULL,
+          id TEXT PRIMARY KEY,
+          organization_id TEXT NOT NULL,
+          branch_id TEXT NOT NULL,
+          product_id TEXT NOT NULL,
           quantity BIGINT NOT NULL,
           unit_cost BIGINT NOT NULL DEFAULT 0,
           reference_number VARCHAR(100),
-          performed_by UUID,
+          performed_by TEXT,
           notes TEXT,
-          created_at TIMESTAMPTZ NOT NULL
+          created_at TEXT NOT NULL
         )
       `);
 
@@ -643,7 +643,7 @@ export async function createProductWithInitialStock(
         `INSERT INTO opening_stock_entries (
            id, organization_id, branch_id, product_id, quantity, unit_cost, reference_number, performed_by, notes, created_at
          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [entryId, orgId, branchId, id, qty, unitCost, refNo, userId ?? null, 'Opening Stock during Product Add', now]
+        [entryId, orgId, branchId, id, qty, unitCost, refNo, userId ? String(userId) : null, 'Opening Stock during Product Add', now]
       );
 
       // 4. UPSERT stock
