@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, Plus, Minus, AlertTriangle, Package, RefreshCw, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { X, Plus, Minus, AlertTriangle, Package, RefreshCw, CheckCircle2, ShieldAlert, DollarSign } from 'lucide-react';
 import { InventoryProduct, InventoryAdjustmentType } from '../types';
 import { stockService } from '../stock/stock.service';
 import { useInventoryStore } from '../core/inventory.store';
 import { usePermissions } from '@/lib/auth/usePermissions';
 import { PERMISSIONS } from '@/constants/permissions';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 import toast from 'react-hot-toast';
 
 interface QuickStockAdjustModalProps {
@@ -29,6 +30,7 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
 
   const [direction, setDirection] = useState<'increase' | 'decrease'>(isOrgAdmin ? 'increase' : 'decrease');
   const [amount, setAmount] = useState<number>(1);
+  const [unitCost, setUnitCost] = useState<number>(product.purchasePrice ?? 0);
   const [adjustmentType, setAdjustmentType] = useState<string>(isOrgAdmin ? 'RESTOCK' : 'DAMAGE');
   const [reason, setReason] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -36,10 +38,20 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
 
   if (!isOpen) return null;
 
+  const isRestock = direction === 'increase' && adjustmentType === 'RESTOCK';
   const currentStock = product.stock || 0;
   const calculatedNewStock = direction === 'increase'
     ? currentStock + (Number(amount) || 0)
     : Math.max(0, currentStock - (Number(amount) || 0));
+
+  // WAC preview: C_WAC = round((Q_old * C_old + Q_rec * C_new) / (Q_old + Q_rec))
+  const currentAvgCost = product.averageCost ?? product.purchasePrice ?? 0;
+  const qOld = currentStock;
+  const qRec = Number(amount) || 0;
+  const cNew = Number(unitCost) || 0;
+  const projectedWac = qOld + qRec > 0
+    ? Math.round((qOld * currentAvgCost + qRec * cNew) / (qOld + qRec))
+    : cNew;
 
   const handleAmountChange = (val: number) => {
     setAmount(Math.max(1, Math.floor(val)));
@@ -70,29 +82,51 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
       return;
     }
 
-    // Map UI adjustment type to authoritative InventoryAdjustmentType
-    let targetType: InventoryAdjustmentType;
-    if (adjustmentType === 'RESTOCK') {
-      targetType = InventoryAdjustmentType.RESTOCK;
-    } else if (adjustmentType === 'DAMAGE') {
-      targetType = InventoryAdjustmentType.DAMAGE;
-    } else {
-      targetType = direction === 'increase'
-        ? InventoryAdjustmentType.INCREASE
-        : InventoryAdjustmentType.DECREASE;
+    if (isRestock && unitCost < 0) {
+      setError('Unit cost cannot be negative.');
+      return;
     }
-
-    const notes = reason.trim() || `${direction === 'increase' ? 'Increased' : 'Decreased'} by ${amount} (${adjustmentType})`;
 
     try {
       setIsSubmitting(true);
       setError(null);
 
-      await stockService.adjustStock(product.id, amount, targetType, notes);
-      
-      toast.success(`Stock successfully updated to ${calculatedNewStock} ${product.unit || 'units'}`);
-      await fetchProducts();
+      if (isRestock) {
+        // ── WAC restock path — calls POST /api/v1/inventory/receive ──
+        const store = useOrganizationStore.getState();
+        const branchId = store.activeShop?._id || store.activeShop?.id || store.activeShopId;
+        if (!branchId) {
+          throw new Error('No active branch selected. Please select a shop before restocking.');
+        }
 
+        const result = await stockService.receiveStock({
+          product_id: product.id,
+          branch_id: branchId,
+          quantity_received: amount,
+          unit_cost: Math.round(unitCost),
+          notes: reason.trim() || `Supplier restock: +${amount} units @ Rs ${Math.round(unitCost)}`,
+        });
+
+        toast.success(
+          `Stock restocked: ${result.new_quantity} ${product.unit || 'units'} · Avg cost updated to Rs ${result.new_average_cost.toLocaleString()}`
+        );
+      } else {
+        // ── Regular adjust path (decrease / manual correction) ──
+        let targetType: InventoryAdjustmentType;
+        if (adjustmentType === 'DAMAGE') {
+          targetType = InventoryAdjustmentType.DAMAGE;
+        } else {
+          targetType = direction === 'increase'
+            ? InventoryAdjustmentType.INCREASE
+            : InventoryAdjustmentType.DECREASE;
+        }
+
+        const notes = reason.trim() || `${direction === 'increase' ? 'Increased' : 'Decreased'} by ${amount} (${adjustmentType})`;
+        await stockService.adjustStock(product.id, amount, targetType, notes);
+        toast.success(`Stock successfully updated to ${calculatedNewStock} ${product.unit || 'units'}`);
+      }
+
+      await fetchProducts();
       if (onSuccess) onSuccess();
       onClose();
     } catch (err: any) {
@@ -106,7 +140,7 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div 
+      <div
         className="w-full max-w-md bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
@@ -117,11 +151,15 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
               <Package className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-neutral-900 dark:text-white">Quick Stock Adjust</h2>
-              <p className="text-xs text-neutral-500">Modify live inventory balance</p>
+              <h2 className="text-base font-bold text-neutral-900 dark:text-white">
+                {isRestock ? 'Stock Receive / Restock' : 'Quick Stock Adjust'}
+              </h2>
+              <p className="text-xs text-neutral-500">
+                {isRestock ? 'Updates WAC & records purchase receipt' : 'Modify live inventory balance'}
+              </p>
             </div>
           </div>
-          <button 
+          <button
             onClick={onClose}
             disabled={isSubmitting}
             className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
@@ -213,8 +251,8 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
             >
               {direction === 'increase' ? (
                 <>
-                  <option value="RESTOCK">Stock In / Restock (RESTOCK)</option>
-                  <option value="MANUAL_CORRECTION">Manual Count Correction (MANUAL_CORRECTION)</option>
+                  <option value="RESTOCK">Stock In / Restock — updates Weighted Avg Cost</option>
+                  <option value="MANUAL_CORRECTION">Manual Count Correction (no cost update)</option>
                 </>
               ) : (
                 <>
@@ -227,7 +265,9 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
 
           {/* Amount Stepper */}
           <div>
-            <label className="block text-xs font-bold text-neutral-500 uppercase tracking-wider mb-2">Quantity to Adjust</label>
+            <label className="block text-xs font-bold text-neutral-500 uppercase tracking-wider mb-2">
+              {isRestock ? 'Quantity Received' : 'Quantity to Adjust'}
+            </label>
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -275,6 +315,39 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
             </div>
           </div>
 
+          {/* Unit Cost field — only for RESTOCK direction */}
+          {isRestock && (
+            <div>
+              <label className="block text-xs font-bold text-neutral-500 uppercase tracking-wider mb-2">
+                Unit Purchase Cost (Rs) <span className="text-[#006970] font-black">*</span>
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                  <DollarSign className="w-4 h-4 text-neutral-400" />
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={unitCost}
+                  onChange={e => setUnitCost(Math.max(0, Math.round(Number(e.target.value) || 0)))}
+                  placeholder="Enter purchase price per unit"
+                  className="w-full pl-10 pr-3.5 py-2.5 bg-white dark:bg-neutral-800 border border-[#006970]/50 dark:border-[#006970]/40 rounded-xl text-sm font-bold text-neutral-900 dark:text-white placeholder:text-neutral-400 placeholder:font-normal focus:outline-none focus:ring-2 focus:ring-[#006970] tabular-nums"
+                />
+              </div>
+              {/* WAC Preview */}
+              <div className="mt-2 px-3.5 py-2 bg-[#006970]/5 dark:bg-[#006970]/10 border border-[#006970]/20 rounded-xl flex items-center justify-between text-xs">
+                <span className="text-neutral-500 font-medium">New Weighted Avg Cost:</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-neutral-400 line-through tabular-nums">Rs {currentAvgCost.toLocaleString()}</span>
+                  <span className="font-black text-[#006970] dark:text-[#00B4BB] tabular-nums">
+                    Rs {projectedWac.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Note / Memo */}
           <div>
             <label className="block text-xs font-bold text-neutral-500 uppercase tracking-wider mb-2">Notes / Audit Memo (Optional)</label>
@@ -282,7 +355,7 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
               type="text"
               value={reason}
               onChange={e => setReason(e.target.value)}
-              placeholder="e.g. Physical inventory count, supplier box intake"
+              placeholder={isRestock ? 'e.g. Supplier delivery batch, PO-2024-001' : 'e.g. Physical inventory count, damaged goods'}
               className="w-full px-3.5 py-2.5 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl text-sm text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-[#006970]"
             />
           </div>
@@ -315,11 +388,13 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
             >
               {isSubmitting ? (
                 <>
-                  <RefreshCw className="w-4 h-4 animate-spin" /> Updating...
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  {isRestock ? 'Receiving...' : 'Updating...'}
                 </>
               ) : (
                 <>
-                  <CheckCircle2 className="w-4 h-4" /> Confirm Adjust
+                  <CheckCircle2 className="w-4 h-4" />
+                  {isRestock ? 'Receive Stock' : 'Confirm Adjust'}
                 </>
               )}
             </button>

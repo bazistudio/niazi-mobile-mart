@@ -295,6 +295,11 @@ export const inventoryApi = {
     };
   },
 
+
+  receiveStock: async (dto: ReceiveStockApiDto): Promise<ReceiveStockApiResult> => {
+    return await httpClient.post<ReceiveStockApiResult>('/api/v1/inventory/receive', dto);
+  },
+
   checkDuplicate: async (_params: { sku?: string; barcode?: string; name?: string }): Promise<CheckDuplicateResponseDTO> => {
     return {
       exists: false,
@@ -302,3 +307,18 @@ export const inventoryApi = {
   }
 };
 
+
+export interface ReceiveStockApiDto {
+  product_id: string;
+  branch_id: string;
+  quantity_received: number;
+  unit_cost: number;
+  supplier_id?: string | null;
+  notes?: string | null;
+}
+
+export interface ReceiveStockApiResult {
+  new_quantity: number;
+  new_average_cost: number;
+  movement_id: string;
+}

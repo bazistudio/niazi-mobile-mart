@@ -1649,3 +1649,161 @@ export async function getLowStockItems(
     low_stock_threshold: Number(r['low_stock_threshold']),
   }));
 }
+
+// ─── receiveStock: WAC Engine ─────────────────────────────────────────────────
+//
+// Implements Phase 1 of the audit-report gap register (RESTOCK-01 / COST-01).
+//
+// Accepts stock received from a supplier at a given unit_cost, then:
+//   1. Locks products row (FOR UPDATE) — prevents concurrent WAC races.
+//   2. Locks stock row (FOR UPDATE) — prevents concurrent stock races.
+//   3. Reads Q_old (global total across all branches) and C_old (products.average_cost).
+//   4. Computes new WAC:
+//        C_WAC = ROUND( (Q_old * C_old + Q_rec * C_new) / (Q_old + Q_rec) )
+//      If Q_old + Q_rec = 0 (edge case) C_WAC = C_new to avoid division by zero.
+//   5. UPDATE products SET average_cost = C_WAC.
+//   6. Upsert stock.quantity += quantity_received for the target branch.
+//   7. INSERT stock_movements (movement_type='IN', reason='Supplier Restock').
+//   8. COMMIT.
+//
+// All monetary fields are BIGINT (whole PKR rupees); Math.round() eliminates
+// floating-point drift as required by the audit report §7 key finding.
+
+export interface ReceiveStockDto {
+  product_id: string;
+  branch_id: string;        // target branch
+  quantity_received: number; // must be > 0
+  unit_cost: number;         // must be >= 0 (whole PKR rupees)
+  supplier_id?: string | null;
+  notes?: string | null;
+}
+
+export interface ReceiveStockResult {
+  new_quantity: number;       // resulting stock at the branch
+  new_average_cost: number;   // updated products.average_cost
+  movement_id: string;        // stock_movements.id of the IN row
+}
+
+export async function receiveStock(
+  pool: Pool,
+  dto: ReceiveStockDto,
+  performedBy?: string | null
+): Promise<ReceiveStockResult> {
+  // ── Input validation ────────────────────────────────────────────────────────
+  if (!dto.product_id || dto.product_id.trim().length < 32) {
+    throw new RepoError('product_id is required', 400);
+  }
+  if (!dto.branch_id || dto.branch_id.trim().length < 32) {
+    throw new RepoError('branch_id is required', 400);
+  }
+  const qRec = Math.round(Number(dto.quantity_received ?? 0));
+  if (qRec <= 0) {
+    throw new RepoError('quantity_received must be greater than 0', 400);
+  }
+  const cNew = Math.round(Number(dto.unit_cost ?? 0));
+  if (cNew < 0) {
+    throw new RepoError('unit_cost cannot be negative', 400);
+  }
+
+  const productId = dto.product_id.trim();
+  const branchId  = dto.branch_id.trim();
+  const now       = new Date().toISOString();
+
+  const client: PoolClient = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // ── Step 1: Lock products row ─────────────────────────────────────────────
+    const productRes = await client.query(
+      `SELECT average_cost FROM products WHERE id = $1 FOR UPDATE`,
+      [productId]
+    );
+    if (productRes.rowCount === 0) {
+      throw new RepoError(`Product ${productId} not found`, 404);
+    }
+    const cOld = Math.round(Number(productRes.rows[0]['average_cost'] ?? 0));
+
+    // ── Step 2: Lock branch stock row (create if absent) ──────────────────────
+    // We lock with FOR UPDATE; if no row exists yet we treat prevStock=0
+    // and the ON CONFLICT upsert below will INSERT.
+    const stockLockRes = await client.query(
+      `SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2 FOR UPDATE`,
+      [productId, branchId]
+    );
+    const qBranch = Number(stockLockRes.rows[0]?.['quantity'] ?? 0);
+
+    // ── Step 3: Global quantity total across all branches (for WAC base) ─────
+    // We read the sum of all branch stocks for this product. Because the
+    // products table has one global average_cost column, WAC must be computed
+    // on total global stock, not only this branch's stock.
+    const globalRes = await client.query(
+      `SELECT COALESCE(SUM(quantity), 0) AS total_qty FROM stock WHERE product_id = $1`,
+      [productId]
+    );
+    const qOld = Number(globalRes.rows[0]['total_qty'] ?? 0);
+
+    // ── Step 4: Compute WAC ───────────────────────────────────────────────────
+    // C_WAC = ROUND( (Q_old * C_old + Q_rec * C_new) / (Q_old + Q_rec) )
+    const denominator = qOld + qRec;
+    const cWac: number = denominator > 0
+      ? Math.round(((qOld * cOld) + (qRec * cNew)) / denominator)
+      : cNew; // fallback when warehouse was empty
+
+    // ── Step 5: UPDATE products.average_cost ─────────────────────────────────
+    await client.query(
+      `UPDATE products SET average_cost = $1, updated_at = $2 WHERE id = $3`,
+      [cWac, now, productId]
+    );
+
+    // ── Step 6: Upsert stock.quantity += quantity_received ────────────────────
+    const newQty = qBranch + qRec;
+    await client.query(
+      `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (product_id, branch_id)
+       DO UPDATE SET
+         quantity   = stock.quantity + $5::BIGINT,
+         updated_at = $4`,
+      [productId, branchId, newQty, now, qRec]
+    );
+
+    // ── Step 7: INSERT stock_movements ────────────────────────────────────────
+    const movementId = uuidv4();
+    const refId = dto.supplier_id ?? 'SUPPLIER_RESTOCK';
+    const reason = dto.notes
+      ? `Supplier Restock — ${dto.notes}`
+      : 'Supplier Restock';
+
+    await client.query(
+      `INSERT INTO stock_movements (
+         id, product_id, branch_id, movement_type, quantity,
+         previous_stock, resulting_stock, reason, reference_id,
+         performed_by, created_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        movementId, productId, branchId,
+        'IN',        // movement_type
+        qRec,        // quantity received
+        qBranch,     // previous_stock at this branch
+        newQty,      // resulting_stock at this branch
+        reason,
+        refId,
+        performedBy ?? null,
+        now,
+      ]
+    );
+
+    await client.query('COMMIT');
+    client.release();
+
+    return {
+      new_quantity:     newQty,
+      new_average_cost: cWac,
+      movement_id:      movementId,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    client.release();
+    throw err;
+  }
+}

@@ -82,6 +82,8 @@ import {
   deltaStock,
   getStockMovements,
   getLowStockItems,
+  receiveStock,
+  ReceiveStockDto,
 } from './repositories/product.repo';
 import { transferStock, StockTransferRepoError } from './repositories/stock_transfer.repo';
 import { authMiddleware, isAdmin, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity } from './auth';
@@ -690,6 +692,70 @@ async function main(): Promise<void> {
           return;
         }
         res.status(500).json({ error: err.message || 'Failed to transfer stock' });
+      }
+    }
+  );
+
+
+  // ── POST /api/v1/inventory/receive — Phase 1 WAC Engine / RESTOCK-01 ──────
+  // Accepts stock received from a supplier at a unit_cost, recalculates
+  // products.average_cost using the Weighted Average Cost (WAC) formula,
+  // and increments the branch stock. Requires Branch/Org Admin.
+  app.post(
+    ['/api/inventory/receive', '/api/v1/inventory/receive', '/api/stock/receive'],
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const identity = req.identity as RequestIdentity;
+
+        if (!isBranchAdmin(identity)) {
+          res.status(403).json({ error: 'Forbidden: stock receiving requires administrator role' });
+          return;
+        }
+
+        const productId    = (req.body?.product_id  || req.body?.productId)  as string | undefined;
+        const qtyReceived  = Number(req.body?.quantity_received ?? req.body?.quantityReceived ?? 0);
+        const unitCost     = Number(req.body?.unit_cost         ?? req.body?.unitCost         ?? 0);
+        const supplierId   = (req.body?.supplier_id  || req.body?.supplierId  || null) as string | null;
+        const notes        = (req.body?.notes || null) as string | null;
+
+        // org-admins may supply an explicit branch_id; branch-users are locked to JWT branch
+        const branchId: string | undefined = isOrgAdmin(identity)
+          ? ((req.body?.branch_id || req.body?.branchId || identity.branch_id) as string | undefined)
+          : (identity.branch_id as string | undefined);
+
+        if (!productId || !productId.trim()) {
+          res.status(400).json({ error: 'product_id is required' }); return;
+        }
+        if (!branchId || !branchId.trim()) {
+          res.status(400).json({ error: 'branch_id is required' }); return;
+        }
+        if (!canAccessBranch(identity, branchId)) {
+          res.status(403).json({ error: 'Access denied: cannot receive stock for a branch you do not manage' }); return;
+        }
+        if (!Number.isInteger(qtyReceived) || qtyReceived <= 0) {
+          res.status(400).json({ error: 'quantity_received must be a positive integer' }); return;
+        }
+        if (unitCost < 0 || !Number.isFinite(unitCost)) {
+          res.status(400).json({ error: 'unit_cost cannot be negative' }); return;
+        }
+
+        const dto: ReceiveStockDto = {
+          product_id:        productId.trim(),
+          branch_id:         branchId.trim(),
+          quantity_received: qtyReceived,
+          unit_cost:         Math.round(unitCost),
+          supplier_id:       supplierId,
+          notes:             notes,
+        };
+
+        const result = await receiveStock(pool, dto, identity.user_id ?? null);
+        res.status(200).json(result);
+      } catch (err: any) {
+        if (err && typeof err.statusCode === 'number') {
+          res.status(err.statusCode).json({ error: err.message }); return;
+        }
+        res.status(500).json({ error: err?.message || 'Failed to receive stock' });
       }
     }
   );

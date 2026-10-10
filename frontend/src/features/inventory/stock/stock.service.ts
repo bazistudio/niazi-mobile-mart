@@ -1,6 +1,7 @@
 // src/features/inventory/stock/stock.service.ts
 
 import { inventoryRepository } from '../repositories/inventory.repository';
+import type { ReceiveStockApiDto, ReceiveStockApiResult } from '../api/inventory.api';
 import { retry } from '@/shared/lib/retry';
 import { RETRY_COUNT } from '../constants/inventory.constants';
 import { InventoryAdjustmentType } from '../types';
@@ -66,6 +67,34 @@ export const stockService = {
       transactionLedger.complete(txnId);
       
       return response.newStock;
+    } catch (err: any) {
+      transactionLedger.fail(txnId, err.message);
+      throw err;
+    }
+  },
+
+
+  receiveStock: async (dto: ReceiveStockApiDto): Promise<ReceiveStockApiResult> => {
+    const txnId = generateTxnId('stock-receive');
+    transactionLedger.begin(txnId);
+    try {
+      const result = await inventoryRepository.receiveStock(dto);
+      stockEventBus.emit('STOCK_RESTOCKED', {
+        productId: dto.product_id,
+        quantityChange: dto.quantity_received,
+        newStock: result.new_quantity,
+        newAverageCost: result.new_average_cost,
+        unitCost: dto.unit_cost,
+        timestamp: new Date().toISOString(),
+      });
+      transactionLedger.record(txnId, 'STOCK_RESTOCKED', {
+        productId: dto.product_id,
+        quantityReceived: dto.quantity_received,
+        newQuantity: result.new_quantity,
+        newAverageCost: result.new_average_cost,
+      });
+      transactionLedger.complete(txnId);
+      return result;
     } catch (err: any) {
       transactionLedger.fail(txnId, err.message);
       throw err;
