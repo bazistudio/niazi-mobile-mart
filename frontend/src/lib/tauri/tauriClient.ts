@@ -1100,31 +1100,35 @@ export const tauriClient = {
     }
   },
 
-  // â”€â”€ Inventory Foundation Domain (Phase 4A Typed Storage Bridge) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€ Inventory Foundation Domain (Phase 7: all paths redirect to TypeScript Express) â”€â”€
+  // Phase 7: inventoryIncrease and inventoryDecrease now route to the PostgreSQL backend
+  // via the atomic /api/v1/inventory/delta endpoint. The Tauri IPC (SQLite) path is retired.
   async inventoryIncrease(dto: IncreaseStockDto): Promise<number> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('storage_inventory_increase', { dto });
-    }
-    const stockMap = getStoredWebStockMap();
-    const current = stockMap[dto.product_id] || 0;
-    const next = current + (dto.quantity || 0);
-    stockMap[dto.product_id] = next;
-    saveStoredWebStockMap(stockMap);
-    return next;
+    const res = await httpFetch<{ data?: number; newStock?: number }>('/api/v1/inventory/delta', {
+      method: 'POST',
+      body: JSON.stringify({
+        product_id: dto.product_id,
+        branch_id: dto.branch_id,
+        delta: Math.abs(dto.quantity || 0),
+        reason: dto.reason ?? 'Stock Increase',
+        reference_id: dto.reference_id ?? null,
+      }),
+    });
+    return typeof res.data === 'number' ? res.data : typeof res === 'number' ? res : 0;
   },
 
   async inventoryDecrease(dto: DecreaseStockDto): Promise<number> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<number>('storage_inventory_decrease', { dto });
-    }
-    const stockMap = getStoredWebStockMap();
-    const current = stockMap[dto.product_id] || 0;
-    const next = Math.max(0, current - (dto.quantity || 0));
-    stockMap[dto.product_id] = next;
-    saveStoredWebStockMap(stockMap);
-    return next;
+    const res = await httpFetch<{ data?: number; newStock?: number }>('/api/v1/inventory/delta', {
+      method: 'POST',
+      body: JSON.stringify({
+        product_id: dto.product_id,
+        branch_id: dto.branch_id,
+        delta: -Math.abs(dto.quantity || 0),
+        reason: dto.reason ?? 'Stock Decrease',
+        reference_id: dto.reference_id ?? null,
+      }),
+    });
+    return typeof res.data === 'number' ? res.data : typeof res === 'number' ? res : 0;
   },
 
   async inventoryAdjust(dto: AdjustStockDto): Promise<number> {

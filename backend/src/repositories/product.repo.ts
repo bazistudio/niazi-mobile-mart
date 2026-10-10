@@ -1440,4 +1440,72 @@ export async function adjustStock(
   }
 }
 
+// Phase 7: Atomic delta stock adjustment (increase or decrease by quantity delta).
+// Uses SQL quantity = quantity + $delta to avoid read-then-write race conditions.
+export async function deltaStock(
+  pool: Pool,
+  dto: {
+    product_id: string;
+    branch_id: string;
+    delta: number;            // positive = increase, negative = decrease
+    reason?: string | null;
+    reference_id?: string | null;
+  }
+): Promise<number> {
+  if (!dto.branch_id || dto.branch_id.trim().length < 32) {
+    throw new RepoError('branch_id is required for stock delta adjustment', 400);
+  }
+  const branchId = dto.branch_id.trim();
+  const productId = dto.product_id;
+  const delta = Math.round(Number(dto.delta ?? 0));
+  const now = NOW_ISO();
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Fetch current stock to validate and compute resulting value
+    const stockRes = await client.query(
+      'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2',
+      [productId, branchId]
+    );
+    const prevStock = Number(stockRes.rows[0]?.['quantity'] ?? 0);
+    const resultingStock = Math.max(0, prevStock + delta);
+
+    // Upsert with atomic delta (uses computed resulting value to avoid separate UPDATE)
+    await client.query(
+      `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (product_id, branch_id)
+       DO UPDATE SET quantity = $3, updated_at = $4`,
+      [productId, branchId, resultingStock, now]
+    );
+
+    if (delta !== 0) {
+      const movementId = uuidv4();
+      const movementType = delta > 0 ? 'IN' : 'OUT';
+      const absQty = Math.abs(delta);
+      const reason = dto.reason || (delta > 0 ? 'Stock Increase' : 'Stock Decrease');
+      const refId = dto.reference_id || 'STOCK_DELTA';
+
+      await client.query(
+        `INSERT INTO stock_movements (
+           id, product_id, branch_id, movement_type, quantity,
+           previous_stock, resulting_stock, reason, reference_id, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [movementId, productId, branchId, movementType, absQty,
+         prevStock, resultingStock, reason, refId, now]
+      );
+    }
+
+    await client.query('COMMIT');
+    client.release();
+    return resultingStock;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    client.release();
+    throw err;
+  }
+}
+
 

@@ -78,6 +78,7 @@ import {
   updateUnit,
   getStockMapForBranch,
   adjustStock,
+  deltaStock,
 } from './repositories/product.repo';
 import { transferStock, StockTransferRepoError } from './repositories/stock_transfer.repo';
 import { authMiddleware, isAdmin, RequestIdentity } from './auth';
@@ -551,6 +552,55 @@ async function main(): Promise<void> {
       } catch (err: any) {
         const statusCode = err?.statusCode ?? 500;
         res.status(statusCode).json({ error: err.message || 'Failed to adjust stock' });
+      }
+    }
+  );
+
+  // ── POST /api/v1/inventory/delta — Phase 7: atomic delta (increase/decrease) ──
+  app.post(
+    ['/api/inventory/delta', '/api/v1/inventory/delta', '/api/stock/delta'],
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const identity = req.identity as RequestIdentity;
+
+        if (!isAdmin(identity)) {
+          res.status(403).json({ error: 'Forbidden: stock delta adjustments require administrator role' });
+          return;
+        }
+
+        const productId = req.body?.product_id || req.body?.productId;
+        if (!productId || typeof productId !== 'string') {
+          res.status(400).json({ error: 'product_id is required' });
+          return;
+        }
+
+        const delta = Number(req.body?.delta ?? req.body?.quantity ?? 0);
+        if (isNaN(delta) || delta === 0) {
+          res.status(400).json({ error: 'delta must be a non-zero number (positive=increase, negative=decrease)' });
+          return;
+        }
+
+        const branchId = (req.body?.branch_id || req.body?.branchId) as string | undefined;
+        if (!branchId || !branchId.trim()) {
+          res.status(400).json({ error: 'branch_id is required for stock delta adjustment' });
+          return;
+        }
+
+        const reason = req.body?.reason;
+        const referenceId = req.body?.reference_id || req.body?.referenceId;
+
+        const newStock = await deltaStock(pool, {
+          product_id: productId,
+          branch_id: branchId,
+          delta,
+          reason,
+          reference_id: referenceId,
+        });
+        res.status(200).json({ data: newStock, newStock });
+      } catch (err: any) {
+        const statusCode = err?.statusCode ?? 500;
+        res.status(statusCode).json({ error: err.message || 'Failed to apply stock delta' });
       }
     }
   );
