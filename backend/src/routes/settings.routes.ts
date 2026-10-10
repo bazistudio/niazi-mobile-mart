@@ -4,7 +4,7 @@
 
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { authMiddleware, isAdmin, RequestIdentity } from '../auth';
+import { authMiddleware, isAdmin, isOrgAdmin, RequestIdentity } from '../auth';
 import {
   getInvoicePrinterSettings,
   saveInvoicePrinterSettings,
@@ -20,7 +20,10 @@ export function createSettingsRouter(pool: Pool): Router {
   router.get('/invoice-printer', async (req: Request, res: Response): Promise<void> => {
     try {
       const identity = req.identity as RequestIdentity;
-      const branchId = (req.query['branch_id'] as string) || identity.branch_id;
+      // Branch isolation: non-org-admin users can only read their own branch settings.
+      // Org admins may pass ?branch_id= to read any branch.
+      const requestedBranchId = (req.query['branch_id'] as string) || identity.branch_id;
+      const branchId = isOrgAdmin(identity) ? requestedBranchId : identity.branch_id;
       const settings = await getInvoicePrinterSettings(pool, branchId);
       res.status(200).json(settings);
     } catch (err: any) {
