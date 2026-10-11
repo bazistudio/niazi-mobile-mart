@@ -69,7 +69,12 @@ export function createCashRouter(pool: Pool): Router {
         return;
       }
 
-      const branchId = requestedBranchId || identity.branch_id || NIAZI_ORGANIZATION_ID;
+      // F-07: Do not fall back to org UUID if no valid branch can be resolved.
+      const branchId = requestedBranchId || identity.branch_id;
+      if (!branchId) {
+        res.status(403).json({ error: 'Access denied: No branch assigned to your account' });
+        return;
+      }
       const session = await getCurrentCashSession(pool, branchId);
       res.status(200).json({ session });
     } catch (err) {
@@ -118,6 +123,23 @@ export function createCashRouter(pool: Pool): Router {
 
     try {
       const dto = req.body as CloseCashSessionDto;
+
+      // F-03: Verify the session belongs to a branch the caller can access.
+      // Load the session record to obtain its actual stored branch_id.
+      const sessionCheck = await pool.query<{ branch_id: string }>(
+        'SELECT branch_id FROM cash_sessions WHERE id = $1',
+        [dto.session_id]
+      );
+      if (sessionCheck.rows.length === 0) {
+        res.status(404).json({ error: 'Cash session not found' });
+        return;
+      }
+      const sessionBranchId = sessionCheck.rows[0]!.branch_id;
+      if (!canAccessBranch(identity, sessionBranchId)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to close this cash session' });
+        return;
+      }
+
       const session = await closeCashSession(pool, dto, identity.user_id);
       res.status(200).json(session);
     } catch (err) {

@@ -201,11 +201,27 @@ export function isAdmin(identity: RequestIdentity): boolean {
 
 /**
  * Checks if identity is authorized to access a specific target branch.
- * Org admins can access any branch.
- * Branch users can only access their assigned identity.branch_id.
+ *
+ * Security note (F-05): This is a single-tenant deployment. The organization is
+ * always NIAZI_ORGANIZATION_ID (seeded by migration 001_initial_schema.sql).
+ * There is no branch→organization lookup table in the current schema, so we
+ * cannot verify the target branch belongs to a given org by querying the DB here.
+ * As a structural guard we verify that the caller's own organization_id matches
+ * the known single-tenant constant. This prevents tokens issued for a different
+ * organization (if any) from passing the org-admin fast-path.
+ *
+ * If this deployment ever adds multi-tenant branch ownership, replace the
+ * organization_id string check below with a DB lookup:
+ *   SELECT organization_id FROM branches WHERE id = targetBranchId
+ * and compare against identity.organization_id.
  */
 export function canAccessBranch(identity: RequestIdentity, targetBranchId: string | null | undefined): boolean {
   if (!identity) return false;
+
+  // Structural single-tenant guard: org must be the known seeded organization.
+  // An ADMIN token from a foreign organization cannot pass via the org-admin path.
+  if (identity.organization_id !== NIAZI_ORGANIZATION_ID) return false;
+
   if (isOrgAdmin(identity)) return true;
   if (!targetBranchId || !targetBranchId.trim()) return false;
   if (!identity.branch_id) return false;
@@ -259,6 +275,10 @@ function hasPageAccess(profile: StaffAccessProfile, page: string, role?: UserRol
 /**
  * Mirrors StaffAccessProfile::has_action_access() in access_control.rs.
  * Falls back to allowing staff roles (SALESMAN, CASHIER, STAFF, MANAGER) when allowed_actions is empty.
+ *
+ * IMPORTANT: This general fallback is intentional for most operations (POS, expenses, etc.).
+ * For product mutation actions (products:edit, products:delete, product:create), callers MUST
+ * use hasProductActionAccess() below, which is default-deny when allowed_actions is empty.
  */
 function hasActionAccess(profile: StaffAccessProfile, action: string, role?: UserRole): boolean {
   if (profile && Array.isArray(profile.allowed_actions) && profile.allowed_actions.length > 0) {
@@ -269,6 +289,50 @@ function hasActionAccess(profile: StaffAccessProfile, action: string, role?: Use
     return true;
   }
   return false;
+}
+
+/**
+ * Strict action access check for product mutations (F-06 fix).
+ * Unlike hasActionAccess(), this does NOT fall back to broad staff-role permission
+ * when allowed_actions is empty. An empty allowed_actions is treated as default-deny
+ * for product mutation actions, requiring explicit grant.
+ *
+ * Actions covered: 'products:edit', 'products:delete', 'product:create'
+ */
+function hasProductActionAccess(profile: StaffAccessProfile, action: string): boolean {
+  if (!profile || !Array.isArray(profile.allowed_actions) || profile.allowed_actions.length === 0) {
+    return false; // default-deny: no explicit actions granted
+  }
+  return profile.allowed_actions.some((a) => a === '*' || a === action);
+}
+
+/**
+ * Strict version of authorizePermission for product mutations.
+ * Admins (isBranchAdmin) pass through. All others must have explicit action grants.
+ * Page access is still checked via the standard hasPageAccess path.
+ * Returns null on success, error string on 403.
+ */
+export function authorizeProductMutation(
+  identity: RequestIdentity,
+  page: string,
+  action: string
+): string | null {
+  // Branch/org admins always pass through
+  if (isAdmin(identity)) {
+    return null;
+  }
+
+  // Check page access (uses standard hasPageAccess with fallback — intentional)
+  if (!hasPageAccess(identity.access_profile, page, identity.role)) {
+    return `Access denied: You do not have permission to access page '${page}'`;
+  }
+
+  // Check action access with strict no-fallback logic
+  if (!hasProductActionAccess(identity.access_profile, action)) {
+    return `Access denied: You do not have permission to execute action '${action}'`;
+  }
+
+  return null;
 }
 
 // --- Express Middleware ---

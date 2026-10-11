@@ -59,6 +59,12 @@ export function createHistoryRouter(pool: Pool): Router {
     try {
       const callerIsOrgAdmin = isOrgAdmin(identity);
 
+      // F-04: Fail closed — non-org-admin without a branch assignment must be denied.
+      if (!callerIsOrgAdmin && !identity.branch_id) {
+        res.status(403).json({ error: 'Access denied: No branch assigned to your account' });
+        return;
+      }
+
       const filter: HistoryFilterParams = {
         page: req.query['page'] ? parseInt(req.query['page'] as string, 10) : 1,
         limit: req.query['limit'] ? parseInt(req.query['limit'] as string, 10) : 50,
@@ -67,7 +73,8 @@ export function createHistoryRouter(pool: Pool): Router {
         endDate: (req.query['endDate'] as string) || undefined,
         status: (req.query['status'] as string) || undefined,
         search: (req.query['search'] as string) || undefined,
-        branch_id: !callerIsOrgAdmin && identity.branch_id ? identity.branch_id : (req.query['branch_id'] as string) || null,
+        // F-04: Non-org-admins locked to assigned branch; cannot override via query param.
+        branch_id: callerIsOrgAdmin ? (req.query['branch_id'] as string) || null : identity.branch_id,
       };
 
       const result = await listHistoryItems(pool, filter);
@@ -90,7 +97,14 @@ export function createHistoryRouter(pool: Pool): Router {
     try {
       const callerIsOrgAdmin = isOrgAdmin(identity);
 
-      const branchId = !callerIsOrgAdmin && identity.branch_id ? identity.branch_id : (req.query['branch_id'] as string) || null;
+      // F-04: Fail closed — non-org-admin without a branch assignment must be denied.
+      if (!callerIsOrgAdmin && !identity.branch_id) {
+        res.status(403).json({ error: 'Access denied: No branch assigned to your account' });
+        return;
+      }
+
+      // Non-org-admins locked to their assigned branch; cannot override via query param.
+      const branchId = callerIsOrgAdmin ? (req.query['branch_id'] as string) || null : identity.branch_id;
       const stats = await getHistoryStats(pool, branchId);
       res.status(200).json(stats);
     } catch (err) {

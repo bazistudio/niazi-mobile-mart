@@ -17,7 +17,7 @@ import express, { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, isAdmin, RequestIdentity } from '../auth';
+import { authMiddleware, authorizePermission, authorizeProductMutation, isAdmin, RequestIdentity } from '../auth';
 import {
   createProduct,
   createProductWithInitialStock,
@@ -212,8 +212,9 @@ export function createProductRouter(pool: Pool): Router {
   router.put('/:id', async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;
 
-    const productsOk = authorizePermission(identity, 'products', 'products:edit');
-    const inventoryOk = authorizePermission(identity, 'inventory', 'products:edit');
+    // F-06: Use strict default-deny action check for product mutations.
+    const productsOk = authorizeProductMutation(identity, 'products', 'products:edit');
+    const inventoryOk = authorizeProductMutation(identity, 'inventory', 'products:edit');
     if (productsOk !== null && inventoryOk !== null) {
       res.status(403).json({ error: productsOk });
       return;
@@ -235,8 +236,9 @@ export function createProductRouter(pool: Pool): Router {
   router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;
 
-    const productsOk = authorizePermission(identity, 'products', 'products:delete');
-    const inventoryOk = authorizePermission(identity, 'inventory', 'products:delete');
+    // F-06: Use strict default-deny action check for product mutations.
+    const productsOk = authorizeProductMutation(identity, 'products', 'products:delete');
+    const inventoryOk = authorizeProductMutation(identity, 'inventory', 'products:delete');
     if (productsOk !== null && inventoryOk !== null) {
       res.status(403).json({ error: productsOk });
       return;
