@@ -23,6 +23,7 @@ import { ProductDeleteDialog } from '@/features/inventory/product/components/Pro
 import { StockTransferModal } from '@/features/inventory/components/StockTransferModal';
 import { tauriClient, Branch } from '@/lib/tauri/tauriClient';
 import { httpClient } from '@/lib/http/httpClient';
+import { inventoryApi } from '@/features/inventory/api/inventory.api';
 import toast from 'react-hot-toast';
 
 export function OrganizationProductsPage() {
@@ -41,6 +42,8 @@ export function OrganizationProductsPage() {
   const [intakeBranchId, setIntakeBranchId] = useState<string>('');
   const [intakeQuantity, setIntakeQuantity] = useState<number>(1);
   const [intakeReason, setIntakeReason] = useState<string>('');
+  // DEF-05: unit cost for WAC receiving — defaults to product purchase price
+  const [intakeUnitCost, setIntakeUnitCost] = useState<number>(0);
   const [isIntakeSubmitting, setIsIntakeSubmitting] = useState<boolean>(false);
 
   // Branch stock mapping state
@@ -123,6 +126,14 @@ export function OrganizationProductsPage() {
     }
   }, [products, intakeProductId]);
 
+  // DEF-05: update default unit cost when selected product changes
+  useEffect(() => {
+    const selectedProd = products.find((p) => p.id === intakeProductId);
+    if (selectedProd && intakeUnitCost === 0) {
+      setIntakeUnitCost(selectedProd.purchasePrice || 0);
+    }
+  }, [intakeProductId, products]);
+
   // Handle Central Stock Intake submit
   const handleStockIntake = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,18 +150,25 @@ export function OrganizationProductsPage() {
       return;
     }
 
+    if (intakeUnitCost <= 0) {
+      toast.error('Please enter a valid unit acquisition cost (must be > 0).');
+      return;
+    }
+
     const selectedProd = products.find((p) => p.id === intakeProductId);
     const selectedBranch = branches.find((b) => b.id === intakeBranchId);
 
     try {
       setIsIntakeSubmitting(true);
-      // tauriClient.inventoryIncrease routes to POST /api/v1/inventory/delta (positive delta = increase)
-      // Backend enforces isBranchAdmin + canAccessBranch — org admins pass for any branch
-      await tauriClient.inventoryIncrease({
+      // DEF-05: use the WAC receiving endpoint instead of the inventory delta/adjustment endpoint.
+      // This correctly updates average_cost via WAC formula and creates proper stock movement records.
+      // Backend enforces isBranchAdmin + canAccessBranch — org admins pass for any branch.
+      await inventoryApi.receiveStock({
         product_id: intakeProductId,
         branch_id: intakeBranchId,
-        quantity: intakeQuantity,
-        reason: intakeReason.trim() || `Central Stock Intake — ${selectedBranch?.name || intakeBranchId}`,
+        quantity_received: intakeQuantity,
+        unit_cost: Math.round(intakeUnitCost),
+        notes: intakeReason.trim() || `Central Stock Intake — ${selectedBranch?.name || intakeBranchId}`,
       });
 
       toast.success(
@@ -158,6 +176,7 @@ export function OrganizationProductsPage() {
       );
       setIntakeQuantity(1);
       setIntakeReason('');
+      setIntakeUnitCost(0);
       await fetchProducts();
     } catch (err: any) {
       toast.error(err?.message || 'Failed to complete stock intake.');
@@ -459,6 +478,25 @@ export function OrganizationProductsPage() {
                 onChange={(e) => setIntakeQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
                 className="w-full px-3.5 py-2.5 text-center bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-lg font-black text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#006970] tabular-nums"
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                Acquisition Unit Cost (Rs.) — Required for WAC
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={intakeUnitCost || ''}
+                onChange={(e) => setIntakeUnitCost(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                placeholder="Enter purchase price per unit (e.g. 1500)"
+                className="w-full px-3.5 py-2.5 text-center bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-lg font-black text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#006970] tabular-nums"
+                required
+              />
+              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                This cost is used to recalculate the product's Weighted Average Cost (WAC) across all branches.
+              </p>
             </div>
 
             <div>

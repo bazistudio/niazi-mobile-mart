@@ -598,7 +598,8 @@ export class SupplierRepo {
   async recordSupplierPayment(
     supplierId: string,
     dto: RecordSupplierPaymentDto,
-    performedBy?: string | null
+    performedBy?: string | null,
+    branchId?: string | null
   ): Promise<SupplierPaymentResult> {
     if (!dto.amount || dto.amount <= 0) {
       throw new SupplierRepoError('Payment amount must be greater than zero', 400);
@@ -648,7 +649,7 @@ export class SupplierRepo {
         }
       }
 
-      // Insert DEBIT entry into supplier_ledger_entries (debit reduces payable)
+      // Insert CREDIT entry into supplier_ledger_entries (credit reduces payable)
       const entryId = uuidv4();
       const now = new Date().toISOString();
       const description = dto.notes
@@ -659,13 +660,13 @@ export class SupplierRepo {
         `INSERT INTO supplier_ledger_entries
            (id, supplier_id, reference_id, reference_number, entry_type,
             debit, credit, balance_after, description, performed_by, created_at)
-         VALUES ($1, $2, $3, $4, 'PAYMENT', $5, 0, $6, $7, $8, $9)`,
+         VALUES ($1, $2, $3, $4, 'PAYMENT', 0, $5, $6, $7, $8, $9)`,
         [
           entryId,
           supplierId,
           entryId,           // reference_id = self (no external purchase)
           receiptNumber,
-          dto.amount,        // debit decreases payable
+          dto.amount,        // credit decreases payable
           balanceAfter,
           description,
           performedBy ?? null,
@@ -675,27 +676,36 @@ export class SupplierRepo {
 
       // For CASH payments — log outgoing cash movement
       if (dto.payment_method.toUpperCase() === 'CASH') {
+        if (!branchId) {
+          throw new SupplierRepoError('branch_id is required for cash supplier payments', 400);
+        }
+        // Only select an open session that belongs to the authenticated branch
         const sessionResult = await client.query(
-          `SELECT id FROM cash_sessions WHERE status = 'OPEN' LIMIT 1`,
-          []
+          `SELECT id FROM cash_sessions WHERE status = 'OPEN' AND branch_id = $1 LIMIT 1`,
+          [branchId]
         );
-        if (sessionResult.rowCount && sessionResult.rowCount > 0) {
-          const sessionId = sessionResult.rows[0].id as string;
-          await client.query(
-            `INSERT INTO cash_movements
-               (id, session_id, reference_id, movement_type, direction, amount, description, performed_by, created_at)
-             VALUES ($1, $2, $3, 'SUPPLIER_PAYMENT', 'OUT', $4, $5, $6, $7)`,
-            [
-              uuidv4(),
-              sessionId,
-              entryId,
-              dto.amount,
-              description,
-              performedBy ?? null,
-              now,
-            ]
+        if (!sessionResult.rowCount || sessionResult.rowCount === 0) {
+          throw new SupplierRepoError(
+            `No open cash session found for this branch. Please open a cash session before recording cash payments.`,
+            400
           );
         }
+        const sessionId = sessionResult.rows[0].id as string;
+        await client.query(
+          `INSERT INTO cash_movements
+             (id, session_id, branch_id, reference_id, movement_type, direction, amount, description, performed_by, created_at)
+           VALUES ($1, $2, $3, $4, 'SUPPLIER_PAYMENT', 'OUT', $5, $6, $7, $8)`,
+          [
+            uuidv4(),
+            sessionId,
+            branchId,          // mandatory branch_id from authenticated identity
+            entryId,
+            dto.amount,
+            description,
+            performedBy ?? null,
+            now,
+          ]
+        );
       }
 
       await client.query('COMMIT');

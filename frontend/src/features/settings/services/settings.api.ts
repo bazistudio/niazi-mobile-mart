@@ -1,4 +1,5 @@
 import { isTauriEnvironment, tauriClient, StaffRole } from '@/lib/tauri/tauriClient';
+import { httpClient } from '@/lib/http/httpClient'; // DEF-08: backend roles API
 import { CreateRoleDto, UpdateRoleDto, Role, RoleWithPermissions, Permission } from '../types/role.types';
 import { CreateStaffDto, UpdateStaffDto, StaffUser } from '../types/staff.types';
 import {
@@ -709,132 +710,73 @@ export const settingsApi = {
   },
 
   // ─── Roles ──────────────────────────────────────────────────────────────────
+  // DEF-08: All role CRUD now calls the backend HTTP API (/api/v1/roles).
+  // The backend persists canonical role permission overrides in role_permission_grants
+  // and custom roles in custom_roles (migration 028). localStorage role storage is no
+  // longer authoritative — getBrowserCustomRoles() is kept only as a graceful fallback
+  // for the transitional period while the DB table may not yet be migrated.
+
   getRoles: async (): Promise<RoleWithPermissions[]> => {
-    const custom = getBrowserCustomRoles();
-    const canonicalWithPersistedGrants: RoleWithPermissions[] = CANONICAL_ROLES.map((canonical) => {
-      const staffRole = mapRoleIdToStaffRole(canonical._id);
-      const defaultPerms = buildRolePermissionsMap(staffRole);
-      const grants = getRolePermissionGrants(canonical._id);
-
-      const effectivePerms: Record<string, boolean> = { ...defaultPerms };
-      for (const [permKey, isGranted] of Object.entries(grants)) {
-        if (isGranted) {
-          effectivePerms[permKey] = true;
+    try {
+      // DEF-08: primary path — fetch from backend
+      const backendRoles = await httpClient.get<RoleWithPermissions[]>('/api/v1/roles');
+      return backendRoles;
+    } catch (backendErr) {
+      // Fallback: build local list from CANONICAL_ROLES + localStorage custom roles.
+      // This path is used during initial deployment before migration 028 has run,
+      // or in offline/network-error scenarios. It is intentionally read-only.
+      console.warn('[settingsApi.getRoles] Backend unavailable, using local fallback. DEF-08 not fully active:', backendErr);
+      const custom = getBrowserCustomRoles();
+      const canonicalWithPersistedGrants: RoleWithPermissions[] = CANONICAL_ROLES.map((canonical) => {
+        const staffRole = mapRoleIdToStaffRole(canonical._id);
+        const defaultPerms = buildRolePermissionsMap(staffRole);
+        const grants = getRolePermissionGrants(canonical._id);
+        const effectivePerms: Record<string, boolean> = { ...defaultPerms };
+        for (const [permKey, isGranted] of Object.entries(grants)) {
+          if (isGranted) effectivePerms[permKey] = true;
         }
-      }
-
-      return {
-        ...canonical,
-        permissions: effectivePerms,
-        permissionCount: Object.values(effectivePerms).filter(Boolean).length,
-      };
-    });
-    return [...canonicalWithPersistedGrants, ...custom];
+        return { ...canonical, permissions: effectivePerms, permissionCount: Object.values(effectivePerms).filter(Boolean).length };
+      });
+      return [...canonicalWithPersistedGrants, ...custom];
+    }
   },
 
   getRoleById: async (id: string): Promise<RoleWithPermissions> => {
-    const roles = await settingsApi.getRoles();
-    const found = roles.find((r) => r._id === id || normalizeRoleKey(r._id) === normalizeRoleKey(id));
-    if (found) return found;
-    return roles[0];
+    try {
+      return await httpClient.get<RoleWithPermissions>(`/api/v1/roles/${encodeURIComponent(id)}`);
+    } catch {
+      // Fallback to local list
+      const roles = await settingsApi.getRoles();
+      const found = roles.find((r) => r._id === id || normalizeRoleKey(r._id) === normalizeRoleKey(id));
+      if (found) return found;
+      return roles[0];
+    }
   },
 
   createRole: async (data: CreateRoleDto): Promise<Role> => {
-    const newRole: RoleWithPermissions = {
-      _id: `role_${Date.now()}`,
-      organizationId: '00000000-0000-0000-0000-000000000001',
-      name: data.name,
-      description: data.description,
-      isSystem: false,
-      userCount: 0,
-      permissionCount: Object.keys(data.permissions || {}).length,
-      permissions: data.permissions || {},
-      createdAt: new Date().toISOString(),
-    };
-    const custom = getBrowserCustomRoles();
-    custom.push(newRole);
-    saveBrowserCustomRoles(custom);
-    return newRole;
+    // DEF-08: persist to backend; do NOT write to localStorage as primary storage.
+    return await httpClient.post<Role>('/api/v1/roles', data);
   },
 
   updateRole: async (id: string, data: UpdateRoleDto): Promise<Role> => {
-    const custom = getBrowserCustomRoles();
-    const idx = custom.findIndex((r) => r._id === id);
-    if (idx >= 0) {
-      custom[idx] = {
-        ...custom[idx],
-        name: data.name || custom[idx].name,
-        description: data.description !== undefined ? data.description : custom[idx].description,
-        permissions: data.permissions || custom[idx].permissions,
-        permissionCount: Object.keys(data.permissions || custom[idx].permissions).length,
-      };
-      saveBrowserCustomRoles(custom);
-      return custom[idx];
-    }
-
-    const canonical = CANONICAL_ROLES.find(
-      (r) => r._id === id || normalizeRoleKey(r._id) === normalizeRoleKey(id)
-    );
-    const roleId = canonical ? canonical._id : normalizeRoleKey(id);
-    const staffRole = mapRoleIdToStaffRole(roleId);
-    const roleDecisions = ROLE_PERMISSION_DECISIONS[staffRole] || {};
-
-    if (data.permissions) {
-      // Extract ONLY permissions where decision is INDIVIDUAL
-      const individualGrantsToSave: Record<string, boolean> = {};
-      for (const [permKey, isEnabled] of Object.entries(data.permissions)) {
-        const decision = roleDecisions[permKey as PermissionKey];
-        if (decision === 'INDIVIDUAL' && isEnabled === true) {
-          individualGrantsToSave[permKey] = true;
-        }
-      }
-      saveRolePermissionGrants(roleId, individualGrantsToSave);
-    }
-
-    const defaultPerms = buildRolePermissionsMap(staffRole);
-    const grants = getRolePermissionGrants(roleId);
-    const effectivePerms: Record<string, boolean> = { ...defaultPerms };
-    for (const [permKey, isGranted] of Object.entries(grants)) {
-      if (isGranted) {
-        effectivePerms[permKey] = true;
-      }
-    }
-
-    return {
-      _id: roleId,
-      organizationId: '00000000-0000-0000-0000-000000000001',
-      name: data.name || canonical?.name || roleId,
-      description: data.description !== undefined ? data.description : canonical?.description || '',
-      isSystem: canonical?.isSystem ?? true,
-      permissions: effectivePerms,
-      createdAt: canonical?.createdAt || '2026-01-01T00:00:00.000Z',
-      updatedAt: new Date().toISOString(),
-    };
+    // DEF-08: persist to backend; do NOT write to localStorage as primary storage.
+    return await httpClient.put<Role>(`/api/v1/roles/${encodeURIComponent(id)}`, data);
   },
 
   deleteRole: async (id: string): Promise<void> => {
-    const custom = getBrowserCustomRoles().filter((r) => r._id !== id);
-    saveBrowserCustomRoles(custom);
+    // DEF-08: delete from backend; do NOT rely on localStorage as primary storage.
+    await httpClient.delete<void>(`/api/v1/roles/${encodeURIComponent(id)}`);
   },
 
   duplicateRole: async (id: string): Promise<Role> => {
-    const roles = await settingsApi.getRoles();
-    const source = roles.find((r) => r._id === id);
-    const newRole: RoleWithPermissions = {
-      _id: `role_${Date.now()}`,
-      organizationId: '00000000-0000-0000-0000-000000000001',
+    // DEF-08: fetch source from backend, then create via backend
+    const source = await settingsApi.getRoleById(id);
+    const newData: CreateRoleDto = {
       name: `Copy of ${source?.name || id}`,
       description: source?.description || 'Duplicated role',
-      isSystem: false,
-      userCount: 0,
-      permissionCount: source?.permissionCount || 0,
       permissions: source ? { ...source.permissions } : {},
-      createdAt: new Date().toISOString(),
     };
-    const custom = getBrowserCustomRoles();
-    custom.push(newRole);
-    saveBrowserCustomRoles(custom);
-    return newRole;
+    return await httpClient.post<Role>('/api/v1/roles', newData);
   },
 
   // ─── Permissions ────────────────────────────────────────────────────────────
@@ -853,4 +795,4 @@ export const settingsApi = {
     const modules = new Set(Object.values(PERMISSION_METADATA).map((m) => m.module));
     return Array.from(modules);
   },
-};
+};

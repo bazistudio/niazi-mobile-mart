@@ -56,6 +56,7 @@ import { buildBranchRouter } from './routes/branch.routes';
 import { buildSyncRouter } from './routes/sync.routes';
 import { buildRepairRouter } from './routes/repair.routes';
 import { createSettingsRouter } from './routes/settings.routes';
+import { buildRolesRouter } from './routes/roles.routes'; // DEF-08
 import { BranchRepo } from './repositories/branch.repo';
 import {
   listBrands,
@@ -273,6 +274,11 @@ async function main(): Promise<void> {
   const settingsRouter = createSettingsRouter(pool);
   app.use('/api/settings', settingsRouter);
   app.use('/api/v1/settings', settingsRouter);
+
+  // Roles management routes — DEF-08: backend-persisted custom roles
+  const rolesRouter = buildRolesRouter(pool);
+  app.use('/api/roles', rolesRouter);
+  app.use('/api/v1/roles', rolesRouter);
 
   app.get(['/api/organization/balances', '/api/v1/organization/balances'], async (_req: Request, res: Response) => {
     try {

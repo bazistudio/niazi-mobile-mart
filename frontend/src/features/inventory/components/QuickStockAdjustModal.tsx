@@ -335,7 +335,8 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
                   className="w-full pl-10 pr-3.5 py-2.5 bg-white dark:bg-neutral-800 border border-[#006970]/50 dark:border-[#006970]/40 rounded-xl text-sm font-bold text-neutral-900 dark:text-white placeholder:text-neutral-400 placeholder:font-normal focus:outline-none focus:ring-2 focus:ring-[#006970] tabular-nums"
                 />
               </div>
-              {/* WAC Preview */}
+              {/* WAC Preview — DEF-09: Note that preview uses branch-local stock while
+                   backend WAC uses global product stock across all branches */}
               <div className="mt-2 px-3.5 py-2 bg-[#006970]/5 dark:bg-[#006970]/10 border border-[#006970]/20 rounded-xl flex items-center justify-between text-xs">
                 <span className="text-neutral-500 font-medium">New Weighted Avg Cost:</span>
                 <div className="flex items-center gap-2">
@@ -345,6 +346,9 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
                   </span>
                 </div>
               </div>
+              <p className="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
+                Preview uses this branch&apos;s stock. Actual WAC is recalculated by the server using total stock across all branches.
+              </p>
             </div>
           )}
 

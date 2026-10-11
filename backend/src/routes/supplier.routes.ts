@@ -210,7 +210,7 @@ export function buildSupplierRouter(pool: Pool): Router {
 
   // -------------------------------------------------------------------------
   // POST /:id/payments — Record supplier payable payment
-  // Inserts a DEBIT entry into supplier_ledger_entries, reducing payable.
+  // Inserts a CREDIT entry into supplier_ledger_entries, reducing payable.
   // For CASH payments, also records a cash_movements row (direction='OUT').
   // Body: { amount: number, payment_method: string, notes?: string, reference_number?: string }
   // Returns 201 + { payment_id, reference_number, new_balance }
@@ -240,9 +240,11 @@ export function buildSupplierRouter(pool: Pool): Router {
 
     const identity = req.identity;
     const performedBy = identity?.user_id ?? null;
+    // Pass branch from authenticated identity — not from client-supplied body
+    const branchId = identity?.branch_id ?? null;
 
     try {
-      const result = await service.recordPayment(id, dto, performedBy);
+      const result = await service.recordPayment(id, dto, performedBy, branchId);
       res.status(201).json(result);
     } catch (err: unknown) {
       handleError(res, err, 'record_supplier_payment');

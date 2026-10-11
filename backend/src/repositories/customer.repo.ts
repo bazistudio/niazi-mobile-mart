@@ -741,7 +741,8 @@ export async function recordCustomerPayment(
   pool: Pool,
   customerId: string,
   dto: RecordCustomerPaymentDto,
-  performedBy?: string | null
+  performedBy?: string | null,
+  branchId?: string | null
 ): Promise<CustomerPaymentResult> {
   if (!dto.amount || dto.amount <= 0) {
     throw new CustomerRepoError('Payment amount must be greater than zero', 400, 'VALIDATION');
@@ -813,12 +814,24 @@ export async function recordCustomerPayment(
 
     // 6. Cash movement (IN) for CASH payments
     if (paymentMethod === 'CASH') {
+      if (!branchId) {
+        throw new CustomerRepoError('branch_id is required for cash customer payments', 400, 'VALIDATION');
+      }
+      // Scope session lookup to the authenticated branch — prevents cross-branch till selection
       const sessionResult = await client.query<{ id: string }>(
         `SELECT id FROM cash_sessions
-         WHERE status = 'OPEN'
-         ORDER BY created_at DESC LIMIT 1`
+         WHERE status = 'OPEN' AND branch_id = $1
+         ORDER BY created_at DESC LIMIT 1`,
+        [branchId]
       );
-      const sessionId = sessionResult.rows[0]?.id ?? null;
+      if (!sessionResult.rows[0]) {
+        throw new CustomerRepoError(
+          'No open cash session found for this branch. Please open a cash session before recording cash payments.',
+          400,
+          'VALIDATION'
+        );
+      }
+      const sessionId = sessionResult.rows[0].id;
       const movementId = uuidv4();
 
       await client.query(

@@ -4,7 +4,7 @@
 
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { authMiddleware, isAdmin, isOrgAdmin, RequestIdentity } from '../auth';
+import { authMiddleware, isAdmin, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
 import {
   getInvoicePrinterSettings,
   saveInvoicePrinterSettings,
@@ -44,7 +44,23 @@ export function createSettingsRouter(pool: Pool): Router {
 
     try {
       const dto = req.body as Partial<DbInvoicePrinterSettings>;
-      const branchId = dto.branch_id || identity.branch_id;
+
+      // DEF-06: Branch isolation — non-org-admins are locked to their own branch.
+      // Org admins may supply an explicit branch_id, validated via canAccessBranch.
+      let branchId: string | undefined;
+      if (isOrgAdmin(identity)) {
+        // Org admins may write any branch they are authorized for
+        const requestedBranchId = dto.branch_id || identity.branch_id;
+        if (requestedBranchId && !canAccessBranch(identity, requestedBranchId)) {
+          res.status(403).json({ error: 'Access denied: You do not have access to that branch' });
+          return;
+        }
+        branchId = requestedBranchId;
+      } else {
+        // Non-org-admins are restricted to their authenticated branch — never trust dto.branch_id
+        branchId = identity.branch_id;
+      }
+
       const saved = await saveInvoicePrinterSettings(pool, branchId, dto);
       res.status(200).json(saved);
     } catch (err: any) {

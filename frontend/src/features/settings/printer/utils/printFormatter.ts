@@ -151,10 +151,38 @@ export const printFormatter = {
     return renderDocument(invoice, settings, 'Payment Receipt');
   },
 
-  formatLedgerStatement: (customer: any, timeline: any[], settings: PrinterSettings, shop: ShopHeader, filterTitle: string = 'Full Ledger'): string => {
-    // Renders a customer account statement. The party domain was removed in v1.3.26;
-    // this function now accepts a customer object (id, name, phone, balance).
-    const title = 'Customer Account Statement';
+  formatLedgerStatement: (party: any, timeline: any[], settings: PrinterSettings, shop: ShopHeader, filterTitle: string = 'Full Ledger'): string => {
+    // DEF-07: domain-aware statement formatter.
+    // party.type === 'SUPPLIER' renders a Supplier Account Statement with supplier labels and
+    // correct debit/credit semantics. Everything else (CUSTOMER or absent) renders a Customer
+    // Account Statement with customer labels.
+    //
+    // Customer ledger convention:
+    //   Debit = Sale / amount owed to us (increases receivable)
+    //   Credit = Payment received from customer (reduces receivable)
+    //   Positive running balance → DR (customer owes us)
+    //   Negative running balance → CR (customer in advance / credit)
+    //
+    // Supplier ledger convention:
+    //   Debit = Purchase / amount we owe supplier (increases payable)
+    //   Credit = Payment made to supplier (reduces payable)
+    //   Positive running balance → DR (we owe supplier)
+    //   Negative running balance → CR (supplier owes us / advance paid)
+
+    const isSupplier = (party?.type || '').toUpperCase() === 'SUPPLIER';
+
+    const title = isSupplier ? 'Supplier Account Statement' : 'Customer Account Statement';
+    const partyLabel = isSupplier ? 'Supplier' : 'Customer';
+    // Debit header: for customer = "Debit (Sale / Invoice)"; for supplier = "Debit (Purchase)"
+    const debitHeader = isSupplier ? 'Debit (Purchase)' : 'Debit (Sale)';
+    const creditHeader = isSupplier ? 'Credit (Payment)' : 'Credit (Payment)';
+
+    const partyName: string = party?.name || (isSupplier ? 'Supplier' : 'Customer');
+    const partyPhone: string | undefined = party?.phone;
+    const balance: number = party?.balance ?? 0;
+
+    // Balance display: positive → DR (amount owed in the normal direction), negative → CR
+    const balanceDisplay = Math.abs(balance).toLocaleString() + (balance < 0 ? ' CR' : ' DR');
 
     let html = '';
     html += '<div style="font-family: ' + (settings.font?.family || 'sans-serif') + '; font-size: ' + (settings.font?.size || 12) + 'px; padding: 20px; max-width: 800px; margin: 0 auto; color: #000; background: #fff;">';
@@ -175,12 +203,12 @@ export const printFormatter = {
 
     html += '<div style="display: flex; justify-content: space-between; margin-bottom: 20px; border-bottom: 1px solid #000; padding-bottom: 10px; font-size: 12px;">';
     html += '<div>';
-    html += '<p style="margin: 2px 0;"><strong>Customer:</strong> ' + (customer.name || 'Customer') + '</p>';
-    if (customer.phone) html += '<p style="margin: 2px 0;"><strong>Phone:</strong> ' + customer.phone + '</p>';
+    html += '<p style="margin: 2px 0;"><strong>' + partyLabel + ':</strong> ' + partyName + '</p>';
+    if (partyPhone) html += '<p style="margin: 2px 0;"><strong>Phone:</strong> ' + partyPhone + '</p>';
     html += '</div>';
     html += '<div style="text-align: right;">';
     html += '<p style="margin: 2px 0;"><strong>Filter:</strong> ' + filterTitle + '</p>';
-    html += '<p style="margin: 2px 0;"><strong>Current Balance:</strong> Rs ' + Math.abs(customer.balance || 0).toLocaleString() + ((customer.balance || 0) < 0 ? ' CR' : ' DR') + '</p>';
+    html += '<p style="margin: 2px 0;"><strong>Current Balance:</strong> Rs ' + balanceDisplay + '</p>';
     html += '</div>';
     html += '</div>';
 
@@ -190,29 +218,39 @@ export const printFormatter = {
     html += '<th style="text-align: left; padding: 5px;">Date</th>';
     html += '<th style="text-align: left; padding: 5px;">Reference</th>';
     html += '<th style="text-align: left; padding: 5px;">Details</th>';
-    html += '<th style="text-align: right; padding: 5px;">Debit</th>';
-    html += '<th style="text-align: right; padding: 5px;">Credit</th>';
+    html += '<th style="text-align: right; padding: 5px;">' + debitHeader + '</th>';
+    html += '<th style="text-align: right; padding: 5px;">' + creditHeader + '</th>';
     html += '<th style="text-align: right; padding: 5px;">Balance</th>';
     html += '</tr>';
     html += '</thead>';
     html += '<tbody>';
 
     (timeline || []).forEach(entry => {
-      // Customer ledger: sales are debits (money owed), payments are credits (money received)
-      const isPayment = entry.type === 'payment' || entry.type === 'PAYMENT';
-      const bal = entry.runningBalance || 0;
+      // PAYMENT entries go to the credit column for both customer and supplier.
+      // All other entry types (SALE for customer; PURCHASE for supplier; ADJUSTMENT) go to debit.
+      const isPayment = (entry.type || '').toUpperCase() === 'PAYMENT';
+      const bal: number = entry.runningBalance ?? entry.balance_after ?? 0;
+      const entryAmt: number = entry.amount ?? 0;
 
-      let displayDesc = entry.description || '';
-      if (displayDesc.toLowerCase().includes('credit')) displayDesc = 'Credit';
-      else if (displayDesc.toLowerCase().includes('cash')) displayDesc = 'Cash';
+      let displayDesc: string = entry.description || entry.type || '';
+      // Sanitize generic placeholders while keeping meaningful descriptions
+      if (!displayDesc || displayDesc.toLowerCase() === 'payment') {
+        displayDesc = isSupplier ? 'Supplier Payment' : 'Customer Payment';
+      } else if (!displayDesc || displayDesc.toLowerCase() === 'sale') {
+        displayDesc = 'Sale';
+      } else if (!displayDesc || displayDesc.toLowerCase() === 'purchase') {
+        displayDesc = 'Purchase';
+      }
+
+      const entryBalDisplay = Math.abs(bal).toLocaleString() + (bal < 0 ? ' CR' : ' DR');
 
       html += '<tr style="border-bottom: 1px solid #eee;">';
-      html += '<td style="padding: 5px;">' + new Date(entry.timestamp || entry.createdAt).toLocaleDateString() + '</td>';
-      html += '<td style="padding: 5px;">' + (entry.transactionId || entry.invoiceNo || '-') + '</td>';
+      html += '<td style="padding: 5px;">' + new Date(entry.timestamp || entry.createdAt || Date.now()).toLocaleDateString() + '</td>';
+      html += '<td style="padding: 5px;">' + (entry.transactionId || entry.invoiceNo || entry.reference || '-') + '</td>';
       html += '<td style="padding: 5px;">' + displayDesc + '</td>';
-      html += '<td style="text-align: right; padding: 5px;">' + (!isPayment ? (entry.amount || 0).toLocaleString() : '-') + '</td>';
-      html += '<td style="text-align: right; padding: 5px;">' + (isPayment ? (entry.amount || 0).toLocaleString() : '-') + '</td>';
-      html += '<td style="text-align: right; padding: 5px;">Rs ' + Math.abs(bal).toLocaleString() + (bal < 0 ? ' CR' : ' DR') + '</td>';
+      html += '<td style="text-align: right; padding: 5px;">' + (!isPayment ? entryAmt.toLocaleString() : '-') + '</td>';
+      html += '<td style="text-align: right; padding: 5px;">' + (isPayment ? entryAmt.toLocaleString() : '-') + '</td>';
+      html += '<td style="text-align: right; padding: 5px;">Rs ' + entryBalDisplay + '</td>';
       html += '</tr>';
     });
 

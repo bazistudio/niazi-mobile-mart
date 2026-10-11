@@ -356,6 +356,7 @@ export function createCustomerV1Router(pool: Pool): Router {
         return;
       }
 
+      // Pass branch from authenticated identity — not from client-supplied body (DEF-03)
       const result = await recordCustomerPayment(
         pool,
         customerId,
@@ -365,7 +366,8 @@ export function createCustomerV1Router(pool: Pool): Router {
           notes: body.notes ?? null,
           reference_number: body.reference_number ?? null,
         },
-        identity.user_id ?? null
+        identity.user_id ?? null,
+        identity.branch_id ?? null
       );
 
       res.status(201).json(result);
