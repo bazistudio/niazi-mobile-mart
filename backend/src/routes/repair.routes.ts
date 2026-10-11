@@ -13,7 +13,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { authMiddleware, isAdmin, RequestIdentity } from '../auth';
+import { authMiddleware, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
 import {
   listRepairJobs,
   getRepairJobById,
@@ -32,7 +32,7 @@ export function buildRepairRouter(pool: Pool): Router {
   router.get('/', authMiddleware, async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      const callerIsAdmin = isAdmin(identity);
+      const callerIsOrgAdmin = isOrgAdmin(identity);
 
       const filters: RepairJobFilters = {
         page: req.query['page'] ? Number(req.query['page']) : 1,
@@ -42,11 +42,16 @@ export function buildRepairRouter(pool: Pool): Router {
         technician_id: (req.query['technician_id'] as string) || undefined,
       };
 
-      // Non-admins are scoped to their own branch
-      if (!callerIsAdmin) {
+      // Org admins may filter by any branch; others are locked to their own branch
+      if (!callerIsOrgAdmin) {
         filters.branch_id = identity.branch_id ?? undefined;
       } else {
-        filters.branch_id = (req.query['branch_id'] as string) || undefined;
+        const requestedBranchId = (req.query['branch_id'] as string) || undefined;
+        if (requestedBranchId && !canAccessBranch(identity, requestedBranchId)) {
+          res.status(403).json({ error: 'Access denied: You do not have permission to view repairs for this branch' });
+          return;
+        }
+        filters.branch_id = requestedBranchId;
       }
 
       const result = await listRepairJobs(pool, filters);
@@ -59,12 +64,20 @@ export function buildRepairRouter(pool: Pool): Router {
   // ── GET /api/repairs/:id — get by id or job_id ────────────────────────────
   router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
       const id = req.params['id'] as string;
       const job = await getRepairJobById(pool, id);
       if (!job) {
         res.status(404).json({ error: `Repair job '${id}' not found` });
         return;
       }
+
+      // Enforce branch isolation: non-org-admins can only access their own branch's jobs
+      if (!canAccessBranch(identity, job.branch_id ?? null)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to view this repair job' });
+        return;
+      }
+
       res.status(200).json(job);
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to fetch repair job' });
@@ -75,8 +88,8 @@ export function buildRepairRouter(pool: Pool): Router {
   router.post('/', authMiddleware, async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      if (!isAdmin(identity)) {
-        res.status(403).json({ error: 'Forbidden: creating repair jobs requires administrator role' });
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Forbidden: creating repair jobs requires Administrator role' });
         return;
       }
 
@@ -120,8 +133,8 @@ export function buildRepairRouter(pool: Pool): Router {
   router.put('/:id/status', authMiddleware, async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      if (!isAdmin(identity)) {
-        res.status(403).json({ error: 'Forbidden: updating repair status requires administrator role' });
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Forbidden: updating repair status requires Administrator role' });
         return;
       }
 
@@ -149,8 +162,8 @@ export function buildRepairRouter(pool: Pool): Router {
   router.post('/:id/parts', authMiddleware, async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      if (!isAdmin(identity)) {
-        res.status(403).json({ error: 'Forbidden: adding parts requires administrator role' });
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Forbidden: adding parts requires Administrator role' });
         return;
       }
 
@@ -180,8 +193,8 @@ export function buildRepairRouter(pool: Pool): Router {
   router.post('/:id/payments', authMiddleware, async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      if (!isAdmin(identity)) {
-        res.status(403).json({ error: 'Forbidden: adding payments requires administrator role' });
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Forbidden: adding payments requires Administrator role' });
         return;
       }
 

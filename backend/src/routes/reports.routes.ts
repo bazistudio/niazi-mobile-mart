@@ -5,7 +5,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, isAdmin, RequestIdentity } from '../auth';
+import { authMiddleware, authorizePermission, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
 import { getProfitSummary, getDashboardProfitSummary, ProfitRepoError } from '../repositories/profit.repo';
 
 function isDbConnectionError(err: unknown): boolean {
@@ -44,15 +44,23 @@ export function createReportsRouter(pool: Pool): Router {
   router.get(['/profit', '/profit/dashboard'], async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;
 
-    if (!isAdmin(identity)) {
-      res.status(403).json({ error: 'Access denied: Profit reporting requires Admin or ShopAdmin permissions' });
+    if (!isOrgAdmin(identity)) {
+      res.status(403).json({ error: 'Access denied: Profit reporting requires Admin permissions' });
       return;
     }
 
     try {
       const startDate = (req.query['start_date'] as string) || undefined;
       const endDate = (req.query['end_date'] as string) || undefined;
-      const branchId = (req.query['branch_id'] as string) || identity.branch_id || undefined;
+      const requestedBranchId = (req.query['branch_id'] as string) || undefined;
+
+      // Validate branch access when a specific branch is requested
+      if (requestedBranchId && !canAccessBranch(identity, requestedBranchId)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to view reports for this branch' });
+        return;
+      }
+
+      const branchId = requestedBranchId || identity.branch_id || undefined;
 
       if (startDate || endDate) {
         const summary = await getProfitSummary(pool, {
@@ -74,14 +82,22 @@ export function createReportsRouter(pool: Pool): Router {
   router.get('/profit/summary', async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;
 
-    if (!isAdmin(identity)) {
-      res.status(403).json({ error: 'Access denied: Profit reporting requires Admin or ShopAdmin permissions' });
+    if (!isOrgAdmin(identity)) {
+      res.status(403).json({ error: 'Access denied: Profit reporting requires Admin permissions' });
       return;
     }
 
     try {
+      const requestedBranchId = (req.query['branch_id'] as string) || undefined;
+
+      // Validate branch access when a specific branch is requested
+      if (requestedBranchId && !canAccessBranch(identity, requestedBranchId)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to view reports for this branch' });
+        return;
+      }
+
       const summary = await getProfitSummary(pool, {
-        branch_id: (req.query['branch_id'] as string) || identity.branch_id || undefined,
+        branch_id: requestedBranchId || identity.branch_id || undefined,
         start_date: (req.query['start_date'] as string) || undefined,
         end_date: (req.query['end_date'] as string) || undefined,
       });

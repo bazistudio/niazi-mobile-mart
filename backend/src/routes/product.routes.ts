@@ -212,8 +212,8 @@ export function createProductRouter(pool: Pool): Router {
   router.put('/:id', async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;
 
-    const productsOk = authorizePermission(identity, 'products', null);
-    const inventoryOk = authorizePermission(identity, 'inventory', null);
+    const productsOk = authorizePermission(identity, 'products', 'products:edit');
+    const inventoryOk = authorizePermission(identity, 'inventory', 'products:edit');
     if (productsOk !== null && inventoryOk !== null) {
       res.status(403).json({ error: productsOk });
       return;
@@ -235,8 +235,8 @@ export function createProductRouter(pool: Pool): Router {
   router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;
 
-    const productsOk = authorizePermission(identity, 'products', null);
-    const inventoryOk = authorizePermission(identity, 'inventory', null);
+    const productsOk = authorizePermission(identity, 'products', 'products:delete');
+    const inventoryOk = authorizePermission(identity, 'inventory', 'products:delete');
     if (productsOk !== null && inventoryOk !== null) {
       res.status(403).json({ error: productsOk });
       return;

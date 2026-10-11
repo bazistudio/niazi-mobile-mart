@@ -5,7 +5,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, RequestIdentity, NIAZI_ORGANIZATION_ID } from '../auth';
+import { authMiddleware, authorizePermission, canAccessBranch, RequestIdentity, NIAZI_ORGANIZATION_ID } from '../auth';
 import {
   closeCashSession,
   getCurrentCashSession,
@@ -61,7 +61,15 @@ export function createCashRouter(pool: Pool): Router {
     }
 
     try {
-      const branchId = (req.query['branch_id'] as string) || identity.branch_id || NIAZI_ORGANIZATION_ID;
+      const requestedBranchId = (req.query['branch_id'] as string) || undefined;
+
+      // Validate branch access when a specific branch is requested
+      if (requestedBranchId && !canAccessBranch(identity, requestedBranchId)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to access this branch' });
+        return;
+      }
+
+      const branchId = requestedBranchId || identity.branch_id || NIAZI_ORGANIZATION_ID;
       const session = await getCurrentCashSession(pool, branchId);
       res.status(200).json({ session });
     } catch (err) {
@@ -81,6 +89,13 @@ export function createCashRouter(pool: Pool): Router {
 
     try {
       const dto = req.body as OpenCashSessionDto;
+
+      // Validate branch access when branch_id is supplied in body
+      if (dto.branch_id && !canAccessBranch(identity, dto.branch_id)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to open a session for this branch' });
+        return;
+      }
+
       if (!dto.branch_id && identity.branch_id) {
         dto.branch_id = identity.branch_id;
       }
@@ -122,6 +137,13 @@ export function createCashRouter(pool: Pool): Router {
 
     try {
       const dto = req.body as RecordCashMovementDto;
+
+      // Validate branch access when branch_id is supplied in body
+      if (dto.branch_id && !canAccessBranch(identity, dto.branch_id)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to record movements for this branch' });
+        return;
+      }
+
       if (!dto.branch_id && identity.branch_id) {
         dto.branch_id = identity.branch_id;
       }
@@ -143,7 +165,15 @@ export function createCashRouter(pool: Pool): Router {
     }
 
     try {
-      const branchId = (req.query['branch_id'] as string) || identity.branch_id || null;
+      const requestedBranchId = (req.query['branch_id'] as string) || undefined;
+
+      // Validate branch access when a specific branch is requested
+      if (requestedBranchId && !canAccessBranch(identity, requestedBranchId)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to view movements for this branch' });
+        return;
+      }
+
+      const branchId = requestedBranchId || identity.branch_id || null;
       const movements = await listCashMovements(pool, branchId);
       res.status(200).json(movements);
     } catch (err) {

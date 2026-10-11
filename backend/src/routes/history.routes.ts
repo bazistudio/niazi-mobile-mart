@@ -6,7 +6,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, isAdmin, RequestIdentity } from '../auth';
+import { authMiddleware, authorizePermission, isOrgAdmin, RequestIdentity } from '../auth';
 import {
   getHistoryStats,
   listHistoryItems,
@@ -57,9 +57,7 @@ export function createHistoryRouter(pool: Pool): Router {
     }
 
     try {
-      const isOrgAdmin =
-        isAdmin(identity) ||
-        identity.access_profile.allowed_pages.some((p) => p === '*');
+      const callerIsOrgAdmin = isOrgAdmin(identity);
 
       const filter: HistoryFilterParams = {
         page: req.query['page'] ? parseInt(req.query['page'] as string, 10) : 1,
@@ -69,7 +67,7 @@ export function createHistoryRouter(pool: Pool): Router {
         endDate: (req.query['endDate'] as string) || undefined,
         status: (req.query['status'] as string) || undefined,
         search: (req.query['search'] as string) || undefined,
-        branch_id: !isOrgAdmin && identity.branch_id ? identity.branch_id : (req.query['branch_id'] as string) || null,
+        branch_id: !callerIsOrgAdmin && identity.branch_id ? identity.branch_id : (req.query['branch_id'] as string) || null,
       };
 
       const result = await listHistoryItems(pool, filter);
@@ -90,11 +88,9 @@ export function createHistoryRouter(pool: Pool): Router {
     }
 
     try {
-      const isOrgAdmin =
-        isAdmin(identity) ||
-        identity.access_profile.allowed_pages.some((p) => p === '*');
+      const callerIsOrgAdmin = isOrgAdmin(identity);
 
-      const branchId = !isOrgAdmin && identity.branch_id ? identity.branch_id : (req.query['branch_id'] as string) || null;
+      const branchId = !callerIsOrgAdmin && identity.branch_id ? identity.branch_id : (req.query['branch_id'] as string) || null;
       const stats = await getHistoryStats(pool, branchId);
       res.status(200).json(stats);
     } catch (err) {
