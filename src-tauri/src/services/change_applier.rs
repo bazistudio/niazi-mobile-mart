@@ -608,7 +608,6 @@ impl ChangeApplier {
                 } else {
                     crate::repositories::SQLiteSupplierRepository::insert_supplier_in_tx(tx, &supplier)?;
                 }
-                }
             }
             // SYNC-B2 — Apply a customer payment from another PC / central server
             "CUSTOMER_PAYMENT_RECORDED" => {
