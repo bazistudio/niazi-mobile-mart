@@ -55,10 +55,10 @@ export function createSettingsRouter(pool: Pool): Router {
           res.status(403).json({ error: 'Access denied: You do not have access to that branch' });
           return;
         }
-        branchId = requestedBranchId;
+        branchId = requestedBranchId ?? undefined;   // null → undefined (Error #8 fix)
       } else {
         // Non-org-admins are restricted to their authenticated branch — never trust dto.branch_id
-        branchId = identity.branch_id;
+        branchId = identity.branch_id ?? undefined;  // null → undefined (Error #9 fix)
       }
 
       const saved = await saveInvoicePrinterSettings(pool, branchId, dto);

@@ -141,6 +141,10 @@ export function buildRolesRouter(pool: Pool): Router {
       const identity = req.identity as RequestIdentity;
       const orgId = identity.organization_id;
       const id = req.params.id;
+      if (!id || typeof id !== 'string') {
+        res.status(400).json({ error: 'Role ID must be a non-empty string' });
+        return;
+      }
 
       if (isCanonicalRole(id)) {
         const grantsResult = await pool.query<{ permission_key: string; granted: boolean }>(
@@ -236,6 +240,10 @@ export function buildRolesRouter(pool: Pool): Router {
       }
       const orgId = identity.organization_id;
       const id = req.params.id;
+      if (!id || typeof id !== 'string') {
+        res.status(400).json({ error: 'Role ID must be a non-empty string' });
+        return;
+      }
       const { name, description, permissions } = req.body;
 
       if (isCanonicalRole(id)) {
@@ -337,6 +345,10 @@ export function buildRolesRouter(pool: Pool): Router {
       }
       const orgId = identity.organization_id;
       const id = req.params.id;
+      if (!id || typeof id !== 'string') {
+        res.status(400).json({ error: 'Role ID must be a non-empty string' });
+        return;
+      }
 
       if (isCanonicalRole(id)) {
         res.status(400).json({ error: 'System roles cannot be deleted' });
