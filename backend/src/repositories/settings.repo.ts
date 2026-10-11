@@ -167,10 +167,16 @@ export async function saveInvoicePrinterSettings(
   branchId: string | null | undefined,
   dto: Partial<DbInvoicePrinterSettings>
 ): Promise<DbInvoicePrinterSettings> {
-  const current = await getInvoicePrinterSettings(pool, branchId);
+  const bId = branchId?.trim();
+  if (!bId) {
+    throw new Error('branch_id is required to save invoice printer settings');
+  }
+
+  const current = await getInvoicePrinterSettings(pool, bId);
   const updated: DbInvoicePrinterSettings = {
     ...current,
     ...dto,
+    branch_id: bId,
     updated_at: new Date().toISOString(),
   };
 

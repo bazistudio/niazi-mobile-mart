@@ -47,21 +47,39 @@ export function createSettingsRouter(pool: Pool): Router {
 
       // DEF-06: Branch isolation — non-org-admins are locked to their own branch.
       // Org admins may supply an explicit branch_id, validated via canAccessBranch.
-      let branchId: string | undefined;
+      let branchId: string;
       if (isOrgAdmin(identity)) {
         // Org admins may write any branch they are authorized for
-        const requestedBranchId = dto.branch_id || identity.branch_id;
-        if (requestedBranchId && !canAccessBranch(identity, requestedBranchId)) {
+        const requestedBranchId = (typeof dto.branch_id === 'string' && dto.branch_id.trim())
+          ? dto.branch_id.trim()
+          : (typeof identity.branch_id === 'string' && identity.branch_id.trim())
+            ? identity.branch_id.trim()
+            : undefined;
+
+        if (!requestedBranchId) {
+          res.status(400).json({ error: 'branch_id is required' });
+          return;
+        }
+
+        if (!canAccessBranch(identity, requestedBranchId)) {
           res.status(403).json({ error: 'Access denied: You do not have access to that branch' });
           return;
         }
-        branchId = requestedBranchId ?? undefined;   // null → undefined (Error #8 fix)
+        branchId = requestedBranchId;
       } else {
         // Non-org-admins are restricted to their authenticated branch — never trust dto.branch_id
-        branchId = identity.branch_id ?? undefined;  // null → undefined (Error #9 fix)
+        const userBranchId = typeof identity.branch_id === 'string' ? identity.branch_id.trim() : '';
+        if (!userBranchId) {
+          res.status(400).json({ error: 'Authenticated user does not have an assigned branch' });
+          return;
+        }
+        branchId = userBranchId;
       }
 
-      const saved = await saveInvoicePrinterSettings(pool, branchId, dto);
+      // Strip branch_id from dto to ensure it cannot override authoritative resolved branch
+      const { branch_id: _ignored, ...cleanDto } = dto;
+
+      const saved = await saveInvoicePrinterSettings(pool, branchId, cleanDto);
       res.status(200).json(saved);
     } catch (err: any) {
       console.error('[settings.routes] Error saving invoice printer settings:', err);
