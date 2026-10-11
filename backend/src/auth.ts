@@ -177,7 +177,7 @@ export function resolveIdentity(token: string): RequestIdentity {
 export function isOrgAdmin(identity: RequestIdentity): boolean {
   if (!identity) return false;
   const r = String(identity.role || '').toUpperCase();
-  if (r === 'ADMIN' || r === 'SUPER_ADMIN' || r === 'OWNER') return true;
+  if (r === 'ADMIN' || r === 'SUPER_ADMIN' || r === 'OWNER' || r === 'MULTI_ADMIN') return true;
   return false;
 }
 
@@ -317,8 +317,8 @@ export function authorizeProductMutation(
   page: string,
   action: string
 ): string | null {
-  // Branch/org admins always pass through
-  if (isAdmin(identity)) {
+  // Centralized catalog: Only Organization admins pass through automatically
+  if (isOrgAdmin(identity)) {
     return null;
   }
 

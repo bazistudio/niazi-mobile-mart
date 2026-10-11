@@ -516,22 +516,19 @@ export async function createProduct(
       ]
     );
 
-    // Insert a zero-quantity stock guard row so that products without initial
-    // stock still appear in LEFT JOIN queries with quantity = 0.
-    // branch_id is optional here; use caller-supplied or default MAIN branch ID.
-    const rawBranch = (dto.branch_id ?? '').trim();
-    const branchIdForGuard = rawBranch.length === 36 ? rawBranch : '00000000-0000-0000-0000-000000000002';
-    if (branchIdForGuard) {
-      try {
-        await client.query(
-          `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
-           VALUES ($1, $2, 0, $3)
-           ON CONFLICT (product_id, branch_id) DO NOTHING`,
-          [id, branchIdForGuard, NOW_ISO()]
-        );
-      } catch (err) {
-        console.warn(`[createProduct] Guard stock row insertion notice for ${id}:`, err);
-      }
+    // Insert zero-quantity stock guard rows across all active branches so the product
+    // exists with 0 stock in every branch inventory matrix (consistent with migration 024).
+    try {
+      await client.query(
+        `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+         SELECT $1, b.id, 0, $2
+         FROM branches b
+         WHERE (b.is_active = 1 OR b.is_active::text = 'true')
+         ON CONFLICT (product_id, branch_id) DO NOTHING`,
+        [id, now]
+      );
+    } catch (err) {
+      console.warn(`[createProduct] Guard stock row insertion notice for ${id}:`, err);
     }
 
     await client.query('COMMIT');
@@ -629,6 +626,16 @@ export async function createProductWithInitialStock(
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (product_id, branch_id) DO NOTHING`,
         [id, branchId, qty, now]
+      );
+
+      // Backfill zero-quantity stock rows for all other active branches (migration 024 parity)
+      await client.query(
+        `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+         SELECT $1, b.id, 0, $2
+         FROM branches b
+         WHERE b.id != $3 AND (b.is_active = 1 OR b.is_active::text = 'true')
+         ON CONFLICT (product_id, branch_id) DO NOTHING`,
+        [id, now, branchId]
       );
 
       if (qty > 0) {

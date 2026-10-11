@@ -149,7 +149,7 @@ export function createProductRouter(pool: Pool): Router {
   router.post('/', async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;
 
-    const denied = authorizePermission(identity, 'products', 'product:create');
+    const denied = authorizeProductMutation(identity, 'products', 'product:create');
     if (denied) {
       res.status(403).json({ error: denied });
       return;
@@ -172,14 +172,10 @@ export function createProductRouter(pool: Pool): Router {
         (dto as any).quantity ??
         0
       );
-      const rawBranch = String(
-        dto.branch_id ??
-        (dto as any).branchId ??
-        (dto as any).initial_branch_id ??
-        identity.branch_id ??
-        ''
-      ).trim();
-      const branchId = rawBranch.length === 36 ? rawBranch : '00000000-0000-0000-0000-000000000002';
+      // Centralized catalog rule: Initial opening stock for newly added products always deposits into
+      // the Central Warehouse (Main Branch: '00000000-0000-0000-0000-000000000002').
+      // Secondary branches (alfa, brb, etc.) initialize with 0 stock until stock is transferred to them.
+      const branchId = '00000000-0000-0000-0000-000000000002';
 
       // Always spread resolved branchId and initial_quantity so createProduct/createProductWithInitialStock receive normalized values.
       const dtoWithBranch = {

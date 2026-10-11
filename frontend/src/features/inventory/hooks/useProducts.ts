@@ -1,12 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { productService } from '../services/product.service';
 import { PaginationParams } from '../types';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 
 export const useProducts = (params: PaginationParams, options?: { enabled?: boolean }) => {
   const queryClient = useQueryClient();
+  const activeBranchId = useOrganizationStore((s) => s.activeShop?._id || s.activeShopId || 'default');
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['products', params],
+    queryKey: ['products', activeBranchId, params],
     queryFn: () => productService.getProducts(params),
     enabled: options?.enabled !== false,
   });

@@ -5,6 +5,8 @@ import { X, Package, Tag, Hash, ShoppingBag, BarChart2, Clock, Edit2 } from 'luc
 import { InventoryProduct, StockStatus } from '@/features/inventory/types';
 import { StockStatusBadge } from '@/features/inventory/components/StockStatusBadge';
 import { tauriClient, ProductProfitabilityDto } from '@/lib/tauri/tauriClient';
+import { usePermissions } from '@/lib/auth/usePermissions';
+import { PERMISSIONS } from '@/constants/permissions';
 
 interface ProductDetailsDrawerProps {
   product: InventoryProduct;
@@ -20,6 +22,9 @@ const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) 
 );
 
 export const ProductDetailsDrawer = ({ product, onClose, onEdit }: ProductDetailsDrawerProps) => {
+  const { hasPermission, role } = usePermissions();
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
+  const canManageProducts = hasPermission(PERMISSIONS.PRODUCTS_MANAGE) && isOrgAdmin;
   const currentCost = product.averageCost ?? product.purchasePrice;
   const estimatedMargin = product.price > 0 && currentCost !== undefined && currentCost !== null
     ? Math.round(((product.price - currentCost) * 100) / product.price)
@@ -69,13 +74,15 @@ export const ProductDetailsDrawer = ({ product, onClose, onEdit }: ProductDetail
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <button
-              onClick={() => { onEdit(product); onClose(); }}
-              className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
-              title="Edit product"
-            >
-              <Edit2 className="h-4 w-4" />
-            </button>
+            {canManageProducts && (
+              <button
+                onClick={() => { onEdit(product); onClose(); }}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                title="Edit product"
+              >
+                <Edit2 className="h-4 w-4" />
+              </button>
+            )}
             <button
               onClick={onClose}
               className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"

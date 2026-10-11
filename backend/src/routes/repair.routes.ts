@@ -78,7 +78,7 @@ export function buildRepairRouter(pool: Pool): Router {
       }
 
       // Enforce branch isolation: non-org-admins can only access their own branch's jobs
-      if (!canAccessBranch(identity, job.branch_id ?? null)) {
+      if (!canAccessBranch(identity, (job as any)?.branch_id ?? (job as any)?.branchId ?? null)) {
         res.status(403).json({ error: 'Access denied: You do not have permission to view this repair job' });
         return;
       }
@@ -166,7 +166,7 @@ export function buildRepairRouter(pool: Pool): Router {
         res.status(404).json({ error: `Repair job '${id}' not found` });
         return;
       }
-      if (!canAccessBranch(identity, existingJob.branch_id ?? null)) {
+      if (!canAccessBranch(identity, (existingJob as any)?.branch_id ?? (existingJob as any)?.branchId ?? null)) {
         res.status(403).json({ error: 'Access denied: You do not have permission to update this repair job' });
         return;
       }
@@ -200,7 +200,7 @@ export function buildRepairRouter(pool: Pool): Router {
         res.status(404).json({ error: `Repair job '${id}' not found` });
         return;
       }
-      if (!canAccessBranch(identity, existingJob.branch_id ?? null)) {
+      if (!canAccessBranch(identity, (existingJob as any)?.branch_id ?? (existingJob as any)?.branchId ?? null)) {
         res.status(403).json({ error: 'Access denied: You do not have permission to modify this repair job' });
         return;
       }
@@ -244,7 +244,7 @@ export function buildRepairRouter(pool: Pool): Router {
         res.status(404).json({ error: `Repair job '${id}' not found` });
         return;
       }
-      if (!canAccessBranch(identity, existingJob.branch_id ?? null)) {
+      if (!canAccessBranch(identity, (existingJob as any)?.branch_id ?? (existingJob as any)?.branchId ?? null)) {
         res.status(403).json({ error: 'Access denied: You do not have permission to take payment for this repair job' });
         return;
       }
