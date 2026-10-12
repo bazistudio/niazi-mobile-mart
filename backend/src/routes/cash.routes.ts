@@ -5,7 +5,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, RequestIdentity, NIAZI_ORGANIZATION_ID } from '../auth';
+import { buildAuthMiddleware, authorizePermission, canAccessBranch, RequestIdentity, NIAZI_ORGANIZATION_ID } from '../auth';
 import {
   closeCashSession,
   getCurrentCashSession,
@@ -48,7 +48,7 @@ function sendError(_req: Request, res: Response, err: unknown): void {
 export function createCashRouter(pool: Pool): Router {
   const router = express.Router();
 
-  router.use(authMiddleware);
+  router.use(buildAuthMiddleware(pool));
 
   // ── GET /api/cash/sessions/current ────────────────────────────────────────
   router.get('/sessions/current', async (req: Request, res: Response): Promise<void> => {
@@ -61,7 +61,20 @@ export function createCashRouter(pool: Pool): Router {
     }
 
     try {
-      const branchId = (req.query['branch_id'] as string) || identity.branch_id || NIAZI_ORGANIZATION_ID;
+      const requestedBranchId = (req.query['branch_id'] as string) || undefined;
+
+      // Validate branch access when a specific branch is requested
+      if (requestedBranchId && !canAccessBranch(identity, requestedBranchId)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to access this branch' });
+        return;
+      }
+
+      // F-07: Do not fall back to org UUID if no valid branch can be resolved.
+      const branchId = requestedBranchId || identity.branch_id;
+      if (!branchId) {
+        res.status(403).json({ error: 'Access denied: No branch assigned to your account' });
+        return;
+      }
       const session = await getCurrentCashSession(pool, branchId);
       res.status(200).json({ session });
     } catch (err) {
@@ -81,6 +94,13 @@ export function createCashRouter(pool: Pool): Router {
 
     try {
       const dto = req.body as OpenCashSessionDto;
+
+      // Validate branch access when branch_id is supplied in body
+      if (dto.branch_id && !canAccessBranch(identity, dto.branch_id)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to open a session for this branch' });
+        return;
+      }
+
       if (!dto.branch_id && identity.branch_id) {
         dto.branch_id = identity.branch_id;
       }
@@ -103,6 +123,23 @@ export function createCashRouter(pool: Pool): Router {
 
     try {
       const dto = req.body as CloseCashSessionDto;
+
+      // F-03: Verify the session belongs to a branch the caller can access.
+      // Load the session record to obtain its actual stored branch_id.
+      const sessionCheck = await pool.query<{ branch_id: string }>(
+        'SELECT branch_id FROM cash_sessions WHERE id = $1',
+        [dto.session_id]
+      );
+      if (sessionCheck.rows.length === 0) {
+        res.status(404).json({ error: 'Cash session not found' });
+        return;
+      }
+      const sessionBranchId = sessionCheck.rows[0]!.branch_id;
+      if (!canAccessBranch(identity, sessionBranchId)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to close this cash session' });
+        return;
+      }
+
       const session = await closeCashSession(pool, dto, identity.user_id);
       res.status(200).json(session);
     } catch (err) {
@@ -122,6 +159,13 @@ export function createCashRouter(pool: Pool): Router {
 
     try {
       const dto = req.body as RecordCashMovementDto;
+
+      // Validate branch access when branch_id is supplied in body
+      if (dto.branch_id && !canAccessBranch(identity, dto.branch_id)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to record movements for this branch' });
+        return;
+      }
+
       if (!dto.branch_id && identity.branch_id) {
         dto.branch_id = identity.branch_id;
       }
@@ -143,7 +187,15 @@ export function createCashRouter(pool: Pool): Router {
     }
 
     try {
-      const branchId = (req.query['branch_id'] as string) || identity.branch_id || null;
+      const requestedBranchId = (req.query['branch_id'] as string) || undefined;
+
+      // Validate branch access when a specific branch is requested
+      if (requestedBranchId && !canAccessBranch(identity, requestedBranchId)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to view movements for this branch' });
+        return;
+      }
+
+      const branchId = requestedBranchId || identity.branch_id || null;
       const movements = await listCashMovements(pool, branchId);
       res.status(200).json(movements);
     } catch (err) {

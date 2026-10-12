@@ -156,15 +156,8 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
     try {
       set({ status: 'loading', error: null });
       
-      // If user selected the fallback uncategorized, we might need to handle it 
-      // or assume the backend accepts a missing category or we map it to a default UUID
-      const finalCategory = data.categoryId || "00000000-0000-0000-0000-000000000000"; 
-      const finalUnit = data.baseUnitId || "00000000-0000-0000-0000-000000000000";
-        // The backend requires a UUID. In a real scenario, this would be an actual ID.
-        // For the sake of the form not breaking, we will send it and let the API layer handle or fail gracefully.
-        // If the backend strict validates, we should ideally fetch the real "Uncategorized" ID.
-
-      const newProductDto = await productService.createProduct(data, image);
+      // Delegate to productService which handles category resolution and API calls
+      await productService.createProduct(data, image);
       
       // Auto-refresh: Completely reload inventory from backend source of truth
       await get().fetchProducts();

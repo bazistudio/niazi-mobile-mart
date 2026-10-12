@@ -9,15 +9,15 @@ import { companyService } from './company.service';
 import { colorService } from './color.service';
 import { qualityService } from './quality.service';
 
-function getActiveBranchId(): string {
+function getActiveBranchId(): string | null {
   try {
     const store = useOrganizationStore.getState();
-    const branchId = store.activeShop?._id || store.activeShopId;
+    const branchId = store.activeShop?._id || store.activeShop?.id || store.activeShopId;
     if (branchId && branchId.length === 36) {
       return branchId;
     }
   } catch {}
-  return '00000000-0000-0000-0000-000000000002';
+  return null;
 }
 
 export const productService = {
@@ -33,8 +33,9 @@ export const productService = {
         color_id: params.colorId,
         quality_id: params.qualityId,
         is_active: true,
+        branch_id: branchId,
       }).catch(() => []),
-      tauriClient.inventoryGetStockMap(branchId).catch(() => ({}) as Record<string, number>),
+      branchId ? tauriClient.inventoryGetStockMap(branchId).catch(() => ({}) as Record<string, number>) : Promise.resolve({} as Record<string, number>),
       categoryService.getCategories().catch(() => []),
       brandService.getBrands().catch(() => []),
       companyService.getCompanies().catch(() => []),
@@ -207,6 +208,21 @@ export const productService = {
     const rawUnitId = productData.unitId || productData.unit_id;
     const unitId = parseValueOrUndefined(rawUnitId);
 
+    const hasQuantityAdjustment =
+      productData.quantity !== undefined &&
+      productData.quantity !== null &&
+      !isNaN(Number(productData.quantity));
+
+    let activeBranchIdForAdjust: string | null = null;
+    if (hasQuantityAdjustment) {
+      activeBranchIdForAdjust = getActiveBranchId();
+      if (!activeBranchIdForAdjust) {
+        throw new Error(
+          'Stock quantity adjustment requires an active branch. Please select a branch before updating stock levels.'
+        );
+      }
+    }
+
     const updated = await tauriClient.productUpdate(id, {
       name: productData.name,
       sku: productData.sku,
@@ -223,16 +239,12 @@ export const productService = {
       description: productData.description || null,
     });
 
-    if (productData.quantity !== undefined && productData.quantity !== null && !isNaN(Number(productData.quantity))) {
-      try {
-        await tauriClient.inventoryAdjust({
-          product_id: id,
-          branch_id: getActiveBranchId(),
-          target_quantity: Number(productData.quantity),
-        });
-      } catch (err) {
-        console.warn('inventoryAdjust non-fatal warning during product update:', err);
-      }
+    if (hasQuantityAdjustment && activeBranchIdForAdjust) {
+      await tauriClient.inventoryAdjust({
+        product_id: id,
+        branch_id: activeBranchIdForAdjust,
+        target_quantity: Number(productData.quantity),
+      });
     }
 
     const [categories, brands, companies, colors, qualities, stockMap] = await Promise.all([
@@ -241,7 +253,7 @@ export const productService = {
       companyService.getCompanies().catch(() => []),
       colorService.getColors().catch(() => []),
       qualityService.getQualities().catch(() => []),
-      tauriClient.inventoryGetStockMap(getActiveBranchId()).catch(() => ({}) as Record<string, number>),
+      (getActiveBranchId() ? tauriClient.inventoryGetStockMap(getActiveBranchId()!).catch(() => ({}) as Record<string, number>) : Promise.resolve({} as Record<string, number>)),
     ]);
 
     const catName = categories.find(c => c.id === updated.category_id)?.name || 'General';

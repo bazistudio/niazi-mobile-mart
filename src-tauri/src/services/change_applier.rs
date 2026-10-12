@@ -608,7 +608,6 @@ impl ChangeApplier {
                 } else {
                     crate::repositories::SQLiteSupplierRepository::insert_supplier_in_tx(tx, &supplier)?;
                 }
-                }
             }
             // SYNC-B2 — Apply a customer payment from another PC / central server
             "CUSTOMER_PAYMENT_RECORDED" => {
@@ -1623,8 +1622,6 @@ mod tests {
         applier.apply_batch("org1", &[change], 1).await.unwrap();
         let stock_replay = inv_repo.get_stock(&product_id, "00000000-0000-0000-0000-000000000002").await.unwrap();
         assert_eq!(stock_replay, 10);
-    }
-
     }
 
     // -------------------------------------------------------------------------

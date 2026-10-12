@@ -1,4 +1,5 @@
 import { isTauriEnvironment, tauriClient, StaffRole } from '@/lib/tauri/tauriClient';
+import { httpClient } from '@/lib/http/httpClient'; // DEF-08: backend roles API
 import { CreateRoleDto, UpdateRoleDto, Role, RoleWithPermissions, Permission } from '../types/role.types';
 import { CreateStaffDto, UpdateStaffDto, StaffUser } from '../types/staff.types';
 import {
@@ -413,32 +414,8 @@ const CANONICAL_ROLES: RoleWithPermissions[] = [
 export const settingsApi = {
   // ─── Staff ──────────────────────────────────────────────────────────────────
   getStaff: async (): Promise<StaffUser[]> => {
-    if (isTauriEnvironment()) {
-      const users = await tauriClient.adminListUsers();
-      return users.map((u) => {
-        const display = mapStaffRoleToDisplay(u.role);
-        return {
-          id: u.id,
-          _id: u.id,
-          name: u.name,
-          username: u.username,
-          email: `${u.username}@local`,
-          roleId: display.roleId,
-          roleName: display.roleName,
-          hasPin: u.has_pin,
-          status: (u.status ? u.status.toLowerCase() : (u.is_active ? 'active' : 'inactive')) as any,
-          mustChangePassword: u.must_change_password,
-          branchId: u.branch_id ?? undefined,
-          createdAt: u.created_at,
-        };
-      });
-    }
-    return getBrowserStaff();
-  },
-
-  approveStaff: async (id: string): Promise<StaffUser> => {
-    if (isTauriEnvironment()) {
-      const u = await tauriClient.adminApproveStaff(id);
+    const users = await tauriClient.adminListUsers();
+    return users.map((u) => {
       const display = mapStaffRoleToDisplay(u.role);
       return {
         id: u.id,
@@ -446,121 +423,6 @@ export const settingsApi = {
         name: u.name,
         username: u.username,
         email: `${u.username}@local`,
-        roleId: display.roleId,
-        roleName: display.roleName,
-        hasPin: u.has_pin,
-        status: 'active',
-        mustChangePassword: u.must_change_password,
-        createdAt: u.created_at,
-      };
-    }
-    return settingsApi.updateStaffStatus(id, 'active');
-  },
-
-  rejectStaff: async (id: string): Promise<StaffUser> => {
-    if (isTauriEnvironment()) {
-      const u = await tauriClient.adminRejectStaff(id);
-      const display = mapStaffRoleToDisplay(u.role);
-      return {
-        id: u.id,
-        _id: u.id,
-        name: u.name,
-        username: u.username,
-        email: `${u.username}@local`,
-        roleId: display.roleId,
-        roleName: display.roleName,
-        hasPin: u.has_pin,
-        status: 'rejected',
-        mustChangePassword: u.must_change_password,
-        createdAt: u.created_at,
-      };
-    }
-    return settingsApi.updateStaffStatus(id, 'inactive');
-  },
-
-  resetStaffPassword: async (id: string, temporaryPassword: string): Promise<void> => {
-    if (isTauriEnvironment()) {
-      await tauriClient.adminResetStaffPassword(id, temporaryPassword);
-      return;
-    }
-  },
-
-  createStaff: async (data: CreateStaffDto): Promise<StaffUser> => {
-    const rawUsername =
-      data.username || (data.email ? data.email.split('@')[0] : data.name.toLowerCase().replace(/\s+/g, ''));
-    const username = rawUsername.trim().toLowerCase();
-    const roleId = data.roleId || 'staff';
-    const targetStaffRole = mapRoleIdToStaffRole(roleId);
-    const display = mapStaffRoleToDisplay(targetStaffRole);
-
-    if (isTauriEnvironment()) {
-      const effectivePin = data.pin && data.pin.trim().length === 4 ? data.pin.trim() : undefined;
-      const res = await tauriClient.adminCreateUser({
-        name: data.name.trim(),
-        username,
-        login_key: effectivePin ? `Niazi@${effectivePin}` : 'Niazi@123',
-        pin: effectivePin,
-        role: targetStaffRole,
-        branch_id: data.branchId ?? null,
-      });
-      const resDisplay = mapStaffRoleToDisplay(res.role);
-      return {
-        id: res.id,
-        _id: res.id,
-        name: res.name,
-        username: res.username,
-        email: data.email || `${res.username}@local`,
-        phone: data.phone,
-        roleId: resDisplay.roleId,
-        roleName: resDisplay.roleName,
-        hasPin: res.has_pin,
-        status: (res.status ? res.status.toLowerCase() : (res.is_active ? 'active' : 'inactive')) as any,
-        mustChangePassword: res.must_change_password,
-        branchId: res.branch_id ?? undefined,
-        createdAt: res.created_at,
-      };
-    }
-
-    // Browser development / offline preview fallback
-    const id = `user_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const newUser: StaffUser = {
-      id,
-      _id: id,
-      name: data.name.trim(),
-      username,
-      email: data.email || `${username}@local`,
-      phone: data.phone,
-      roleId: display.roleId,
-      roleName: display.roleName,
-      hasPin: !!(data.pin && data.pin.trim().length === 4),
-      status: 'active',
-      mustChangePassword: false,
-      createdAt: new Date().toISOString(),
-    };
-    const staff = getBrowserStaff();
-    staff.push(newUser);
-    saveBrowserStaff(staff);
-    return newUser;
-  },
-
-  updateStaff: async (id: string, data: UpdateStaffDto): Promise<StaffUser> => {
-    if (isTauriEnvironment()) {
-      const targetRole = data.roleId ? mapRoleIdToStaffRole(data.roleId) : undefined;
-      const u = await tauriClient.adminUpdateUser({
-        user_id: id,
-        name: data.name,
-        role: targetRole,
-        status: data.status ? (data.status.toUpperCase() as any) : undefined,
-        branch_id: data.branchId !== undefined ? (data.branchId ?? null) : undefined,
-      });
-      const display = mapStaffRoleToDisplay(u.role);
-      return {
-        id: u.id,
-        _id: u.id,
-        name: u.name,
-        username: u.username,
-        email: data.email || `${u.username}@local`,
-        phone: data.phone,
         roleId: display.roleId,
         roleName: display.roleName,
         hasPin: u.has_pin,
@@ -569,89 +431,155 @@ export const settingsApi = {
         branchId: u.branch_id ?? undefined,
         createdAt: u.created_at,
       };
-    }
+    });
+  },
 
-    const staff = getBrowserStaff();
-    const idx = staff.findIndex((u) => u.id === id || u._id === id);
-    if (idx >= 0) {
-      const current = staff[idx];
-      const display = data.roleId
-        ? mapStaffRoleToDisplay(mapRoleIdToStaffRole(data.roleId))
-        : { roleId: current.roleId, roleName: current.roleName };
-      const updated: StaffUser = {
-        ...current,
-        name: data.name !== undefined ? data.name : current.name,
-        phone: data.phone !== undefined ? data.phone : current.phone,
-        email: data.email !== undefined ? data.email : current.email,
-        roleId: display.roleId,
-        roleName: display.roleName,
-        status: data.status !== undefined ? data.status : current.status,
-      };
-      staff[idx] = updated;
-      saveBrowserStaff(staff);
-      return updated;
-    }
-    throw new Error(`User with ID ${id} not found`);
+  approveStaff: async (id: string): Promise<StaffUser> => {
+    const u = await tauriClient.adminApproveStaff(id);
+    const display = mapStaffRoleToDisplay(u.role);
+    return {
+      id: u.id,
+      _id: u.id,
+      name: u.name,
+      username: u.username,
+      email: `${u.username}@local`,
+      roleId: display.roleId,
+      roleName: display.roleName,
+      hasPin: u.has_pin,
+      status: 'active',
+      mustChangePassword: u.must_change_password,
+      branchId: u.branch_id ?? undefined,
+      createdAt: u.created_at,
+    };
+  },
+
+  rejectStaff: async (id: string): Promise<StaffUser> => {
+    const u = await tauriClient.adminRejectStaff(id);
+    const display = mapStaffRoleToDisplay(u.role);
+    return {
+      id: u.id,
+      _id: u.id,
+      name: u.name,
+      username: u.username,
+      email: `${u.username}@local`,
+      roleId: display.roleId,
+      roleName: display.roleName,
+      hasPin: u.has_pin,
+      status: 'rejected',
+      mustChangePassword: u.must_change_password,
+      branchId: u.branch_id ?? undefined,
+      createdAt: u.created_at,
+    };
+  },
+
+  resetStaffPassword: async (id: string, temporaryPassword: string): Promise<void> => {
+    await tauriClient.adminResetStaffPassword(id, temporaryPassword);
+  },
+
+  createStaff: async (data: CreateStaffDto): Promise<StaffUser> => {
+    const rawUsername =
+      data.username || (data.email ? data.email.split('@')[0] : data.name.toLowerCase().replace(/\s+/g, ''));
+    const username = rawUsername.trim().toLowerCase();
+    const roleId = data.roleId || 'staff';
+    const targetStaffRole = mapRoleIdToStaffRole(roleId);
+    const effectivePin = data.pin && data.pin.trim().length === 4 ? data.pin.trim() : undefined;
+    const effectivePassword = effectivePin ? `Niazi@${effectivePin}` : 'Niazi@123';
+
+    const res = await tauriClient.adminCreateUser({
+      name: data.name.trim(),
+      username,
+      password: effectivePassword,
+      login_key: effectivePassword,
+      pin: effectivePin,
+      role: targetStaffRole,
+      branch_id: data.branchId ? data.branchId.trim() : null,
+    });
+    const resDisplay = mapStaffRoleToDisplay(res.role);
+    return {
+      id: res.id,
+      _id: res.id,
+      name: res.name,
+      username: res.username,
+      email: data.email || `${res.username}@local`,
+      phone: data.phone,
+      roleId: resDisplay.roleId,
+      roleName: resDisplay.roleName,
+      hasPin: res.has_pin,
+      status: (res.status ? res.status.toLowerCase() : (res.is_active ? 'active' : 'inactive')) as any,
+      mustChangePassword: res.must_change_password,
+      branchId: res.branch_id ?? undefined,
+      createdAt: res.created_at,
+    };
+  },
+
+  updateStaff: async (id: string, data: UpdateStaffDto): Promise<StaffUser> => {
+    const targetRole = data.roleId ? mapRoleIdToStaffRole(data.roleId) : undefined;
+    const cleanBranchId = data.branchId !== undefined
+      ? (data.branchId && data.branchId.trim() ? data.branchId.trim() : null)
+      : undefined;
+
+    const u = await tauriClient.adminUpdateUser({
+      user_id: id,
+      name: data.name,
+      role: targetRole,
+      status: data.status ? (data.status.toUpperCase() as any) : undefined,
+      branch_id: cleanBranchId,
+    });
+    const display = mapStaffRoleToDisplay(u.role);
+    return {
+      id: u.id,
+      _id: u.id,
+      name: u.name,
+      username: u.username,
+      email: data.email || `${u.username}@local`,
+      phone: data.phone,
+      roleId: display.roleId,
+      roleName: display.roleName,
+      hasPin: u.has_pin,
+      status: (u.status ? u.status.toLowerCase() : (u.is_active ? 'active' : 'inactive')) as any,
+      mustChangePassword: u.must_change_password,
+      branchId: u.branch_id ?? undefined,
+      createdAt: u.created_at,
+    };
   },
 
   updateStaffStatus: async (id: string, status: 'active' | 'suspended' | 'inactive'): Promise<StaffUser> => {
-    if (isTauriEnvironment()) {
-      const isActivating = status === 'active';
-      const u = await tauriClient.adminUpdateUser({
-        user_id: id,
-        status: isActivating ? ('ACTIVE' as any) : ('DISABLED' as any),
-        is_active: isActivating,
-      });
-      const display = mapStaffRoleToDisplay(u.role);
-      return {
-        id: u.id,
-        _id: u.id,
-        name: u.name,
-        username: u.username,
-        email: `${u.username}@local`,
-        roleId: display.roleId,
-        roleName: display.roleName,
-        hasPin: u.has_pin,
-        status: (u.status ? u.status.toLowerCase() : (u.is_active ? 'active' : 'inactive')) as any,
-        mustChangePassword: u.must_change_password,
-        createdAt: u.created_at,
-      };
-    }
-    const staff = getBrowserStaff();
-    const idx = staff.findIndex((u) => u.id === id || u._id === id);
-    if (idx >= 0) {
-      staff[idx].status = status;
-      saveBrowserStaff(staff);
-      return staff[idx];
-    }
-    throw new Error(`User with ID ${id} not found`);
+    const isActivating = status === 'active';
+    const u = await tauriClient.adminUpdateUser({
+      user_id: id,
+      status: isActivating ? ('ACTIVE' as any) : ('DISABLED' as any),
+      is_active: isActivating,
+    });
+    const display = mapStaffRoleToDisplay(u.role);
+    return {
+      id: u.id,
+      _id: u.id,
+      name: u.name,
+      username: u.username,
+      email: `${u.username}@local`,
+      roleId: display.roleId,
+      roleName: display.roleName,
+      hasPin: u.has_pin,
+      status: (u.status ? u.status.toLowerCase() : (u.is_active ? 'active' : 'inactive')) as any,
+      mustChangePassword: u.must_change_password,
+      branchId: u.branch_id ?? undefined,
+      createdAt: u.created_at,
+    };
   },
 
   suspendStaff: async (id: string): Promise<StaffUser> => {
-    // Dedicated suspend endpoint — calls POST /api/users/:id/suspend with precondition checks
     return settingsApi.updateStaffStatus(id, 'suspended');
   },
 
   reactivateStaff: async (id: string): Promise<StaffUser> => {
-    // Dedicated reactivate endpoint — calls POST /api/users/:id/reactivate
     return settingsApi.updateStaffStatus(id, 'active');
   },
 
   changeStaffPin: async (id: string, pin: string): Promise<void> => {
-    if (isTauriEnvironment()) {
-      await tauriClient.adminResetCredentials({
-        user_id: id,
-        new_pin: pin,
-      });
-      return;
-    }
-
-    const staff = getBrowserStaff();
-    const idx = staff.findIndex((u) => u.id === id || u._id === id);
-    if (idx >= 0) {
-      staff[idx].hasPin = true;
-      saveBrowserStaff(staff);
-    }
+    await tauriClient.adminResetCredentials({
+      user_id: id,
+      new_pin: pin,
+    });
   },
 
   verifyAdminPassword: async (password: string): Promise<void> => {
@@ -659,182 +587,103 @@ export const settingsApi = {
       await tauriClient.adminVerifyPassword(password);
       return;
     }
-    // Browser stub — always succeeds in development
   },
 
   deleteStaff: async (id: string): Promise<void> => {
-    if (isTauriEnvironment()) {
-      await tauriClient.adminDeleteUser(id);
-      return;
-    }
-
-    const staff = getBrowserStaff();
-    const filtered = staff.filter((u) => u.id !== id && u._id !== id);
-    saveBrowserStaff(filtered);
+    await tauriClient.adminDeleteUser(id);
   },
 
   changeStaffRole: async (id: string, roleId: string): Promise<StaffUser> => {
     const targetRole = mapRoleIdToStaffRole(roleId);
-    if (isTauriEnvironment()) {
-      const u = await tauriClient.adminUpdateUser({
-        user_id: id,
-        role: targetRole,
-      });
-      const display = mapStaffRoleToDisplay(u.role);
-      return {
-        id: u.id,
-        _id: u.id,
-        name: u.name,
-        username: u.username,
-        email: `${u.username}@local`,
-        roleId: display.roleId,
-        roleName: display.roleName,
-        hasPin: u.has_pin,
-        status: (u.status ? u.status.toLowerCase() : (u.is_active ? 'active' : 'inactive')) as any,
-        mustChangePassword: u.must_change_password,
-        createdAt: u.created_at,
-      };
-    }
-
-    const staff = getBrowserStaff();
-    const idx = staff.findIndex((u) => u.id === id || u._id === id);
-    if (idx >= 0) {
-      const display = mapStaffRoleToDisplay(targetRole);
-      staff[idx].roleId = display.roleId;
-      staff[idx].roleName = display.roleName;
-      saveBrowserStaff(staff);
-      return staff[idx];
-    }
-    throw new Error(`User with ID ${id} not found`);
+    const u = await tauriClient.adminUpdateUser({
+      user_id: id,
+      role: targetRole,
+    });
+    const display = mapStaffRoleToDisplay(u.role);
+    return {
+      id: u.id,
+      _id: u.id,
+      name: u.name,
+      username: u.username,
+      email: `${u.username}@local`,
+      roleId: display.roleId,
+      roleName: display.roleName,
+      hasPin: u.has_pin,
+      status: (u.status ? u.status.toLowerCase() : (u.is_active ? 'active' : 'inactive')) as any,
+      mustChangePassword: u.must_change_password,
+      branchId: u.branch_id ?? undefined,
+      createdAt: u.created_at,
+    };
   },
 
   // ─── Roles ──────────────────────────────────────────────────────────────────
+  // DEF-08: All role CRUD now calls the backend HTTP API (/api/v1/roles).
+  // The backend persists canonical role permission overrides in role_permission_grants
+  // and custom roles in custom_roles (migration 028). localStorage role storage is no
+  // longer authoritative — getBrowserCustomRoles() is kept only as a graceful fallback
+  // for the transitional period while the DB table may not yet be migrated.
+
   getRoles: async (): Promise<RoleWithPermissions[]> => {
-    const custom = getBrowserCustomRoles();
-    const canonicalWithPersistedGrants: RoleWithPermissions[] = CANONICAL_ROLES.map((canonical) => {
-      const staffRole = mapRoleIdToStaffRole(canonical._id);
-      const defaultPerms = buildRolePermissionsMap(staffRole);
-      const grants = getRolePermissionGrants(canonical._id);
-
-      const effectivePerms: Record<string, boolean> = { ...defaultPerms };
-      for (const [permKey, isGranted] of Object.entries(grants)) {
-        if (isGranted) {
-          effectivePerms[permKey] = true;
+    try {
+      // DEF-08: primary path — fetch from backend
+      const backendRoles = await httpClient.get<RoleWithPermissions[]>('/api/v1/roles');
+      return backendRoles;
+    } catch (backendErr) {
+      // Fallback: build local list from CANONICAL_ROLES + localStorage custom roles.
+      // This path is used during initial deployment before migration 028 has run,
+      // or in offline/network-error scenarios. It is intentionally read-only.
+      console.warn('[settingsApi.getRoles] Backend unavailable, using local fallback. DEF-08 not fully active:', backendErr);
+      const custom = getBrowserCustomRoles();
+      const canonicalWithPersistedGrants: RoleWithPermissions[] = CANONICAL_ROLES.map((canonical) => {
+        const staffRole = mapRoleIdToStaffRole(canonical._id);
+        const defaultPerms = buildRolePermissionsMap(staffRole);
+        const grants = getRolePermissionGrants(canonical._id);
+        const effectivePerms: Record<string, boolean> = { ...defaultPerms };
+        for (const [permKey, isGranted] of Object.entries(grants)) {
+          if (isGranted) effectivePerms[permKey] = true;
         }
-      }
-
-      return {
-        ...canonical,
-        permissions: effectivePerms,
-        permissionCount: Object.values(effectivePerms).filter(Boolean).length,
-      };
-    });
-    return [...canonicalWithPersistedGrants, ...custom];
+        return { ...canonical, permissions: effectivePerms, permissionCount: Object.values(effectivePerms).filter(Boolean).length };
+      });
+      return [...canonicalWithPersistedGrants, ...custom];
+    }
   },
 
   getRoleById: async (id: string): Promise<RoleWithPermissions> => {
-    const roles = await settingsApi.getRoles();
-    const found = roles.find((r) => r._id === id || normalizeRoleKey(r._id) === normalizeRoleKey(id));
-    if (found) return found;
-    return roles[0];
+    try {
+      return await httpClient.get<RoleWithPermissions>(`/api/v1/roles/${encodeURIComponent(id)}`);
+    } catch {
+      // Fallback to local list
+      const roles = await settingsApi.getRoles();
+      const found = roles.find((r) => r._id === id || normalizeRoleKey(r._id) === normalizeRoleKey(id));
+      if (found) return found;
+      return roles[0];
+    }
   },
 
   createRole: async (data: CreateRoleDto): Promise<Role> => {
-    const newRole: RoleWithPermissions = {
-      _id: `role_${Date.now()}`,
-      organizationId: '00000000-0000-0000-0000-000000000001',
-      name: data.name,
-      description: data.description,
-      isSystem: false,
-      userCount: 0,
-      permissionCount: Object.keys(data.permissions || {}).length,
-      permissions: data.permissions || {},
-      createdAt: new Date().toISOString(),
-    };
-    const custom = getBrowserCustomRoles();
-    custom.push(newRole);
-    saveBrowserCustomRoles(custom);
-    return newRole;
+    // DEF-08: persist to backend; do NOT write to localStorage as primary storage.
+    return await httpClient.post<Role>('/api/v1/roles', data);
   },
 
   updateRole: async (id: string, data: UpdateRoleDto): Promise<Role> => {
-    const custom = getBrowserCustomRoles();
-    const idx = custom.findIndex((r) => r._id === id);
-    if (idx >= 0) {
-      custom[idx] = {
-        ...custom[idx],
-        name: data.name || custom[idx].name,
-        description: data.description !== undefined ? data.description : custom[idx].description,
-        permissions: data.permissions || custom[idx].permissions,
-        permissionCount: Object.keys(data.permissions || custom[idx].permissions).length,
-      };
-      saveBrowserCustomRoles(custom);
-      return custom[idx];
-    }
-
-    const canonical = CANONICAL_ROLES.find(
-      (r) => r._id === id || normalizeRoleKey(r._id) === normalizeRoleKey(id)
-    );
-    const roleId = canonical ? canonical._id : normalizeRoleKey(id);
-    const staffRole = mapRoleIdToStaffRole(roleId);
-    const roleDecisions = ROLE_PERMISSION_DECISIONS[staffRole] || {};
-
-    if (data.permissions) {
-      // Extract ONLY permissions where decision is INDIVIDUAL
-      const individualGrantsToSave: Record<string, boolean> = {};
-      for (const [permKey, isEnabled] of Object.entries(data.permissions)) {
-        const decision = roleDecisions[permKey as PermissionKey];
-        if (decision === 'INDIVIDUAL' && isEnabled === true) {
-          individualGrantsToSave[permKey] = true;
-        }
-      }
-      saveRolePermissionGrants(roleId, individualGrantsToSave);
-    }
-
-    const defaultPerms = buildRolePermissionsMap(staffRole);
-    const grants = getRolePermissionGrants(roleId);
-    const effectivePerms: Record<string, boolean> = { ...defaultPerms };
-    for (const [permKey, isGranted] of Object.entries(grants)) {
-      if (isGranted) {
-        effectivePerms[permKey] = true;
-      }
-    }
-
-    return {
-      _id: roleId,
-      organizationId: '00000000-0000-0000-0000-000000000001',
-      name: data.name || canonical?.name || roleId,
-      description: data.description !== undefined ? data.description : canonical?.description || '',
-      isSystem: canonical?.isSystem ?? true,
-      permissions: effectivePerms,
-      createdAt: canonical?.createdAt || '2026-01-01T00:00:00.000Z',
-      updatedAt: new Date().toISOString(),
-    };
+    // DEF-08: persist to backend; do NOT write to localStorage as primary storage.
+    return await httpClient.put<Role>(`/api/v1/roles/${encodeURIComponent(id)}`, data);
   },
 
   deleteRole: async (id: string): Promise<void> => {
-    const custom = getBrowserCustomRoles().filter((r) => r._id !== id);
-    saveBrowserCustomRoles(custom);
+    // DEF-08: delete from backend; do NOT rely on localStorage as primary storage.
+    await httpClient.delete<void>(`/api/v1/roles/${encodeURIComponent(id)}`);
   },
 
   duplicateRole: async (id: string): Promise<Role> => {
-    const roles = await settingsApi.getRoles();
-    const source = roles.find((r) => r._id === id);
-    const newRole: RoleWithPermissions = {
-      _id: `role_${Date.now()}`,
-      organizationId: '00000000-0000-0000-0000-000000000001',
+    // DEF-08: fetch source from backend, then create via backend
+    const source = await settingsApi.getRoleById(id);
+    const newData: CreateRoleDto = {
       name: `Copy of ${source?.name || id}`,
       description: source?.description || 'Duplicated role',
-      isSystem: false,
-      userCount: 0,
-      permissionCount: source?.permissionCount || 0,
       permissions: source ? { ...source.permissions } : {},
-      createdAt: new Date().toISOString(),
     };
-    const custom = getBrowserCustomRoles();
-    custom.push(newRole);
-    saveBrowserCustomRoles(custom);
-    return newRole;
+    return await httpClient.post<Role>('/api/v1/roles', newData);
   },
 
   // ─── Permissions ────────────────────────────────────────────────────────────
@@ -853,4 +702,4 @@ export const settingsApi = {
     const modules = new Set(Object.values(PERMISSION_METADATA).map((m) => m.module));
     return Array.from(modules);
   },
-};
+};

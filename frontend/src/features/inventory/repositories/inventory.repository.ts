@@ -1,6 +1,6 @@
 // src/features/inventory/repositories/inventory.repository.ts
 
-import { inventoryApi } from '../api/inventory.api';
+import { inventoryApi, ReceiveStockApiDto, ReceiveStockApiResult } from '../api/inventory.api';
 import { PaginationParams, InventoryAdjustmentType } from '../types';
 
 /**
@@ -36,6 +36,11 @@ export const inventoryRepository = {
   deleteProduct: async (id: string) => {
     // Soft delete — backend sets status: 'inactive'
     return await inventoryApi.deleteProduct(id);
+  },
+
+
+  receiveStock: async (dto: ReceiveStockApiDto): Promise<ReceiveStockApiResult> => {
+    return await inventoryApi.receiveStock(dto);
   },
 
   checkDuplicate: async (params: { sku?: string; barcode?: string; name?: string }) => {

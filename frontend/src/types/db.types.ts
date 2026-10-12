@@ -90,6 +90,8 @@ export interface DBCustomer {
   currentBalance: number;
   creditLimit: number;
   createdAt?: number;
+  email?: string;
+  address?: string;
 }
 
 export interface DBSupplier {

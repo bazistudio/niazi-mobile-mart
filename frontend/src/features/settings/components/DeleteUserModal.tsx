@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { X, AlertTriangle, ShieldAlert, Trash2 } from 'lucide-react';
+import { X, ShieldAlert, UserX } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { settingsApi } from '../services/settings.api';
 import { useDeleteStaff } from '../hooks/useStaff';
@@ -25,7 +25,7 @@ export const DeleteUserModal: React.FC<DeleteUserModalProps> = ({
   const [authError, setAuthError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
-  const { mutate: deleteStaff, isPending: isDeleting } = useDeleteStaff();
+  const { mutate: deleteStaff, isPending: isDeactivating } = useDeleteStaff();
 
   const resetState = useCallback(() => {
     setStage('authorize');
@@ -53,7 +53,7 @@ export const DeleteUserModal: React.FC<DeleteUserModalProps> = ({
       setIsVerifying(true);
       try {
         await settingsApi.verifyAdminPassword(password);
-        // Correct password — advance to final confirmation. Do NOT delete yet.
+        // Correct password — advance to final confirmation. Do NOT deactivate yet.
         setStage('confirm');
       } catch {
         setAuthError('Incorrect administrator password.');
@@ -64,19 +64,32 @@ export const DeleteUserModal: React.FC<DeleteUserModalProps> = ({
     [password]
   );
 
-  // Stage 2 — final explicit deletion
-  const handleDelete = useCallback(() => {
+  // Stage 2 — final explicit deactivation
+  const handleDeactivate = useCallback(() => {
     if (!staff) return;
 
     deleteStaff(staff.id ?? staff._id, {
       onSuccess: () => {
-        toast.success(`${staff.name} has been permanently deleted.`);
+        toast.success(
+          `${staff.name}'s account has been deactivated. Historical records are preserved.`
+        );
         resetState();
         onClose();
       },
       onError: (err: unknown) => {
-        const msg = err instanceof Error ? err.message : 'Failed to delete user.';
-        toast.error(msg);
+        const errMsg =
+          err instanceof Error ? err.message : 'Failed to deactivate account.';
+        // Handle already-deactivated (409) gracefully — not a fatal error
+        if (
+          errMsg.toLowerCase().includes('already deactivated') ||
+          errMsg.toLowerCase().includes('already inactive')
+        ) {
+          toast(`${staff.name}'s account is already inactive.`, { icon: 'ℹ️' });
+          resetState();
+          onClose();
+        } else {
+          toast.error(errMsg);
+        }
       },
     });
   }, [staff, deleteStaff, resetState, onClose]);
@@ -89,18 +102,14 @@ export const DeleteUserModal: React.FC<DeleteUserModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            {stage === 'authorize' ? (
-              <ShieldAlert className="w-5 h-5 text-warning" />
-            ) : (
-              <AlertTriangle className="w-5 h-5 text-danger" />
-            )}
+            <ShieldAlert className="w-5 h-5 text-warning" />
             <h2 className="text-lg font-semibold text-text-primary">
-              {stage === 'authorize' ? 'Authorization Required' : 'Permanent Deletion'}
+              {stage === 'authorize' ? 'Authorization Required' : 'Deactivate Account'}
             </h2>
           </div>
           <button
             onClick={handleClose}
-            disabled={isVerifying || isDeleting}
+            disabled={isVerifying || isDeactivating}
             className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
             aria-label="Close"
           >
@@ -112,9 +121,9 @@ export const DeleteUserModal: React.FC<DeleteUserModalProps> = ({
         {stage === 'authorize' && (
           <form onSubmit={handleVerifyPassword} className="flex flex-col gap-4">
             <div className="rounded-lg bg-warning/10 border border-warning/30 p-3 text-sm text-warning-dark">
-              Permanently deleting{' '}
-              <span className="font-semibold">{staff.name}</span> requires administrator
-              password verification.
+              Deactivating{' '}
+              <span className="font-semibold">{staff.name}</span>'s account requires
+              administrator password verification.
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -169,11 +178,12 @@ export const DeleteUserModal: React.FC<DeleteUserModalProps> = ({
         {/* Stage 2 — Final confirmation */}
         {stage === 'confirm' && (
           <div className="flex flex-col gap-4">
-            <div className="rounded-lg bg-danger/10 border border-danger/30 p-3 text-sm text-danger">
-              <p className="font-semibold mb-1">This action cannot be undone.</p>
+            <div className="rounded-lg bg-warning/10 border border-warning/30 p-3 text-sm text-warning-dark">
+              <p className="font-semibold mb-1">Deactivate this account?</p>
               <p>
-                <span className="font-semibold">{staff.name}</span> will be permanently
-                removed. Historical records will be preserved.
+                <span className="font-semibold">{staff.name}</span> will lose access to
+                the system. All historical business records — sales, invoices, stock
+                movements — will remain attributed to their account.
               </p>
             </div>
 
@@ -181,23 +191,23 @@ export const DeleteUserModal: React.FC<DeleteUserModalProps> = ({
               <button
                 type="button"
                 onClick={handleClose}
-                disabled={isDeleting}
+                disabled={isDeactivating}
                 className="flex-1 py-2 px-4 rounded-lg border border-border text-text-secondary hover:bg-surface-hover transition-colors text-sm font-medium disabled:opacity-disabled"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={handleDelete}
-                disabled={isDeleting}
-                className="flex-1 py-2 px-4 rounded-lg bg-danger text-white text-sm font-medium hover:bg-danger/90 transition-colors disabled:opacity-disabled flex items-center justify-center gap-1.5"
+                onClick={handleDeactivate}
+                disabled={isDeactivating}
+                className="flex-1 py-2 px-4 rounded-lg bg-warning text-white text-sm font-medium hover:bg-warning/90 transition-colors disabled:opacity-disabled flex items-center justify-center gap-1.5"
               >
-                {isDeleting ? (
-                  'Deleting…'
+                {isDeactivating ? (
+                  'Deactivating…'
                 ) : (
                   <>
-                    <Trash2 className="w-4 h-4" />
-                    Permanently Delete User
+                    <UserX className="w-4 h-4" />
+                    Deactivate Account
                   </>
                 )}
               </button>

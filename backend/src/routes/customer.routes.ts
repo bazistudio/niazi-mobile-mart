@@ -8,10 +8,7 @@
  *   GET    /api/v1/customers/:id     → getCustomerDetail  (auth: customers page)
  *   GET    /api/v1/customers/:id/ledger → getCustomerStatement (auth: customers page)
  *
- * Note: record_customer_payment is NOT exposed here.
- * Rust customer_service.rs line 281: Postgres path returns
- * Err(AppError::Internal("Postgres record_customer_payment not implemented")).
- * That endpoint does not exist on the central server — it is SQLite/desktop only.
+ *   POST   /api/v1/customers/:id/payments → recordCustomerPayment (auth: customers page)
  *
  * Error response shape mirrors Axum handlers:
  *   403: { error: "FORBIDDEN",      message: "..." }
@@ -23,7 +20,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, RequestIdentity } from '../auth';
+import { buildAuthMiddleware, authorizePermission, RequestIdentity } from '../auth';
 import {
   CustomerRepoError,
   CustomerFilter,
@@ -39,6 +36,8 @@ import {
   getCustomerStatement,
   validateCreateCustomer,
   validateUpdateCustomer,
+  recordCustomerPayment,
+  RecordCustomerPaymentDto,
 } from '../repositories/customer.repo';
 
 // ─── Error Response Helper ────────────────────────────────────────────────────
@@ -88,8 +87,8 @@ function sendError(_req: Request, res: Response, err: unknown): void {
 export function createCustomerRouter(pool: Pool): Router {
   const router = express.Router();
 
-  // Apply JWT authentication middleware to all customer routes
-  router.use(authMiddleware);
+  // Apply authentication + active-account middleware to all customer routes
+  router.use(buildAuthMiddleware(pool));
 
   // ── GET /api/customers ─────────────────────────────────────────────────────
   // Mirrors list_customers_handler in server.rs.
@@ -223,7 +222,7 @@ export function createCustomerRouter(pool: Pool): Router {
 export function createCustomerV1Router(pool: Pool): Router {
   const router = express.Router();
 
-  router.use(authMiddleware);
+  router.use(buildAuthMiddleware(pool));
 
   // ── GET /api/v1/customers/:id ─────────────────────────────────────────────
   // Mirrors get_customer_detail_handler in server.rs.
@@ -324,6 +323,59 @@ export function createCustomerV1Router(pool: Pool): Router {
       await deactivateCustomer(pool, id);
       res.status(200).json({ success: true, message: 'Customer deactivated successfully' });
     } catch (err) {
+      sendError(req, res, err);
+    }
+  });
+
+  // ── POST /api/v1/customers/:id/payments ──────────────────────────────────
+  // Records a customer receivable payment.
+  // Auth: customers page permission.
+  // Body: { amount: number, payment_method: string, notes?: string, reference_number?: string }
+  // Returns: 201 + CustomerPaymentResult { payment_id, reference_number, new_balance }
+  // Error: 400 on invalid amount; 404 NOT_FOUND if customer missing; 500 SERVER_ERROR.
+  router.post('/:id/payments', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    const denied = authorizePermission(identity, 'customers', null);
+    if (denied) {
+      res.status(403).json({ error: 'FORBIDDEN', message: denied });
+      return;
+    }
+
+    try {
+      const customerId = req.params['id'] as string;
+      const body = req.body as RecordCustomerPaymentDto;
+
+      // Validate required fields
+      if (typeof body.amount !== 'number' || body.amount <= 0) {
+        res.status(400).json({ error: 'VALIDATION_ERROR', message: 'amount must be a positive number' });
+        return;
+      }
+      if (!body.payment_method || typeof body.payment_method !== 'string') {
+        res.status(400).json({ error: 'VALIDATION_ERROR', message: 'payment_method is required' });
+        return;
+      }
+
+      // Pass branch from authenticated identity — not from client-supplied body (DEF-03)
+      const result = await recordCustomerPayment(
+        pool,
+        customerId,
+        {
+          amount: Math.round(body.amount),
+          payment_method: body.payment_method.toUpperCase(),
+          notes: body.notes ?? null,
+          reference_number: body.reference_number ?? null,
+        },
+        identity.user_id ?? null,
+        identity.branch_id ?? null
+      );
+
+      res.status(201).json(result);
+    } catch (err) {
+      if (err instanceof CustomerRepoError && err.statusCode === 404) {
+        res.status(404).json({ error: 'NOT_FOUND', message: err.message });
+        return;
+      }
       sendError(req, res, err);
     }
   });

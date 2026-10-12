@@ -26,6 +26,8 @@ export interface AuthUser {
 
   // active shop context
   shopId?: string;
+  branchId?: string | null;
+  branch_id?: string | null;
 
   // optional fine-grained permissions (future upgrade)
   permissions?: string[];

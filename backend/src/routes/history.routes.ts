@@ -6,7 +6,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, isAdmin, RequestIdentity } from '../auth';
+import { buildAuthMiddleware, authorizePermission, isOrgAdmin, RequestIdentity } from '../auth';
 import {
   getHistoryStats,
   listHistoryItems,
@@ -44,7 +44,7 @@ function sendError(_req: Request, res: Response, err: unknown): void {
 export function createHistoryRouter(pool: Pool): Router {
   const router = express.Router();
 
-  router.use(authMiddleware);
+  router.use(buildAuthMiddleware(pool));
 
   // ── GET /api/history ──────────────────────────────────────────────────────
   router.get('/', async (req: Request, res: Response): Promise<void> => {
@@ -57,9 +57,13 @@ export function createHistoryRouter(pool: Pool): Router {
     }
 
     try {
-      const isOrgAdmin =
-        isAdmin(identity) ||
-        identity.access_profile.allowed_pages.some((p) => p === '*');
+      const callerIsOrgAdmin = isOrgAdmin(identity);
+
+      // F-04: Fail closed — non-org-admin without a branch assignment must be denied.
+      if (!callerIsOrgAdmin && !identity.branch_id) {
+        res.status(403).json({ error: 'Access denied: No branch assigned to your account' });
+        return;
+      }
 
       const filter: HistoryFilterParams = {
         page: req.query['page'] ? parseInt(req.query['page'] as string, 10) : 1,
@@ -69,7 +73,8 @@ export function createHistoryRouter(pool: Pool): Router {
         endDate: (req.query['endDate'] as string) || undefined,
         status: (req.query['status'] as string) || undefined,
         search: (req.query['search'] as string) || undefined,
-        branch_id: !isOrgAdmin && identity.branch_id ? identity.branch_id : (req.query['branch_id'] as string) || null,
+        // F-04: Non-org-admins locked to assigned branch; cannot override via query param.
+        branch_id: callerIsOrgAdmin ? (req.query['branch_id'] as string) || null : identity.branch_id,
       };
 
       const result = await listHistoryItems(pool, filter);
@@ -90,11 +95,16 @@ export function createHistoryRouter(pool: Pool): Router {
     }
 
     try {
-      const isOrgAdmin =
-        isAdmin(identity) ||
-        identity.access_profile.allowed_pages.some((p) => p === '*');
+      const callerIsOrgAdmin = isOrgAdmin(identity);
 
-      const branchId = !isOrgAdmin && identity.branch_id ? identity.branch_id : (req.query['branch_id'] as string) || null;
+      // F-04: Fail closed — non-org-admin without a branch assignment must be denied.
+      if (!callerIsOrgAdmin && !identity.branch_id) {
+        res.status(403).json({ error: 'Access denied: No branch assigned to your account' });
+        return;
+      }
+
+      // Non-org-admins locked to their assigned branch; cannot override via query param.
+      const branchId = callerIsOrgAdmin ? (req.query['branch_id'] as string) || null : identity.branch_id;
       const stats = await getHistoryStats(pool, branchId);
       res.status(200).json(stats);
     } catch (err) {

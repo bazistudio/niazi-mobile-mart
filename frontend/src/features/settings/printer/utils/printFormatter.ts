@@ -69,9 +69,9 @@ export const printFormatter = {
     const invoice: UnifiedInvoice = {
       invoiceNo: order.displayNumber || order.orderNumber || order.transactionId || (order._id ? `TP-${order._id.slice(-6).toUpperCase()}` : `TP-${Date.now().toString().slice(-6)}`),
       date: new Date(order.createdAt || Date.now()).toLocaleString(),
-      customer: order.partyId 
-        ? { name: order.partyId.companyName || order.partyId.contactPerson || 'Walk-in Customer', phone: order.partyId.phone } 
-        : (order.customerId ? { name: order.customerId.name || 'Walk-in Customer', phone: order.customerId.phone } : undefined),
+      customer: order.customerId
+        ? { name: order.customerId.name || 'Walk-in Customer', phone: order.customerId.phone }
+        : (order.customer ? { name: order.customer.name || 'Walk-in Customer', phone: order.customer.phone } : undefined),
       cashier: order.cashierName || order.cashier || 'Cashier',
       items: (order.items || []).map((i: any) => {
         const price = i.salePrice ?? i.price ?? i.unitPrice ?? 0;
@@ -92,7 +92,8 @@ export const printFormatter = {
       tendered: order.tenderedAmount ?? order.totalPaid,
       change: order.changeReturned ?? order.change,
       shop,
-      returnPolicy: shop.footerText ? undefined : 'Goods once sold can only be returned/exchanged within 3 days with original receipt.'
+      returnPolicy: shop.returnPolicy || 'Goods once sold can only be returned/exchanged within 3 days with original receipt.',
+      warrantyInstructions: shop.warrantyInstructions || undefined
     };
     return renderDocument(invoice, settings, 'Sale Receipt');
   },
@@ -101,7 +102,7 @@ export const printFormatter = {
     const invoice: UnifiedInvoice = {
       invoiceNo: purchase.invoiceNumber || (purchase._id ? purchase._id.slice(-6).toUpperCase() : `PO-${Date.now().toString().slice(-6)}`),
       date: new Date(purchase.issuedAt || purchase.createdAt || Date.now()).toLocaleString(),
-      customer: purchase.supplierId ? { name: purchase.supplierId.name || 'Supplier' } : undefined,
+      customer: purchase.supplierName ? { name: purchase.supplierName } : (purchase.supplier ? { name: purchase.supplier.name || 'Supplier' } : undefined),
       items: (purchase.items || []).map((i: any) => ({ 
         name: i.name || i.productName || 'Item', 
         qty: i.quantity || 1, 
@@ -138,7 +139,7 @@ export const printFormatter = {
     const invoice: UnifiedInvoice = {
       invoiceNo: ledger.transactionId || (ledger.id ? ledger.id.slice(-8).toUpperCase() : ledger._id?.slice(-8).toUpperCase() || `RCP-${Date.now().toString().slice(-6)}`),
       date: new Date(ledger.createdAt || ledger.timestamp || Date.now()).toLocaleString(),
-      customer: { name: ledger.customerId?.name || ledger.supplierId?.name || 'Party' },
+      customer: { name: ledger.customerId?.name || ledger.customer?.name || ledger.customerName || 'Customer' },
       items: [{ name: `Payment: ${ledger.description || ledger.type || 'Ledger Settlement'}`, qty: 1, price: ledger.amount || 0, total: ledger.amount || 0 }],
       subtotal: ledger.amount || 0,
       discount: 0,
@@ -151,33 +152,63 @@ export const printFormatter = {
   },
 
   formatLedgerStatement: (party: any, timeline: any[], settings: PrinterSettings, shop: ShopHeader, filterTitle: string = 'Full Ledger'): string => {
-    const title = (party.type === 'CUSTOMER' ? 'Customer' : 'Supplier') + ' Ledger Statement';
-    
+    // DEF-07: domain-aware statement formatter.
+    // party.type === 'SUPPLIER' renders a Supplier Account Statement with supplier labels and
+    // correct debit/credit semantics. Everything else (CUSTOMER or absent) renders a Customer
+    // Account Statement with customer labels.
+    //
+    // Customer ledger convention:
+    //   Debit = Sale / amount owed to us (increases receivable)
+    //   Credit = Payment received from customer (reduces receivable)
+    //   Positive running balance → DR (customer owes us)
+    //   Negative running balance → CR (customer in advance / credit)
+    //
+    // Supplier ledger convention:
+    //   Debit = Purchase / amount we owe supplier (increases payable)
+    //   Credit = Payment made to supplier (reduces payable)
+    //   Positive running balance → DR (we owe supplier)
+    //   Negative running balance → CR (supplier owes us / advance paid)
+
+    const isSupplier = (party?.type || '').toUpperCase() === 'SUPPLIER';
+
+    const title = isSupplier ? 'Supplier Account Statement' : 'Customer Account Statement';
+    const partyLabel = isSupplier ? 'Supplier' : 'Customer';
+    // Debit header: for customer = "Debit (Sale / Invoice)"; for supplier = "Debit (Purchase)"
+    const debitHeader = isSupplier ? 'Debit (Purchase)' : 'Debit (Sale)';
+    const creditHeader = isSupplier ? 'Credit (Payment)' : 'Credit (Payment)';
+
+    const partyName: string = party?.name || (isSupplier ? 'Supplier' : 'Customer');
+    const partyPhone: string | undefined = party?.phone;
+    const balance: number = party?.balance ?? 0;
+
+    // Balance display: positive → DR (amount owed in the normal direction), negative → CR
+    const balanceDisplay = Math.abs(balance).toLocaleString() + (balance < 0 ? ' CR' : ' DR');
+
     let html = '';
     html += '<div style="font-family: ' + (settings.font?.family || 'sans-serif') + '; font-size: ' + (settings.font?.size || 12) + 'px; padding: 20px; max-width: 800px; margin: 0 auto; color: #000; background: #fff;">';
     html += '<div style="text-align: center; margin-bottom: 20px;">';
-    
+
     if (settings.invoice?.showLogo && shop.logoUrl) {
       html += '<img src="' + shop.logoUrl + '" style="max-height: 80px;" />';
     }
-    
+
     if (settings.invoice?.showShopInfo !== false) {
       html += '<h1 style="margin: 5px 0; font-size: 20px; font-weight: bold;">' + shop.name + '</h1>';
       if (shop.address) html += '<p style="margin: 2px 0; white-space: pre-wrap;">' + shop.address + '</p>';
       if (shop.phone) html += '<p style="margin: 2px 0;">' + shop.phone + '</p>';
     }
-    
+
     html += '<h2 style="margin: 10px 0; border: 1px solid #000; display: inline-block; padding: 5px 15px; border-radius: 4px; font-size: 14px;">' + title + '</h2>';
     html += '</div>';
 
     html += '<div style="display: flex; justify-content: space-between; margin-bottom: 20px; border-bottom: 1px solid #000; padding-bottom: 10px; font-size: 12px;">';
     html += '<div>';
-    html += '<p style="margin: 2px 0;"><strong>Party:</strong> ' + party.name + '</p>';
-    html += '<p style="margin: 2px 0;"><strong>Type:</strong> ' + party.type + '</p>';
+    html += '<p style="margin: 2px 0;"><strong>' + partyLabel + ':</strong> ' + partyName + '</p>';
+    if (partyPhone) html += '<p style="margin: 2px 0;"><strong>Phone:</strong> ' + partyPhone + '</p>';
     html += '</div>';
     html += '<div style="text-align: right;">';
     html += '<p style="margin: 2px 0;"><strong>Filter:</strong> ' + filterTitle + '</p>';
-    html += '<p style="margin: 2px 0;"><strong>Current Balance:</strong> Rs ' + Math.abs(party.balance || 0).toLocaleString() + ((party.balance || 0) < 0 ? ' CR' : ' DR') + '</p>';
+    html += '<p style="margin: 2px 0;"><strong>Current Balance:</strong> Rs ' + balanceDisplay + '</p>';
     html += '</div>';
     html += '</div>';
 
@@ -187,31 +218,39 @@ export const printFormatter = {
     html += '<th style="text-align: left; padding: 5px;">Date</th>';
     html += '<th style="text-align: left; padding: 5px;">Reference</th>';
     html += '<th style="text-align: left; padding: 5px;">Details</th>';
-    html += '<th style="text-align: right; padding: 5px;">Debit</th>';
-    html += '<th style="text-align: right; padding: 5px;">Credit</th>';
+    html += '<th style="text-align: right; padding: 5px;">' + debitHeader + '</th>';
+    html += '<th style="text-align: right; padding: 5px;">' + creditHeader + '</th>';
     html += '<th style="text-align: right; padding: 5px;">Balance</th>';
     html += '</tr>';
     html += '</thead>';
     html += '<tbody>';
 
     (timeline || []).forEach(entry => {
-      const isPayment = entry.type === 'payment';
-      const isCustomer = party.type === 'CUSTOMER';
-      const showDebit = isCustomer ? !isPayment : isPayment;
-      const showCredit = isCustomer ? isPayment : !isPayment;
-      const bal = entry.runningBalance || 0;
+      // PAYMENT entries go to the credit column for both customer and supplier.
+      // All other entry types (SALE for customer; PURCHASE for supplier; ADJUSTMENT) go to debit.
+      const isPayment = (entry.type || '').toUpperCase() === 'PAYMENT';
+      const bal: number = entry.runningBalance ?? entry.balance_after ?? 0;
+      const entryAmt: number = entry.amount ?? 0;
 
-      let displayDesc = entry.description || '';
-      if (displayDesc.toLowerCase().includes('credit')) displayDesc = 'Credit';
-      else if (displayDesc.toLowerCase().includes('cash')) displayDesc = 'Cash';
+      let displayDesc: string = entry.description || entry.type || '';
+      // Sanitize generic placeholders while keeping meaningful descriptions
+      if (!displayDesc || displayDesc.toLowerCase() === 'payment') {
+        displayDesc = isSupplier ? 'Supplier Payment' : 'Customer Payment';
+      } else if (!displayDesc || displayDesc.toLowerCase() === 'sale') {
+        displayDesc = 'Sale';
+      } else if (!displayDesc || displayDesc.toLowerCase() === 'purchase') {
+        displayDesc = 'Purchase';
+      }
+
+      const entryBalDisplay = Math.abs(bal).toLocaleString() + (bal < 0 ? ' CR' : ' DR');
 
       html += '<tr style="border-bottom: 1px solid #eee;">';
-      html += '<td style="padding: 5px;">' + new Date(entry.timestamp).toLocaleDateString() + '</td>';
-      html += '<td style="padding: 5px;">' + (entry.transactionId || '-') + '</td>';
+      html += '<td style="padding: 5px;">' + new Date(entry.timestamp || entry.createdAt || Date.now()).toLocaleDateString() + '</td>';
+      html += '<td style="padding: 5px;">' + (entry.transactionId || entry.invoiceNo || entry.reference || '-') + '</td>';
       html += '<td style="padding: 5px;">' + displayDesc + '</td>';
-      html += '<td style="text-align: right; padding: 5px;">' + (showDebit ? (entry.amount || 0).toLocaleString() : '-') + '</td>';
-      html += '<td style="text-align: right; padding: 5px;">' + (showCredit ? (entry.amount || 0).toLocaleString() : '-') + '</td>';
-      html += '<td style="text-align: right; padding: 5px;">Rs ' + Math.abs(bal).toLocaleString() + (bal < 0 ? ' CR' : ' DR') + '</td>';
+      html += '<td style="text-align: right; padding: 5px;">' + (!isPayment ? entryAmt.toLocaleString() : '-') + '</td>';
+      html += '<td style="text-align: right; padding: 5px;">' + (isPayment ? entryAmt.toLocaleString() : '-') + '</td>';
+      html += '<td style="text-align: right; padding: 5px;">Rs ' + entryBalDisplay + '</td>';
       html += '</tr>';
     });
 
@@ -338,13 +377,12 @@ const formatA4 = (invoice: UnifiedInvoice, settings: PrinterSettings, title: str
 
 const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width: number, title: string): string => {
   const is58 = width === 58;
-  const pxWidth = is58 ? 218 : 298;
-  const baseFontSize = is58 ? 10 : 12;
+  const pxWidth = is58 ? 220 : 304;
+  const baseFontSize = is58 ? 11 : 13.5;
   const fontFamily = settings.font?.family === 'monospace' ? 'Courier, "Courier New", monospace' : 'Arial, sans-serif';
-  const divider = is58 ? '--------------------------------' : '------------------------------------------';
 
   return `
-    <div style="font-family: ${fontFamily}; font-size: ${baseFontSize}px; width: ${pxWidth}px; margin: 0 auto; line-height: 1.25; color: #000000; background-color: #ffffff; padding: 4px 2px;">
+    <div style="font-family: ${fontFamily}; font-size: ${baseFontSize}px; width: ${pxWidth}px; margin: 0 auto; line-height: 1.3; color: #000000; background-color: #ffffff; padding: 8px 14px; box-sizing: border-box;">
       <style>
         @media print {
           body, html {
@@ -357,19 +395,21 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
       </style>
       
       <!-- Store Header Identity -->
-      <div style="text-align: center; margin-bottom: 6px;">
-        ${!is58 && settings.invoice?.showLogo && invoice.shop.logoUrl ? `<img src="${invoice.shop.logoUrl}" style="max-width: 70%; max-height: 50px; margin-bottom: 4px;" />` : ''}
+      <div style="text-align: center; margin-bottom: 8px;">
+        ${!is58 && settings.invoice?.showLogo && invoice.shop.logoUrl ? `<img src="${invoice.shop.logoUrl}" style="max-width: 70%; max-height: 55px; margin-bottom: 4px;" />` : ''}
         ${settings.invoice?.showShopInfo !== false ? `
-          <div style="font-weight: 900; font-size: ${is58 ? '13px' : '15px'}; text-transform: uppercase; letter-spacing: 0.5px;">${invoice.shop.name}</div>
-          ${invoice.shop.address ? `<div style="font-size: ${is58 ? '9px' : '10px'}; white-space: pre-wrap; margin-top: 1px;">${invoice.shop.address}</div>` : ''}
-          ${invoice.shop.phone ? `<div style="font-size: ${is58 ? '9px' : '10px'}; margin-top: 1px;">Tel: ${invoice.shop.phone}</div>` : ''}
-          ${invoice.shop.taxNumber ? `<div style="font-size: ${is58 ? '9px' : '10px'};">NTN: ${invoice.shop.taxNumber}</div>` : ''}
+          <div style="font-weight: 900; font-size: ${is58 ? '14px' : '17px'}; text-transform: uppercase; letter-spacing: 0.5px;">${invoice.shop.name}</div>
+          ${invoice.shop.branchName ? `<div style="font-size: ${is58 ? '10.5px' : '12px'}; font-weight: bold; margin-top: 2px; color: #222;">[ ${invoice.shop.branchName} ]</div>` : ''}
+          ${invoice.shop.address ? `<div style="font-size: ${is58 ? '10px' : '11px'}; white-space: pre-wrap; margin-top: 2px;">${invoice.shop.address}</div>` : ''}
+          ${invoice.shop.phone || invoice.shop.secondaryPhone ? `<div style="font-size: ${is58 ? '10px' : '11px'}; margin-top: 2px;">Tel: ${invoice.shop.phone}${invoice.shop.secondaryPhone ? ' / ' + invoice.shop.secondaryPhone : ''}</div>` : ''}
+          ${invoice.shop.whatsapp ? `<div style="font-size: ${is58 ? '10px' : '11px'};">WhatsApp: ${invoice.shop.whatsapp}</div>` : ''}
+          ${invoice.shop.taxNumber ? `<div style="font-size: ${is58 ? '10px' : '11px'};">NTN: ${invoice.shop.taxNumber}</div>` : ''}
         ` : ''}
-        <div style="margin-top: 3px; font-weight: bold; font-size: ${is58 ? '10px' : '11px'}; text-transform: uppercase;">*** ${title} ***</div>
+        <div style="margin-top: 4px; font-weight: bold; font-size: ${is58 ? '11px' : '12.5px'}; text-transform: uppercase; letter-spacing: 0.5px;">*** ${title} ***</div>
       </div>
       
       <!-- Meta Information Section -->
-      <div style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 4px 0; margin-bottom: 4px; font-size: ${is58 ? '9px' : '10px'};">
+      <div style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 5px 0; margin-bottom: 6px; font-size: ${is58 ? '10px' : '11.5px'};">
         <div style="display: flex; justify-content: space-between;">
           <span>Invoice #:</span>
           <span style="font-weight: bold;">${invoice.invoiceNo}</span>
@@ -386,94 +426,107 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
         ${invoice.customer ? `
         <div style="display: flex; justify-content: space-between;">
           <span>Customer:</span>
-          <span>${invoice.customer.name}</span>
+          <span style="font-weight: 600;">${invoice.customer.name}</span>
+        </div>
+        ${invoice.customer.phone ? `
+        <div style="display: flex; justify-content: space-between;">
+          <span>Cust Phone:</span>
+          <span>${invoice.customer.phone}</span>
         </div>` : ''}
+        ` : ''}
       </div>
 
-      <!-- Items Table -->
-      <table style="width: 100%; text-align: left; margin-bottom: 4px; font-size: ${is58 ? '9.5px' : '11px'}; border-collapse: collapse;">
+      <!-- Items Table: Item (1st), Qty (2nd), Price (3rd), Amount (4th) -->
+      <table style="width: 100%; text-align: left; margin-bottom: 6px; font-size: ${is58 ? '10.5px' : '12px'}; border-collapse: collapse;">
         <thead>
           <tr style="border-bottom: 1px dashed #000;">
-            <th style="padding: 2px 0; width: ${is58 ? '14%' : '12%'}; text-align: left;">Qty</th>
-            <th style="padding: 2px 2px; width: ${is58 ? '56%' : '50%'}; text-align: left;">Item</th>
-            ${!is58 ? `<th style="padding: 2px 0; width: 18%; text-align: right;">Price</th>` : ''}
-            <th style="padding: 2px 0; width: ${is58 ? '30%' : '20%'}; text-align: right;">Amount</th>
+            <th style="padding: 3px 2px; width: ${is58 ? '58%' : '46%'}; text-align: left;">Item</th>
+            <th style="padding: 3px 0; width: ${is58 ? '16%' : '12%'}; text-align: center;">Qty</th>
+            ${!is58 ? `<th style="padding: 3px 0; width: 20%; text-align: right;">Price</th>` : ''}
+            <th style="padding: 3px 0; width: ${is58 ? '26%' : '22%'}; text-align: right;">Amount</th>
           </tr>
         </thead>
         <tbody>
           ${invoice.items.map(item => `
             <tr style="vertical-align: top; border-bottom: 1px dotted #ccc;">
-              <td style="padding: 3px 0; font-weight: bold;">${item.qty}</td>
-              <td style="padding: 3px 2px; word-break: break-word;">
-                <div>${item.name}</div>
-                ${item.imei ? `<div style="font-size: 8.5px; color: #333;">IMEI: ${maskImei(item.imei)}</div>` : ''}
+              <td style="padding: 4px 2px; word-break: break-word;">
+                <div style="font-weight: 600;">${item.name}</div>
+                ${item.imei ? `<div style="font-size: 9.5px; color: #333;">IMEI: ${maskImei(item.imei)}</div>` : ''}
               </td>
-              ${!is58 ? `<td style="padding: 3px 0; text-align: right; tabular-nums;">${item.price.toLocaleString()}</td>` : ''}
-              <td style="padding: 3px 0; text-align: right; font-weight: bold; tabular-nums;">${item.total.toLocaleString()}</td>
+              <td style="padding: 4px 0; text-align: center; font-weight: bold;">${item.qty}</td>
+              ${!is58 ? `<td style="padding: 4px 0; text-align: right; tabular-nums;">${item.price.toLocaleString()}</td>` : ''}
+              <td style="padding: 4px 0; text-align: right; font-weight: bold; tabular-nums;">${item.total.toLocaleString()}</td>
             </tr>
           `).join('')}
         </tbody>
       </table>
       
       <!-- Financial Summary Totals -->
-      <div style="border-top: 1px dashed #000; padding-top: 4px; font-size: ${is58 ? '10px' : '11px'};">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+      <div style="border-top: 1px dashed #000; padding-top: 5px; font-size: ${is58 ? '11px' : '12.5px'};">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
           <span>Subtotal:</span>
           <span style="font-weight: bold;">Rs ${invoice.subtotal.toLocaleString()}</span>
         </div>
         
         ${settings.invoice?.showDiscount !== false && invoice.discount > 0 ? `
-        <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
           <span>Discount:</span>
           <span style="font-weight: bold;">- Rs ${invoice.discount.toLocaleString()}</span>
         </div>` : ''}
         
         ${settings.invoice?.showTax && invoice.tax > 0 ? `
-        <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
           <span>Tax:</span>
           <span>+ Rs ${invoice.tax.toLocaleString()}</span>
         </div>` : ''}
         
-        <div style="display: flex; justify-content: space-between; font-weight: 900; font-size: ${is58 ? '12px' : '13px'}; border-top: 1px solid #000; border-bottom: 1px solid #000; margin: 4px 0; padding: 4px 0;">
+        <div style="display: flex; justify-content: space-between; font-weight: 900; font-size: ${is58 ? '13.5px' : '15px'}; border-top: 1px solid #000; border-bottom: 1px solid #000; margin: 5px 0; padding: 5px 0;">
           <span>Grand Total:</span>
           <span>Rs ${invoice.total.toLocaleString()}</span>
         </div>
         
         <!-- Tender & Change Breakdown -->
-        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '9px' : '10px'}; margin-top: 3px;">
+        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '10px' : '11.5px'}; margin-top: 4px;">
           <span>Payment Method:</span>
           <span style="font-weight: bold; text-transform: uppercase;">${invoice.paymentMethod || 'Cash'}</span>
         </div>
         
         ${invoice.tendered && invoice.tendered > 0 ? `
-        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '9px' : '10px'};">
+        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '10px' : '11.5px'};">
           <span>Tendered:</span>
           <span>Rs ${invoice.tendered.toLocaleString()}</span>
         </div>` : ''}
         
         ${invoice.change && invoice.change > 0 ? `
-        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '9.5px' : '10.5px'}; font-weight: bold;">
+        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '10.5px' : '12px'}; font-weight: bold;">
           <span>Change Due:</span>
           <span>Rs ${invoice.change.toLocaleString()}</span>
         </div>` : ''}
       </div>
       
-      <!-- Return Policy -->
-      <div style="border-top: 1px dashed #000; margin-top: 6px; padding-top: 4px; text-align: center; font-size: ${is58 ? '8px' : '9px'};">
+      <!-- Return Policy & Warranty Instructions -->
+      ${invoice.returnPolicy || invoice.shop.returnPolicy ? `
+      <div style="border-top: 1px dashed #000; margin-top: 8px; padding-top: 5px; text-align: center; font-size: ${is58 ? '9px' : '10.5px'};">
         <div style="font-weight: bold; margin-bottom: 1px;">Return Policy:</div>
-        <div>${invoice.returnPolicy || 'Exchange/Return within 3 days with original receipt.'}</div>
-      </div>
+        <div>${invoice.returnPolicy || invoice.shop.returnPolicy}</div>
+      </div>` : ''}
+
+      ${invoice.warrantyInstructions || invoice.shop.warrantyInstructions ? `
+      <div style="border-top: 1px dotted #000; margin-top: 5px; padding-top: 4px; text-align: center; font-size: ${is58 ? '8.5px' : '10px'}; color: #222;">
+        <div style="font-weight: bold; margin-bottom: 1px;">Warranty Terms:</div>
+        <div>${invoice.warrantyInstructions || invoice.shop.warrantyInstructions}</div>
+      </div>` : ''}
       
       <!-- Barcode Section -->
       ${settings.invoice?.showBarcode !== false ? `
-      <div style="margin-top: 6px;">
-        ${generateBarcodeSvg(invoice.invoiceNo, pxWidth - 10, is58 ? 32 : 38)}
+      <div style="margin-top: 8px;">
+        ${generateBarcodeSvg(invoice.invoiceNo, pxWidth - 28, is58 ? 32 : 38)}
       </div>` : ''}
       
       <!-- Footer & Branding -->
-      <div style="text-align: center; margin-top: 8px; font-size: ${is58 ? '8.5px' : '9.5px'}; border-top: 1px dashed #000; padding-top: 4px;">
+      <div style="text-align: center; margin-top: 10px; font-size: ${is58 ? '9.5px' : '10.5px'}; border-top: 1px dashed #000; padding-top: 5px;">
         <div style="font-weight: bold;">${invoice.shop.footerText || 'Thank you for shopping with us!'}</div>
-        <div style="font-size: 8px; color: #555; margin-top: 3px; letter-spacing: 0.5px;">Powered by Niazi Mobile Mart</div>
+        <div style="font-size: 9px; color: #555; margin-top: 4px; letter-spacing: 0.5px;">Powered by Niazi Mobile Mart</div>
       </div>
     </div>
   `;

@@ -27,11 +27,13 @@ export const ShopSwitcher = () => {
     setActiveShop,
   } = useOrganizationStore();
 
+  // Phase 13 (M-01a): ADMIN and MULTI_ADMIN are org-level only when they have NO branch
+  // assignment. A branch-assigned ADMIN or MULTI_ADMIN is a Branch Admin, not an Org Admin.
   const isOrgAdmin =
     user?.role === 'OWNER' ||
     user?.role === 'SUPER_ADMIN' ||
-    user?.role === 'MULTI_ADMIN' ||
-    user?.role === 'ADMIN';
+    (user?.role === 'MULTI_ADMIN' && !user?.branch_id) ||
+    (user?.role === 'ADMIN' && !user?.branch_id);
 
   // Fetch branches on mount or when auth/admin status changes
   const loadBranches = useCallback(async () => {
@@ -78,17 +80,24 @@ export const ShopSwitcher = () => {
       }
 
       // Filter branches: Org Admin sees all branches; branch users see ONLY their assigned branch
-      const userBranchId = (user as any)?.branchId || (user as any)?.shopId;
+      const userBranchId = (user as any)?.branch_id || (user as any)?.branchId || (user as any)?.shopId;
       const accessible = isOrgAdmin
         ? list
-        : list.filter((b) => !userBranchId || b.id === userBranchId);
+        : userBranchId
+          ? list.filter((b) => b.id === userBranchId)
+          : [];
 
       setBranches(accessible);
 
       // Ensure activeShop in Zustand store is initialized from accessible branches
       if (accessible.length > 0) {
-        const currentShopId = activeShopId || activeShop?._id;
-        const matchedBranch = accessible.find((b) => b.id === currentShopId) || accessible[0];
+        let matchedBranch = accessible.find((b) => b.id === activeShopId); // Phase 13 (M-01b): was currentShopId (undefined)
+        if (!isOrgAdmin && userBranchId) {
+          // Strictly lock non-org admin to their assigned branch
+          matchedBranch = accessible.find((b) => b.id === userBranchId) || accessible[0];
+        } else if (!matchedBranch) {
+          matchedBranch = accessible[0];
+        }
 
         if (matchedBranch && (!activeShop || activeShop._id !== matchedBranch.id)) {
           setActiveShop({
@@ -97,6 +106,11 @@ export const ShopSwitcher = () => {
             organizationId: matchedBranch.organization_id,
             status: matchedBranch.is_active ? 'active' : 'inactive',
           });
+        }
+      } else if (!isOrgAdmin && !userBranchId) {
+        // Non-org admin with no assigned branch: clear active shop to avoid unauthorized fallback
+        if (activeShop) {
+          setActiveShop(null);
         }
       }
     } catch (error) {
@@ -147,7 +161,7 @@ export const ShopSwitcher = () => {
     }
 
     // Prevent non-admin users from switching to a branch other than their assigned one
-    const userBranchId = (user as any)?.branchId || (user as any)?.shopId;
+    const userBranchId = (user as any)?.branch_id || (user as any)?.branchId || (user as any)?.shopId;
     if (branch && !isOrgAdmin && userBranchId && branch.id !== userBranchId) {
       return;
     }
@@ -172,10 +186,11 @@ export const ShopSwitcher = () => {
     setIsLoading(false);
   };
 
+  const userBranchId = (user as any)?.branch_id || (user as any)?.branchId || (user as any)?.shopId;
   const displayLabel =
     viewMode === 'organization'
       ? 'All Shops'
-      : activeShop?.name || (isFetchingBranches ? 'Loading…' : 'Main Branch');
+      : activeShop?.name || (isFetchingBranches ? 'Loading…' : (!isOrgAdmin && !userBranchId ? 'No Branch Assigned' : 'Main Branch'));
 
   return (
     <div className="relative" ref={dropdownRef}>

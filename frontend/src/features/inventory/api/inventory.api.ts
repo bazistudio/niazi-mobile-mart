@@ -17,16 +17,18 @@ function getActiveBranchId(): string {
 
 export const inventoryApi = {
   getProducts: async (params: PaginationParams): Promise<PaginatedProductsDTO> => {
+    const store = useOrganizationStore.getState();
+    const branchId = store.activeShop?._id || store.activeShop?.id || store.activeShopId;
+
     const items = await tauriClient.productList({
       search: params.search,
       category_id: params.category && params.category !== 'all' ? params.category : undefined,
       is_active: true,
+      branch_id: branchId || undefined,
     });
 
     // Obtain active branch stock map if branch context is available
     let stockMap: Record<string, number> = {};
-    const store = useOrganizationStore.getState();
-    const branchId = store.activeShop?._id || store.activeShop?.id || store.activeShopId;
     if (branchId) {
       try {
         stockMap = await tauriClient.inventoryGetStockMap(branchId);
@@ -56,7 +58,6 @@ export const inventoryApi = {
     }));
 
     return {
-      success: true,
       products,
       pagination: {
         total: products.length,
@@ -100,17 +101,6 @@ export const inventoryApi = {
       success: true,
       message: 'Stock adjusted successfully',
       newStock,
-      adjustment: {
-        _id: `adj-${Date.now()}`,
-        productId,
-        type,
-        quantity,
-        previousStock: 0,
-        newStock,
-        reason,
-        adjustedBy: 'admin',
-        createdAt: new Date().toISOString(),
-      },
     };
   },
 
@@ -278,6 +268,7 @@ export const inventoryApi = {
       lowStockThreshold: updated.low_stock_threshold,
       description: updated.description || undefined,
       status: 'active',
+      isLowStock: currentStock <= (updated.low_stock_threshold || 5),
       createdAt: updated.created_at,
       updatedAt: updated.updated_at,
     };
@@ -295,10 +286,31 @@ export const inventoryApi = {
     };
   },
 
+
+  receiveStock: async (dto: ReceiveStockApiDto): Promise<ReceiveStockApiResult> => {
+    return await httpClient.post<ReceiveStockApiResult>('/api/v1/inventory/receive', dto);
+  },
+
   checkDuplicate: async (_params: { sku?: string; barcode?: string; name?: string }): Promise<CheckDuplicateResponseDTO> => {
     return {
       exists: false,
+      matchType: 'none',
     };
   }
 };
 
+
+export interface ReceiveStockApiDto {
+  product_id: string;
+  branch_id: string;
+  quantity_received: number;
+  unit_cost: number;
+  supplier_id?: string | null;
+  notes?: string | null;
+}
+
+export interface ReceiveStockApiResult {
+  new_quantity: number;
+  new_average_cost: number;
+  movement_id: string;
+}

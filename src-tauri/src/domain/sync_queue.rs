@@ -80,7 +80,7 @@ pub const KNOWN_SERVER_EVENT_TYPES: &[&str] = &[
     "CUSTOMER_UPDATED",
     "CUSTOMER_PAYMENT_RECORDED", // SYNC-B2
     "INVENTORY_OPERATION_RECORDED", // SYNC-H1
-    crate::domain::party::PARTY_UPSERTED_EVENT, // "PARTY_UPSERTED"
+    "PARTY_UPSERTED",
     // SYNC-H2: catalog master data direct synchronization
     "CATEGORY_CREATED",
     "BRAND_CREATED",

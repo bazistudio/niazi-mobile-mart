@@ -344,10 +344,10 @@ export async function completeSaleTx(
     const salePrice = Number(prod['sale_price'] ?? 0);
     const purchasePrice = Number(prod['purchase_price'] ?? 0);
     const avgCost = Number(prod['average_cost'] ?? 0);
-    let costPrice = avgCost > 0 ? avgCost : purchasePrice;
-    if (purchasePrice > 0 && avgCost > purchasePrice * 3) {
-      costPrice = purchasePrice;
-    }
+    // DEF-10: Authoritative cost is average_cost (WAC) when available, else purchase_price.
+    // The legacy 3× cap that replaced a valid WAC with stale purchase_price has been removed
+    // as it silently distorted COGS whenever WAC legitimately exceeded the last purchase price.
+    const costPrice = avgCost > 0 ? avgCost : purchasePrice;
 
     const lineDisc = Math.max(Number(item.discount ?? 0), 0);
     const subtotalLine = salePrice * item.quantity;

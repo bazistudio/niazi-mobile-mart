@@ -205,4 +205,13 @@ export class BranchRepo {
       supplier_payables: Number(suppRes.rows[0]?.supplier_payables ?? 0),
     };
   }
+
+  // ---------------------------------------------------------------------------
+  // Deactivate branch (safe soft-deactivation)
+  // Physical DELETE is strictly prohibited across the application to preserve
+  // all historical business records and referencing foreign keys.
+  // ---------------------------------------------------------------------------
+  async deactivateBranch(id: string): Promise<Branch> {
+    return this.updateBranch(id, { is_active: 0 });
+  }
 }

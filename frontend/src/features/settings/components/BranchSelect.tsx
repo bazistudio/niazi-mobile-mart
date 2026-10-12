@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { tauriClient, isTauriEnvironment } from '@/lib/tauri/tauriClient';
+import { shopApi } from '@/services/shop.api';
 
 interface BranchOption {
   id: string;
@@ -37,28 +38,37 @@ export const BranchSelect: React.FC<BranchSelectProps> = ({
     async function loadBranches() {
       setIsLoading(true);
       try {
-        if (isTauriEnvironment()) {
-          const list = await tauriClient.branchList();
-          if (!cancelled) {
-            setBranches(
-              list.map((b) => ({
-                id: b.id,
-                name: b.name,
-                code: b.code,
-              }))
-            );
+        let list = await tauriClient.branchList().catch(() => []);
+        if (!list || list.length === 0) {
+          const res = await shopApi.getAllShops().catch(() => ({ success: false, data: [] }));
+          if (res.success && res.data && res.data.length > 0) {
+            list = res.data.map((s) => ({
+              id: s._id,
+              organization_id: '00000000-0000-0000-0000-000000000001',
+              name: s.name,
+              code: s.name.substring(0, 4).toUpperCase(),
+              is_active: s.status === 'active' || s.status === 'ACTIVE',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }));
           }
-        } else {
-          // Browser / dev fallback — seed with Main Branch
-          if (!cancelled) {
-            setBranches([
-              {
-                id: '00000000-0000-0000-0000-000000000002',
-                name: 'Main Branch',
-                code: 'MAIN',
-              },
-            ]);
-          }
+        }
+        if (!cancelled && list && list.length > 0) {
+          // Blocker 3: Exclude inactive branches from new user assignments
+          const selectableBranches = list.filter((b: any) => {
+            // If an existing user already belongs to this branch, preserve it so it remains visible
+            if (value && b.id === value) return true;
+            // Otherwise exclude branches whose is_active is explicitly false or numeric 0
+            return b.is_active !== false && b.is_active !== 0;
+          });
+
+          setBranches(
+            selectableBranches.map((b: any) => ({
+              id: b.id,
+              name: b.name + (b.is_active === false || b.is_active === 0 ? ' (Inactive)' : ''),
+              code: b.code,
+            }))
+          );
         }
       } catch (err) {
         console.warn('[BranchSelect] Failed to load branches:', err);

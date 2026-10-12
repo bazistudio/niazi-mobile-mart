@@ -61,8 +61,8 @@ export const ProductTable = ({ products, isLoading }: ProductTableProps) => {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <div className="text-4xl mb-3">📦</div>
-        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">No products found</p>
-        <p className="text-xs text-gray-400 mt-1">Try adjusting your search or filters</p>
+        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">No products available</p>
+        <p className="text-xs text-gray-400 mt-1">Products will appear after stock is transferred to this branch.</p>
       </div>
     );
   }

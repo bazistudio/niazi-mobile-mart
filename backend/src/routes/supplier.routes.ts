@@ -29,9 +29,9 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { authMiddleware, authorizePermission } from '../auth';
+import { buildAuthMiddleware, authorizePermission } from '../auth';
 import { SupplierService, SupplierServiceError } from '../services/supplier.service';
-import type { SupplierFilter } from '../services/supplier.service';
+import type { SupplierFilter, RecordSupplierPaymentDto } from '../services/supplier.service';
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -46,7 +46,7 @@ export function buildSupplierRouter(pool: Pool): Router {
   const service = new SupplierService(pool);
 
   // All supplier routes require authentication
-  router.use(authMiddleware);
+  router.use(buildAuthMiddleware(pool));
 
   // Authorization helper — mirrors authorize_permission(Some("suppliers"), None)
   function requireSuppliersPermission(req: Request, res: Response): boolean {
@@ -205,6 +205,49 @@ export function buildSupplierRouter(pool: Pool): Router {
       res.status(200).json(updated);
     } catch (err: unknown) {
       handleError(res, err, 'update_supplier');
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /:id/payments — Record supplier payable payment
+  // Inserts a CREDIT entry into supplier_ledger_entries, reducing payable.
+  // For CASH payments, also records a cash_movements row (direction='OUT').
+  // Body: { amount: number, payment_method: string, notes?: string, reference_number?: string }
+  // Returns 201 + { payment_id, reference_number, new_balance }
+  // -------------------------------------------------------------------------
+
+  router.post('/:id/payments', async (req: Request, res: Response): Promise<void> => {
+    if (!requireSuppliersPermission(req, res)) return;
+
+    const { id } = req.params as { id: string };
+    const body = req.body as Record<string, unknown>;
+
+    if (typeof body['amount'] !== 'number' || Number(body['amount']) <= 0) {
+      res.status(400).json({ error: 'VALIDATION_ERROR', message: 'amount must be a positive number' });
+      return;
+    }
+    if (!body['payment_method'] || typeof body['payment_method'] !== 'string') {
+      res.status(400).json({ error: 'VALIDATION_ERROR', message: 'payment_method is required' });
+      return;
+    }
+
+    const dto: RecordSupplierPaymentDto = {
+      amount: Math.round(Number(body['amount'])),
+      payment_method: String(body['payment_method']).toUpperCase(),
+      notes: body['notes'] !== undefined ? (body['notes'] as string | null) : null,
+      reference_number: body['reference_number'] !== undefined ? (body['reference_number'] as string | null) : null,
+    };
+
+    const identity = req.identity;
+    const performedBy = identity?.user_id ?? null;
+    // Pass branch from authenticated identity — not from client-supplied body
+    const branchId = identity?.branch_id ?? null;
+
+    try {
+      const result = await service.recordPayment(id, dto, performedBy, branchId);
+      res.status(201).json(result);
+    } catch (err: unknown) {
+      handleError(res, err, 'record_supplier_payment');
     }
   });
 

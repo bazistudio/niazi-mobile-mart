@@ -22,6 +22,11 @@ export interface GlobalSearchResultItem {
   totalAmount?: number;
   match_type?: string;
   matched_value?: string;
+  matched_compatible_model?: string;
+  orderNumber?: string;
+  customerId?: string;
+  customerName?: string;
+  status?: string;
 }
 
 export interface GlobalSearchResult {

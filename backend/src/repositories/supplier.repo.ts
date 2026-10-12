@@ -29,6 +29,22 @@ import { v4 as uuidv4 } from 'uuid';
 
 // ─── Error class ──────────────────────────────────────────────────────────────
 
+
+// ─── Payment DTOs ─────────────────────────────────────────────────────────────
+
+export interface RecordSupplierPaymentDto {
+  amount: number;              // whole PKR rupees, must be > 0
+  payment_method: string;      // CASH | BANK | EASYPAISA | JAZZCASH | …
+  notes?: string | null;
+  reference_number?: string | null;
+}
+
+export interface SupplierPaymentResult {
+  payment_id: string;
+  reference_number: string;
+  new_balance: number;
+}
+
 export class SupplierRepoError extends Error {
   constructor(
     message: string,
@@ -570,6 +586,144 @@ export class SupplierRepo {
       created_at: row['created_at'] as string,
       updated_at: row['updated_at'] as string,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // recordSupplierPayment
+  // Records a supplier payable payment: inserts a DEBIT entry into
+  // supplier_ledger_entries, decreasing the payable balance.
+  // For CASH payments, also inserts a cash_movements row (direction='OUT').
+  // ---------------------------------------------------------------------------
+
+  async recordSupplierPayment(
+    supplierId: string,
+    dto: RecordSupplierPaymentDto,
+    performedBy?: string | null,
+    branchId?: string | null
+  ): Promise<SupplierPaymentResult> {
+    if (!dto.amount || dto.amount <= 0) {
+      throw new SupplierRepoError('Payment amount must be greater than zero', 400);
+    }
+
+    const client: PoolClient = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Lock the supplier row to prevent concurrent modifications
+      const supplierResult = await client.query(
+        'SELECT id, name FROM suppliers WHERE id = $1 FOR UPDATE',
+        [supplierId]
+      );
+      if (supplierResult.rowCount === 0) {
+        throw new SupplierRepoError(`Supplier '${supplierId}' not found`, 404);
+      }
+
+      // Compute current payable balance: SUM(debit) - SUM(credit)
+      const balResult = await client.query(
+        `SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT AS balance
+         FROM supplier_ledger_entries WHERE supplier_id = $1`,
+        [supplierId]
+      );
+      const currentBalance = Number(balResult.rows[0].balance ?? 0);
+      const balanceAfter = currentBalance - dto.amount;
+
+      // Generate sequential receipt number (PAY-000001 pattern) unless caller provided one
+      let receiptNumber: string;
+      if (dto.reference_number && dto.reference_number.trim() !== '') {
+        receiptNumber = dto.reference_number.trim();
+      } else {
+        const ctrResult = await client.query(
+          `UPDATE counters SET value = value + 1 WHERE name = 'supplier_payment_number' RETURNING value`,
+          []
+        );
+        if (ctrResult.rowCount === 0) {
+          // Insert counter row on first use
+          await client.query(
+            `INSERT INTO counters (name, value) VALUES ('supplier_payment_number', 1)`,
+            []
+          );
+          receiptNumber = 'PAY-000001';
+        } else {
+          const num = Number(ctrResult.rows[0].value);
+          receiptNumber = 'PAY-' + String(num).padStart(6, '0');
+        }
+      }
+
+      // Insert CREDIT entry into supplier_ledger_entries (credit reduces payable)
+      const entryId = uuidv4();
+      const now = new Date().toISOString();
+      const description = dto.notes
+        ? `Supplier payment — ${dto.notes}`
+        : `Supplier payment (${dto.payment_method})`;
+
+      await client.query(
+        `INSERT INTO supplier_ledger_entries
+           (id, supplier_id, reference_id, reference_number, entry_type,
+            debit, credit, balance_after, description, performed_by, created_at)
+         VALUES ($1, $2, $3, $4, 'PAYMENT', 0, $5, $6, $7, $8, $9)`,
+        [
+          entryId,
+          supplierId,
+          entryId,           // reference_id = self (no external purchase)
+          receiptNumber,
+          dto.amount,        // credit decreases payable
+          balanceAfter,
+          description,
+          performedBy ?? null,
+          now,
+        ]
+      );
+
+      // For CASH payments — log outgoing cash movement
+      if (dto.payment_method.toUpperCase() === 'CASH') {
+        if (!branchId) {
+          throw new SupplierRepoError('branch_id is required for cash supplier payments', 400);
+        }
+        // Only select an open session that belongs to the authenticated branch
+        const sessionResult = await client.query(
+          `SELECT id FROM cash_sessions WHERE status = 'OPEN' AND branch_id = $1 LIMIT 1`,
+          [branchId]
+        );
+        if (!sessionResult.rowCount || sessionResult.rowCount === 0) {
+          throw new SupplierRepoError(
+            `No open cash session found for this branch. Please open a cash session before recording cash payments.`,
+            400
+          );
+        }
+        const sessionId = sessionResult.rows[0].id as string;
+        await client.query(
+          `INSERT INTO cash_movements
+             (id, session_id, branch_id, reference_id, movement_type, direction, amount, description, performed_by, created_at)
+           VALUES ($1, $2, $3, $4, 'SUPPLIER_PAYMENT', 'OUT', $5, $6, $7, $8)`,
+          [
+            uuidv4(),
+            sessionId,
+            branchId,          // mandatory branch_id from authenticated identity
+            entryId,
+            dto.amount,
+            description,
+            performedBy ?? null,
+            now,
+          ]
+        );
+      }
+
+      await client.query('COMMIT');
+
+      return {
+        payment_id: entryId,
+        reference_number: receiptNumber,
+        new_balance: balanceAfter,
+      };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      if (err instanceof SupplierRepoError) throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[SupplierRepo.recordSupplierPayment] Error:', err);
+      throw new SupplierRepoError(`Failed to record supplier payment: ${msg}`, 500);
+    } finally {
+      client.release();
+    }
   }
 
   private validateEntryType(s: string): SupplierLedgerEntryType {

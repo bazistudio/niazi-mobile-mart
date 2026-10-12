@@ -38,7 +38,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { authMiddleware, authorizePermission } from '../auth';
+import { buildAuthMiddleware, authorizePermission, isOrgAdmin } from '../auth';
 import { ExpenseService, ExpenseServiceError } from '../services/expense.service';
 import type { ExpenseFilterDto } from '../services/expense.service';
 
@@ -54,8 +54,8 @@ export function buildExpenseRouter(pool: Pool): Router {
   const router = Router();
   const service = new ExpenseService(pool);
 
-  // All expense routes require authentication
-  router.use(authMiddleware);
+  // All expense routes require authentication + active-account enforcement
+  router.use(buildAuthMiddleware(pool));
 
   // Authorization helpers
 
@@ -125,16 +125,12 @@ export function buildExpenseRouter(pool: Pool): Router {
       return 'UNAUTHORIZED';
     }
 
-    const isAdmin =
-      identity.role === 'SHOP_ADMIN' ||
-      (identity.role as string) === 'ADMIN' ||
-      (identity.role as string) === 'Admin' ||
-      (identity.role as string) === 'admin';
+    const orgAdmin = isOrgAdmin(identity);
 
     const requested = requestedBranchId?.trim() ?? null;
 
     if (requested) {
-      if (!isAdmin && identity.branch_id && identity.branch_id !== requested) {
+      if (!orgAdmin && identity.branch_id && identity.branch_id !== requested) {
         res.status(403).json({
           error: 'FORBIDDEN',
           message: 'Access to this branch is not authorized',
@@ -329,12 +325,7 @@ export function buildExpenseRouter(pool: Pool): Router {
       const expense = await service.getExpenseById(id);
 
       // Branch access check — mirrors IPC expense_get_by_id branch check
-      const isAdmin =
-        identity.role === 'SHOP_ADMIN' ||
-        (identity.role as string) === 'ADMIN' ||
-        (identity.role as string) === 'Admin' ||
-        (identity.role as string) === 'admin';
-      if (!isAdmin && identity.branch_id && expense.branch_id !== identity.branch_id) {
+      if (!isOrgAdmin(identity) && identity.branch_id && expense.branch_id !== identity.branch_id) {
         res.status(403).json({
           error: 'FORBIDDEN',
           message: 'Access to this branch is not authorized',
@@ -365,12 +356,7 @@ export function buildExpenseRouter(pool: Pool): Router {
       // Fetch first to do branch access check before cancelling
       const existing = await service.getExpenseById(id);
 
-      const isAdmin =
-        identity.role === 'SHOP_ADMIN' ||
-        (identity.role as string) === 'ADMIN' ||
-        (identity.role as string) === 'Admin' ||
-        (identity.role as string) === 'admin';
-      if (!isAdmin && identity.branch_id && existing.branch_id !== identity.branch_id) {
+      if (!isOrgAdmin(identity) && identity.branch_id && existing.branch_id !== identity.branch_id) {
         res.status(403).json({
           error: 'FORBIDDEN',
           message: 'Access to this branch is not authorized',

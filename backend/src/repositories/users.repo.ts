@@ -210,7 +210,7 @@ export class UsersRepo {
         is_active ? 1 : 0,
         (input.must_change_password ?? false) ? 1 : 0,
         JSON.stringify(defaultProfile),
-        input.branch_id ?? null,
+        (typeof input.branch_id === 'string' && input.branch_id.trim()) ? input.branch_id.trim() : null,
       ]
     );
 
@@ -250,7 +250,10 @@ export class UsersRepo {
     }
     if (input.branch_id !== undefined) {
       setClauses.push(`branch_id = $${paramIdx++}`);
-      params.push(input.branch_id ?? null);
+      const cleanBranchId = (typeof input.branch_id === 'string' && input.branch_id.trim())
+        ? input.branch_id.trim()
+        : null;
+      params.push(cleanBranchId);
     }
     if (input.access_profile !== undefined) {
       // Fetch current role to fill limits if not supplied
@@ -296,21 +299,25 @@ export class UsersRepo {
   }
 
   /**
-   * Soft-delete a user by setting status = 'DISABLED' and is_active = false.
-   * Matches Rust admin_service::delete_user() behavior which disables rather
-   * than hard-deletes.
+   * Soft-deactivate a user by setting status = 'DISABLED' and is_active = false.
+   * Does not guard on current status — deactivates regardless of whether the user
+   * was ACTIVE, PENDING, or already DISABLED.
+   * Returns the updated UserRow, or null if the user was not found.
+   * Phase 13: Used by DELETE /:id to preserve historical attribution.
    */
-  async deactivateUser(id: string, client?: PoolClient): Promise<boolean> {
+  async deactivateUser(id: string, client?: PoolClient): Promise<UserRow | null> {
     const executor = client ?? this.pool;
     const result = await executor.query(
       `UPDATE users
          SET status = 'DISABLED',
              is_active = false,
              updated_at = NOW()
-       WHERE id = $1`,
+       WHERE id = $1
+       RETURNING ${SELECT_SAFE_COLS}`,
       [id]
     );
-    return (result.rowCount ?? 0) > 0;
+    if (result.rows.length === 0) return null;
+    return mapSafeRow(result.rows[0] as Record<string, unknown>);
   }
 
   /**
@@ -535,7 +542,7 @@ export class UsersRepo {
       return { deleted: false, reason: 'User not found' };
     }
     const userRole = ((checkResult.rows[0] as Record<string, unknown>)['role'] as string ?? '').toUpperCase();
-    if (userRole === 'ADMIN' || userRole === 'SUPER_ADMIN' || userRole === 'OWNER') {
+    if (userRole === 'ADMIN' || userRole === 'SUPER_ADMIN' || userRole === 'OWNER' || userRole === 'MULTI_ADMIN') {
       return { deleted: false, reason: 'Cannot delete an ADMIN user. Suspend the user instead.' };
     }
 

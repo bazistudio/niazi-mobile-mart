@@ -602,6 +602,7 @@ mod tests {
                 Some("99999999-9999-9999-9999-999999999999"),
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: None, // Walk-in
                     items: vec![SaleItemDto {
                         product_id: product_id.clone(),
@@ -677,6 +678,7 @@ mod tests {
                 None,
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: Some(customer.id.clone()),
                     items: vec![SaleItemDto {
                         product_id: product_id.clone(),
@@ -735,6 +737,7 @@ mod tests {
                 None,
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: Some(customer.id.clone()),
                     items: vec![SaleItemDto {
                         product_id: product_id.clone(),
@@ -776,6 +779,7 @@ mod tests {
                 None,
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: Some(customer.id.clone()),
                     items: vec![SaleItemDto {
                         product_id: product_id.clone(),
@@ -809,6 +813,7 @@ mod tests {
                 None,
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto {
                         product_id: product_id.clone(),
@@ -831,6 +836,7 @@ mod tests {
                 None,
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: Some(customer.id.clone()),
                     items: vec![SaleItemDto {
                         product_id: product_id.clone(),
@@ -872,6 +878,7 @@ mod tests {
                 None,
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: Some(customer.id.clone()),
                     items: vec![SaleItemDto {
                         product_id: product_id.clone(),
@@ -894,6 +901,7 @@ mod tests {
                 None,
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: Some(customer.id.clone()),
                     items: vec![SaleItemDto {
                         product_id: product_id.clone(),
@@ -982,6 +990,7 @@ mod tests {
                 None,
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 1, discount: None }],
                     discount: None,
@@ -1018,6 +1027,7 @@ mod tests {
                 None,
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 1, discount: None }],
                     discount: None,
@@ -1052,6 +1062,7 @@ mod tests {
                 None,
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 3, discount: None }], // 3000 total
                     discount: None,
@@ -1078,6 +1089,7 @@ mod tests {
                 None,
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: Some(customer.id.clone()),
                     items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 2, discount: None }], // 2000 total
                     discount: None,
@@ -1114,6 +1126,7 @@ mod tests {
                 None,
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 2, discount: None }], // 2000 total
                     discount: None,
@@ -1150,6 +1163,7 @@ mod tests {
                 None,
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 1, discount: None }], // 1000 total
                     discount: None,
@@ -1197,6 +1211,7 @@ mod tests {
                 None,
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto { product_id: product_id.clone(), quantity: 1, discount: None }], // 1000 total
                     discount: None,

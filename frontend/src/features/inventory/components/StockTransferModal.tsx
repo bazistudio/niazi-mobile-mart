@@ -23,7 +23,7 @@ export const StockTransferModal: React.FC<StockTransferModalProps> = ({
   onSuccess,
 }) => {
   const { role } = usePermissions();
-  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN' || role === 'SHOP_ADMIN';
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
   const products = useInventoryStore((state) => state.products);
   const fetchProducts = useInventoryStore((state) => state.fetchProducts);
 
@@ -37,6 +37,16 @@ export const StockTransferModal: React.FC<StockTransferModalProps> = ({
   const [isLoadingStock, setIsLoadingStock] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [transferId, setTransferId] = useState<string>('');
+
+  // Retain transferId across network retries of the same submission, but assign a new UUID if payload changes or modal reopens
+  useEffect(() => {
+    if (isOpen) {
+      setTransferId(crypto.randomUUID());
+    } else {
+      setTransferId('');
+    }
+  }, [isOpen, selectedProductId, fromBranchId, toBranchId, quantity]);
 
   // Load branches
   useEffect(() => {
@@ -136,7 +146,13 @@ export const StockTransferModal: React.FC<StockTransferModalProps> = ({
       setIsSubmitting(true);
       setError(null);
 
+      const currentTransferId = transferId || crypto.randomUUID();
+      if (!transferId) {
+        setTransferId(currentTransferId);
+      }
+
       await httpClient.post('/api/v1/inventory/transfer', {
+        transfer_id: currentTransferId,
         product_id: selectedProductId,
         from_branch_id: fromBranchId,
         to_branch_id: toBranchId,
@@ -149,6 +165,9 @@ export const StockTransferModal: React.FC<StockTransferModalProps> = ({
 
       toast.success(`Transferred ${quantity} ${targetProduct?.unit || 'pcs'} from ${sourceBranchName} to ${destBranchName}`);
       
+      // Rotate transfer ID on success for any future transfer
+      setTransferId(crypto.randomUUID());
+
       await fetchProducts();
 
       if (onSuccess) onSuccess();

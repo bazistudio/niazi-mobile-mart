@@ -17,11 +17,26 @@ export const RepairDashboard = () => {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
   const { data: response, isLoading } = useQuery({
-    queryKey: ['repairs', statusFilter, searchTerm],
-    queryFn: () => repairApi.getRepairJobs({ status: statusFilter, search: searchTerm }),
+    queryKey: ['repairs', statusFilter],
+    queryFn: () => repairApi.getRepairJobs({ status: statusFilter }),
   });
 
   const jobs = response?.data || [];
+
+  // Client-side search filtering (backend does not support search parameter)
+  const filteredJobs = searchTerm.trim()
+    ? jobs.filter((job: any) => {
+        const q = searchTerm.toLowerCase();
+        return (
+          job.jobId?.toLowerCase().includes(q) ||
+          job.device?.brand?.toLowerCase().includes(q) ||
+          job.device?.model?.toLowerCase().includes(q) ||
+          job.device?.imei?.toLowerCase().includes(q) ||
+          job.customerId?.name?.toLowerCase().includes(q) ||
+          job.customerId?.contactPerson?.toLowerCase().includes(q)
+        );
+      })
+    : jobs;
 
   /** Map repair status → Badge variant */
   const getStatusVariant = (status: string): BadgeProps['variant'] => {
@@ -80,10 +95,10 @@ export const RepairDashboard = () => {
       {/* KPI Summary Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { icon: Clock, label: 'Active Repairs', value: jobs.filter((j: any) => j.status === 'Repair In Progress').length, variant: 'info' as const },
-          { icon: CheckCircle, label: 'Ready for Pickup', value: jobs.filter((j: any) => j.status === 'Ready for Pickup').length, variant: 'success' as const },
-          { icon: CheckCircle, label: 'Delivered Today', value: jobs.filter((j: any) => j.status === 'Delivered').length, variant: 'primary' as const },
-          { icon: AlertCircle, label: 'Pending Payments', value: jobs.filter((j: any) => j.remainingBalance > 0).length, variant: 'danger' as const },
+          { icon: Clock, label: 'Active Repairs', value: filteredJobs.filter((j: any) => j.status === 'Repair In Progress').length, variant: 'info' as const },
+          { icon: CheckCircle, label: 'Ready for Pickup', value: filteredJobs.filter((j: any) => j.status === 'Ready for Pickup').length, variant: 'success' as const },
+          { icon: CheckCircle, label: 'Delivered Today', value: filteredJobs.filter((j: any) => j.status === 'Delivered').length, variant: 'primary' as const },
+          { icon: AlertCircle, label: 'Pending Payments', value: filteredJobs.filter((j: any) => j.remainingBalance > 0).length, variant: 'danger' as const },
         ].map(({ icon: Icon, label, value, variant }) => (
           <div key={label} className="bg-surface p-4 rounded-xl border border-border shadow-card flex flex-col gap-2">
             <div className={`flex items-center gap-2 text-${variant}`}>
@@ -162,7 +177,7 @@ export const RepairDashboard = () => {
                     </div>
                   </td>
                 </tr>
-              ) : jobs.length === 0 ? (
+              ) : filteredJobs.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-12 text-center">
                     <div className="flex flex-col items-center gap-2 text-text-muted">
@@ -173,7 +188,7 @@ export const RepairDashboard = () => {
                   </td>
                 </tr>
               ) : (
-                jobs.map((job: any) => (
+                filteredJobs.map((job: any) => (
                   <tr
                     key={job.id}
                     className="hover:bg-surface-hover transition-colors cursor-pointer group focus-within:bg-surface-hover"

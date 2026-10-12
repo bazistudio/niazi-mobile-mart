@@ -124,6 +124,8 @@ function rowToRepairJob(row: Record<string, unknown>, parts: unknown[], payments
     id,
     _id: id,
     jobId: row['job_id'] as string,
+    branch_id: (row['branch_id'] as string) || null,
+    branchId: (row['branch_id'] as string) || null,
     customerId: row['customer_id']
       ? { _id: row['customer_id'], name: row['customer_name'], phone: row['customer_phone'] }
       : { _id: null, name: row['customer_name'] as string, phone: row['customer_phone'] ?? '' },

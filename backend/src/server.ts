@@ -55,6 +55,8 @@ import { buildExpenseRouter } from './routes/expense.routes';
 import { buildBranchRouter } from './routes/branch.routes';
 import { buildSyncRouter } from './routes/sync.routes';
 import { buildRepairRouter } from './routes/repair.routes';
+import { createSettingsRouter } from './routes/settings.routes';
+import { buildRolesRouter } from './routes/roles.routes'; // DEF-08
 import { BranchRepo } from './repositories/branch.repo';
 import {
   listBrands,
@@ -81,9 +83,11 @@ import {
   deltaStock,
   getStockMovements,
   getLowStockItems,
+  receiveStock,
+  ReceiveStockDto,
 } from './repositories/product.repo';
 import { transferStock, StockTransferRepoError } from './repositories/stock_transfer.repo';
-import { authMiddleware, isAdmin, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity } from './auth';
+import { authMiddleware, buildAuthMiddleware, buildActiveUserMiddleware, isAdmin, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity } from './auth';
 
 // --- (Main server function continues) ---
 
@@ -176,6 +180,12 @@ async function main(): Promise<void> {
 
   const pool = getPool();
 
+  // NOTE: Active-account enforcement is now integrated into buildAuthMiddleware(pool),
+  // which is used by each router via router.use(buildAuthMiddleware(pool)).
+  // The former global app.use(buildActiveUserMiddleware(pool)) was ineffective because
+  // it ran before req.identity was set by per-router authMiddleware.
+  // Do NOT restore a global active-user middleware here.
+
   // Run PostgreSQL database migrations sequentially on startup
   try {
     await runMigrations(pool);
@@ -267,6 +277,15 @@ async function main(): Promise<void> {
   app.use('/api/search', searchRouter);
   app.use('/api/v1/search', searchRouter);
 
+  const settingsRouter = createSettingsRouter(pool);
+  app.use('/api/settings', settingsRouter);
+  app.use('/api/v1/settings', settingsRouter);
+
+  // Roles management routes — DEF-08: backend-persisted custom roles
+  const rolesRouter = buildRolesRouter(pool);
+  app.use('/api/roles', rolesRouter);
+  app.use('/api/v1/roles', rolesRouter);
+
   app.get(['/api/organization/balances', '/api/v1/organization/balances'], async (_req: Request, res: Response) => {
     try {
       const branchRepo = new BranchRepo(pool);
@@ -286,8 +305,13 @@ async function main(): Promise<void> {
     }
   });
 
-  app.post(['/api/brands', '/api/v1/brands'], async (req: Request, res: Response) => {
+  app.post(['/api/brands', '/api/v1/brands'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage brands' });
+        return;
+      }
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
         res.status(400).json({ error: 'Name is required' });
@@ -300,8 +324,13 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/brands/:id', '/api/v1/brands/:id'], async (req: Request, res: Response) => {
+  app.put(['/api/brands/:id', '/api/v1/brands/:id'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage brands' });
+        return;
+      }
       const id = req.params['id'] as string;
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
@@ -320,8 +349,13 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
-  app.post(['/api/categories', '/api/v1/categories'], async (req: Request, res: Response) => {
+  app.post(['/api/categories', '/api/v1/categories'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage categories' });
+        return;
+      }
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
         res.status(400).json({ error: 'Name is required' });
@@ -334,8 +368,13 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/categories/:id', '/api/v1/categories/:id'], async (req: Request, res: Response) => {
+  app.put(['/api/categories/:id', '/api/v1/categories/:id'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage categories' });
+        return;
+      }
       const id = req.params['id'] as string;
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
@@ -354,8 +393,13 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
-  app.post(['/api/companies', '/api/v1/companies'], async (req: Request, res: Response) => {
+  app.post(['/api/companies', '/api/v1/companies'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage companies' });
+        return;
+      }
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
         res.status(400).json({ error: 'Name is required' });
@@ -368,8 +412,13 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/companies/:id', '/api/v1/companies/:id'], async (req: Request, res: Response) => {
+  app.put(['/api/companies/:id', '/api/v1/companies/:id'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage companies' });
+        return;
+      }
       const id = req.params['id'] as string;
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
@@ -388,8 +437,13 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
-  app.post(['/api/qualities', '/api/v1/qualities'], async (req: Request, res: Response) => {
+  app.post(['/api/qualities', '/api/v1/qualities'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage qualities' });
+        return;
+      }
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
         res.status(400).json({ error: 'Name is required' });
@@ -402,8 +456,13 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/qualities/:id', '/api/v1/qualities/:id'], async (req: Request, res: Response) => {
+  app.put(['/api/qualities/:id', '/api/v1/qualities/:id'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage qualities' });
+        return;
+      }
       const id = req.params['id'] as string;
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
@@ -422,8 +481,13 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
-  app.post(['/api/colors', '/api/v1/colors'], async (req: Request, res: Response) => {
+  app.post(['/api/colors', '/api/v1/colors'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage colors' });
+        return;
+      }
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
         res.status(400).json({ error: 'Name is required' });
@@ -436,8 +500,13 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/colors/:id', '/api/v1/colors/:id'], async (req: Request, res: Response) => {
+  app.put(['/api/colors/:id', '/api/v1/colors/:id'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage colors' });
+        return;
+      }
       const id = req.params['id'] as string;
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
@@ -456,8 +525,13 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
-  app.post(['/api/units', '/api/v1/units'], async (req: Request, res: Response) => {
+  app.post(['/api/units', '/api/v1/units'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage units' });
+        return;
+      }
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
         res.status(400).json({ error: 'Name is required' });
@@ -470,8 +544,13 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/units/:id', '/api/v1/units/:id'], async (req: Request, res: Response) => {
+  app.put(['/api/units/:id', '/api/v1/units/:id'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage units' });
+        return;
+      }
       const id = req.params['id'] as string;
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
@@ -628,9 +707,9 @@ async function main(): Promise<void> {
       try {
         const identity = req.identity as RequestIdentity;
 
-        // Transfers between branches require Branch or Org Admin permissions
-        if (!isBranchAdmin(identity)) {
-          res.status(403).json({ error: 'Forbidden: stock transfers require administrator role' });
+        // Stock transfers between branches require Organization Administrator permissions
+        if (!isOrgAdmin(identity)) {
+          res.status(403).json({ error: 'Forbidden: cross-branch stock transfers require organization administrator role' });
           return;
         }
 
@@ -670,6 +749,7 @@ async function main(): Promise<void> {
         }
 
         const result = await transferStock(pool, {
+          transfer_id: ((req.body?.transfer_id || req.body?.transferId || req.body?.idempotency_key) as string | undefined)?.trim() || null,
           source_branch_id: sourceId.trim(),
           destination_branch_id: destId.trim(),
           product_id: productId.trim(),
@@ -685,6 +765,70 @@ async function main(): Promise<void> {
           return;
         }
         res.status(500).json({ error: err.message || 'Failed to transfer stock' });
+      }
+    }
+  );
+
+
+  // ── POST /api/v1/inventory/receive — Phase 1 WAC Engine / RESTOCK-01 ──────
+  // Accepts stock received from a supplier at a unit_cost, recalculates
+  // products.average_cost using the Weighted Average Cost (WAC) formula,
+  // and increments the branch stock. Requires Branch/Org Admin.
+  app.post(
+    ['/api/inventory/receive', '/api/v1/inventory/receive', '/api/stock/receive'],
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const identity = req.identity as RequestIdentity;
+
+        if (!isBranchAdmin(identity)) {
+          res.status(403).json({ error: 'Forbidden: stock receiving requires administrator role' });
+          return;
+        }
+
+        const productId    = (req.body?.product_id  || req.body?.productId)  as string | undefined;
+        const qtyReceived  = Number(req.body?.quantity_received ?? req.body?.quantityReceived ?? 0);
+        const unitCost     = Number(req.body?.unit_cost         ?? req.body?.unitCost         ?? 0);
+        const supplierId   = (req.body?.supplier_id  || req.body?.supplierId  || null) as string | null;
+        const notes        = (req.body?.notes || null) as string | null;
+
+        // org-admins may supply an explicit branch_id; branch-users are locked to JWT branch
+        const branchId: string | undefined = isOrgAdmin(identity)
+          ? ((req.body?.branch_id || req.body?.branchId || identity.branch_id) as string | undefined)
+          : (identity.branch_id as string | undefined);
+
+        if (!productId || !productId.trim()) {
+          res.status(400).json({ error: 'product_id is required' }); return;
+        }
+        if (!branchId || !branchId.trim()) {
+          res.status(400).json({ error: 'branch_id is required' }); return;
+        }
+        if (!canAccessBranch(identity, branchId)) {
+          res.status(403).json({ error: 'Access denied: cannot receive stock for a branch you do not manage' }); return;
+        }
+        if (!Number.isInteger(qtyReceived) || qtyReceived <= 0) {
+          res.status(400).json({ error: 'quantity_received must be a positive integer' }); return;
+        }
+        if (unitCost < 0 || !Number.isFinite(unitCost)) {
+          res.status(400).json({ error: 'unit_cost cannot be negative' }); return;
+        }
+
+        const dto: ReceiveStockDto = {
+          product_id:        productId.trim(),
+          branch_id:         branchId.trim(),
+          quantity_received: qtyReceived,
+          unit_cost:         Math.round(unitCost),
+          supplier_id:       supplierId,
+          notes:             notes,
+        };
+
+        const result = await receiveStock(pool, dto, identity.user_id ?? null);
+        res.status(200).json(result);
+      } catch (err: any) {
+        if (err && typeof err.statusCode === 'number') {
+          res.status(err.statusCode).json({ error: err.message }); return;
+        }
+        res.status(500).json({ error: err?.message || 'Failed to receive stock' });
       }
     }
   );

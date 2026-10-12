@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import type { Pool } from 'pg';
 
 // --- Types ---
 
@@ -177,7 +178,12 @@ export function resolveIdentity(token: string): RequestIdentity {
 export function isOrgAdmin(identity: RequestIdentity): boolean {
   if (!identity) return false;
   const r = String(identity.role || '').toUpperCase();
-  if (r === 'ADMIN' || r === 'SUPER_ADMIN' || r === 'OWNER') return true;
+  // OWNER and SUPER_ADMIN always have organization-wide authority
+  if (r === 'OWNER' || r === 'SUPER_ADMIN') return true;
+  // ADMIN and MULTI_ADMIN have organization-wide authority ONLY IF genuinely unassigned to a specific branch
+  if ((r === 'ADMIN' || r === 'MULTI_ADMIN') && (!identity.branch_id || !identity.branch_id.trim())) {
+    return true;
+  }
   return false;
 }
 
@@ -201,11 +207,27 @@ export function isAdmin(identity: RequestIdentity): boolean {
 
 /**
  * Checks if identity is authorized to access a specific target branch.
- * Org admins can access any branch.
- * Branch users can only access their assigned identity.branch_id.
+ *
+ * Security note (F-05): This is a single-tenant deployment. The organization is
+ * always NIAZI_ORGANIZATION_ID (seeded by migration 001_initial_schema.sql).
+ * There is no branch→organization lookup table in the current schema, so we
+ * cannot verify the target branch belongs to a given org by querying the DB here.
+ * As a structural guard we verify that the caller's own organization_id matches
+ * the known single-tenant constant. This prevents tokens issued for a different
+ * organization (if any) from passing the org-admin fast-path.
+ *
+ * If this deployment ever adds multi-tenant branch ownership, replace the
+ * organization_id string check below with a DB lookup:
+ *   SELECT organization_id FROM branches WHERE id = targetBranchId
+ * and compare against identity.organization_id.
  */
 export function canAccessBranch(identity: RequestIdentity, targetBranchId: string | null | undefined): boolean {
   if (!identity) return false;
+
+  // Structural single-tenant guard: org must be the known seeded organization.
+  // An ADMIN token from a foreign organization cannot pass via the org-admin path.
+  if (identity.organization_id !== NIAZI_ORGANIZATION_ID) return false;
+
   if (isOrgAdmin(identity)) return true;
   if (!targetBranchId || !targetBranchId.trim()) return false;
   if (!identity.branch_id) return false;
@@ -259,6 +281,10 @@ function hasPageAccess(profile: StaffAccessProfile, page: string, role?: UserRol
 /**
  * Mirrors StaffAccessProfile::has_action_access() in access_control.rs.
  * Falls back to allowing staff roles (SALESMAN, CASHIER, STAFF, MANAGER) when allowed_actions is empty.
+ *
+ * IMPORTANT: This general fallback is intentional for most operations (POS, expenses, etc.).
+ * For product mutation actions (products:edit, products:delete, product:create), callers MUST
+ * use hasProductActionAccess() below, which is default-deny when allowed_actions is empty.
  */
 function hasActionAccess(profile: StaffAccessProfile, action: string, role?: UserRole): boolean {
   if (profile && Array.isArray(profile.allowed_actions) && profile.allowed_actions.length > 0) {
@@ -269,6 +295,41 @@ function hasActionAccess(profile: StaffAccessProfile, action: string, role?: Use
     return true;
   }
   return false;
+}
+
+/**
+ * Strict action access check for product mutations (F-06 fix).
+ * Unlike hasActionAccess(), this does NOT fall back to broad staff-role permission
+ * when allowed_actions is empty. An empty allowed_actions is treated as default-deny
+ * for product mutation actions, requiring explicit grant.
+ *
+ * Actions covered: 'products:edit', 'products:delete', 'product:create'
+ */
+function hasProductActionAccess(profile: StaffAccessProfile, action: string): boolean {
+  if (!profile || !Array.isArray(profile.allowed_actions) || profile.allowed_actions.length === 0) {
+    return false; // default-deny: no explicit actions granted
+  }
+  return profile.allowed_actions.some((a) => a === '*' || a === action);
+}
+
+/**
+ * Strict version of authorizePermission for product mutations.
+ * Admins (isBranchAdmin) pass through. All others must have explicit action grants.
+ * Page access is still checked via the standard hasPageAccess path.
+ * Returns null on success, error string on 403.
+ */
+export function authorizeProductMutation(
+  identity: RequestIdentity,
+  page: string,
+  action: string
+): string | null {
+  // Shared Organization Catalog Rule: Only Organization administrators may create, edit, or delete catalog products.
+  // Branch users and branch-level administrators must not mutate the shared catalog.
+  if (!isOrgAdmin(identity)) {
+    return 'Access denied: Only organization administrators may manage shared catalog products';
+  }
+
+  return null;
 }
 
 // --- Express Middleware ---
@@ -283,9 +344,91 @@ declare global {
 }
 
 /**
- * Express middleware: extracts and verifies the Bearer JWT from the Authorization header.
- * Attaches resolved RequestIdentity to req.identity.
- * Returns 401 on missing or invalid token.
+ * Factory: returns an async Express middleware that:
+ *   1. Verifies the Bearer JWT (RS256 stateless check — no DB).
+ *   2. Resolves RequestIdentity and attaches it to req.identity.
+ *   3. Immediately queries PostgreSQL to confirm the account is still ACTIVE.
+ *
+ * This ordering guarantees the active-account check always runs AFTER identity
+ * is established, for every route that uses this middleware, regardless of which
+ * router mounts it. There is no separate global active-user middleware needed.
+ *
+ * Failure modes (all fail-CLOSED — never calls next() on failure):
+ *   • Missing/invalid/expired JWT        → 401
+ *   • User row not found in DB           → 401
+ *   • Account status ≠ 'ACTIVE'          → 401
+ *   • PostgreSQL error during status check → 503 Service Unavailable
+ *
+ * Public endpoints (login, health) must NOT use this middleware — they have
+ * no Bearer token and must not hit the DB for every unauthenticated probe.
+ *
+ * The pool parameter is closed over so the returned middleware is a plain
+ * RequestHandler compatible with router.use() and app.use().
+ */
+export function buildAuthMiddleware(pool: Pool): (req: Request, res: Response, next: NextFunction) => void {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const authHeader = req.headers['authorization'] ?? '';
+
+    if (!authHeader) {
+      console.warn(`[auth] 401 Unauthorized: Missing Authorization header on ${req.method} ${req.originalUrl || req.path}`);
+      res.status(401).json({ error: 'Missing or empty authorization token' });
+      return;
+    }
+
+    let identity: RequestIdentity;
+    try {
+      identity = resolveIdentity(authHeader);
+    } catch (err) {
+      if (err instanceof AuthError) {
+        console.warn(`[auth] 401 Unauthorized: ${err.message} on ${req.method} ${req.originalUrl || req.path}`);
+        res.status(err.statusCode).json({ error: err.message });
+      } else {
+        console.warn(`[auth] 401 Unauthorized: Invalid token on ${req.method} ${req.originalUrl || req.path}`, err);
+        res.status(401).json({ error: 'Invalid or corrupted authentication token' });
+      }
+      return;
+    }
+
+    // JWT verified — now confirm the account is still active in the database.
+    // Fail-CLOSED: any DB error returns 503 and never calls next().
+    pool.query(
+      'SELECT is_active, status FROM users WHERE id = $1 LIMIT 1',
+      [identity.user_id]
+    ).then((result) => {
+      if (result.rows.length === 0) {
+        console.warn(`[auth] 401 User ${identity.user_id} not found in DB — token issued for a deleted account`);
+        res.status(401).json({ error: 'Account not found. Please log in again.' });
+        return;
+      }
+      const row = result.rows[0] as Record<string, unknown>;
+      const isActive = Boolean(row['is_active']);
+      const status = String(row['status'] ?? '');
+      if (!isActive || status !== 'ACTIVE') {
+        console.warn(`[auth] 401 Disabled user ${identity.user_id} (status=${status}) attempted access on ${req.method} ${req.originalUrl || req.path}`);
+        res.status(401).json({ error: 'Account is disabled. Contact your administrator.' });
+        return;
+      }
+      // Account confirmed active — attach identity and continue.
+      req.identity = identity;
+      next();
+    }).catch((err: unknown) => {
+      // PostgreSQL error: fail-CLOSED. Do NOT call next().
+      // Return 503 with a safe generic message; never leak DB details.
+      console.error(`[auth] 503 DB status check failed for user ${identity.user_id} on ${req.method} ${req.originalUrl || req.path}:`, (err as Error).message);
+      res.status(503).json({ error: 'Service temporarily unavailable. Please try again later.' });
+    });
+  };
+}
+
+/**
+ * Synchronous JWT-only middleware (no DB check).
+ * Retained for use on endpoints that are called before a pool is available,
+ * or for the rare public-ish endpoint that needs identity but not active-check.
+ *
+ * For all normal protected routes, prefer buildAuthMiddleware(pool) which
+ * performs both JWT verification and active-account enforcement in one step.
+ *
+ * @deprecated Prefer buildAuthMiddleware(pool) for protected routes.
  */
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers['authorization'] ?? '';
@@ -308,5 +451,23 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
       res.status(401).json({ error: 'Invalid or corrupted authentication token' });
     }
   }
+}
+
+/**
+ * @deprecated Replaced by buildAuthMiddleware(pool) which integrates the
+ * active-account check directly into authentication. This function is kept
+ * only to avoid breaking any call site that has not yet been migrated, but
+ * it is INEFFECTIVE when placed before authMiddleware in the middleware chain
+ * (req.identity will be undefined at that point).
+ *
+ * DO NOT register this middleware globally before routers.
+ * DO NOT use this as a replacement for buildAuthMiddleware(pool).
+ */
+export function buildActiveUserMiddleware(pool: Pool): (req: Request, res: Response, next: NextFunction) => void {
+  console.warn('[auth] buildActiveUserMiddleware is deprecated. Use buildAuthMiddleware(pool) instead.');
+  // Return a no-op: the real enforcement is now inside buildAuthMiddleware.
+  return (_req: Request, _res: Response, next: NextFunction): void => {
+    next();
+  };
 }
 

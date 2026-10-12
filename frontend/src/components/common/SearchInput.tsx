@@ -60,13 +60,13 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
     e?.preventDefault();
     // Map global search result to DBInventory format expected by POS
     const posProduct = {
-      id: product._id,
+      id: product.id || product._id,
       sku: product.sku || '',
       barcode: product.barcode || '',
       name: product.name,
       salePrice: product.price ?? product.salePrice ?? 0,
       costPrice: product.purchasePrice ?? product.costPrice ?? 0,
-      stock: product.quantity || 0
+      stock: product.stock ?? product.quantity ?? 0
     };
     addToCart(posProduct as any);
     
@@ -344,10 +344,10 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
                         <div className="flex flex-col items-end gap-1">
                           <span 
                             className="text-sm font-bold text-primary cursor-pointer select-none"
-                            onMouseDown={(e) => { e.stopPropagation(); setRevealedPriceId(product._id); }}
+                            onMouseDown={(e) => { e.stopPropagation(); setRevealedPriceId(product.id || product._id || null); }}
                             onMouseUp={(e) => { e.stopPropagation(); setRevealedPriceId(null); }}
                             onMouseLeave={(e) => { e.stopPropagation(); setRevealedPriceId(null); }}
-                            onTouchStart={(e) => { e.stopPropagation(); setRevealedPriceId(product._id); }}
+                            onTouchStart={(e) => { e.stopPropagation(); setRevealedPriceId(product.id || product._id || null); }}
                             onTouchEnd={(e) => { e.stopPropagation(); setRevealedPriceId(null); }}
                             onClick={(e) => { e.stopPropagation(); }}
                             title="Hold to see cost price"
@@ -465,7 +465,7 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
                             ])}
                           </p>
                           <p className="text-xs text-text-muted">
-                            {typeof invoice.customerId === 'object' && invoice.customerId !== null ? invoice.customerId.name : 'Walk-in'}
+                            {invoice.customerName ?? 'Walk-in'}
                           </p>
                         </div>
                         <span className={`text-xs font-semibold px-2 py-0.5 rounded-md border ${

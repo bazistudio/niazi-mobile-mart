@@ -8,19 +8,30 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 import { globalSearch } from '../repositories/search.repo';
-import { sendError, authorizePermission } from './product.routes';
-import { isAdmin } from '../auth';
+import { sendError } from './product.routes';
+import { buildAuthMiddleware, isOrgAdmin, RequestIdentity } from '../auth';
 
 export function createSearchRouter(pool: Pool): Router {
   const router = Router();
+  router.use(buildAuthMiddleware(pool));
 
   router.get('/', async (req: Request, res: Response): Promise<void> => {
-    const identity = (req as any).identity;
+    const identity = req.identity as RequestIdentity;
 
-    // Optional Branch Scope based on Role (Cashier/ShopAdmin scoped to active branch)
+    const callerIsOrgAdmin = isOrgAdmin(identity);
     let branchId: string | null = null;
-    if (identity && !isAdmin(identity)) {
-      branchId = identity.branch_id || null;
+
+    // Branch boundary enforcement:
+    // Non-org-admins are strictly scoped to their assigned branch. Query parameter branch_id cannot override.
+    // Org Admins may view branch-scoped search by supplying branch_id, or view global catalog if omitted.
+    if (!callerIsOrgAdmin) {
+      if (!identity.branch_id) {
+        res.status(403).json({ error: 'Access denied: User has no assigned branch' });
+        return;
+      }
+      branchId = identity.branch_id;
+    } else {
+      branchId = (req.query['branch_id'] as string) || (req.query['branchId'] as string) || null;
     }
 
     try {

@@ -30,7 +30,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { authMiddleware } from '../auth';
+import { buildAuthMiddleware, isOrgAdmin } from '../auth';
 import { BranchService, BranchServiceError } from '../services/branch.service';
 
 // ---------------------------------------------------------------------------
@@ -45,8 +45,8 @@ export function buildBranchRouter(pool: Pool): Router {
   const router = Router();
   const service = new BranchService(pool);
 
-  // All branch routes require authentication
-  router.use(authMiddleware);
+  // All branch routes require authentication + active-account enforcement
+  router.use(buildAuthMiddleware(pool));
 
   // -------------------------------------------------------------------------
   // GET / — List all branches
@@ -127,6 +127,22 @@ export function buildBranchRouter(pool: Pool): Router {
     }
   });
 
+  // -------------------------------------------------------------------------
+  // DELETE /:id — Delete / Safe Deactivate branch (ADMIN only)
+  // -------------------------------------------------------------------------
+  router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
+    if (!requireAdmin(req, res)) return;
+
+    const { id } = req.params as { id: string };
+
+    try {
+      const result = await service.deleteBranch(id);
+      res.status(200).json(result);
+    } catch (err: unknown) {
+      handleError(res, err, 'delete_branch');
+    }
+  });
+
   return router;
 }
 
@@ -145,13 +161,7 @@ function requireAdmin(req: Request, res: Response): boolean {
     res.status(401).json({ error: 'Not authenticated' });
     return false;
   }
-  const role = identity.role?.toUpperCase() ?? '';
-  const isAdmin =
-    role === 'ADMIN' ||
-    role === 'SUPER_ADMIN' ||
-    role === 'OWNER' ||
-    role === 'MULTI_ADMIN';
-  if (!isAdmin) {
+  if (!isOrgAdmin(identity)) {
     res.status(403).json({
       error: 'FORBIDDEN',
       message: 'Only organization administrators can manage branches',

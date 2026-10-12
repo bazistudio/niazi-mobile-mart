@@ -22,6 +22,8 @@ import { ProductEditModal } from '@/features/inventory/product/components/Produc
 import { ProductDeleteDialog } from '@/features/inventory/product/components/ProductDeleteDialog';
 import { StockTransferModal } from '@/features/inventory/components/StockTransferModal';
 import { tauriClient, Branch } from '@/lib/tauri/tauriClient';
+import { httpClient } from '@/lib/http/httpClient';
+import { inventoryApi } from '@/features/inventory/api/inventory.api';
 import toast from 'react-hot-toast';
 
 export function OrganizationProductsPage() {
@@ -37,8 +39,11 @@ export function OrganizationProductsPage() {
 
   // Central Stock Intake form state
   const [intakeProductId, setIntakeProductId] = useState<string>('');
+  const [intakeBranchId, setIntakeBranchId] = useState<string>('');
   const [intakeQuantity, setIntakeQuantity] = useState<number>(1);
   const [intakeReason, setIntakeReason] = useState<string>('');
+  // DEF-05: unit cost for WAC receiving — defaults to product purchase price
+  const [intakeUnitCost, setIntakeUnitCost] = useState<number>(0);
   const [isIntakeSubmitting, setIsIntakeSubmitting] = useState<boolean>(false);
 
   // Branch stock mapping state
@@ -61,11 +66,17 @@ export function OrganizationProductsPage() {
       setIsLoadingBranchStocks(true);
       setStockLoadError(null);
       try {
-        const branchList = await tauriClient.branchList();
+        // Use the REST API directly (same as StockTransferModal) rather than the legacy Tauri IPC path
+        const branchList = await httpClient.get<Branch[]>('/api/v1/branches');
         const activeBranches = branchList && branchList.length > 0 ? branchList : [
           { id: '00000000-0000-0000-0000-000000000002', organization_id: 'org1', name: 'Main Branch', code: 'MAIN', is_active: true, created_at: '', updated_at: '' },
         ];
         setBranches(activeBranches);
+        // Pre-select main branch as intake destination default
+        if (!intakeBranchId && activeBranches.length > 0) {
+          const mainBranch = activeBranches.find((b) => b.code === 'MAIN' || b.name.toLowerCase().includes('main')) || activeBranches[0];
+          setIntakeBranchId(mainBranch.id);
+        }
 
         const maps: Record<string, Record<string, number>> = {};
         let mapFailedCount = 0;
@@ -115,6 +126,14 @@ export function OrganizationProductsPage() {
     }
   }, [products, intakeProductId]);
 
+  // DEF-05: update default unit cost when selected product changes
+  useEffect(() => {
+    const selectedProd = products.find((p) => p.id === intakeProductId);
+    if (selectedProd && intakeUnitCost === 0) {
+      setIntakeUnitCost(selectedProd.purchasePrice || 0);
+    }
+  }, [intakeProductId, products]);
+
   // Handle Central Stock Intake submit
   const handleStockIntake = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,26 +141,42 @@ export function OrganizationProductsPage() {
       toast.error('Please select a product for stock intake.');
       return;
     }
+    if (!intakeBranchId) {
+      toast.error('Please select a destination branch for stock intake.');
+      return;
+    }
     if (intakeQuantity <= 0) {
       toast.error('Stock intake quantity must be at least 1.');
       return;
     }
 
-    const mainBranchId = '00000000-0000-0000-0000-000000000002'; // Central/Main Branch ID
+    if (intakeUnitCost <= 0) {
+      toast.error('Please enter a valid unit acquisition cost (must be > 0).');
+      return;
+    }
+
     const selectedProd = products.find((p) => p.id === intakeProductId);
+    const selectedBranch = branches.find((b) => b.id === intakeBranchId);
 
     try {
       setIsIntakeSubmitting(true);
-      await tauriClient.inventoryIncrease({
+      // DEF-05: use the WAC receiving endpoint instead of the inventory delta/adjustment endpoint.
+      // This correctly updates average_cost via WAC formula and creates proper stock movement records.
+      // Backend enforces isBranchAdmin + canAccessBranch — org admins pass for any branch.
+      await inventoryApi.receiveStock({
         product_id: intakeProductId,
-        branch_id: mainBranchId,
-        quantity: intakeQuantity,
-        reason: intakeReason.trim() || 'Central Main Branch Stock Intake',
+        branch_id: intakeBranchId,
+        quantity_received: intakeQuantity,
+        unit_cost: Math.round(intakeUnitCost),
+        notes: intakeReason.trim() || `Central Stock Intake — ${selectedBranch?.name || intakeBranchId}`,
       });
 
-      toast.success(`Successfully added ${intakeQuantity} ${selectedProd?.unit || 'pcs'} to Central Main Branch stock.`);
+      toast.success(
+        `Successfully added ${intakeQuantity} ${selectedProd?.unit || 'pcs'} to ${selectedBranch?.name || 'branch'} stock.`
+      );
       setIntakeQuantity(1);
       setIntakeReason('');
+      setIntakeUnitCost(0);
       await fetchProducts();
     } catch (err: any) {
       toast.error(err?.message || 'Failed to complete stock intake.');
@@ -152,7 +187,7 @@ export function OrganizationProductsPage() {
 
   const productSections = [
     { id: 'catalog', label: 'Product Master Catalog', icon: Package, desc: 'Central organization product master definitions, SKUs, and prices.' },
-    { id: 'intake', label: 'Central Stock Intake', icon: Plus, desc: 'Receive and restock inventory directly at Central/Main Branch.' },
+    { id: 'intake', label: 'Central Stock Intake', icon: Plus, desc: 'Receive inventory from external suppliers and allocate to any authorized branch.' },
     { id: 'transfer', label: 'Stock Transfer Dispatch', icon: ArrowRightLeft, desc: 'Allocate and transfer stock from Main Branch to operational retail branches.' },
     { id: 'distribution', label: 'Branch Stock Distribution', icon: Store, desc: 'Organization-wide inventory breakdown across all physical branches.' },
   ];
@@ -391,11 +426,30 @@ export function OrganizationProductsPage() {
             </div>
             <div>
               <h3 className="text-base font-bold text-gray-900 dark:text-white">Central Stock Intake / Restock</h3>
-              <p className="text-xs text-gray-500">Receive inventory directly at Main Branch (Central Stock)</p>
+              <p className="text-xs text-gray-500">Receive inventory from an external supplier and allocate to any authorized branch</p>
             </div>
           </div>
 
           <form onSubmit={handleStockIntake} className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                Destination Branch
+              </label>
+              <select
+                value={intakeBranchId}
+                onChange={(e) => setIntakeBranchId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#006970]"
+                required
+              >
+                <option value="" disabled>Select destination branch…</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} ({b.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div>
               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
                 Select Product Master
@@ -407,7 +461,7 @@ export function OrganizationProductsPage() {
               >
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} ({p.sku || 'No SKU'}) — Current Main Stock: {p.stock} {p.unit || 'pcs'}
+                    {p.name} ({p.sku || 'No SKU'}) — Stock: {p.stock} {p.unit || 'pcs'}
                   </option>
                 ))}
               </select>
@@ -424,6 +478,25 @@ export function OrganizationProductsPage() {
                 onChange={(e) => setIntakeQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
                 className="w-full px-3.5 py-2.5 text-center bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-lg font-black text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#006970] tabular-nums"
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                Acquisition Unit Cost (Rs.) — Required for WAC
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={intakeUnitCost || ''}
+                onChange={(e) => setIntakeUnitCost(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                placeholder="Enter purchase price per unit (e.g. 1500)"
+                className="w-full px-3.5 py-2.5 text-center bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-lg font-black text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#006970] tabular-nums"
+                required
+              />
+              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                This cost is used to recalculate the product's Weighted Average Cost (WAC) across all branches.
+              </p>
             </div>
 
             <div>

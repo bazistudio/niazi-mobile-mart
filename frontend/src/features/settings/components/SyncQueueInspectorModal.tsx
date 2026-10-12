@@ -39,8 +39,7 @@ export const SyncQueueInspectorModal: React.FC<SyncQueueInspectorModalProps> = (
   const isOrgAdmin =
     user?.role?.toUpperCase() === 'ADMIN' ||
     user?.role?.toUpperCase() === 'OWNER' ||
-    user?.role?.toUpperCase() === 'SUPER_ADMIN' ||
-    user?.access_profile?.allowed_pages?.includes('*');
+    user?.role?.toUpperCase() === 'SUPER_ADMIN';
 
   const [activeTab, setActiveTab] = useState<'conflicts' | 'failed'>(initialTab);
   const [conflicts, setConflicts] = useState<SyncQueueItem[]>([]);

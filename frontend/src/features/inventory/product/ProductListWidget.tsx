@@ -12,11 +12,13 @@ import { LoadingState } from '@/shared/components/loading-state/LoadingState';
 import { usePermissions } from '@/lib/auth/usePermissions';
 import { PERMISSIONS } from '@/constants/permissions';
 import { useInventoryUIStore } from '@/features/inventory/store/inventory-ui.store';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 
 export const ProductListWidget = () => {
   const { hasPermission, role } = usePermissions();
-  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN' || role === 'SHOP_ADMIN';
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
   const canManageProducts = hasPermission(PERMISSIONS.PRODUCTS_MANAGE) && isOrgAdmin;
+  const activeShopId = useOrganizationStore((s) => s.activeShop?._id || s.activeShopId);
 
   const fetchProducts = selectFetchProducts();
   const forceSync = selectForceSync();
@@ -25,7 +27,7 @@ export const ProductListWidget = () => {
 
   useEffect(() => {
     fetchProducts();
-  }, [fetchProducts]);
+  }, [fetchProducts, activeShopId]);
 
   return (
     <div className="space-y-4">

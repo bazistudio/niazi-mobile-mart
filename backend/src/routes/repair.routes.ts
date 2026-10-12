@@ -13,7 +13,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { authMiddleware, isAdmin, RequestIdentity } from '../auth';
+import { buildAuthMiddleware, isBranchAdmin, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
 import {
   listRepairJobs,
   getRepairJobById,
@@ -27,12 +27,13 @@ import {
 
 export function buildRepairRouter(pool: Pool): Router {
   const router = Router();
+  router.use(buildAuthMiddleware(pool));
 
   // ── GET /api/repairs — list with optional filters ──────────────────────────
-  router.get('/', authMiddleware, async (req: Request, res: Response) => {
+  router.get('/', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      const callerIsAdmin = isAdmin(identity);
+      const callerIsOrgAdmin = isOrgAdmin(identity);
 
       const filters: RepairJobFilters = {
         page: req.query['page'] ? Number(req.query['page']) : 1,
@@ -42,11 +43,21 @@ export function buildRepairRouter(pool: Pool): Router {
         technician_id: (req.query['technician_id'] as string) || undefined,
       };
 
-      // Non-admins are scoped to their own branch
-      if (!callerIsAdmin) {
-        filters.branch_id = identity.branch_id ?? undefined;
+      // Org admins may filter by any branch; branch admins and others are locked to their own branch.
+      // F-04: if a non-org-admin has no branch_id, fail closed rather than running an unscoped query.
+      if (!callerIsOrgAdmin) {
+        if (!identity.branch_id) {
+          res.status(403).json({ error: 'Access denied: No branch assigned to your account' });
+          return;
+        }
+        filters.branch_id = identity.branch_id;
       } else {
-        filters.branch_id = (req.query['branch_id'] as string) || undefined;
+        const requestedBranchId = (req.query['branch_id'] as string) || undefined;
+        if (requestedBranchId && !canAccessBranch(identity, requestedBranchId)) {
+          res.status(403).json({ error: 'Access denied: You do not have permission to view repairs for this branch' });
+          return;
+        }
+        filters.branch_id = requestedBranchId;
       }
 
       const result = await listRepairJobs(pool, filters);
@@ -57,26 +68,35 @@ export function buildRepairRouter(pool: Pool): Router {
   });
 
   // ── GET /api/repairs/:id — get by id or job_id ────────────────────────────
-  router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
+  router.get('/:id', async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
       const id = req.params['id'] as string;
       const job = await getRepairJobById(pool, id);
       if (!job) {
         res.status(404).json({ error: `Repair job '${id}' not found` });
         return;
       }
+
+      // Enforce branch isolation: non-org-admins can only access their own branch's jobs
+      if (!canAccessBranch(identity, (job as any)?.branch_id ?? (job as any)?.branchId ?? null)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to view this repair job' });
+        return;
+      }
+
       res.status(200).json(job);
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to fetch repair job' });
     }
   });
 
-  // ── POST /api/repairs — create new repair job (admin-only) ────────────────
-  router.post('/', authMiddleware, async (req: Request, res: Response) => {
+  // ── POST /api/repairs — create new repair job (branch admin) ────────────
+  router.post('/', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      if (!isAdmin(identity)) {
-        res.status(403).json({ error: 'Forbidden: creating repair jobs requires administrator role' });
+      // F-01: Branch admins (SHOP_ADMIN, MANAGER) and org admins may create repair jobs.
+      if (!isBranchAdmin(identity)) {
+        res.status(403).json({ error: 'Forbidden: creating repair jobs requires Admin or ShopAdmin role' });
         return;
       }
 
@@ -105,6 +125,12 @@ export function buildRepairRouter(pool: Pool): Router {
         branch_id: body.branch_id || body.branchId || identity.branch_id || null,
       };
 
+      // F-01: Validate that the caller can access the target branch before creating.
+      if (!canAccessBranch(identity, dto.branch_id)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to create a repair job for this branch' });
+        return;
+      }
+
       const job = await createRepairJob(pool, dto, identity.user_id);
       res.status(201).json(job);
     } catch (err: any) {
@@ -116,12 +142,13 @@ export function buildRepairRouter(pool: Pool): Router {
     }
   });
 
-  // ── PUT /api/repairs/:id/status — update status (admin-only) ─────────────
-  router.put('/:id/status', authMiddleware, async (req: Request, res: Response) => {
+  // ── PUT /api/repairs/:id/status — update status (branch admin) ──────────
+  router.put('/:id/status', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      if (!isAdmin(identity)) {
-        res.status(403).json({ error: 'Forbidden: updating repair status requires administrator role' });
+      // F-01: Branch admins may update status; org-only guard removed.
+      if (!isBranchAdmin(identity)) {
+        res.status(403).json({ error: 'Forbidden: updating repair status requires Admin or ShopAdmin role' });
         return;
       }
 
@@ -131,6 +158,17 @@ export function buildRepairRouter(pool: Pool): Router {
 
       if (!status || typeof status !== 'string' || !status.trim()) {
         res.status(400).json({ error: 'status is required' });
+        return;
+      }
+
+      // F-01: Load job and verify resource ownership before mutating.
+      const existingJob = await getRepairJobById(pool, id);
+      if (!existingJob) {
+        res.status(404).json({ error: `Repair job '${id}' not found` });
+        return;
+      }
+      if (!canAccessBranch(identity, (existingJob as any)?.branch_id ?? (existingJob as any)?.branchId ?? null)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to update this repair job' });
         return;
       }
 
@@ -145,16 +183,29 @@ export function buildRepairRouter(pool: Pool): Router {
     }
   });
 
-  // ── POST /api/repairs/:id/parts — add part to job (admin-only) ───────────
-  router.post('/:id/parts', authMiddleware, async (req: Request, res: Response) => {
+  // ── POST /api/repairs/:id/parts — add part to job (branch admin) ───────
+  router.post('/:id/parts', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      if (!isAdmin(identity)) {
-        res.status(403).json({ error: 'Forbidden: adding parts requires administrator role' });
+      // F-01: Branch admins may add parts; org-only guard removed.
+      if (!isBranchAdmin(identity)) {
+        res.status(403).json({ error: 'Forbidden: adding parts requires Admin or ShopAdmin role' });
         return;
       }
 
       const id = req.params['id'] as string;
+
+      // F-01: Load job and verify resource ownership before mutating.
+      const existingJob = await getRepairJobById(pool, id);
+      if (!existingJob) {
+        res.status(404).json({ error: `Repair job '${id}' not found` });
+        return;
+      }
+      if (!canAccessBranch(identity, (existingJob as any)?.branch_id ?? (existingJob as any)?.branchId ?? null)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to modify this repair job' });
+        return;
+      }
+
       const body = req.body ?? {};
       const dto = {
         product_id: body.product_id || body.productId || null,
@@ -176,16 +227,29 @@ export function buildRepairRouter(pool: Pool): Router {
     }
   });
 
-  // ── POST /api/repairs/:id/payments — add payment (admin-only) ────────────
-  router.post('/:id/payments', authMiddleware, async (req: Request, res: Response) => {
+  // ── POST /api/repairs/:id/payments — add payment (branch admin) ─────────
+  router.post('/:id/payments', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      if (!isAdmin(identity)) {
-        res.status(403).json({ error: 'Forbidden: adding payments requires administrator role' });
+      // F-01: Branch admins may take payments; org-only guard removed.
+      if (!isBranchAdmin(identity)) {
+        res.status(403).json({ error: 'Forbidden: adding payments requires Admin or ShopAdmin role' });
         return;
       }
 
       const id = req.params['id'] as string;
+
+      // F-01: Load job and verify resource ownership before mutating.
+      const existingJob = await getRepairJobById(pool, id);
+      if (!existingJob) {
+        res.status(404).json({ error: `Repair job '${id}' not found` });
+        return;
+      }
+      if (!canAccessBranch(identity, (existingJob as any)?.branch_id ?? (existingJob as any)?.branchId ?? null)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to take payment for this repair job' });
+        return;
+      }
+
       const body = req.body ?? {};
       const dto = {
         amount: Number(body.amount ?? 0),

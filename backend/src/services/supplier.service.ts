@@ -29,7 +29,11 @@ import {
   type CreateSupplierDto,
   type UpdateSupplierDto,
   type SupplierFilter,
+  type RecordSupplierPaymentDto,
+  type SupplierPaymentResult,
 } from '../repositories/supplier.repo';
+
+export type { RecordSupplierPaymentDto, SupplierPaymentResult };
 
 // ─── Service Error ─────────────────────────────────────────────────────────────
 
@@ -236,6 +240,33 @@ export class SupplierService {
       return await this.repo.calculateOutstandingBalance(supplierId);
     } catch (err: unknown) {
       throw this.translateError(err, 'get_supplier_balance');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // recordPayment
+  // Records a supplier payable payment; delegates to repo.recordSupplierPayment.
+  // ---------------------------------------------------------------------------
+
+  async recordPayment(
+    supplierId: string,
+    dto: RecordSupplierPaymentDto,
+    performedBy?: string | null,
+    branchId?: string | null
+  ): Promise<SupplierPaymentResult> {
+    if (!supplierId?.trim()) {
+      throw new SupplierServiceError('Supplier ID is required', 400, 'VALIDATION');
+    }
+    if (!dto.amount || dto.amount <= 0) {
+      throw new SupplierServiceError('Payment amount must be greater than zero', 400, 'VALIDATION');
+    }
+    if (!dto.payment_method || typeof dto.payment_method !== 'string') {
+      throw new SupplierServiceError('payment_method is required', 400, 'VALIDATION');
+    }
+    try {
+      return await this.repo.recordSupplierPayment(supplierId, dto, performedBy, branchId);
+    } catch (err: unknown) {
+      throw this.translateError(err, 'record_supplier_payment');
     }
   }
 

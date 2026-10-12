@@ -225,6 +225,7 @@ mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto {
                         product_id: prod_id,
@@ -276,6 +277,7 @@ mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto {
                         product_id: prod_id.clone(),
@@ -337,6 +339,7 @@ mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto {
                         product_id: prod_id,
@@ -410,6 +413,7 @@ mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
+                    terminal_id: None,
                     customer_id: Some(customer.id.clone()),
                     items: vec![SaleItemDto {
                         product_id: prod_id,
@@ -470,6 +474,7 @@ mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto {
                         product_id: prod_id,
@@ -525,6 +530,7 @@ mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto {
                         product_id: prod_id.clone(),
@@ -609,6 +615,7 @@ mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto { product_id: prod_id.clone(), quantity: 1, discount: None }],
                     discount: None,
@@ -634,6 +641,7 @@ mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto { product_id: prod_id.clone(), quantity: 1, discount: None }],
                     discount: None,
@@ -659,6 +667,7 @@ mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto { product_id: prod_id.clone(), quantity: 1, discount: None }],
                     discount: None,
@@ -704,6 +713,7 @@ mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto { product_id: prod_id, quantity: 1, discount: None }],
                     discount: None,
@@ -750,6 +760,7 @@ mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: Some(branch_id),
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto { product_id: prod_id.clone(), quantity: 10, discount: None }],
                     discount: None,
@@ -793,6 +804,7 @@ mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto { product_id: prod_id.clone(), quantity: 2, discount: None }],
                     discount: None,
@@ -850,6 +862,7 @@ mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto { product_id: prod_id.clone(), quantity: 2, discount: None }],
                     discount: None,
@@ -887,6 +900,7 @@ mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: Some(branch_id.clone()),
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto { product_id: prod_id, quantity: 1, discount: None }],
                     discount: None,

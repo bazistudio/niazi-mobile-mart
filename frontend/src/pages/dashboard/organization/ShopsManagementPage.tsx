@@ -46,9 +46,11 @@ export function ShopsManagementPage({ embedded = false }: ShopsManagementPagePro
         toast.success(res.message || 'Shop deleted successfully');
         setDeletingShop(null);
         fetchShops();
+      } else {
+        toast.error(res.message || 'Failed to delete shop');
       }
     } catch (err: any) {
-      toast.error(err.response?.data?.message || err.message || 'Failed to delete shop');
+      toast.error(err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to delete shop');
     } finally {
       setActionLoading(false);
     }
@@ -62,9 +64,11 @@ export function ShopsManagementPage({ embedded = false }: ShopsManagementPagePro
       if (res.success) {
         toast.success(`Shop status changed to ${newStatus}`);
         fetchShops();
+      } else {
+        toast.error(res.message || 'Failed to update shop status');
       }
     } catch (err: any) {
-      toast.error(err.response?.data?.message || err.message || 'Failed to update shop status');
+      toast.error(err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to update shop status');
     }
   };
 
