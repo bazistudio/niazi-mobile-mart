@@ -536,6 +536,7 @@ mod tests {
                 &prod.id,
                 UpdateProductDto {
                     name: Some("Sync Phone Pro".to_string()),
+                    sku: None,
                     barcode: None,
                     category_id: None,
                     brand_id: None,

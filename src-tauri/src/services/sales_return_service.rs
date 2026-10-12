@@ -534,6 +534,7 @@ mod tests {
                 Some("22222222-2222-2222-2222-222222222222"),
                 CompleteSaleDto {
                     branch_id: Some(DEFAULT_MAIN_BRANCH_ID.to_string()),
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto {
                         product_id: prod_id.clone(),
@@ -662,6 +663,7 @@ mod tests {
                 Some("22222222-2222-2222-2222-222222222222"),
                 CompleteSaleDto {
                     branch_id: Some(DEFAULT_MAIN_BRANCH_ID.to_string()),
+                    terminal_id: None,
                     customer_id: Some(cust.id.clone()),
                     items: vec![SaleItemDto {
                         product_id: prod_id.clone(),
@@ -732,6 +734,7 @@ mod tests {
                 Some("22222222-2222-2222-2222-222222222222"),
                 CompleteSaleDto {
                     branch_id: Some(DEFAULT_MAIN_BRANCH_ID.to_string()),
+                    terminal_id: None,
                     customer_id: Some(cust.id.clone()),
                     items: vec![SaleItemDto {
                         product_id: prod_id.clone(),
@@ -782,6 +785,7 @@ mod tests {
                 Some("22222222-2222-2222-2222-222222222222"),
                 CompleteSaleDto {
                     branch_id: Some(DEFAULT_MAIN_BRANCH_ID.to_string()),
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto {
                         product_id: prod_id.clone(),
@@ -844,6 +848,7 @@ mod tests {
                 Some("22222222-2222-2222-2222-222222222222"),
                 CompleteSaleDto {
                     branch_id: Some(DEFAULT_MAIN_BRANCH_ID.to_string()),
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto {
                         product_id: prod_id.clone(),

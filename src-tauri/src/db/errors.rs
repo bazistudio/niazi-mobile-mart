@@ -26,6 +26,9 @@ pub enum DbError {
 
     #[error("Validation error: {0}")]
     ValidationError(String),
+
+    #[error("Internal database error: {0}")]
+    Internal(String),
 }
 
 impl From<rusqlite::Error> for DbError {
@@ -58,6 +61,7 @@ impl From<DbError> for AppError {
             DbError::ConstraintViolation(msg) => AppError::Conflict(msg),
             DbError::DatabaseLocked(msg) => AppError::Locked(msg),
             DbError::ValidationError(msg) => AppError::Validation(msg),
+            DbError::Internal(msg) => AppError::Internal(msg),
             DbError::ConnectionError(msg)
             | DbError::MigrationError(msg)
             | DbError::QueryError(msg)

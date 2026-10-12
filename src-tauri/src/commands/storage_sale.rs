@@ -182,6 +182,7 @@ mod tests {
         // 1. DTO Structural Rejection: Empty Cart
         let empty_cart_dto = CompleteSaleDto {
             branch_id: None,
+            terminal_id: None,
             customer_id: None,
             items: vec![],
             discount: None,
@@ -198,6 +199,7 @@ mod tests {
         // 2. Complete Valid Cash Sale via Typed Storage Command
         let valid_sale_dto = CompleteSaleDto {
             branch_id: Some(DEFAULT_MAIN_BRANCH_ID.to_string()),
+            terminal_id: None,
             customer_id: None, // Walk-in
             items: vec![SaleItemDto {
                 product_id: prod_id.clone(),

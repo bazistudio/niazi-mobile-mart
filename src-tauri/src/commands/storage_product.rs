@@ -547,6 +547,7 @@ mod tests {
         // 6. Update product
         let update_dto = UpdateProductDto {
             name: Some("Tauri Pilot Phone Pro".to_string()),
+            sku: None,
             barcode: None,
             category_id: None,
             brand_id: None,
@@ -665,6 +666,7 @@ mod tests {
         // 5. Update product and verify PRODUCT_UPDATED outbox event
         let update_dto = UpdateProductDto {
             name: Some("Galaxy Ultra S26 Plus".to_string()),
+            sku: None,
             barcode: None,
             category_id: None,
             brand_id: None,

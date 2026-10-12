@@ -708,6 +708,7 @@ pub mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: None, // Walk-in
                     items: vec![SaleItemDto {
                         product_id: prod_id.clone(),
@@ -745,6 +746,7 @@ pub mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: Some(cust.id.clone()),
                     items: vec![SaleItemDto {
                         product_id: prod_id.clone(),
@@ -943,6 +945,7 @@ pub mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto {
                         product_id: prod_id.clone(),
@@ -978,6 +981,7 @@ pub mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: Some(cust.id.clone()),
                     items: vec![SaleItemDto {
                         product_id: prod_id.clone(),
@@ -1116,6 +1120,7 @@ pub mod tests {
                 Some(TEST_USER_ID),
                 CompleteSaleDto {
                     branch_id: None,
+                    terminal_id: None,
                     customer_id: None,
                     items: vec![SaleItemDto {
                         product_id: prod_id.clone(),
