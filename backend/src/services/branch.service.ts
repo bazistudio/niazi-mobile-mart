@@ -106,11 +106,48 @@ export class BranchService {
       throw new BranchServiceError('Branch name cannot be empty', 400, 'VALIDATION');
     }
 
+    if (id === '00000000-0000-0000-0000-000000000002' && dto.is_active === 0) {
+      throw new BranchServiceError('The canonical Main Branch cannot be deactivated', 400, 'CANONICAL_PROTECTED');
+    }
+
     try {
       return await this.repo.updateBranch(id, dto);
     } catch (err: unknown) {
       throw this.translateError(err, 'update_branch');
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Branch Removal — Strict Soft-Deactivation
+  // Physical deletion is completely eliminated from the application workflow.
+  // Historical records (sales, purchases, ledgers, stock, cash, transfers) continue
+  // referencing the branch. Repeated calls are safe and idempotent.
+  // ---------------------------------------------------------------------------
+  async deleteBranch(id: string): Promise<{ success: boolean; deactivated: boolean; message: string; branch: Branch }> {
+    if (!id?.trim()) {
+      throw new BranchServiceError('Branch ID is required', 400, 'VALIDATION');
+    }
+    if (id === '00000000-0000-0000-0000-000000000002') {
+      throw new BranchServiceError('The canonical Main Branch cannot be deactivated or removed', 400, 'CANONICAL_PROTECTED');
+    }
+
+    const existing = await this.repo.getBranchById(id);
+    if (!existing) {
+      throw new BranchServiceError(`Branch '${id}' not found`, 404, 'NOT_FOUND');
+    }
+
+    if (existing.code === 'MAIN') {
+      throw new BranchServiceError('The canonical Main Branch cannot be deactivated or removed', 400, 'CANONICAL_PROTECTED');
+    }
+
+    // Safely deactivate the branch without removing the row or breaking foreign keys
+    const branch = await this.repo.deactivateBranch(id);
+    return {
+      success: true,
+      deactivated: true,
+      message: 'Branch deactivated successfully. Historical records have been preserved.',
+      branch,
+    };
   }
 
   // ---------------------------------------------------------------------------

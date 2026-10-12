@@ -177,7 +177,12 @@ export function resolveIdentity(token: string): RequestIdentity {
 export function isOrgAdmin(identity: RequestIdentity): boolean {
   if (!identity) return false;
   const r = String(identity.role || '').toUpperCase();
-  if (r === 'ADMIN' || r === 'SUPER_ADMIN' || r === 'OWNER' || r === 'MULTI_ADMIN') return true;
+  // OWNER and SUPER_ADMIN always have organization-wide authority
+  if (r === 'OWNER' || r === 'SUPER_ADMIN') return true;
+  // ADMIN and MULTI_ADMIN have organization-wide authority ONLY IF genuinely unassigned to a specific branch
+  if ((r === 'ADMIN' || r === 'MULTI_ADMIN') && (!identity.branch_id || !identity.branch_id.trim())) {
+    return true;
+  }
   return false;
 }
 

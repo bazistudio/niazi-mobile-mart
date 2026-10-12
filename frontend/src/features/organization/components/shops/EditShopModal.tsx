@@ -45,21 +45,28 @@ export const EditShopModal: React.FC<EditShopModalProps> = ({ isOpen, shop, onCl
     try {
       setLoading(true);
       setError(null);
-      await shopApi.updateShop(shop._id, {
+      const updateRes = await shopApi.updateShop(shop._id, {
         name: formData.name,
         phone: formData.phone,
         address: formData.address,
         city: formData.city,
       });
 
+      if (!updateRes.success) {
+        throw new Error(updateRes.message || 'Failed to update shop');
+      }
+
       if (formData.status !== ((shop.status === 'ACTIVE' || shop.status === 'active') ? 'active' : 'inactive')) {
-        await shopApi.toggleShopStatus(shop._id, formData.status);
+        const toggleRes = await shopApi.toggleShopStatus(shop._id, formData.status);
+        if (!toggleRes.success) {
+          throw new Error(toggleRes.message || 'Failed to update shop status');
+        }
       }
 
       onSuccess();
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Failed to update shop');
+      setError(err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to update shop');
     } finally {
       setLoading(false);
     }

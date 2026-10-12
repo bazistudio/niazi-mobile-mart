@@ -50,6 +50,7 @@ export class AuthService {
         const rawUser = data.user;
         const token = data.token;
 
+        const assignedBranch = rawUser.branch_id || rawUser.branchId || rawUser.shopId || null;
         let user: AuthUser = {
           id: rawUser.id,
           name: rawUser.name,
@@ -58,6 +59,9 @@ export class AuthService {
           role: (rawUser.role ? rawUser.role.toUpperCase() : "STAFF") as any,
           status: (rawUser.status ? rawUser.status.toLowerCase() : (rawUser.is_active ? "active" : "suspended")) as any,
           mustChangePassword: rawUser.must_change_password,
+          branchId: assignedBranch,
+          branch_id: assignedBranch,
+          shopId: assignedBranch || undefined,
           permissions: rawUser.access_profile ? rawUser.access_profile.allowed_actions : [],
           createdAt: rawUser.created_at,
         };
@@ -81,6 +85,7 @@ export class AuthService {
 
           const nativeUser = await tauriClient.getCurrentUser();
           if (nativeUser) {
+              const nativeBranch = nativeUser.branch_id || null;
               user = {
                 id: nativeUser.id,
                 name: nativeUser.name,
@@ -89,6 +94,9 @@ export class AuthService {
                 role: (nativeUser.role ? nativeUser.role.toUpperCase() : "STAFF") as any,
                 status: (nativeUser.status ? nativeUser.status.toLowerCase() : (nativeUser.is_active ? "active" : "suspended")) as any,
                 mustChangePassword: nativeUser.must_change_password,
+                branchId: nativeBranch,
+                branch_id: nativeBranch,
+                shopId: nativeBranch || undefined,
                 permissions: nativeUser.access_profile ? nativeUser.access_profile.allowed_actions : [],
                 createdAt: nativeUser.created_at,
               };
@@ -117,6 +125,7 @@ export class AuthService {
           await tauriClient.authSyncSession(existingToken).catch(() => {});
         }
 
+        const snapBranch = snapshotRes.user.branch_id || null;
         const user: AuthUser = {
           id: snapshotRes.user.id,
           name: snapshotRes.user.name,
@@ -125,6 +134,9 @@ export class AuthService {
           role: (snapshotRes.user.role ? snapshotRes.user.role.toUpperCase() : "STAFF") as any,
           status: (snapshotRes.user.status ? snapshotRes.user.status.toLowerCase() : (snapshotRes.user.is_active ? "active" : "suspended")) as any,
           mustChangePassword: snapshotRes.user.must_change_password,
+          branchId: snapBranch,
+          branch_id: snapBranch,
+          shopId: snapBranch || undefined,
           permissions: snapshotRes.user.access_profile ? snapshotRes.user.access_profile.allowed_actions : [],
           createdAt: snapshotRes.user.created_at,
         };
@@ -151,6 +163,7 @@ export class AuthService {
     if (isTauriEnvironment()) {
       const res = await tauriClient.authLogin(identifier, password);
 
+      const resBranch = res.user.branch_id || null;
       const user: AuthUser = {
         id: res.user.id,
         name: res.user.name,
@@ -159,6 +172,9 @@ export class AuthService {
         role: (res.user.role ? res.user.role.toUpperCase() : "STAFF") as any,
         status: (res.user.status ? res.user.status.toLowerCase() : (res.user.is_active ? "active" : "suspended")) as any,
         mustChangePassword: res.user.must_change_password,
+        branchId: resBranch,
+        branch_id: resBranch,
+        shopId: resBranch || undefined,
         permissions: res.user.access_profile ? res.user.access_profile.allowed_actions : [],
         createdAt: res.user.created_at,
       };
@@ -343,6 +359,7 @@ export class AuthService {
       const rawUser = await tauriClient.getCurrentUser();
       if (!rawUser) return null;
 
+      const rawBranch = rawUser.branch_id || null;
       return {
         id: rawUser.id,
         name: rawUser.name,
@@ -351,6 +368,9 @@ export class AuthService {
         role: (rawUser.role ? rawUser.role.toUpperCase() : "STAFF") as any,
         status: (rawUser.status ? rawUser.status.toLowerCase() : (rawUser.is_active ? "active" : "suspended")) as any,
         mustChangePassword: rawUser.must_change_password,
+        branchId: rawBranch,
+        branch_id: rawBranch,
+        shopId: rawBranch || undefined,
         permissions: rawUser.access_profile ? rawUser.access_profile.allowed_actions : [],
         createdAt: rawUser.created_at,
       };
@@ -368,19 +388,23 @@ export class AuthService {
       if (!response.ok) return null;
 
       const data = await response.json();
-      const identity = data.identity;
-      if (!identity) return null;
+      const u = data.identity || data.user || data;
+      if (!u || (!u.id && !u.user_id)) return null;
 
+      const assignedBranch = u.branch_id || u.branchId || u.shopId || null;
       return {
-        id: identity.user_id,
-        name: identity.username,
-        username: identity.username,
-        email: `${identity.username}@local`,
-        role: (identity.role ? identity.role.toUpperCase() : "STAFF") as any,
-        status: "active",
-        mustChangePassword: false,
-        permissions: [],
-        createdAt: new Date().toISOString(),
+        id: u.id || u.user_id,
+        name: u.name || u.username,
+        username: u.username,
+        email: `${u.username}@local`,
+        role: (u.role ? u.role.toUpperCase() : "STAFF") as any,
+        status: (u.status ? u.status.toLowerCase() : (u.is_active ? "active" : "disabled")) as any,
+        mustChangePassword: !!u.must_change_password,
+        branchId: assignedBranch,
+        branch_id: assignedBranch,
+        shopId: assignedBranch || undefined,
+        permissions: u.access_profile?.allowed_actions || [],
+        createdAt: u.created_at || new Date().toISOString(),
       };
     } catch {
       return null;

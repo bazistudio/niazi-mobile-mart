@@ -210,7 +210,7 @@ export class UsersRepo {
         is_active ? 1 : 0,
         (input.must_change_password ?? false) ? 1 : 0,
         JSON.stringify(defaultProfile),
-        input.branch_id ?? null,
+        (typeof input.branch_id === 'string' && input.branch_id.trim()) ? input.branch_id.trim() : null,
       ]
     );
 
@@ -250,7 +250,10 @@ export class UsersRepo {
     }
     if (input.branch_id !== undefined) {
       setClauses.push(`branch_id = $${paramIdx++}`);
-      params.push(input.branch_id ?? null);
+      const cleanBranchId = (typeof input.branch_id === 'string' && input.branch_id.trim())
+        ? input.branch_id.trim()
+        : null;
+      params.push(cleanBranchId);
     }
     if (input.access_profile !== undefined) {
       // Fetch current role to fill limits if not supplied

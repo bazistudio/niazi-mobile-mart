@@ -78,17 +78,24 @@ export const ShopSwitcher = () => {
       }
 
       // Filter branches: Org Admin sees all branches; branch users see ONLY their assigned branch
-      const userBranchId = (user as any)?.branchId || (user as any)?.shopId;
+      const userBranchId = (user as any)?.branch_id || (user as any)?.branchId || (user as any)?.shopId;
       const accessible = isOrgAdmin
         ? list
-        : list.filter((b) => !userBranchId || b.id === userBranchId);
+        : userBranchId
+          ? list.filter((b) => b.id === userBranchId)
+          : [];
 
       setBranches(accessible);
 
       // Ensure activeShop in Zustand store is initialized from accessible branches
       if (accessible.length > 0) {
-        const currentShopId = activeShopId || activeShop?._id;
-        const matchedBranch = accessible.find((b) => b.id === currentShopId) || accessible[0];
+        let matchedBranch = accessible.find((b) => b.id === currentShopId);
+        if (!isOrgAdmin && userBranchId) {
+          // Strictly lock non-org admin to their assigned branch
+          matchedBranch = accessible.find((b) => b.id === userBranchId) || accessible[0];
+        } else if (!matchedBranch) {
+          matchedBranch = accessible[0];
+        }
 
         if (matchedBranch && (!activeShop || activeShop._id !== matchedBranch.id)) {
           setActiveShop({
@@ -97,6 +104,11 @@ export const ShopSwitcher = () => {
             organizationId: matchedBranch.organization_id,
             status: matchedBranch.is_active ? 'active' : 'inactive',
           });
+        }
+      } else if (!isOrgAdmin && !userBranchId) {
+        // Non-org admin with no assigned branch: clear active shop to avoid unauthorized fallback
+        if (activeShop) {
+          setActiveShop(null);
         }
       }
     } catch (error) {
@@ -147,7 +159,7 @@ export const ShopSwitcher = () => {
     }
 
     // Prevent non-admin users from switching to a branch other than their assigned one
-    const userBranchId = (user as any)?.branchId || (user as any)?.shopId;
+    const userBranchId = (user as any)?.branch_id || (user as any)?.branchId || (user as any)?.shopId;
     if (branch && !isOrgAdmin && userBranchId && branch.id !== userBranchId) {
       return;
     }
@@ -172,10 +184,11 @@ export const ShopSwitcher = () => {
     setIsLoading(false);
   };
 
+  const userBranchId = (user as any)?.branch_id || (user as any)?.branchId || (user as any)?.shopId;
   const displayLabel =
     viewMode === 'organization'
       ? 'All Shops'
-      : activeShop?.name || (isFetchingBranches ? 'Loading…' : 'Main Branch');
+      : activeShop?.name || (isFetchingBranches ? 'Loading…' : (!isOrgAdmin && !userBranchId ? 'No Branch Assigned' : 'Main Branch'));
 
   return (
     <div className="relative" ref={dropdownRef}>

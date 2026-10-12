@@ -633,22 +633,41 @@ export const tauriClient = {
   },
 
   async adminApproveStaff(userId: string): Promise<SanitizedUser> {
+    if (getApiBaseUrl()) {
+      const res = await httpFetch<{ message: string; user: SanitizedUser }>(`/api/v1/users/${userId}/approve`, {
+        method: 'POST',
+      });
+      return res.user;
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<SanitizedUser>('admin_approve_staff', { userId });
     }
-    throw new Error('Native Tauri environment required');
+    throw new Error('Native Tauri environment or API Base URL required');
   },
 
   async adminRejectStaff(userId: string): Promise<SanitizedUser> {
+    if (getApiBaseUrl()) {
+      const res = await httpFetch<{ message: string; user: SanitizedUser }>(`/api/v1/users/${userId}/reject`, {
+        method: 'POST',
+      });
+      return res.user;
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<SanitizedUser>('admin_reject_staff', { userId });
     }
-    throw new Error('Native Tauri environment required');
+    throw new Error('Native Tauri environment or API Base URL required');
   },
 
   async adminResetStaffPassword(userId: string, temporaryPassword: string): Promise<void> {
+    if (getApiBaseUrl()) {
+      await httpFetch<void>(`/api/v1/users/${userId}/reset-credentials`, {
+        method: 'POST',
+        body: JSON.stringify({ password: temporaryPassword }),
+      });
+      return;
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('admin_reset_staff_password', { userId, temporaryPassword });
@@ -668,6 +687,7 @@ export const tauriClient = {
   async adminCreateUser(payload: {
     name: string;
     username: string;
+    password?: string;
     login_key?: string;
     pin?: string;
     role: StaffRole;
@@ -675,9 +695,19 @@ export const tauriClient = {
     access_profile?: StaffAccessProfile;
   }): Promise<SanitizedUser> {
     if (getApiBaseUrl()) {
+      const effectivePassword = payload.password || payload.login_key || (payload.pin ? `Niazi@${payload.pin}` : 'Niazi@123');
       return await httpFetch<SanitizedUser>('/api/v1/users', {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          name: payload.name,
+          username: payload.username,
+          password: effectivePassword,
+          login_key: effectivePassword,
+          pin: payload.pin,
+          role: payload.role,
+          branch_id: payload.branch_id,
+          access_profile: payload.access_profile,
+        }),
       });
     }
     if (isTauriEnvironment()) {
@@ -690,17 +720,31 @@ export const tauriClient = {
   async adminUpdateUser(payload: {
     user_id: string;
     name?: string;
+    username?: string;
     role?: StaffRole;
     status?: 'ACTIVE' | 'DISABLED' | 'PENDING' | 'REJECTED';
     is_active?: boolean;
     branch_id?: string | null;
     access_profile?: StaffAccessProfile;
   }): Promise<SanitizedUser> {
+    if (getApiBaseUrl()) {
+      return await httpFetch<SanitizedUser>(`/api/v1/users/${payload.user_id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: payload.name,
+          username: payload.username,
+          role: payload.role,
+          status: payload.status,
+          branch_id: payload.branch_id,
+          access_profile: payload.access_profile,
+        }),
+      });
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<SanitizedUser>('admin_update_user', { payload });
     }
-    throw new Error('Tauri environment required');
+    throw new Error('API Base URL or Tauri environment required');
   },
 
   async adminResetCredentials(payload: {
@@ -708,24 +752,45 @@ export const tauriClient = {
     new_login_key?: string;
     new_pin?: string;
   }): Promise<void> {
+    if (getApiBaseUrl()) {
+      await httpFetch<void>(`/api/v1/users/${payload.user_id}/reset-credentials`, {
+        method: 'POST',
+        body: JSON.stringify({
+          password: payload.new_login_key,
+          pin: payload.new_pin,
+        }),
+      });
+      return;
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('admin_reset_credentials', { payload });
+      return;
     }
+    throw new Error('API Base URL or Tauri environment required');
   },
 
   async adminVerifyPassword(password: string): Promise<void> {
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('admin_verify_password', { password });
+      return;
     }
   },
 
   async adminDeleteUser(userId: string): Promise<void> {
+    if (getApiBaseUrl()) {
+      await httpFetch<void>(`/api/v1/users/${userId}`, {
+        method: 'DELETE',
+      });
+      return;
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('admin_delete_user', { userId });
+      return;
     }
+    throw new Error('API Base URL or Tauri environment required');
   },
 
   // â”€â”€ Catalog Domain (Phase 7 Domain 1) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

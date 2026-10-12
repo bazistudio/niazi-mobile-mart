@@ -33,7 +33,7 @@ import { Pool } from 'pg';
 import { UsersRepo } from '../repositories/users.repo';
 import { AuthRepo } from '../repositories/auth.repo';
 import { hashArgon2 } from '../services/argon2.service';
-import { authMiddleware, isAdmin } from '../auth';
+import { authMiddleware, isAdmin, isOrgAdmin as authIsOrgAdmin } from '../auth';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -64,10 +64,9 @@ function requireStrictAdmin(req: Request, res: Response): boolean {
   return true;
 }
 
-/** Returns true if the identity has org-level ADMIN role (for Phase 4 operations). */
+/** Returns true if the identity has org-level ADMIN authority (OWNER, SUPER_ADMIN, or unassigned ADMIN). */
 function isOrgAdmin(req: Request): boolean {
-  const r = String(req.identity?.role || '').toUpperCase();
-  return r === 'ADMIN' || r === 'SUPER_ADMIN' || r === 'OWNER' || r === 'MULTI_ADMIN';
+  return req.identity ? authIsOrgAdmin(req.identity) : false;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,8 +126,14 @@ export function buildUsersRouter(pool: Pool): Router {
   router.post('/', async (req: Request, res: Response): Promise<void> => {
     if (!requireStrictAdmin(req, res)) return;
 
-    const { name, username, password, pin, role, status, branch_id, access_profile, must_change_password } =
+    const { name, username, password, login_key, pin, role, status, branch_id, access_profile, must_change_password } =
       req.body as Record<string, unknown>;
+
+    const effectivePassword = typeof password === 'string' && password.trim()
+      ? password.trim()
+      : typeof login_key === 'string' && login_key.trim()
+      ? login_key.trim()
+      : '';
 
     if (typeof name !== 'string' || !name.trim()) {
       res.status(400).json({ error: 'name is required' });
@@ -138,13 +143,49 @@ export function buildUsersRouter(pool: Pool): Router {
       res.status(400).json({ error: 'username is required' });
       return;
     }
-    if (typeof password !== 'string' || password.length < 6) {
+    if (effectivePassword.length < 6) {
       res.status(400).json({ error: 'password must be at least 6 characters' });
       return;
     }
     if (typeof role !== 'string' || !role.trim()) {
       res.status(400).json({ error: 'role is required' });
       return;
+    }
+
+    const identity = req.identity!;
+    const isOrg = isOrgAdmin(req);
+
+    const cleanBranchId = typeof branch_id === 'string' && branch_id.trim()
+      ? branch_id.trim()
+      : null;
+
+    // Branch-scoped administrators (branch-assigned ADMIN):
+    if (!isOrg) {
+      if (!identity.branch_id) {
+        res.status(403).json({ error: 'Forbidden: No branch assigned to your account' });
+        return;
+      }
+      if (cleanBranchId !== identity.branch_id) {
+        res.status(403).json({ error: 'Forbidden: Cannot create users outside your assigned branch' });
+        return;
+      }
+      const upperRole = role.trim().toUpperCase();
+      if (upperRole === 'ADMIN' || upperRole === 'SUPER_ADMIN' || upperRole === 'OWNER' || upperRole === 'MULTI_ADMIN') {
+        res.status(403).json({ error: 'Forbidden: Branch-scoped administrators cannot create administrator accounts' });
+        return;
+      }
+    }
+
+    if (cleanBranchId) {
+      const bCheck = await pool.query('SELECT id, is_active FROM branches WHERE id = $1 LIMIT 1', [cleanBranchId]);
+      if (bCheck.rows.length === 0) {
+        res.status(400).json({ error: `Branch '${cleanBranchId}' does not exist` });
+        return;
+      }
+      if (bCheck.rows[0].is_active === 0) {
+        res.status(400).json({ error: `Cannot assign user to deactivated branch '${cleanBranchId}'` });
+        return;
+      }
     }
 
     try {
@@ -154,7 +195,7 @@ export function buildUsersRouter(pool: Pool): Router {
         return;
       }
 
-      const loginKeyHash = await hashArgon2(password);
+      const loginKeyHash = await hashArgon2(effectivePassword);
       let pinHash: string | null = null;
       if (typeof pin === 'string' && pin.length > 0) {
         pinHash = await hashArgon2(pin);
@@ -167,7 +208,7 @@ export function buildUsersRouter(pool: Pool): Router {
         pin_hash: pinHash,
         role: role.trim(),
         status: typeof status === 'string' ? status.trim() : 'ACTIVE',
-        branch_id: typeof branch_id === 'string' ? branch_id : null,
+        branch_id: cleanBranchId,
         access_profile: access_profile && typeof access_profile === 'object'
           ? (access_profile as unknown as import('../repositories/users.repo').AccessProfile)
           : undefined,
@@ -230,18 +271,70 @@ export function buildUsersRouter(pool: Pool): Router {
     if (!requireAdmin(req, res)) return;
 
     const { id } = req.params as { id: string };
+    const identity = req.identity!;
+    const isOrg = isOrgAdmin(req);
     const { name, username, role, status, branch_id, access_profile, must_change_password } =
       req.body as Record<string, unknown>;
 
     try {
+      const targetUser = await usersRepo.findById(id);
+      if (!targetUser) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+
+      const targetRole = String(targetUser.role || '').toUpperCase();
+      const isTargetAdmin = targetRole === 'ADMIN' || targetRole === 'SUPER_ADMIN' || targetRole === 'OWNER' || targetRole === 'MULTI_ADMIN';
+
+      // Non-Org Admin restrictions (e.g. SHOP_ADMIN / MANAGER)
+      if (!isOrg) {
+        // Must belong to the same branch
+        if (!identity.branch_id || targetUser.branch_id !== identity.branch_id) {
+          res.status(403).json({ error: 'Forbidden: Cannot modify users outside your assigned branch' });
+          return;
+        }
+        // Cannot modify admin users
+        if (isTargetAdmin) {
+          res.status(403).json({ error: 'Forbidden: Cannot modify administrator accounts' });
+          return;
+        }
+        // Cannot escalate role or change roles
+        if (role !== undefined && String(role).toUpperCase() !== targetRole) {
+          res.status(403).json({ error: 'Forbidden: Organization Admin privileges required to change user roles' });
+          return;
+        }
+        // Cannot change branch assignment
+        if (branch_id !== undefined && branch_id !== targetUser.branch_id) {
+          res.status(403).json({ error: 'Forbidden: Organization Admin privileges required to change branch assignments' });
+          return;
+        }
+      }
+
+      // If branch_id is provided, validate it against branches table
+      const cleanBranchId = typeof branch_id === 'string' && branch_id.trim()
+        ? branch_id.trim()
+        : branch_id === null || branch_id === ''
+        ? null
+        : undefined;
+
+      if (cleanBranchId !== undefined && cleanBranchId !== null) {
+        const bCheck = await pool.query('SELECT id, is_active FROM branches WHERE id = $1 LIMIT 1', [cleanBranchId]);
+        if (bCheck.rows.length === 0) {
+          res.status(400).json({ error: `Branch '${cleanBranchId}' does not exist` });
+          return;
+        }
+        if (bCheck.rows[0].is_active === 0 && targetUser.branch_id !== cleanBranchId) {
+          res.status(400).json({ error: `Cannot assign user to deactivated branch '${cleanBranchId}'` });
+          return;
+        }
+      }
+
       const updated = await usersRepo.updateUser(id, {
         name: typeof name === 'string' ? name.trim() : undefined,
         username: typeof username === 'string' ? username.trim() : undefined,
         role: typeof role === 'string' ? role.trim() : undefined,
         status: typeof status === 'string' ? status.trim() : undefined,
-        branch_id: typeof branch_id === 'string' ? branch_id
-          : branch_id === null ? null
-          : undefined,
+        branch_id: cleanBranchId,
         access_profile: access_profile && typeof access_profile === 'object'
           ? (access_profile as unknown as import('../repositories/users.repo').AccessProfile)
           : undefined,
@@ -272,6 +365,7 @@ export function buildUsersRouter(pool: Pool): Router {
 
     const { id } = req.params as { id: string };
     const identity = req.identity!;
+    const isOrg = isOrgAdmin(req);
 
     // Prevent self-deletion (belt-and-suspenders: hardDeleteUserAdmin also checks)
     if (id === identity.user_id) {
@@ -280,6 +374,23 @@ export function buildUsersRouter(pool: Pool): Router {
     }
 
     try {
+      if (!isOrg) {
+        const target = await usersRepo.findById(id);
+        if (!target) {
+          res.status(404).json({ error: 'User not found' });
+          return;
+        }
+        if (!identity.branch_id || target.branch_id !== identity.branch_id) {
+          res.status(403).json({ error: 'Forbidden: Cannot delete users outside your assigned branch' });
+          return;
+        }
+        const targetRole = String(target.role || '').toUpperCase();
+        if (targetRole === 'ADMIN' || targetRole === 'SUPER_ADMIN' || targetRole === 'OWNER' || targetRole === 'MULTI_ADMIN') {
+          res.status(403).json({ error: 'Forbidden: Cannot delete administrator accounts' });
+          return;
+        }
+      }
+
       const result = await usersRepo.hardDeleteUserAdmin(id, identity.user_id);
 
       if (!result.deleted) {
@@ -310,8 +421,22 @@ export function buildUsersRouter(pool: Pool): Router {
     if (!requireAdmin(req, res)) return;
 
     const { id } = req.params as { id: string };
+    const identity = req.identity!;
+    const isOrg = isOrgAdmin(req);
 
     try {
+      if (!isOrg) {
+        const target = await usersRepo.findById(id);
+        if (!target) {
+          res.status(404).json({ error: 'User not found or not in PENDING status' });
+          return;
+        }
+        if (!identity.branch_id || target.branch_id !== identity.branch_id) {
+          res.status(403).json({ error: 'Forbidden: Cannot approve staff outside your assigned branch' });
+          return;
+        }
+      }
+
       const user = await usersRepo.approveStaff(id);
       if (!user) {
         res.status(404).json({ error: 'User not found or not in PENDING status' });
@@ -332,8 +457,22 @@ export function buildUsersRouter(pool: Pool): Router {
     if (!requireAdmin(req, res)) return;
 
     const { id } = req.params as { id: string };
+    const identity = req.identity!;
+    const isOrg = isOrgAdmin(req);
 
     try {
+      if (!isOrg) {
+        const target = await usersRepo.findById(id);
+        if (!target) {
+          res.status(404).json({ error: 'User not found or not in PENDING status' });
+          return;
+        }
+        if (!identity.branch_id || target.branch_id !== identity.branch_id) {
+          res.status(403).json({ error: 'Forbidden: Cannot reject staff outside your assigned branch' });
+          return;
+        }
+      }
+
       const user = await usersRepo.rejectStaff(id);
       if (!user) {
         res.status(404).json({ error: 'User not found or not in PENDING status' });
@@ -362,11 +501,26 @@ export function buildUsersRouter(pool: Pool): Router {
       return;
     }
 
+    const identity = req.identity!;
+    const isOrg = isOrgAdmin(req);
+
     try {
       const target = await usersRepo.findById(id);
       if (!target) {
         res.status(404).json({ error: 'User not found' });
         return;
+      }
+
+      if (!isOrg) {
+        if (!identity.branch_id || target.branch_id !== identity.branch_id) {
+          res.status(403).json({ error: 'Forbidden: Cannot reset credentials for users outside your assigned branch' });
+          return;
+        }
+        const targetRole = String(target.role || '').toUpperCase();
+        if (targetRole === 'ADMIN' || targetRole === 'SUPER_ADMIN' || targetRole === 'OWNER' || targetRole === 'MULTI_ADMIN') {
+          res.status(403).json({ error: 'Forbidden: Cannot reset credentials for an administrator account' });
+          return;
+        }
       }
 
       if (typeof password === 'string' && password.length > 0) {
@@ -398,6 +552,7 @@ export function buildUsersRouter(pool: Pool): Router {
 
     const { id } = req.params as { id: string };
     const identity = req.identity!;
+    const isOrg = isOrgAdmin(req);
 
     if (id === identity.user_id) {
       res.status(400).json({ error: 'Cannot suspend your own account' });
@@ -411,8 +566,15 @@ export function buildUsersRouter(pool: Pool): Router {
         return;
       }
 
+      if (!isOrg) {
+        if (!identity.branch_id || target.branch_id !== identity.branch_id) {
+          res.status(403).json({ error: 'Forbidden: Cannot suspend users outside your assigned branch' });
+          return;
+        }
+      }
+
       const targetRole = String(target.role || '').toUpperCase();
-      if (targetRole === 'ADMIN' || targetRole === 'SUPER_ADMIN' || targetRole === 'OWNER') {
+      if (targetRole === 'ADMIN' || targetRole === 'SUPER_ADMIN' || targetRole === 'OWNER' || targetRole === 'MULTI_ADMIN') {
         res.status(409).json({ error: 'Cannot suspend an administrator account' });
         return;
       }
@@ -439,8 +601,28 @@ export function buildUsersRouter(pool: Pool): Router {
     if (!requireStrictAdmin(req, res)) return;
 
     const { id } = req.params as { id: string };
+    const identity = req.identity!;
+    const isOrg = isOrgAdmin(req);
 
     try {
+      const target = await usersRepo.findById(id);
+      if (!target) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+
+      if (!isOrg) {
+        if (!identity.branch_id || target.branch_id !== identity.branch_id) {
+          res.status(403).json({ error: 'Forbidden: Cannot reactivate users outside your assigned branch' });
+          return;
+        }
+        const targetRole = String(target.role || '').toUpperCase();
+        if (targetRole === 'ADMIN' || targetRole === 'SUPER_ADMIN' || targetRole === 'OWNER' || targetRole === 'MULTI_ADMIN') {
+          res.status(403).json({ error: 'Forbidden: Cannot modify administrator accounts' });
+          return;
+        }
+      }
+
       const reactivated = await usersRepo.reactivateUser(id);
       if (!reactivated) {
         res.status(409).json({ error: 'User not found or not in DISABLED status' });
@@ -464,6 +646,8 @@ export function buildUsersRouter(pool: Pool): Router {
     if (!requireStrictAdmin(req, res)) return;
 
     const { id } = req.params as { id: string };
+    const identity = req.identity!;
+    const isOrg = isOrgAdmin(req);
     const body = req.body as Record<string, unknown>;
     const pin = body['pin'];
 
@@ -478,6 +662,18 @@ export function buildUsersRouter(pool: Pool): Router {
       if (!target) {
         res.status(404).json({ error: 'User not found' });
         return;
+      }
+
+      if (!isOrg) {
+        if (!identity.branch_id || target.branch_id !== identity.branch_id) {
+          res.status(403).json({ error: 'Forbidden: Cannot change PIN for users outside your assigned branch' });
+          return;
+        }
+        const targetRole = String(target.role || '').toUpperCase();
+        if (targetRole === 'ADMIN' || targetRole === 'SUPER_ADMIN' || targetRole === 'OWNER' || targetRole === 'MULTI_ADMIN') {
+          res.status(403).json({ error: 'Forbidden: Cannot modify administrator accounts' });
+          return;
+        }
       }
 
       if (typeof pin === 'string' && pin.length > 0) {
@@ -505,6 +701,8 @@ export function buildUsersRouter(pool: Pool): Router {
     if (!requireStrictAdmin(req, res)) return;
 
     const { id } = req.params as { id: string };
+    const identity = req.identity!;
+    const isOrg = isOrgAdmin(req);
     const body = req.body as Record<string, unknown>;
 
     const allowedPages = body['allowed_pages'];
@@ -518,6 +716,23 @@ export function buildUsersRouter(pool: Pool): Router {
     }
 
     try {
+      if (!isOrg) {
+        const target = await usersRepo.findById(id);
+        if (!target) {
+          res.status(404).json({ error: 'User not found' });
+          return;
+        }
+        if (!identity.branch_id || target.branch_id !== identity.branch_id) {
+          res.status(403).json({ error: 'Forbidden: Cannot update permissions for users outside your assigned branch' });
+          return;
+        }
+        const targetRole = String(target.role || '').toUpperCase();
+        if (targetRole === 'ADMIN' || targetRole === 'SUPER_ADMIN' || targetRole === 'OWNER' || targetRole === 'MULTI_ADMIN') {
+          res.status(403).json({ error: 'Forbidden: Cannot modify administrator accounts' });
+          return;
+        }
+      }
+
       const updated = await usersRepo.updatePermissions(id, {
         allowed_pages: allowedPages as string[],
         allowed_actions: allowedActions as string[],

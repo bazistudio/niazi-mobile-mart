@@ -105,7 +105,8 @@ export const shopApi = {
         is_active: payload.status !== 'inactive'
       });
       // The API returns the Branch object
-      const created = res.data || res;
+      const created = (res as any)?.data || res;
+      window.dispatchEvent(new CustomEvent('branch-updated'));
       return {
         success: true,
         data: mapBranchToShopData(created),
@@ -115,32 +116,68 @@ export const shopApi = {
       return {
         success: false,
         data: CANONICAL_BRANCH,
-        message: err.message || 'Failed to create shop in Postgres',
+        message: err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to create shop in Postgres',
       };
     }
   },
 
   updateShop: async (shopId: string, payload: Partial<ShopData>): Promise<{ success: boolean; data: ShopData; message: string }> => {
-    // Phase 1 migration: Branch update not yet implemented in backend.
-    return {
-      success: false,
-      data: CANONICAL_BRANCH,
-      message: 'Branch updates are not supported by the current API yet.',
-    };
+    try {
+      const res = await httpClient.put<any>(`/api/v1/branches/${shopId}`, {
+        name: payload.name?.trim(),
+        is_active: payload.status !== undefined ? (payload.status === 'active' || payload.status === 'ACTIVE') : undefined,
+      });
+      const updated = (res as any)?.data || res;
+      window.dispatchEvent(new CustomEvent('branch-updated'));
+      return {
+        success: true,
+        data: mapBranchToShopData(updated),
+        message: 'Shop updated successfully in Postgres',
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        data: CANONICAL_BRANCH,
+        message: err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to update shop',
+      };
+    }
   },
 
   toggleShopStatus: async (shopId: string, status: 'active' | 'suspended' | 'inactive'): Promise<{ success: boolean; data: ShopData; message: string }> => {
-    return {
-      success: false,
-      data: CANONICAL_BRANCH,
-      message: 'Branch status updates are not supported by the current API yet.',
-    };
+    try {
+      const isActive = status === 'active';
+      const res = await httpClient.put<any>(`/api/v1/branches/${shopId}`, {
+        is_active: isActive,
+      });
+      const updated = (res as any)?.data || res;
+      window.dispatchEvent(new CustomEvent('branch-updated'));
+      return {
+        success: true,
+        data: mapBranchToShopData(updated),
+        message: `Shop status changed to ${status}`,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        data: CANONICAL_BRANCH,
+        message: err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to update branch status',
+      };
+    }
   },
 
   deleteShop: async (shopId: string): Promise<{ success: boolean; message: string }> => {
-    return {
-      success: false,
-      message: 'Branch deletion is not supported by the current API.',
-    };
+    try {
+      const res = await httpClient.delete<any>(`/api/v1/branches/${shopId}`);
+      window.dispatchEvent(new CustomEvent('branch-updated'));
+      return {
+        success: true,
+        message: (res as any)?.message || 'Branch removed successfully',
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to remove branch',
+      };
+    }
   },
 };

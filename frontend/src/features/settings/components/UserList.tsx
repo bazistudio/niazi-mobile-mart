@@ -21,6 +21,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { tauriClient } from '@/lib/tauri/tauriClient';
 
 interface UserListProps {
   staff: StaffUser[];
@@ -33,6 +34,17 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
   const [openActionsId, setOpenActionsId] = useState<string | null>(null);
   const [changePinStaff, setChangePinStaff] = useState<StaffUser | null>(null);
   const [deleteTargetStaff, setDeleteTargetStaff] = useState<StaffUser | null>(null);
+  const [branchMap, setBranchMap] = useState<Record<string, string>>({});
+
+  React.useEffect(() => {
+    tauriClient.branchList().then((list) => {
+      const map: Record<string, string> = {};
+      for (const b of list) {
+        map[b.id] = b.name;
+      }
+      setBranchMap(map);
+    }).catch(() => {});
+  }, []);
 
   const updateStatus = useUpdateStaffStatus();
   const changeRole = useChangeStaffRole();
@@ -179,10 +191,12 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
                   <td className="px-4 py-3 whitespace-nowrap">
                     {user.branchId ? (
                       <span className="text-sm text-text-primary">
-                        {user.branchName || user.branchId}
+                        {user.branchName || branchMap[user.branchId] || user.branchId}
                       </span>
                     ) : (
-                      <span className="text-xs text-text-muted italic">Main Branch</span>
+                      <span className="text-xs text-text-muted italic">
+                        {user.roleId === 'admin' ? 'Organization-wide' : 'Unassigned'}
+                      </span>
                     )}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap text-center">
