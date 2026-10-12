@@ -26,7 +26,7 @@ export const StockWidget = () => {
   const { filtered, stats } = useInventoryData();
 
   useEffect(() => {
-    fetchProducts();
+    fetchProducts({ scope: 'branch' });
   }, [fetchProducts]);
 
   const alertProducts = products.filter(

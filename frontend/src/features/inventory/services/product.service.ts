@@ -22,7 +22,8 @@ function getActiveBranchId(): string | null {
 
 export const productService = {
   getProducts: async (params: PaginationParams): Promise<{ products: InventoryProduct[], total: number }> => {
-    const branchId = getActiveBranchId();
+    const isOrgScope = params.scope === 'organization';
+    const branchId = isOrgScope ? null : getActiveBranchId();
 
     const [items, stockMap, categories, brands, companies, colors, qualities] = await Promise.all([
       tauriClient.productList({
@@ -33,9 +34,9 @@ export const productService = {
         color_id: params.colorId,
         quality_id: params.qualityId,
         is_active: true,
-        branch_id: branchId,
+        branch_id: branchId || undefined,
       }).catch(() => []),
-      branchId ? tauriClient.inventoryGetStockMap(branchId).catch(() => ({}) as Record<string, number>) : Promise.resolve({} as Record<string, number>),
+      (!isOrgScope && branchId) ? tauriClient.inventoryGetStockMap(branchId).catch(() => ({}) as Record<string, number>) : Promise.resolve({} as Record<string, number>),
       categoryService.getCategories().catch(() => []),
       brandService.getBrands().catch(() => []),
       companyService.getCompanies().catch(() => []),
@@ -51,7 +52,7 @@ export const productService = {
 
     const mapped: InventoryProduct[] = items.map((p) => {
       const minStock = p.low_stock_threshold ?? 5;
-      const currentStock = stockMap[p.id] ?? 0;
+      const currentStock = isOrgScope ? (p.quantity ?? 0) : (stockMap[p.id] ?? 0);
 
       let status = StockStatus.HEALTHY;
       if (currentStock === 0) {

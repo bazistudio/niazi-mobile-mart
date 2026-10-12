@@ -57,7 +57,10 @@ export function OrganizationProductsPage() {
   const reqStatus = useInventoryStore((state) => state.status);
 
   useEffect(() => {
-    fetchProducts();
+    fetchProducts({ scope: 'organization' });
+    return () => {
+      useInventoryStore.getState().setScope('branch');
+    };
   }, [fetchProducts]);
 
   // Load branch list and fetch stock maps for cross-branch distribution matrix
@@ -177,7 +180,7 @@ export function OrganizationProductsPage() {
       setIntakeQuantity(1);
       setIntakeReason('');
       setIntakeUnitCost(0);
-      await fetchProducts();
+      await fetchProducts({ scope: 'organization' });
     } catch (err: any) {
       toast.error(err?.message || 'Failed to complete stock intake.');
     } finally {
@@ -335,7 +338,7 @@ export function OrganizationProductsPage() {
                     <th className="px-4 py-3">Category</th>
                     <th className="px-4 py-3">Purchase Cost</th>
                     <th className="px-4 py-3">Sale Price</th>
-                    <th className="px-4 py-3">Main Branch Stock</th>
+                    <th className="px-4 py-3">Total Org Stock</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
@@ -590,7 +593,7 @@ export function OrganizationProductsPage() {
                       <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">{p.name}</td>
                       <td className="px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-300">{p.sku || '-'}</td>
                       {branches.map((b) => {
-                        const count = branchStockMaps[b.id]?.[p.id] ?? (b.code === 'MAIN' ? p.stock : 0);
+                        const count = branchStockMaps[b.id]?.[p.id] ?? 0;
                         totalOrgStock += count;
                         return (
                           <td key={b.id} className="px-4 py-3 text-center font-bold tabular-nums text-gray-800 dark:text-gray-200">

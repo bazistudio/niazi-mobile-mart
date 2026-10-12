@@ -27,11 +27,13 @@ interface InventoryState {
   error: string | null;
   categories: ProductCategory[];
   isCategoriesLoading: boolean;
+  scope: 'branch' | 'organization';
 
   // actions
   setSearch: (term: string) => void;
   setFilter: (filter: InventoryFilterType) => void;
   setSort: (sort: InventorySortConfig) => void;
+  setScope: (scope: 'branch' | 'organization') => void;
   
   // async thunks
   fetchProducts: (params?: Partial<PaginationParams>) => Promise<void>;
@@ -52,6 +54,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
   error: null,
   categories: [],
   isCategoriesLoading: false,
+  scope: 'branch',
 
   setSearch: (term) => set({ searchTerm: term }),
 
@@ -59,16 +62,24 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
 
   setSort: (sort) => set({ sort }),
 
+  setScope: (scope) => set({ scope }),
+
   fetchProducts: async (params) => {
     if (get().status === 'loading') return;
     console.log("[DEBUG] FETCH PRODUCTS CALLED");
     try {
       set({ status: 'loading', error: null });
       
+      const currentScope = params?.scope ?? get().scope ?? 'branch';
+      if (params?.scope && params.scope !== get().scope) {
+        set({ scope: params.scope });
+      }
+
       const requestParams: PaginationParams = {
         page: params?.page || 1,
         limit: params?.limit || DEFAULT_PAGE_SIZE,
         search: params?.search || get().searchTerm,
+        scope: currentScope,
       };
       
       const { products, total } = await inventoryService.getProducts(requestParams);
@@ -95,6 +106,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
         page: 1,
         limit: DEFAULT_PAGE_SIZE,
         search: get().searchTerm,
+        scope: get().scope ?? 'branch',
       };
       const { products, total } = await inventoryService.getProducts(requestParams);
       set({

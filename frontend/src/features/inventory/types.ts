@@ -23,6 +23,7 @@ export interface PaginationParams {
   companyId?: string;
   colorId?: string;
   qualityId?: string;
+  scope?: 'branch' | 'organization';
 }
 
 export enum InventoryAdjustmentType {

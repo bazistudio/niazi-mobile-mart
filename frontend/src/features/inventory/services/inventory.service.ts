@@ -39,6 +39,21 @@ export const inventoryService = {
     };
   },
 
+  getOrganizationProducts: async (params?: Partial<PaginationParams>): Promise<{ products: InventoryProduct[], total: number }> => {
+    return inventoryService.getProducts({
+      page: params?.page || 1,
+      limit: params?.limit || 10,
+      search: params?.search,
+      category: params?.category,
+      categoryId: params?.categoryId,
+      brandId: params?.brandId,
+      companyId: params?.companyId,
+      colorId: params?.colorId,
+      qualityId: params?.qualityId,
+      scope: 'organization',
+    });
+  },
+
   adjustStock: async (productId: string, quantity: number, type: InventoryAdjustmentType, reason?: string): Promise<number> => {
     if (quantity < 0) throw new Error('Quantity cannot be negative');
     

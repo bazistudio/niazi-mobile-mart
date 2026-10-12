@@ -17,19 +17,24 @@ function getActiveBranchId(): string {
 
 export const inventoryApi = {
   getProducts: async (params: PaginationParams): Promise<PaginatedProductsDTO> => {
-    const store = useOrganizationStore.getState();
-    const branchId = store.activeShop?._id || store.activeShop?.id || store.activeShopId;
+    const isOrgScope = params.scope === 'organization';
+    let branchId: string | undefined = undefined;
+
+    if (!isOrgScope) {
+      const store = useOrganizationStore.getState();
+      branchId = store.activeShop?._id || store.activeShop?.id || store.activeShopId || undefined;
+    }
 
     const items = await tauriClient.productList({
       search: params.search,
       category_id: params.category && params.category !== 'all' ? params.category : undefined,
       is_active: true,
-      branch_id: branchId || undefined,
+      branch_id: branchId,
     });
 
-    // Obtain active branch stock map if branch context is available
+    // Obtain active branch stock map only if in branch-scoped mode
     let stockMap: Record<string, number> = {};
-    if (branchId) {
+    if (!isOrgScope && branchId) {
       try {
         stockMap = await tauriClient.inventoryGetStockMap(branchId);
       } catch (err) {
@@ -37,25 +42,31 @@ export const inventoryApi = {
       }
     }
 
-    const products: ProductDTO[] = items.map((p) => ({
-      _id: p.id,
-      name: p.name,
-      sku: p.sku,
-      barcode: p.barcode || undefined,
-      category: p.category_id,
-      categoryId: { _id: p.category_id, name: 'Catalog' },
-      price: p.sale_price,
-      purchasePrice: p.purchase_price,
-      averageCost: p.average_cost,
-      lastPurchaseCost: p.purchase_price,
-      quantity: stockMap[p.id] ?? 0,
-      lowStockThreshold: p.low_stock_threshold,
-      description: p.description || undefined,
-      status: 'active',
-      createdAt: p.created_at,
-      updatedAt: p.updated_at,
-      isLowStock: (p.quantity || 0) <= (p.low_stock_threshold || 5),
-    }));
+    const products: ProductDTO[] = items.map((p) => {
+      const quantity = isOrgScope
+        ? (p.quantity ?? 0)
+        : (branchId ? (stockMap[p.id] ?? 0) : (p.quantity ?? 0));
+
+      return {
+        _id: p.id,
+        name: p.name,
+        sku: p.sku,
+        barcode: p.barcode || undefined,
+        category: p.category_id,
+        categoryId: { _id: p.category_id, name: 'Catalog' },
+        price: p.sale_price,
+        purchasePrice: p.purchase_price,
+        averageCost: p.average_cost,
+        lastPurchaseCost: p.purchase_price,
+        quantity,
+        lowStockThreshold: p.low_stock_threshold,
+        description: p.description || undefined,
+        status: 'active',
+        createdAt: p.created_at,
+        updatedAt: p.updated_at,
+        isLowStock: quantity <= (p.low_stock_threshold || 5),
+      };
+    });
 
     return {
       products,
@@ -66,6 +77,21 @@ export const inventoryApi = {
         limit: params.limit || 10,
       },
     };
+  },
+
+  getOrganizationProducts: async (params?: Partial<PaginationParams>): Promise<PaginatedProductsDTO> => {
+    return inventoryApi.getProducts({
+      page: params?.page || 1,
+      limit: params?.limit || 10,
+      search: params?.search,
+      category: params?.category,
+      categoryId: params?.categoryId,
+      brandId: params?.brandId,
+      companyId: params?.companyId,
+      colorId: params?.colorId,
+      qualityId: params?.qualityId,
+      scope: 'organization',
+    });
   },
 
   adjustStock: async (
