@@ -29,7 +29,7 @@ import { AuthRepo, defaultLimitsForRole } from '../repositories/auth.repo';
 import { UsersRepo } from '../repositories/users.repo';
 import { AuthService, AuthServiceError } from '../services/auth.service';
 import { hashArgon2 } from '../services/argon2.service';
-import { authMiddleware } from '../auth';
+import { authMiddleware, buildAuthMiddleware } from '../auth';
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -93,7 +93,7 @@ export function buildAuthRouter(pool: Pool): Router {
   // GET /me
   // -------------------------------------------------------------------------
 
-  router.get('/me', authMiddleware, async (req: Request, res: Response): Promise<void> => {
+  router.get('/me', buildAuthMiddleware(pool), async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity;
     if (!identity) {
       res.status(401).json({ error: 'Not authenticated' });

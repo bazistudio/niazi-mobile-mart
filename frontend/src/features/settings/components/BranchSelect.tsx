@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { tauriClient, isTauriEnvironment } from '@/lib/tauri/tauriClient';
+import { shopApi } from '@/services/shop.api';
 
 interface BranchOption {
   id: string;

@@ -13,7 +13,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { authMiddleware, isBranchAdmin, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
+import { buildAuthMiddleware, isBranchAdmin, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
 import {
   listRepairJobs,
   getRepairJobById,
@@ -27,9 +27,10 @@ import {
 
 export function buildRepairRouter(pool: Pool): Router {
   const router = Router();
+  router.use(buildAuthMiddleware(pool));
 
   // ── GET /api/repairs — list with optional filters ──────────────────────────
-  router.get('/', authMiddleware, async (req: Request, res: Response) => {
+  router.get('/', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       const callerIsOrgAdmin = isOrgAdmin(identity);
@@ -67,7 +68,7 @@ export function buildRepairRouter(pool: Pool): Router {
   });
 
   // ── GET /api/repairs/:id — get by id or job_id ────────────────────────────
-  router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
+  router.get('/:id', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       const id = req.params['id'] as string;
@@ -90,7 +91,7 @@ export function buildRepairRouter(pool: Pool): Router {
   });
 
   // ── POST /api/repairs — create new repair job (branch admin) ────────────
-  router.post('/', authMiddleware, async (req: Request, res: Response) => {
+  router.post('/', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       // F-01: Branch admins (SHOP_ADMIN, MANAGER) and org admins may create repair jobs.
@@ -142,7 +143,7 @@ export function buildRepairRouter(pool: Pool): Router {
   });
 
   // ── PUT /api/repairs/:id/status — update status (branch admin) ──────────
-  router.put('/:id/status', authMiddleware, async (req: Request, res: Response) => {
+  router.put('/:id/status', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       // F-01: Branch admins may update status; org-only guard removed.
@@ -183,7 +184,7 @@ export function buildRepairRouter(pool: Pool): Router {
   });
 
   // ── POST /api/repairs/:id/parts — add part to job (branch admin) ───────
-  router.post('/:id/parts', authMiddleware, async (req: Request, res: Response) => {
+  router.post('/:id/parts', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       // F-01: Branch admins may add parts; org-only guard removed.
@@ -227,7 +228,7 @@ export function buildRepairRouter(pool: Pool): Router {
   });
 
   // ── POST /api/repairs/:id/payments — add payment (branch admin) ─────────
-  router.post('/:id/payments', authMiddleware, async (req: Request, res: Response) => {
+  router.post('/:id/payments', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       // F-01: Branch admins may take payments; org-only guard removed.

@@ -30,7 +30,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { authMiddleware, isOrgAdmin } from '../auth';
+import { buildAuthMiddleware, isOrgAdmin } from '../auth';
 import { BranchService, BranchServiceError } from '../services/branch.service';
 
 // ---------------------------------------------------------------------------
@@ -45,8 +45,8 @@ export function buildBranchRouter(pool: Pool): Router {
   const router = Router();
   const service = new BranchService(pool);
 
-  // All branch routes require authentication
-  router.use(authMiddleware);
+  // All branch routes require authentication + active-account enforcement
+  router.use(buildAuthMiddleware(pool));
 
   // -------------------------------------------------------------------------
   // GET / — List all branches

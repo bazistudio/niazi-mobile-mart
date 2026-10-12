@@ -27,11 +27,13 @@ export const ShopSwitcher = () => {
     setActiveShop,
   } = useOrganizationStore();
 
+  // Phase 13 (M-01a): ADMIN and MULTI_ADMIN are org-level only when they have NO branch
+  // assignment. A branch-assigned ADMIN or MULTI_ADMIN is a Branch Admin, not an Org Admin.
   const isOrgAdmin =
     user?.role === 'OWNER' ||
     user?.role === 'SUPER_ADMIN' ||
-    user?.role === 'MULTI_ADMIN' ||
-    user?.role === 'ADMIN';
+    (user?.role === 'MULTI_ADMIN' && !user?.branch_id) ||
+    (user?.role === 'ADMIN' && !user?.branch_id);
 
   // Fetch branches on mount or when auth/admin status changes
   const loadBranches = useCallback(async () => {
@@ -89,7 +91,7 @@ export const ShopSwitcher = () => {
 
       // Ensure activeShop in Zustand store is initialized from accessible branches
       if (accessible.length > 0) {
-        let matchedBranch = accessible.find((b) => b.id === currentShopId);
+        let matchedBranch = accessible.find((b) => b.id === activeShopId); // Phase 13 (M-01b): was currentShopId (undefined)
         if (!isOrgAdmin && userBranchId) {
           // Strictly lock non-org admin to their assigned branch
           matchedBranch = accessible.find((b) => b.id === userBranchId) || accessible[0];

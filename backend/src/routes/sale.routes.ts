@@ -15,7 +15,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity } from '../auth';
+import { buildAuthMiddleware, authorizePermission, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity } from '../auth';
 import {
   completeSale,
   getSaleById,
@@ -62,7 +62,7 @@ function sendError(_req: Request, res: Response, err: unknown): void {
 export function createSaleRouter(pool: Pool): Router {
   const router = express.Router();
 
-  router.use(authMiddleware);
+  router.use(buildAuthMiddleware(pool));
 
   // ── POST /api/sales ──────────────────────────────────────────────────────
   router.post('/', async (req: Request, res: Response): Promise<void> => {

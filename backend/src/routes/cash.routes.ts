@@ -5,7 +5,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, canAccessBranch, RequestIdentity, NIAZI_ORGANIZATION_ID } from '../auth';
+import { buildAuthMiddleware, authorizePermission, canAccessBranch, RequestIdentity, NIAZI_ORGANIZATION_ID } from '../auth';
 import {
   closeCashSession,
   getCurrentCashSession,
@@ -48,7 +48,7 @@ function sendError(_req: Request, res: Response, err: unknown): void {
 export function createCashRouter(pool: Pool): Router {
   const router = express.Router();
 
-  router.use(authMiddleware);
+  router.use(buildAuthMiddleware(pool));
 
   // ── GET /api/cash/sessions/current ────────────────────────────────────────
   router.get('/sessions/current', async (req: Request, res: Response): Promise<void> => {

@@ -33,7 +33,7 @@ import { Pool } from 'pg';
 import { UsersRepo } from '../repositories/users.repo';
 import { AuthRepo } from '../repositories/auth.repo';
 import { hashArgon2 } from '../services/argon2.service';
-import { authMiddleware, isAdmin, isOrgAdmin as authIsOrgAdmin } from '../auth';
+import { buildAuthMiddleware, authMiddleware, isAdmin, isOrgAdmin as authIsOrgAdmin } from '../auth';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -82,8 +82,10 @@ export function buildUsersRouter(pool: Pool): Router {
   const usersRepo = new UsersRepo(pool);
   const authRepo = new AuthRepo(pool);
 
-  // All routes require authentication
-  router.use(authMiddleware);
+  // All routes require authentication + active-account enforcement.
+  // buildAuthMiddleware verifies the JWT and then checks PostgreSQL to confirm
+  // the account is still ACTIVE — fail-CLOSED (503) on DB error.
+  router.use(buildAuthMiddleware(pool));
 
   // -------------------------------------------------------------------------
   // GET /
@@ -245,10 +247,19 @@ export function buildUsersRouter(pool: Pool): Router {
 
   // -------------------------------------------------------------------------
   // GET /:id
+  // Phase 13 (H-01): Enforce branch-scope on single-user lookup.
+  //   - Org-admin: unrestricted.
+  //   - Caller reading own record: allowed.
+  //   - Branch-scoped user: may only read users in the same branch.
   // -------------------------------------------------------------------------
 
   router.get('/:id', async (req: Request, res: Response): Promise<void> => {
     const { id } = req.params as { id: string };
+    const identity = req.identity;
+    if (!identity) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
 
     try {
       const user = await usersRepo.findById(id);
@@ -256,6 +267,16 @@ export function buildUsersRouter(pool: Pool): Router {
         res.status(404).json({ error: 'User not found' });
         return;
       }
+
+      // Org-admin may read any record; a caller may always read their own record.
+      if (!isOrgAdmin(req) && id !== identity.user_id) {
+        // Branch-scoped: only allow reading users in the same branch.
+        if (!identity.branch_id || user.branch_id !== identity.branch_id) {
+          res.status(403).json({ error: 'Forbidden: Cannot read users outside your assigned branch' });
+          return;
+        }
+      }
+
       res.status(200).json(user);
     } catch (err) {
       console.error('[users/get] Unexpected error:', err);
@@ -354,10 +375,12 @@ export function buildUsersRouter(pool: Pool): Router {
 
   // -------------------------------------------------------------------------
   // DELETE /:id
-  // Phase 4: Hard-delete user (ADMIN only). Safety-checked via hardDeleteUserAdmin:
-  //   - Cannot delete ADMIN/SUPER_ADMIN/OWNER roles
-  //   - Cannot self-delete
-  //   - All FK constraints are ON DELETE SET NULL; historical records preserved
+  // Phase 13: Soft-deactivate ACTIVE users instead of hard-deleting.
+  //   - ACTIVE users → set status=DISABLED, is_active=false (preserves history).
+  //   - PENDING/REJECTED users → still hard-deleted (no business records to preserve).
+  //   - Cannot deactivate ADMIN/SUPER_ADMIN/OWNER/MULTI_ADMIN roles.
+  //   - Cannot self-deactivate.
+  //   - Branch-scope enforced for non-org-admin callers.
   // -------------------------------------------------------------------------
 
   router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
@@ -367,46 +390,68 @@ export function buildUsersRouter(pool: Pool): Router {
     const identity = req.identity!;
     const isOrg = isOrgAdmin(req);
 
-    // Prevent self-deletion (belt-and-suspenders: hardDeleteUserAdmin also checks)
     if (id === identity.user_id) {
-      res.status(400).json({ error: 'Cannot delete your own account' });
+      res.status(400).json({ error: 'Cannot deactivate your own account' });
       return;
     }
 
     try {
-      if (!isOrg) {
-        const target = await usersRepo.findById(id);
-        if (!target) {
-          res.status(404).json({ error: 'User not found' });
-          return;
-        }
-        if (!identity.branch_id || target.branch_id !== identity.branch_id) {
-          res.status(403).json({ error: 'Forbidden: Cannot delete users outside your assigned branch' });
-          return;
-        }
-        const targetRole = String(target.role || '').toUpperCase();
-        if (targetRole === 'ADMIN' || targetRole === 'SUPER_ADMIN' || targetRole === 'OWNER' || targetRole === 'MULTI_ADMIN') {
-          res.status(403).json({ error: 'Forbidden: Cannot delete administrator accounts' });
-          return;
-        }
-      }
-
-      const result = await usersRepo.hardDeleteUserAdmin(id, identity.user_id);
-
-      if (!result.deleted) {
-        if (result.reason === 'not_found') {
-          res.status(404).json({ error: 'User not found' });
-        } else if (result.reason === 'self_delete') {
-          res.status(400).json({ error: 'Cannot delete your own account' });
-        } else if (result.reason === 'is_admin') {
-          res.status(409).json({ error: 'Cannot delete an administrator account' });
-        } else {
-          res.status(409).json({ error: result.reason ?? 'Delete not allowed' });
-        }
+      const target = await usersRepo.findById(id);
+      if (!target) {
+        res.status(404).json({ error: 'User not found' });
         return;
       }
 
-      res.status(200).json({ message: 'User deleted successfully' });
+      if (!isOrg) {
+        if (!identity.branch_id || target.branch_id !== identity.branch_id) {
+          res.status(403).json({ error: 'Forbidden: Cannot deactivate users outside your assigned branch' });
+          return;
+        }
+      }
+
+      const targetRole = String(target.role || '').toUpperCase();
+      if (targetRole === 'ADMIN' || targetRole === 'SUPER_ADMIN' || targetRole === 'OWNER' || targetRole === 'MULTI_ADMIN') {
+        res.status(409).json({ error: 'Cannot deactivate an administrator account. Use the admin console to manage organization administrators.' });
+        return;
+      }
+
+      const targetStatus = String(target.status || '').toUpperCase();
+
+      if (targetStatus === 'ACTIVE') {
+        // Soft-deactivate: preserve the user row and all historical attribution.
+        const deactivated = await usersRepo.deactivateUser(id);
+        if (!deactivated) {
+          res.status(409).json({ error: 'User could not be deactivated. It may already be inactive.' });
+          return;
+        }
+        res.status(200).json({ message: 'User deactivated successfully. Historical records remain attributed to this account.', user: deactivated });
+      } else if (targetStatus === 'DISABLED') {
+        // Phase 13 Fix 2: Already-deactivated accounts must never fall through to
+        // hardDeleteUserAdmin(). Return 409 to indicate the account is already inactive.
+        // Historical attribution is fully preserved — no row is removed.
+        res.status(409).json({
+          error: 'Account is already deactivated.',
+          message: 'This account is already inactive. Historical records remain attributed to this account.',
+          user: target,
+        });
+      } else {
+        // PENDING or REJECTED users have no confirmed business records — hard-delete is safe.
+        // DISABLED status is handled above and never reaches this branch.
+        const result = await usersRepo.hardDeleteUserAdmin(id, identity.user_id);
+        if (!result.deleted) {
+          if (result.reason === 'not_found') {
+            res.status(404).json({ error: 'User not found' });
+          } else if (result.reason === 'self_delete') {
+            res.status(400).json({ error: 'Cannot delete your own account' });
+          } else if (result.reason === 'is_admin') {
+            res.status(409).json({ error: 'Cannot delete an administrator account' });
+          } else {
+            res.status(409).json({ error: result.reason ?? 'Delete not allowed' });
+          }
+          return;
+        }
+        res.status(200).json({ message: 'User removed successfully' });
+      }
     } catch (err) {
       console.error('[users/delete] Unexpected error:', err);
       res.status(500).json({ error: 'Internal server error' });

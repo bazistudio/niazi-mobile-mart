@@ -465,7 +465,7 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
                             ])}
                           </p>
                           <p className="text-xs text-text-muted">
-                            {typeof invoice.customerId === 'object' && invoice.customerId !== null ? invoice.customerId.name : 'Walk-in'}
+                            {invoice.customerName ?? 'Walk-in'}
                           </p>
                         </div>
                         <span className={`text-xs font-semibold px-2 py-0.5 rounded-md border ${

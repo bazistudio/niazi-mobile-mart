@@ -17,7 +17,7 @@ import express, { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, authorizeProductMutation, isAdmin, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
+import { buildAuthMiddleware, authorizePermission, authorizeProductMutation, isAdmin, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
 import {
   createProduct,
   createProductWithInitialStock,
@@ -82,8 +82,8 @@ function validateCreatePrices(salePrice: number, purchasePrice: number): string 
 export function createProductRouter(pool: Pool): Router {
   const router = express.Router();
 
-  // Apply JWT authentication middleware to all product routes
-  router.use(authMiddleware);
+  // Apply authentication + active-account middleware to all product routes
+  router.use(buildAuthMiddleware(pool));
 
   // ── GET /api/products ──────────────────────────────────────────────────────
   // Auth: products page permission

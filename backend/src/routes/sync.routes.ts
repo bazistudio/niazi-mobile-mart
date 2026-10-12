@@ -35,7 +35,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
-import { authMiddleware, RequestIdentity, NIAZI_ORGANIZATION_ID } from '../auth';
+import { buildAuthMiddleware, RequestIdentity, NIAZI_ORGANIZATION_ID } from '../auth';
 import {
   createProductWithInitialStock,
   updateProduct,
@@ -561,8 +561,8 @@ async function writeSyncAudit(
 export function buildSyncRouter(pool: Pool): Router {
   const router = Router();
 
-  // All sync routes require valid Bearer JWT
-  router.use(authMiddleware);
+  // All sync routes require valid Bearer JWT + active-account enforcement
+  router.use(buildAuthMiddleware(pool));
 
   // -------------------------------------------------------------------------
   // POST /api/v1/sync/push

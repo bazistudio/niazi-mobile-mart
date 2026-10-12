@@ -9,11 +9,11 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 import { globalSearch } from '../repositories/search.repo';
 import { sendError } from './product.routes';
-import { authMiddleware, isOrgAdmin, RequestIdentity } from '../auth';
+import { buildAuthMiddleware, isOrgAdmin, RequestIdentity } from '../auth';
 
 export function createSearchRouter(pool: Pool): Router {
   const router = Router();
-  router.use(authMiddleware);
+  router.use(buildAuthMiddleware(pool));
 
   router.get('/', async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;

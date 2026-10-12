@@ -26,6 +26,7 @@ export interface GlobalSearchItem {
   phone?: string;
   invoiceNumber?: string;
   totalAmount?: number;
+  customerName?: string;
   match_type?: string;
   matched_value?: string;
 }
@@ -220,6 +221,7 @@ export async function globalSearch(
           type: 'invoice',
           name: r.invoice_number,
           invoiceNumber: r.invoice_number,
+          customerName: r.customer_name_snapshot ?? undefined,
           totalAmount: Number(r.total_amount || 0),
         });
       }

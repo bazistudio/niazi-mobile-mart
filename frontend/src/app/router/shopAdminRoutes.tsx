@@ -42,7 +42,7 @@ export const shopAdminCoreRoutes = (
     <Route
       path="pos"
       element={
-        <PermissionGuard requiredPermission={PERMISSIONS.POS_ACCESS} fallbackPath="/dashboard/shop-admin">
+        <PermissionGuard requiredPermission={PERMISSIONS.POS_USE} fallbackPath="/dashboard/shop-admin">
           <POSPage />
         </PermissionGuard>
       }
@@ -110,7 +110,7 @@ export const shopAdminCoreRoutes = (
     <Route
       path="customers"
       element={
-        <PermissionGuard requiredPermission={PERMISSIONS.CUSTOMERS_VIEW} fallbackPath="/dashboard/shop-admin">
+        <PermissionGuard requiredPermission={PERMISSIONS.PARTIES_VIEW} fallbackPath="/dashboard/shop-admin">
           <CustomersPage />
         </PermissionGuard>
       }
@@ -118,7 +118,7 @@ export const shopAdminCoreRoutes = (
     <Route
       path="customers/:id"
       element={
-        <PermissionGuard requiredPermission={PERMISSIONS.CUSTOMERS_VIEW} fallbackPath="/dashboard/shop-admin">
+        <PermissionGuard requiredPermission={PERMISSIONS.PARTIES_VIEW} fallbackPath="/dashboard/shop-admin">
           <CustomerDetailPage />
         </PermissionGuard>
       }
@@ -175,7 +175,7 @@ export const shopAdminCoreRoutes = (
     <Route
       path="cash"
       element={
-        <PermissionGuard requiredPermission={PERMISSIONS.CASH_VIEW} fallbackPath="/dashboard/shop-admin">
+        <PermissionGuard requiredPermission={PERMISSIONS.FINANCE_VIEW} fallbackPath="/dashboard/shop-admin">
           <CashManagementPage />
         </PermissionGuard>
       }
@@ -208,7 +208,7 @@ export const shopAdminCoreRoutes = (
     <Route
       path="audit-logs"
       element={
-        <PermissionGuard requiredPermission={PERMISSIONS.AUDIT_VIEW} fallbackPath="/dashboard/shop-admin">
+        <PermissionGuard requiredPermission={PERMISSIONS.REPORTS_VIEW} fallbackPath="/dashboard/shop-admin">
           <AuditPage />
         </PermissionGuard>
       }

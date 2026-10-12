@@ -1272,13 +1272,20 @@ export const tauriClient = {
   async organizationGetDashboardStats(): Promise<OrganizationDashboardStats> {
     const products = await httpFetch<any[]>('/api/products').catch(() => []);
     const users = await httpFetch<any[]>('/api/users').catch(() => []);
+    const branches = await httpFetch<Branch[]>('/api/v1/branches');
     const lowStockCount = products.filter((p) => (p.quantity || 0) <= (p.low_stock_threshold || 5)).length;
     const activeStaffCount = users.filter((u) => u.status === 'active' || u.is_active).length;
+    const categoryCount = new Set(
+      products.map((p: any) => p.category_id).filter((id: any) => id != null)
+    ).size;
+    const activeBranchCount = branches.filter((b) => b.is_active === true).length;
 
     return {
-      total_products: products.length,
-      active_staff: activeStaffCount || 1,
-      low_stock_items: lowStockCount,
+      product_count: products.length,
+      category_count: categoryCount,
+      active_staff_count: activeStaffCount || 1,
+      low_stock_count: lowStockCount,
+      active_branch_count: activeBranchCount,
     };
   },
 

@@ -87,7 +87,7 @@ import {
   ReceiveStockDto,
 } from './repositories/product.repo';
 import { transferStock, StockTransferRepoError } from './repositories/stock_transfer.repo';
-import { authMiddleware, isAdmin, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity } from './auth';
+import { authMiddleware, buildAuthMiddleware, buildActiveUserMiddleware, isAdmin, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity } from './auth';
 
 // --- (Main server function continues) ---
 
@@ -179,6 +179,12 @@ async function main(): Promise<void> {
   app.use(express.json());
 
   const pool = getPool();
+
+  // NOTE: Active-account enforcement is now integrated into buildAuthMiddleware(pool),
+  // which is used by each router via router.use(buildAuthMiddleware(pool)).
+  // The former global app.use(buildActiveUserMiddleware(pool)) was ineffective because
+  // it ran before req.identity was set by per-router authMiddleware.
+  // Do NOT restore a global active-user middleware here.
 
   // Run PostgreSQL database migrations sequentially on startup
   try {

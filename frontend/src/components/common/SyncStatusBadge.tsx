@@ -22,8 +22,7 @@ export const SyncStatusBadge: React.FC = () => {
   const isOrgAdmin =
     user?.role?.toUpperCase() === 'ADMIN' ||
     user?.role?.toUpperCase() === 'OWNER' ||
-    user?.role?.toUpperCase() === 'SUPER_ADMIN' ||
-    user?.access_profile?.allowed_pages?.includes('*');
+    user?.role?.toUpperCase() === 'SUPER_ADMIN';
 
   const wasSyncingRef = useRef(false);
 

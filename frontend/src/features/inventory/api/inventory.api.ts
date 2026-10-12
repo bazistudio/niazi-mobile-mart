@@ -58,7 +58,6 @@ export const inventoryApi = {
     }));
 
     return {
-      success: true,
       products,
       pagination: {
         total: products.length,
@@ -102,17 +101,6 @@ export const inventoryApi = {
       success: true,
       message: 'Stock adjusted successfully',
       newStock,
-      adjustment: {
-        _id: `adj-${Date.now()}`,
-        productId,
-        type,
-        quantity,
-        previousStock: 0,
-        newStock,
-        reason,
-        adjustedBy: 'admin',
-        createdAt: new Date().toISOString(),
-      },
     };
   },
 
@@ -280,6 +268,7 @@ export const inventoryApi = {
       lowStockThreshold: updated.low_stock_threshold,
       description: updated.description || undefined,
       status: 'active',
+      isLowStock: currentStock <= (updated.low_stock_threshold || 5),
       createdAt: updated.created_at,
       updatedAt: updated.updated_at,
     };
@@ -305,6 +294,7 @@ export const inventoryApi = {
   checkDuplicate: async (_params: { sku?: string; barcode?: string; name?: string }): Promise<CheckDuplicateResponseDTO> => {
     return {
       exists: false,
+      matchType: 'none',
     };
   }
 };

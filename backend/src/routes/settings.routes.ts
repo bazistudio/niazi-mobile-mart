@@ -4,7 +4,7 @@
 
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { authMiddleware, isAdmin, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
+import { buildAuthMiddleware, isAdmin, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
 import {
   getInvoicePrinterSettings,
   saveInvoicePrinterSettings,
@@ -14,7 +14,7 @@ import {
 export function createSettingsRouter(pool: Pool): Router {
   const router = express.Router();
 
-  router.use(authMiddleware);
+  router.use(buildAuthMiddleware(pool));
 
   // GET /api/settings/invoice-printer
   router.get('/invoice-printer', async (req: Request, res: Response): Promise<void> => {

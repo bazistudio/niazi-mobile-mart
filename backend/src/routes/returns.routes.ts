@@ -5,7 +5,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity } from '../auth';
+import { buildAuthMiddleware, authorizePermission, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity } from '../auth';
 import {
   createSalesReturn,
   getSaleReturnableInfo,
@@ -44,7 +44,7 @@ function sendError(_req: Request, res: Response, err: unknown): void {
 export function createReturnsRouter(pool: Pool): Router {
   const router = express.Router();
 
-  router.use(authMiddleware);
+  router.use(buildAuthMiddleware(pool));
 
   // ── GET /api/returns/sale/:saleId/returnable ──────────────────────────────
   router.get('/sale/:saleId/returnable', async (req: Request, res: Response): Promise<void> => {

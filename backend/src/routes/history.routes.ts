@@ -6,7 +6,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, isOrgAdmin, RequestIdentity } from '../auth';
+import { buildAuthMiddleware, authorizePermission, isOrgAdmin, RequestIdentity } from '../auth';
 import {
   getHistoryStats,
   listHistoryItems,
@@ -44,7 +44,7 @@ function sendError(_req: Request, res: Response, err: unknown): void {
 export function createHistoryRouter(pool: Pool): Router {
   const router = express.Router();
 
-  router.use(authMiddleware);
+  router.use(buildAuthMiddleware(pool));
 
   // ── GET /api/history ──────────────────────────────────────────────────────
   router.get('/', async (req: Request, res: Response): Promise<void> => {

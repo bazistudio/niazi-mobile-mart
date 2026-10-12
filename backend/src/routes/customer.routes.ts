@@ -20,7 +20,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, RequestIdentity } from '../auth';
+import { buildAuthMiddleware, authorizePermission, RequestIdentity } from '../auth';
 import {
   CustomerRepoError,
   CustomerFilter,
@@ -87,8 +87,8 @@ function sendError(_req: Request, res: Response, err: unknown): void {
 export function createCustomerRouter(pool: Pool): Router {
   const router = express.Router();
 
-  // Apply JWT authentication middleware to all customer routes
-  router.use(authMiddleware);
+  // Apply authentication + active-account middleware to all customer routes
+  router.use(buildAuthMiddleware(pool));
 
   // ── GET /api/customers ─────────────────────────────────────────────────────
   // Mirrors list_customers_handler in server.rs.
@@ -222,7 +222,7 @@ export function createCustomerRouter(pool: Pool): Router {
 export function createCustomerV1Router(pool: Pool): Router {
   const router = express.Router();
 
-  router.use(authMiddleware);
+  router.use(buildAuthMiddleware(pool));
 
   // ── GET /api/v1/customers/:id ─────────────────────────────────────────────
   // Mirrors get_customer_detail_handler in server.rs.

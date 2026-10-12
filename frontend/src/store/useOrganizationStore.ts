@@ -11,9 +11,11 @@ export interface Organization {
 
 export interface Shop {
   _id: string;
+  id?: string;
   name: string;
   organizationId: string;
   status: string;
+  address?: string;
 }
 
 export interface ShopAccess {

@@ -25,6 +25,7 @@ export interface GlobalSearchResultItem {
   matched_compatible_model?: string;
   orderNumber?: string;
   customerId?: string;
+  customerName?: string;
   status?: string;
 }
 

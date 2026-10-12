@@ -5,7 +5,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, isBranchAdmin, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
+import { buildAuthMiddleware, authorizePermission, isBranchAdmin, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
 import { getProfitSummary, getDashboardProfitSummary, ProfitRepoError } from '../repositories/profit.repo';
 
 function isDbConnectionError(err: unknown): boolean {
@@ -38,7 +38,7 @@ function sendError(_req: Request, res: Response, err: unknown): void {
 export function createReportsRouter(pool: Pool): Router {
   const router = express.Router();
 
-  router.use(authMiddleware);
+  router.use(buildAuthMiddleware(pool));
 
   // ── GET /api/reports/profit ───────────────────────────────────────────────
   router.get(['/profit', '/profit/dashboard'], async (req: Request, res: Response): Promise<void> => {

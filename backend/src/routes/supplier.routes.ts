@@ -29,7 +29,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { authMiddleware, authorizePermission } from '../auth';
+import { buildAuthMiddleware, authorizePermission } from '../auth';
 import { SupplierService, SupplierServiceError } from '../services/supplier.service';
 import type { SupplierFilter, RecordSupplierPaymentDto } from '../services/supplier.service';
 
@@ -46,7 +46,7 @@ export function buildSupplierRouter(pool: Pool): Router {
   const service = new SupplierService(pool);
 
   // All supplier routes require authentication
-  router.use(authMiddleware);
+  router.use(buildAuthMiddleware(pool));
 
   // Authorization helper — mirrors authorize_permission(Some("suppliers"), None)
   function requireSuppliersPermission(req: Request, res: Response): boolean {

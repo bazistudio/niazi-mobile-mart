@@ -38,7 +38,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { authMiddleware, authorizePermission, isOrgAdmin } from '../auth';
+import { buildAuthMiddleware, authorizePermission, isOrgAdmin } from '../auth';
 import { ExpenseService, ExpenseServiceError } from '../services/expense.service';
 import type { ExpenseFilterDto } from '../services/expense.service';
 
@@ -54,8 +54,8 @@ export function buildExpenseRouter(pool: Pool): Router {
   const router = Router();
   const service = new ExpenseService(pool);
 
-  // All expense routes require authentication
-  router.use(authMiddleware);
+  // All expense routes require authentication + active-account enforcement
+  router.use(buildAuthMiddleware(pool));
 
   // Authorization helpers
 

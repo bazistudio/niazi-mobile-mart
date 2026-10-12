@@ -22,7 +22,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { authMiddleware, isOrgAdmin, RequestIdentity } from '../auth';
+import { buildAuthMiddleware, isOrgAdmin, RequestIdentity } from '../auth';
 
 // ─── Canonical built-in role definitions ─────────────────────────────────────
 
@@ -73,8 +73,8 @@ function buildCanonicalRole(roleId: CanonicalRoleId, orgPermissionGrants: Record
 export function buildRolesRouter(pool: Pool): Router {
   const router = Router();
 
-  // All routes require authentication
-  router.use(authMiddleware);
+  // All routes require authentication + active-account enforcement
+  router.use(buildAuthMiddleware(pool));
 
   // ── GET /  — List all roles (canonical + custom) for the caller's org ────────
   router.get('/', async (req: Request, res: Response): Promise<void> => {
