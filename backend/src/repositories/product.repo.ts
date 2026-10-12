@@ -85,6 +85,7 @@ export interface ProductListFilter {
   quality_id?: string | null;
   color_id?: string | null;
   is_active?: boolean | null;
+  branch_id?: string | null;
 }
 
 // --- Repository Errors ---
@@ -516,20 +517,8 @@ export async function createProduct(
       ]
     );
 
-    // Insert zero-quantity stock guard rows across all active branches so the product
-    // exists with 0 stock in every branch inventory matrix (consistent with migration 024).
-    try {
-      await client.query(
-        `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
-         SELECT $1, b.id, 0, $2
-         FROM branches b
-         WHERE (b.is_active = 1 OR b.is_active::text = 'true')
-         ON CONFLICT (product_id, branch_id) DO NOTHING`,
-        [id, now]
-      );
-    } catch (err) {
-      console.warn(`[createProduct] Guard stock row insertion notice for ${id}:`, err);
-    }
+    // Unassigned branch isolation: We no longer auto-insert 0-stock placeholder rows
+    // across unrelated branches, preserving strict branch boundaries.
 
     await client.query('COMMIT');
     client.release();
@@ -628,15 +617,8 @@ export async function createProductWithInitialStock(
         [id, branchId, qty, now]
       );
 
-      // Backfill zero-quantity stock rows for all other active branches (migration 024 parity)
-      await client.query(
-        `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
-         SELECT $1, b.id, 0, $2
-         FROM branches b
-         WHERE b.id != $3 AND (b.is_active = 1 OR b.is_active::text = 'true')
-         ON CONFLICT (product_id, branch_id) DO NOTHING`,
-        [id, now, branchId]
-      );
+      // Unassigned branch isolation: Other branches only gain stock and visibility
+      // when stock is explicitly transferred to them.
 
       if (qty > 0) {
         // 2. Ensure opening_stock_entries table exists with TEXT entity ID column types
@@ -721,59 +703,87 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
 
   if (filter.search) {
     const term = `%${filter.search}%`;
-    conditions.push(`(name ILIKE $${idx} OR sku ILIKE $${idx} OR barcode ILIKE $${idx})`);
+    conditions.push(`(p.name ILIKE $${idx} OR p.sku ILIKE $${idx} OR p.barcode ILIKE $${idx})`);
     params.push(term);
     idx++;
   }
 
   if (filter.category_id != null) {
-    conditions.push(`${caps.catCol} = $${idx}`);
+    conditions.push(`p.${caps.catCol} = $${idx}`);
     params.push(filter.category_id);
     idx++;
   }
 
   if (filter.brand_id != null) {
-    conditions.push(`brand_id = $${idx}`);
+    conditions.push(`p.brand_id = $${idx}`);
     params.push(filter.brand_id);
     idx++;
   }
 
   if (filter.company_id != null) {
-    conditions.push(`company_id = $${idx}`);
+    conditions.push(`p.company_id = $${idx}`);
     params.push(filter.company_id);
     idx++;
   }
 
   if (filter.quality_id != null) {
-    conditions.push(`quality_id = $${idx}`);
+    conditions.push(`p.quality_id = $${idx}`);
     params.push(filter.quality_id);
     idx++;
   }
 
   if (filter.color_id != null) {
-    conditions.push(`color_id = $${idx}`);
+    conditions.push(`p.color_id = $${idx}`);
     params.push(filter.color_id);
     idx++;
   }
 
   if (filter.is_active !== null && filter.is_active !== undefined) {
     if (filter.is_active) {
-      conditions.push(`(is_active::text = '1' OR is_active::text = 'true')`);
+      conditions.push(`(p.is_active::text = '1' OR p.is_active::text = 'true')`);
     } else {
-      conditions.push(`(is_active::text = '0' OR is_active::text = 'false')`);
+      conditions.push(`(p.is_active::text = '0' OR p.is_active::text = 'false')`);
     }
   } else {
-    conditions.push(`(is_active::text = '1' OR is_active::text = 'true')`);
+    conditions.push(`(p.is_active::text = '1' OR p.is_active::text = 'true')`);
   }
 
   const selectCols = getSelectCols(caps);
 
+  // Branch-scoped visibility vs Shared Organization Catalog
+  if (filter.branch_id != null && filter.branch_id.trim()) {
+    const branchParam = filter.branch_id.trim();
+    params.push(branchParam);
+    const branchIdx = idx++;
+
+    // Assignment & Zero-Stock Rule:
+    // A product is visible to a branch if and only if it currently holds positive stock
+    // OR has historical stock movements (e.g. transfers, receipts, sales) at that branch.
+    // Unassigned products with 0 stock and no movements remain hidden.
+    conditions.push(
+      `(COALESCE(s.quantity, 0) > 0 OR EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.product_id = p.id AND sm.branch_id = $${branchIdx}))`
+    );
+
+    const sql = `
+      SELECT ${selectCols.split(', ').map(c => `p.${c}`).join(', ')},
+             COALESCE(s.quantity, 0)::bigint AS initial_quantity
+      FROM products p
+      LEFT JOIN stock s ON p.id = s.product_id AND s.branch_id = $${branchIdx}
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY p.name ASC
+    `;
+
+    const res = await pool.query(sql, params);
+    return res.rows.map(mapProductRow);
+  }
+
+  // Organization-wide catalog view (all products, total summed stock)
   const sql = `
-    SELECT ${selectCols.split(', ').map(c => c.includes(' AS ') ? `p.${c}` : `p.${c}`).join(', ')},
+    SELECT ${selectCols.split(', ').map(c => `p.${c}`).join(', ')},
            COALESCE(SUM(s.quantity), 0)::bigint AS initial_quantity
     FROM products p
     LEFT JOIN stock s ON p.id = s.product_id
-    WHERE ${conditions.map(c => c.replace(/\b(name|sku|barcode|brand_id|company_id|quality_id|color_id|description|type_id|category_id)\b/g, 'p.$1')).join(' AND ')}
+    WHERE ${conditions.join(' AND ')}
     GROUP BY p.id, p.name, p.normalized_name, p.sku, p.barcode, p.${caps.catCol}, p.brand_id, p.company_id, p.quality_id, p.color_id, p.unit_id, p.purchase_price, p.average_cost, p.sale_price, p.low_stock_threshold, p.is_active, p.description, p.created_at, p.updated_at
     ORDER BY p.name ASC
   `;
@@ -784,9 +794,30 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
 
 // --- Get Product By ID ---
 
-export async function getProductById(pool: Pool, id: string): Promise<Product | null> {
+export async function getProductById(
+  pool: Pool,
+  id: string,
+  branchId?: string | null
+): Promise<Product | null> {
   const caps = await getSchemaCaps(pool);
   const selectCols = getSelectCols(caps);
+
+  if (branchId != null && branchId.trim()) {
+    const res = await pool.query(
+      `SELECT ${selectCols.split(', ').map(c => c.includes(' AS ') ? `p.${c}` : `p.${c}`).join(', ')},
+              COALESCE(s.quantity, 0)::bigint AS initial_quantity
+       FROM products p
+       LEFT JOIN stock s ON p.id = s.product_id AND s.branch_id = $2
+       WHERE p.id = $1
+         AND (COALESCE(s.quantity, 0) > 0 OR EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.product_id = p.id AND sm.branch_id = $2))`,
+      [id, branchId.trim()]
+    );
+    if (res.rows.length === 0) {
+      return null;
+    }
+    return mapProductRow(res.rows[0]!);
+  }
+
   const res = await pool.query(
     `SELECT ${selectCols.split(', ').map(c => c.includes(' AS ') ? `p.${c}` : `p.${c}`).join(', ')},
             COALESCE(SUM(s.quantity), 0)::bigint AS initial_quantity

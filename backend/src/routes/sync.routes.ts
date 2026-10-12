@@ -299,6 +299,12 @@ async function handleInventoryOperation(
   const now = NOW_ISO();
 
   try {
+    const prevStockRes = await client.query<{ quantity: number }>(
+      'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2 LIMIT 1',
+      [productId, targetBranchId]
+    );
+    const prevStock = Number(prevStockRes.rows[0]?.quantity ?? 0);
+
     if (operationType === 'ADJUST' || operationType === 'OPENING_STOCK' || !operationType) {
       // Absolute target quantity — safe to use direct SET
       const targetQty = Math.max(0, Math.round(Number(
@@ -311,10 +317,28 @@ async function handleInventoryOperation(
            SET quantity = EXCLUDED.quantity, updated_at = EXCLUDED.updated_at`,
         [productId, targetBranchId, targetQty, now]
       );
+      const isOpening = operationType === 'OPENING_STOCK';
+      const movementType = isOpening ? 'OPENING_STOCK' : (targetQty >= prevStock ? 'ADJUST_UP' : 'ADJUST_DOWN');
+      const delta = Math.abs(targetQty - prevStock);
+      const movId = uuidv4();
+      await client.query(
+        `INSERT INTO stock_movements (
+           id, product_id, branch_id, movement_type, quantity,
+           previous_stock, resulting_stock, reason, reference_id, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          movId, productId, targetBranchId, movementType, delta, prevStock, targetQty,
+          (payload['reason'] as string) || (isOpening ? 'Opening Stock' : 'Stock Adjustment'),
+          clientEventId, now
+        ]
+      );
     } else if (operationType === 'INCREASE' || operationType === 'IN') {
+      let targetQty: number;
+      let delta: number;
       if (payload['target_quantity'] != null) {
         // Authoritative absolute target — use direct SET
-        const targetQty = Math.max(0, Math.round(Number(payload['target_quantity'])));
+        targetQty = Math.max(0, Math.round(Number(payload['target_quantity'])));
+        delta = Math.max(0, targetQty - prevStock);
         await client.query(
           `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
            VALUES ($1, $2, $3, $4)
@@ -324,7 +348,8 @@ async function handleInventoryOperation(
         );
       } else {
         // Relative delta — use atomic increment; no application-level read
-        const delta = Math.max(0, Math.round(Number(payload['quantity'] ?? 0)));
+        delta = Math.max(0, Math.round(Number(payload['quantity'] ?? 0)));
+        targetQty = prevStock + delta;
         await client.query(
           `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
            VALUES ($1, $2, $3, $4)
@@ -333,6 +358,18 @@ async function handleInventoryOperation(
           [productId, targetBranchId, delta, now]
         );
       }
+      const movId = uuidv4();
+      await client.query(
+        `INSERT INTO stock_movements (
+           id, product_id, branch_id, movement_type, quantity,
+           previous_stock, resulting_stock, reason, reference_id, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          movId, productId, targetBranchId, 'IN', delta, prevStock, targetQty,
+          (payload['reason'] as string) || 'Stock In',
+          clientEventId, now
+        ]
+      );
     } else if (operationType === 'DECREASE' || operationType === 'OUT') {
       // Atomic decrement: only succeeds when sufficient stock exists.
       // Returns 0 rows if quantity < delta — triggers CONFLICT (not silent clamp).
@@ -356,6 +393,19 @@ async function handleInventoryOperation(
           error: `INSUFFICIENT_STOCK: product=${productId} branch=${targetBranchId} available=${available} requested=${delta}`,
         };
       }
+      const newStock = Number(decreaseRes.rows[0]?.quantity ?? 0);
+      const movId = uuidv4();
+      await client.query(
+        `INSERT INTO stock_movements (
+           id, product_id, branch_id, movement_type, quantity,
+           previous_stock, resulting_stock, reason, reference_id, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          movId, productId, targetBranchId, 'OUT', delta, prevStock, newStock,
+          (payload['reason'] as string) || 'Stock Out',
+          clientEventId, now
+        ]
+      );
     } else if (operationType === 'TRANSFER') {
       // Transfer: deduct from source branch, credit destination branch atomically.
       const toBranchId = payload['to_branch_id'] as string | undefined;
@@ -383,14 +433,44 @@ async function handleInventoryOperation(
           error: `INSUFFICIENT_STOCK_FOR_TRANSFER: product=${productId} src=${targetBranchId} available=${available} requested=${delta}`,
         };
       }
+      const srcStockAfter = Number(srcRes.rows[0]?.quantity ?? 0);
 
       // Atomic destination credit — must succeed or the whole transaction rolls back
-      await client.query(
+      const dstRes = await client.query<{ quantity: number }>(
         `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (product_id, branch_id) DO UPDATE
-           SET quantity = stock.quantity + $3, updated_at = $4`,
+           SET quantity = stock.quantity + $3, updated_at = $4
+         RETURNING quantity`,
         [productId, toBranchId, delta, now]
+      );
+      const dstStockAfter = Number(dstRes.rows[0]?.quantity ?? 0);
+      const dstStockBefore = dstStockAfter - delta;
+
+      const outMovId = uuidv4();
+      await client.query(
+        `INSERT INTO stock_movements (
+           id, product_id, branch_id, movement_type, quantity,
+           previous_stock, resulting_stock, reason, reference_id, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          outMovId, productId, targetBranchId, 'TRANSFER_OUT', delta, prevStock, srcStockAfter,
+          (payload['reason'] as string) || `Transfer → ${toBranchId}`,
+          clientEventId, now
+        ]
+      );
+
+      const inMovId = uuidv4();
+      await client.query(
+        `INSERT INTO stock_movements (
+           id, product_id, branch_id, movement_type, quantity,
+           previous_stock, resulting_stock, reason, reference_id, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          inMovId, productId, toBranchId, 'TRANSFER_IN', delta, dstStockBefore, dstStockAfter,
+          (payload['reason'] as string) || `Transfer ← ${targetBranchId}`,
+          clientEventId, now
+        ]
       );
     } else {
       // Unknown operation sub-type within INVENTORY_OPERATION_RECORDED

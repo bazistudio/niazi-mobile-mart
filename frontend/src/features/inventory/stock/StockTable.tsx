@@ -24,7 +24,7 @@ function SortIcon({ field, activeField, direction }: { field: SortField; activeF
 export const StockTable = ({ products, isLoading }: StockTableProps) => {
   const { hasPermission, role } = usePermissions();
   const canAdjustStock = hasPermission(PERMISSIONS.INVENTORY_EDIT);
-  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN' || role === 'SHOP_ADMIN';
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
 
   const sort = selectSortConfig();
   const setSort = selectSetSort();
@@ -41,7 +41,7 @@ export const StockTable = ({ products, isLoading }: StockTableProps) => {
   };
 
   const startEdit = (product: InventoryProduct) => {
-    if (!canAdjustStock) return;
+    if (!canAdjustStock || !isOrgAdmin) return;
     setEditingId(product.id);
     setEditValue(String(product.stock));
   };
@@ -142,7 +142,7 @@ export const StockTable = ({ products, isLoading }: StockTableProps) => {
                 </code>
               </td>
               <td className="px-4 py-1.5">
-                {editingId === product.id && canAdjustStock ? (
+                {editingId === product.id && canAdjustStock && isOrgAdmin ? (
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
@@ -159,14 +159,14 @@ export const StockTable = ({ products, isLoading }: StockTableProps) => {
                 ) : (
                   <span
                     className={`font-semibold transition-colors inline-block px-2 py-1 border border-transparent rounded ${
-                      canAdjustStock ? 'cursor-pointer hover:text-[#006970] dark:hover:text-[#00B4BB] hover:border-[#006970]/30' : ''
+                      canAdjustStock && isOrgAdmin ? 'cursor-pointer hover:text-[#006970] dark:hover:text-[#00B4BB] hover:border-[#006970]/30' : ''
                     } ${
                       product.status === StockStatus.OUT_OF_STOCK ? 'text-red-600 dark:text-red-400' :
                       product.status === StockStatus.LOW_STOCK ? 'text-amber-600 dark:text-amber-400' :
                       'text-gray-900 dark:text-white'
                     }`}
-                    onClick={() => startEdit(product)}
-                    title={canAdjustStock ? 'Click to adjust stock' : undefined}
+                    onClick={() => (canAdjustStock && isOrgAdmin ? startEdit(product) : undefined)}
+                    title={canAdjustStock && isOrgAdmin ? 'Click to adjust stock' : undefined}
                   >
                     {product.stock} {product.unit}
                   </span>

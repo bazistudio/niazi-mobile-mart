@@ -16,6 +16,7 @@ import { Pool } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface StockTransferDto {
+  transfer_id?: string | null;
   source_branch_id: string;
   destination_branch_id: string;
   product_id: string;
@@ -75,6 +76,54 @@ export async function transferStock(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    const transferId = dto.transfer_id && dto.transfer_id.trim() ? dto.transfer_id.trim() : uuidv4();
+
+    // Idempotency check: return existing record if this transfer was already processed
+    if (dto.transfer_id && dto.transfer_id.trim()) {
+      const existing = await client.query(
+        `SELECT st.*,
+                (SELECT quantity FROM stock WHERE product_id = st.product_id AND branch_id = st.source_branch_id) AS src_stock,
+                (SELECT quantity FROM stock WHERE product_id = st.product_id AND branch_id = st.destination_branch_id) AS dst_stock
+         FROM stock_transfers st
+         WHERE st.id = $1`,
+        [transferId]
+      );
+      if (existing.rows.length > 0) {
+        const row = existing.rows[0] as Record<string, unknown>;
+        const existingProductId = String(row['product_id'] ?? '').trim();
+        const existingSrcId = String(row['source_branch_id'] ?? '').trim();
+        const existingDstId = String(row['destination_branch_id'] ?? '').trim();
+        const existingQty = Number(row['quantity'] ?? 0);
+
+        if (
+          existingProductId !== productId ||
+          existingSrcId !== srcId ||
+          existingDstId !== dstId ||
+          existingQty !== qty
+        ) {
+          await client.query('ROLLBACK');
+          throw new StockTransferRepoError(
+            `Transfer ID '${transferId}' was already used with a different transfer payload (conflict)`,
+            409
+          );
+        }
+
+        await client.query('COMMIT');
+        return {
+          transfer_id: transferId,
+          source_branch_id: existingSrcId,
+          destination_branch_id: existingDstId,
+          product_id: existingProductId,
+          quantity: existingQty,
+          source_stock_after: Number(row['src_stock'] ?? 0),
+          destination_stock_after: Number(row['dst_stock'] ?? 0),
+          reason: (row['reason'] as string) ?? null,
+          performed_by: (row['performed_by'] as string) ?? null,
+          created_at: row['created_at'] as string,
+        };
+      }
+    }
 
     // 1. Validate source branch — must exist and be active
     const srcBranchRes = await client.query(
@@ -146,7 +195,6 @@ export async function transferStock(
     );
 
     const now = new Date().toISOString();
-    const transferId = uuidv4();
 
     // 6. Atomically deduct source stock
     const srcUpdateRes = await client.query(
@@ -218,8 +266,59 @@ export async function transferStock(
       performed_by: userId ?? null,
       created_at: now,
     };
-  } catch (err) {
+  } catch (err: any) {
     await client.query('ROLLBACK').catch(() => {});
+
+    // Concurrent duplicate request race condition:
+    // If another concurrent request inserted stock_transfers with the same ID first,
+    // verify the committed transfer payload and return the prior result if identical.
+    if (err?.code === '23505' && dto.transfer_id && dto.transfer_id.trim()) {
+      try {
+        const checkRes = await pool.query(
+          `SELECT st.*,
+                  (SELECT quantity FROM stock WHERE product_id = st.product_id AND branch_id = st.source_branch_id) AS src_stock,
+                  (SELECT quantity FROM stock WHERE product_id = st.product_id AND branch_id = st.destination_branch_id) AS dst_stock
+           FROM stock_transfers st
+           WHERE st.id = $1`,
+          [dto.transfer_id.trim()]
+        );
+        if (checkRes.rows.length > 0) {
+          const row = checkRes.rows[0] as Record<string, unknown>;
+          const existingProductId = String(row['product_id'] ?? '').trim();
+          const existingSrcId = String(row['source_branch_id'] ?? '').trim();
+          const existingDstId = String(row['destination_branch_id'] ?? '').trim();
+          const existingQty = Number(row['quantity'] ?? 0);
+
+          if (
+            existingProductId !== productId ||
+            existingSrcId !== srcId ||
+            existingDstId !== dstId ||
+            existingQty !== qty
+          ) {
+            throw new StockTransferRepoError(
+              `Transfer ID '${dto.transfer_id.trim()}' was already used with a different transfer payload (conflict)`,
+              409
+            );
+          }
+
+          return {
+            transfer_id: dto.transfer_id.trim(),
+            source_branch_id: existingSrcId,
+            destination_branch_id: existingDstId,
+            product_id: existingProductId,
+            quantity: existingQty,
+            source_stock_after: Number(row['src_stock'] ?? 0),
+            destination_stock_after: Number(row['dst_stock'] ?? 0),
+            reason: (row['reason'] as string) ?? null,
+            performed_by: (row['performed_by'] as string) ?? null,
+            created_at: row['created_at'] as string,
+          };
+        }
+      } catch (checkErr) {
+        if (checkErr instanceof StockTransferRepoError) throw checkErr;
+      }
+    }
+
     throw err;
   } finally {
     client.release();

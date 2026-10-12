@@ -317,19 +317,10 @@ export function authorizeProductMutation(
   page: string,
   action: string
 ): string | null {
-  // Centralized catalog: Only Organization admins pass through automatically
-  if (isOrgAdmin(identity)) {
-    return null;
-  }
-
-  // Check page access (uses standard hasPageAccess with fallback — intentional)
-  if (!hasPageAccess(identity.access_profile, page, identity.role)) {
-    return `Access denied: You do not have permission to access page '${page}'`;
-  }
-
-  // Check action access with strict no-fallback logic
-  if (!hasProductActionAccess(identity.access_profile, action)) {
-    return `Access denied: You do not have permission to execute action '${action}'`;
+  // Shared Organization Catalog Rule: Only Organization administrators may create, edit, or delete catalog products.
+  // Branch users and branch-level administrators must not mutate the shared catalog.
+  if (!isOrgAdmin(identity)) {
+    return 'Access denied: Only organization administrators may manage shared catalog products';
   }
 
   return null;

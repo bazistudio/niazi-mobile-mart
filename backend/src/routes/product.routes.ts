@@ -17,7 +17,7 @@ import express, { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { Pool } from 'pg';
 
-import { authMiddleware, authorizePermission, authorizeProductMutation, isAdmin, RequestIdentity } from '../auth';
+import { authMiddleware, authorizePermission, authorizeProductMutation, isAdmin, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
 import {
   createProduct,
   createProductWithInitialStock,
@@ -98,6 +98,22 @@ export function createProductRouter(pool: Pool): Router {
     }
 
     try {
+      const callerIsOrgAdmin = isOrgAdmin(identity);
+      let branchId: string | null = null;
+
+      // Branch boundary enforcement:
+      // Non-org-admins are strictly scoped to their assigned branch. Query parameter branch_id cannot override.
+      // Org Admins may view branch-scoped inventory by supplying branch_id, or view global catalog if omitted.
+      if (!callerIsOrgAdmin) {
+        if (!identity.branch_id) {
+          res.status(403).json({ error: 'Access denied: User has no assigned branch' });
+          return;
+        }
+        branchId = identity.branch_id;
+      } else {
+        branchId = (req.query['branch_id'] as string) || (req.query['branchId'] as string) || null;
+      }
+
       const filter: ProductListFilter = {
         search: (req.query['search'] as string) || null,
         category_id: (req.query['category_id'] as string) || null,
@@ -109,6 +125,7 @@ export function createProductRouter(pool: Pool): Router {
           req.query['is_active'] !== undefined
             ? req.query['is_active'] === 'true' || req.query['is_active'] === '1'
             : null,
+        branch_id: branchId,
       };
 
       const products = await listProducts(pool, filter);
@@ -132,7 +149,20 @@ export function createProductRouter(pool: Pool): Router {
 
     try {
       const id = req.params['id'] as string;
-      const product = await getProductById(pool, id);
+      const callerIsOrgAdmin = isOrgAdmin(identity);
+      let branchId: string | null = null;
+
+      if (!callerIsOrgAdmin) {
+        if (!identity.branch_id) {
+          res.status(403).json({ error: 'Access denied: User has no assigned branch' });
+          return;
+        }
+        branchId = identity.branch_id;
+      } else {
+        branchId = (req.query['branch_id'] as string) || (req.query['branchId'] as string) || null;
+      }
+
+      const product = await getProductById(pool, id, branchId);
       if (!product) {
         res.status(404).json({ error: 'Product not found' });
         return;
@@ -260,9 +290,22 @@ export function createProductRouter(pool: Pool): Router {
 
     try {
       const dto = req.body as ImportOpeningStockDto;
-      if (!dto.branch_id && identity.branch_id) {
+      if (!isOrgAdmin(identity)) {
+        dto.branch_id = identity.branch_id;
+      } else if (!dto.branch_id) {
         dto.branch_id = identity.branch_id;
       }
+
+      if (!dto.branch_id) {
+        res.status(400).json({ error: 'branch_id is required for opening stock import' });
+        return;
+      }
+
+      if (!canAccessBranch(identity, dto.branch_id)) {
+        res.status(403).json({ error: 'Access denied: Cannot import opening stock for another branch' });
+        return;
+      }
+
       const result = await importOpeningStock(pool, dto, identity.user_id);
       res.status(201).json(result);
     } catch (err) {

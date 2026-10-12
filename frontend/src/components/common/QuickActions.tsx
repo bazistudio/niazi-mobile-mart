@@ -4,8 +4,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { PlusCircle, ShoppingCart, Package, Receipt, Wrench, UserPlus, ChevronDown } from 'lucide-react';
 import { useInventoryUIStore } from '@/features/inventory/store/inventory-ui.store';
+import { usePermissions } from '@/lib/auth/usePermissions';
 
 export const QuickActions = () => {
+  const { role } = usePermissions();
+  const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -36,16 +39,18 @@ export const QuickActions = () => {
             Create New
           </div>
 
-          <button
-            className="w-full text-left group flex items-center px-4 py-2 text-sm text-text-secondary hover:bg-surface-hover transition-colors"
-            onClick={() => {
-              setIsOpen(false);
-              useInventoryUIStore.getState().setAddProductOpen(true);
-            }}
-          >
-            <Package className="mr-3 h-4 w-4 text-text-muted group-hover:text-primary" />
-            Add Product
-          </button>
+          {isOrgAdmin && (
+            <button
+              className="w-full text-left group flex items-center px-4 py-2 text-sm text-text-secondary hover:bg-surface-hover transition-colors"
+              onClick={() => {
+                setIsOpen(false);
+                useInventoryUIStore.getState().setAddProductOpen(true);
+              }}
+            >
+              <Package className="mr-3 h-4 w-4 text-text-muted group-hover:text-primary" />
+              Add Product
+            </button>
+          )}
           <Link
             to="/dashboard/shop-admin/expenses"
             className="group flex items-center px-4 py-2 text-sm text-text-secondary hover:bg-surface-hover transition-colors"

@@ -299,8 +299,13 @@ async function main(): Promise<void> {
     }
   });
 
-  app.post(['/api/brands', '/api/v1/brands'], async (req: Request, res: Response) => {
+  app.post(['/api/brands', '/api/v1/brands'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage brands' });
+        return;
+      }
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
         res.status(400).json({ error: 'Name is required' });
@@ -313,8 +318,13 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/brands/:id', '/api/v1/brands/:id'], async (req: Request, res: Response) => {
+  app.put(['/api/brands/:id', '/api/v1/brands/:id'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage brands' });
+        return;
+      }
       const id = req.params['id'] as string;
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
@@ -333,8 +343,13 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
-  app.post(['/api/categories', '/api/v1/categories'], async (req: Request, res: Response) => {
+  app.post(['/api/categories', '/api/v1/categories'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage categories' });
+        return;
+      }
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
         res.status(400).json({ error: 'Name is required' });
@@ -347,8 +362,13 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/categories/:id', '/api/v1/categories/:id'], async (req: Request, res: Response) => {
+  app.put(['/api/categories/:id', '/api/v1/categories/:id'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage categories' });
+        return;
+      }
       const id = req.params['id'] as string;
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
@@ -367,8 +387,13 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
-  app.post(['/api/companies', '/api/v1/companies'], async (req: Request, res: Response) => {
+  app.post(['/api/companies', '/api/v1/companies'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage companies' });
+        return;
+      }
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
         res.status(400).json({ error: 'Name is required' });
@@ -381,8 +406,13 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/companies/:id', '/api/v1/companies/:id'], async (req: Request, res: Response) => {
+  app.put(['/api/companies/:id', '/api/v1/companies/:id'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage companies' });
+        return;
+      }
       const id = req.params['id'] as string;
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
@@ -401,8 +431,13 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
-  app.post(['/api/qualities', '/api/v1/qualities'], async (req: Request, res: Response) => {
+  app.post(['/api/qualities', '/api/v1/qualities'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage qualities' });
+        return;
+      }
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
         res.status(400).json({ error: 'Name is required' });
@@ -415,8 +450,13 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/qualities/:id', '/api/v1/qualities/:id'], async (req: Request, res: Response) => {
+  app.put(['/api/qualities/:id', '/api/v1/qualities/:id'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage qualities' });
+        return;
+      }
       const id = req.params['id'] as string;
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
@@ -435,8 +475,13 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
-  app.post(['/api/colors', '/api/v1/colors'], async (req: Request, res: Response) => {
+  app.post(['/api/colors', '/api/v1/colors'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage colors' });
+        return;
+      }
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
         res.status(400).json({ error: 'Name is required' });
@@ -449,8 +494,13 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/colors/:id', '/api/v1/colors/:id'], async (req: Request, res: Response) => {
+  app.put(['/api/colors/:id', '/api/v1/colors/:id'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage colors' });
+        return;
+      }
       const id = req.params['id'] as string;
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
@@ -469,8 +519,13 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
-  app.post(['/api/units', '/api/v1/units'], async (req: Request, res: Response) => {
+  app.post(['/api/units', '/api/v1/units'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage units' });
+        return;
+      }
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
         res.status(400).json({ error: 'Name is required' });
@@ -483,8 +538,13 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/units/:id', '/api/v1/units/:id'], async (req: Request, res: Response) => {
+  app.put(['/api/units/:id', '/api/v1/units/:id'], authMiddleware, async (req: Request, res: Response) => {
     try {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Only organization administrators may manage units' });
+        return;
+      }
       const id = req.params['id'] as string;
       const name = req.body?.name || req.body?.title;
       if (!name || typeof name !== 'string' || !name.trim()) {
@@ -641,9 +701,9 @@ async function main(): Promise<void> {
       try {
         const identity = req.identity as RequestIdentity;
 
-        // Transfers between branches require Branch or Org Admin permissions
-        if (!isBranchAdmin(identity)) {
-          res.status(403).json({ error: 'Forbidden: stock transfers require administrator role' });
+        // Stock transfers between branches require Organization Administrator permissions
+        if (!isOrgAdmin(identity)) {
+          res.status(403).json({ error: 'Forbidden: cross-branch stock transfers require organization administrator role' });
           return;
         }
 
@@ -683,6 +743,7 @@ async function main(): Promise<void> {
         }
 
         const result = await transferStock(pool, {
+          transfer_id: ((req.body?.transfer_id || req.body?.transferId || req.body?.idempotency_key) as string | undefined)?.trim() || null,
           source_branch_id: sourceId.trim(),
           destination_branch_id: destId.trim(),
           product_id: productId.trim(),

@@ -1077,6 +1077,7 @@ export const tauriClient = {
       }
       if (filter.limit !== undefined && filter.limit !== null) params.set('limit', String(filter.limit));
       if (filter.offset !== undefined && filter.offset !== null) params.set('offset', String(filter.offset));
+      if (filter.branch_id) params.set('branch_id', filter.branch_id);
     }
     const qs = params.toString();
     return await httpFetch<Product[]>(`/api/products${qs ? '?' + qs : ''}`);
@@ -2239,6 +2240,7 @@ export interface ProductFilter {
   is_active?: boolean | null;
   limit?: number | null;
   offset?: number | null;
+  branch_id?: string | null;
 }
 
 export type StockMovementType = 'IN' | 'OUT' | 'ADJUSTMENT' | 'TRANSFER_IN' | 'TRANSFER_OUT';
@@ -2282,6 +2284,8 @@ export interface AdjustStockDto {
 }
 
 export interface TransferStockDto {
+  transfer_id?: string | null;
+  idempotency_key?: string | null;
   product_id: string;
   from_branch_id: string;
   to_branch_id: string;

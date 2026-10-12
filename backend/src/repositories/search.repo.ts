@@ -68,7 +68,11 @@ export async function globalSearch(
           COALESCE(s.quantity, 0) AS stock,
           pcm.model_name AS matched_compatible_model
         FROM products p
-        LEFT JOIN stock s ON s.product_id = p.id AND ($2::text IS NULL OR s.branch_id::text = $2::text)
+        ${
+          branchId
+            ? `LEFT JOIN stock s ON s.product_id = p.id AND s.branch_id::text = $2::text`
+            : `LEFT JOIN (SELECT product_id, SUM(quantity)::bigint AS quantity FROM stock GROUP BY product_id) s ON s.product_id = p.id`
+        }
         LEFT JOIN product_compatible_models pcm ON pcm.product_id = p.id AND (pcm.model_name ILIKE $1 OR pcm.normalized_model ILIKE $3)
         WHERE (p.is_active::text = '1' OR p.is_active::text = 'true')
           AND (
@@ -77,6 +81,14 @@ export async function globalSearch(
             OR p.barcode ILIKE $1 
             OR pcm.id IS NOT NULL
           )
+          ${
+            branchId
+              ? `AND (COALESCE(s.quantity, 0) > 0 OR EXISTS (
+                   SELECT 1 FROM stock_movements sm 
+                   WHERE sm.product_id = p.id AND sm.branch_id::text = $2::text
+                 ))`
+              : ``
+          }
         ORDER BY 
           CASE 
             WHEN p.barcode ILIKE $1 THEN 1
