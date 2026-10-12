@@ -316,9 +316,11 @@ export class AuthService {
         const freshUser = await AuthService.getMeUser();
         if (freshUser) {
           useAuthStore.getState().setAuth(freshUser, session);
+        } else {
+          await AuthService.logout();
         }
       } catch (err: any) {
-        if (err?.response?.status === 401) {
+        if (err?.response?.status === 401 || String(err?.message || '').includes('401')) {
           await AuthService.logout();
         } else {
           console.warn("[AuthService.hydrate] Could not refresh user profile:", err?.message);
