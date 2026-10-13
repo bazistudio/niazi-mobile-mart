@@ -56,9 +56,19 @@ export const StockTransferModal: React.FC<StockTransferModalProps> = ({
       const list = await httpClient.get<Branch[]>('/api/v1/branches');
       if (list && list.length > 0) {
         setBranches(list);
-        const mainBranch = list.find((b) => b.code === 'MAIN' || b.name.toLowerCase().includes('main')) || list[0];
-        setFromBranchId(mainBranch.id);
-        const otherBranch = list.find((b) => b.id !== mainBranch.id);
+        // Default source to Central Warehouse — typical flow is Warehouse → Branch.
+        // If warehouse branch is not in the list yet (before migration 030 runs on this instance),
+        // fall back to Main Branch so the UI remains functional.
+        const warehouseBranch =
+          list.find((b) => b.id === '00000000-0000-0000-0000-000000000003') ||
+          list.find((b) => b.code === 'WAREHOUSE' || b.name.toLowerCase().includes('warehouse'));
+        const mainBranch =
+          list.find((b) => b.code === 'MAIN' || b.name.toLowerCase().includes('main')) ||
+          list[0];
+        const sourceBranch = warehouseBranch ?? mainBranch;
+        setFromBranchId(sourceBranch.id);
+        // Default destination to first retail branch that is NOT the source
+        const otherBranch = list.find((b) => b.id !== sourceBranch.id);
         if (otherBranch) setToBranchId(otherBranch.id);
       }
     }
@@ -245,7 +255,7 @@ export const StockTransferModal: React.FC<StockTransferModalProps> = ({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
-                Source Branch
+                Source (Warehouse / Branch)
               </label>
               <select
                 value={fromBranchId}
@@ -262,7 +272,7 @@ export const StockTransferModal: React.FC<StockTransferModalProps> = ({
 
             <div>
               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
-                Destination Branch
+                Destination (Branch / Warehouse)
               </label>
               <select
                 value={toBranchId}

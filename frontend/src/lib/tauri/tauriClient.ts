@@ -1213,12 +1213,12 @@ export const tauriClient = {
   },
 
   async inventoryGetStock(productId: string, branchId: string): Promise<number> {
-    const stockList = await httpFetch<any[]>(`/api/inventory?product_id=${encodeURIComponent(productId)}&branch_id=${encodeURIComponent(branchId)}`).catch(() => []);
-    if (Array.isArray(stockList)) {
-      const record = stockList.find((r: any) => r.product_id === productId);
-      return record ? (record.quantity || 0) : 0;
-    }
-    return 0;
+    // Backend returns Record<string, number> (product_id → quantity map), not an array.
+    // Fix: query by branch_id only, then look up productId as a key in the returned map.
+    const stockMap = await httpFetch<Record<string, number>>(
+      `/api/inventory?branch_id=${encodeURIComponent(branchId)}`
+    ).catch(() => ({} as Record<string, number>));
+    return Number(stockMap?.[productId] ?? 0);
   },
 
   async inventoryGetStockMap(branchId: string): Promise<Record<string, number>> {

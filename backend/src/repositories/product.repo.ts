@@ -8,7 +8,10 @@
 
 import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
-import { NIAZI_ORGANIZATION_ID } from '../auth';
+import { NIAZI_ORGANIZATION_ID, CENTRAL_WAREHOUSE_ID } from '../auth';
+
+// Well-known system branch IDs (mirrors seeded UUIDs in migration 001/030)
+const MAIN_BRANCH_ID = '00000000-0000-0000-0000-000000000002';
 
 // --- Domain Types ---
 
@@ -36,6 +39,10 @@ export interface Product {
   stock_quantity?: number;
   total_stock?: number;
   quantity?: number;
+  /** Stock currently held in the Central Warehouse (id=...0003). Populated on org-wide catalog queries. */
+  warehouse_stock?: number;
+  /** Stock currently held at Main Branch (id=...0002). Populated on org-wide catalog queries. */
+  main_branch_stock?: number;
   created_at: string;
   updated_at: string;
 }
@@ -178,6 +185,12 @@ function mapProductRow(row: Record<string, unknown>): Product {
     stock_quantity: numQty,
     total_stock: numQty,
     quantity: numQty,
+    warehouse_stock: row['warehouse_stock'] !== undefined && row['warehouse_stock'] !== null
+      ? Number(row['warehouse_stock'])
+      : undefined,
+    main_branch_stock: row['main_branch_stock'] !== undefined && row['main_branch_stock'] !== null
+      ? Number(row['main_branch_stock'])
+      : undefined,
     created_at: row['created_at'] as string,
     updated_at: row['updated_at'] as string,
   };
@@ -777,10 +790,22 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
     return res.rows.map(mapProductRow);
   }
 
-  // Organization-wide catalog view (all products, total summed stock)
+  // Organization-wide catalog view (all products, total summed stock + warehouse/main breakdown)
+  // warehouse_stock: stock at Central Warehouse (CENTRAL_WAREHOUSE_ID, migration 030)
+  // main_branch_stock: stock at Main Branch (MAIN_BRANCH_ID, migration 001)
+  // initial_quantity: total stock across ALL locations (warehouse + all retail branches)
+  const warehouseId = CENTRAL_WAREHOUSE_ID;
+  const mainBranchId = MAIN_BRANCH_ID;
+  params.push(warehouseId);
+  const warehouseIdx = idx++;
+  params.push(mainBranchId);
+  const mainBranchIdx = idx++;
+
   const sql = `
     SELECT ${selectCols.split(', ').map(c => `p.${c}`).join(', ')},
-           COALESCE(SUM(s.quantity), 0)::bigint AS initial_quantity
+           COALESCE(SUM(s.quantity), 0)::bigint AS initial_quantity,
+           COALESCE(SUM(CASE WHEN s.branch_id = $${warehouseIdx} THEN s.quantity ELSE 0 END), 0)::bigint AS warehouse_stock,
+           COALESCE(SUM(CASE WHEN s.branch_id = $${mainBranchIdx} THEN s.quantity ELSE 0 END), 0)::bigint AS main_branch_stock
     FROM products p
     LEFT JOIN stock s ON p.id = s.product_id
     WHERE ${conditions.join(' AND ')}

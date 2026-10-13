@@ -87,7 +87,7 @@ import {
   ReceiveStockDto,
 } from './repositories/product.repo';
 import { transferStock, StockTransferRepoError } from './repositories/stock_transfer.repo';
-import { authMiddleware, buildAuthMiddleware, buildActiveUserMiddleware, isAdmin, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity } from './auth';
+import { authMiddleware, buildAuthMiddleware, buildActiveUserMiddleware, isAdmin, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity, CENTRAL_WAREHOUSE_ID } from './auth';
 
 // --- (Main server function continues) ---
 
@@ -737,7 +737,12 @@ async function main(): Promise<void> {
           return;
         }
 
-        // Phase 13 Fix: Both source and destination branches must be authorized for the caller
+        // Phase 13 Fix: Both source and destination branches must be authorized for the caller.
+        // The Central Warehouse (CENTRAL_WAREHOUSE_ID) is a valid source or destination:
+        //   - Warehouse → Branch: dispatching stock to a retail branch (org-admin only)
+        //   - Branch → Warehouse: returning stock to the warehouse (org-admin only)
+        // Since this entire endpoint is org-admin-gated above, canAccessBranch will pass
+        // for both warehouse and retail branch IDs for any valid org-admin identity.
         if (!canAccessBranch(identity, sourceId)) {
           res.status(403).json({ error: 'Access denied: cannot transfer stock from a branch you do not manage' });
           return;
@@ -746,6 +751,11 @@ async function main(): Promise<void> {
         if (!canAccessBranch(identity, destId)) {
           res.status(403).json({ error: 'Access denied: cannot transfer stock to a branch you do not manage' });
           return;
+        }
+
+        // Audit log: warehouse movements are significant inventory events
+        if (sourceId.trim() === CENTRAL_WAREHOUSE_ID || destId.trim() === CENTRAL_WAREHOUSE_ID) {
+          console.log(`[inventory/transfer] Warehouse movement: ${sourceId.trim()} → ${destId.trim()}, product=${productId?.trim()}, qty=${quantity}, by=${identity.user_id}`);
         }
 
         const result = await transferStock(pool, {
@@ -792,9 +802,11 @@ async function main(): Promise<void> {
         const supplierId   = (req.body?.supplier_id  || req.body?.supplierId  || null) as string | null;
         const notes        = (req.body?.notes || null) as string | null;
 
-        // org-admins may supply an explicit branch_id; branch-users are locked to JWT branch
+        // org-admins may supply an explicit branch_id; when none is supplied the default
+        // destination is the Central Warehouse (migration 030_central_warehouse_location.sql).
+        // Branch-users are locked to their JWT branch_id and can never receive into the warehouse.
         const branchId: string | undefined = isOrgAdmin(identity)
-          ? ((req.body?.branch_id || req.body?.branchId || identity.branch_id) as string | undefined)
+          ? ((req.body?.branch_id || req.body?.branchId || CENTRAL_WAREHOUSE_ID) as string | undefined)
           : (identity.branch_id as string | undefined);
 
         if (!productId || !productId.trim()) {

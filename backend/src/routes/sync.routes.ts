@@ -35,7 +35,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
-import { buildAuthMiddleware, RequestIdentity, NIAZI_ORGANIZATION_ID } from '../auth';
+import { buildAuthMiddleware, RequestIdentity, NIAZI_ORGANIZATION_ID, CENTRAL_WAREHOUSE_ID } from '../auth';
 import {
   createProductWithInitialStock,
   updateProduct,
@@ -48,8 +48,12 @@ import {
 // Constants
 // ---------------------------------------------------------------------------
 
-// NIAZI_ORGANIZATION_ID is imported from auth.ts — the single source of truth.
-const DEFAULT_MAIN_BRANCH_ID = '00000000-0000-0000-0000-000000000002';
+// NIAZI_ORGANIZATION_ID and CENTRAL_WAREHOUSE_ID are imported from auth.ts — the single source of truth.
+// IMPORTANT: When a sync push event carries no explicit branch_id, the fallback is the Central Warehouse.
+// Warehouse-bound movements are intentional: initial product creation and supplier receipts route there.
+// Events from retail branch terminals will always carry their JWT branch_id, so this fallback
+// should only fire for org-admin-initiated operations where the warehouse is the correct destination.
+const DEFAULT_BRANCH_ID = CENTRAL_WAREHOUSE_ID;
 
 function NOW_ISO(): string {
   return new Date().toISOString();
@@ -203,7 +207,7 @@ async function handleProductCreated(
     low_stock_threshold: payload['low_stock_threshold'] != null ? Number(payload['low_stock_threshold']) : 5,
     description: payload['description'] != null ? String(payload['description']) : null,
     initial_quantity: payload['initial_quantity'] != null ? Number(payload['initial_quantity']) : null,
-    branch_id: payload['branch_id'] != null ? String(payload['branch_id']) : DEFAULT_MAIN_BRANCH_ID,
+    branch_id: payload['branch_id'] != null ? String(payload['branch_id']) : DEFAULT_BRANCH_ID,
   };
 
   try {
@@ -590,7 +594,7 @@ export function buildSyncRouter(pool: Pool): Router {
       const clientEventId = (event['client_event_id'] as string | undefined) ?? (event['id'] as string | undefined) ?? uuidv4();
       const terminalId = (event['terminal_id'] as string | undefined) ?? 'unknown-terminal';
       const organizationId = (event['organization_id'] as string | undefined) ?? NIAZI_ORGANIZATION_ID;
-      const branchId = (event['branch_id'] as string | undefined) ?? DEFAULT_MAIN_BRANCH_ID;
+      const branchId = (event['branch_id'] as string | undefined) ?? DEFAULT_BRANCH_ID;
       const eventType = (event['event_type'] as string | undefined) ?? '';
       const payloadStr = typeof event['payload'] === 'string'
         ? event['payload']

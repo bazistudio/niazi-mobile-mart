@@ -17,7 +17,7 @@ import express, { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { Pool } from 'pg';
 
-import { buildAuthMiddleware, authorizePermission, authorizeProductMutation, isAdmin, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
+import { buildAuthMiddleware, authorizePermission, authorizeProductMutation, isAdmin, isOrgAdmin, canAccessBranch, RequestIdentity, CENTRAL_WAREHOUSE_ID } from '../auth';
 import {
   createProduct,
   createProductWithInitialStock,
@@ -203,9 +203,9 @@ export function createProductRouter(pool: Pool): Router {
         0
       );
       // Centralized catalog rule: Initial opening stock for newly added products always deposits into
-      // the Central Warehouse (Main Branch: '00000000-0000-0000-0000-000000000002').
-      // Secondary branches (alfa, brb, etc.) initialize with 0 stock until stock is transferred to them.
-      const branchId = '00000000-0000-0000-0000-000000000002';
+      // the Central Warehouse (seeded by migration 030_central_warehouse_location.sql).
+      // Retail branches initialize with 0 stock until explicitly transferred from the warehouse.
+      const branchId = CENTRAL_WAREHOUSE_ID;
 
       // Always spread resolved branchId and initial_quantity so createProduct/createProductWithInitialStock receive normalized values.
       const dtoWithBranch = {

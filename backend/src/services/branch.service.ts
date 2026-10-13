@@ -109,6 +109,9 @@ export class BranchService {
     if (id === '00000000-0000-0000-0000-000000000002' && dto.is_active === 0) {
       throw new BranchServiceError('The canonical Main Branch cannot be deactivated', 400, 'CANONICAL_PROTECTED');
     }
+    if (id === '00000000-0000-0000-0000-000000000003' && dto.is_active === 0) {
+      throw new BranchServiceError('The Central Warehouse system branch cannot be deactivated', 400, 'CANONICAL_PROTECTED');
+    }
 
     try {
       return await this.repo.updateBranch(id, dto);
@@ -130,6 +133,9 @@ export class BranchService {
     if (id === '00000000-0000-0000-0000-000000000002') {
       throw new BranchServiceError('The canonical Main Branch cannot be deactivated or removed', 400, 'CANONICAL_PROTECTED');
     }
+    if (id === '00000000-0000-0000-0000-000000000003') {
+      throw new BranchServiceError('The Central Warehouse system branch cannot be deactivated or removed', 400, 'CANONICAL_PROTECTED');
+    }
 
     const existing = await this.repo.getBranchById(id);
     if (!existing) {
@@ -138,6 +144,9 @@ export class BranchService {
 
     if (existing.code === 'MAIN') {
       throw new BranchServiceError('The canonical Main Branch cannot be deactivated or removed', 400, 'CANONICAL_PROTECTED');
+    }
+    if (existing.code === 'WAREHOUSE') {
+      throw new BranchServiceError('The Central Warehouse system branch cannot be deactivated or removed', 400, 'CANONICAL_PROTECTED');
     }
 
     // Safely deactivate the branch without removing the row or breaking foreign keys

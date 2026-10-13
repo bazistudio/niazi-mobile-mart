@@ -76,6 +76,12 @@ interface Claims {
 // This is the ONLY place this constant should be defined. All other files must import it.
 export const NIAZI_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
 
+// Canonical Central Warehouse system branch UUID — seeded by migration 030_central_warehouse_location.sql.
+// The warehouse is a first-class system branch in the branches table with is_warehouse=1.
+// Only org-admins may receive into or transfer out of the warehouse.
+// POS checkout is always bound to the user's JWT branch_id which is never the warehouse.
+export const CENTRAL_WAREHOUSE_ID = '00000000-0000-0000-0000-000000000003';
+
 // --- Key Loading ---
 
 function requirePublicKey(): string {

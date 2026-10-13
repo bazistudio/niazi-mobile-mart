@@ -75,10 +75,17 @@ export function OrganizationProductsPage() {
           { id: '00000000-0000-0000-0000-000000000002', organization_id: 'org1', name: 'Main Branch', code: 'MAIN', is_active: true, created_at: '', updated_at: '' },
         ];
         setBranches(activeBranches);
-        // Pre-select main branch as intake destination default
+        // Pre-select Central Warehouse as intake destination default (migration 030_central_warehouse_location.sql).
+        // Supplier receipts go to the warehouse; stock is then transferred to retail branches as needed.
+        // Fall back to Main Branch if warehouse not found, then to first branch.
         if (!intakeBranchId && activeBranches.length > 0) {
-          const mainBranch = activeBranches.find((b) => b.code === 'MAIN' || b.name.toLowerCase().includes('main')) || activeBranches[0];
-          setIntakeBranchId(mainBranch.id);
+          const warehouseBranch =
+            activeBranches.find((b) => b.id === '00000000-0000-0000-0000-000000000003') ||
+            activeBranches.find((b) => b.code === 'WAREHOUSE' || b.name.toLowerCase().includes('warehouse'));
+          const fallbackBranch =
+            activeBranches.find((b) => b.code === 'MAIN' || b.name.toLowerCase().includes('main')) ||
+            activeBranches[0];
+          setIntakeBranchId((warehouseBranch ?? fallbackBranch).id);
         }
 
         const maps: Record<string, Record<string, number>> = {};
