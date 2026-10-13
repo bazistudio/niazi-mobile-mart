@@ -2161,6 +2161,9 @@ export interface Branch {
   name: string;
   code: string;
   is_active: boolean;
+  /** 1 = Central Warehouse (stock-holding only, not a retail POS branch); 0 = retail branch.
+   *  Added by migration 030_central_warehouse_location.sql. Defaults to 0 for all legacy rows. */
+  is_warehouse: number;
   created_at: string;
   updated_at: string;
 }

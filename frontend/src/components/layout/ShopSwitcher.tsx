@@ -79,12 +79,20 @@ export const ShopSwitcher = () => {
         ];
       }
 
-      // Filter branches: Org Admin sees all branches; branch users see ONLY their assigned branch
+      // F-02: Exclude the Central Warehouse from the retail shop switcher.
+      // Warehouse is a stock-holding location only; it must not appear as a selectable POS branch.
+      // Uses is_warehouse typed field (F-04) with defensive UUID fallback for backward compatibility.
+      const CENTRAL_WAREHOUSE_ID = '00000000-0000-0000-0000-000000000003';
+      const retailBranches = list.filter(
+        (b) => b.is_warehouse !== 1 && b.id !== CENTRAL_WAREHOUSE_ID
+      );
+
+      // Filter branches: Org Admin sees all retail branches; branch users see ONLY their assigned branch
       const userBranchId = (user as any)?.branch_id || (user as any)?.branchId || (user as any)?.shopId;
       const accessible = isOrgAdmin
-        ? list
+        ? retailBranches
         : userBranchId
-          ? list.filter((b) => b.id === userBranchId)
+          ? retailBranches.filter((b) => b.id === userBranchId)
           : [];
 
       setBranches(accessible);

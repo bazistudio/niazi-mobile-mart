@@ -267,7 +267,7 @@ export async function completeSaleTx(
 
   // P1 fix: Validate the resolved branch exists and is active
   const branchValidRow = await client.query(
-    'SELECT id, is_active FROM branches WHERE id = $1',
+    'SELECT id, is_active, is_warehouse FROM branches WHERE id = $1',
     [branchId]
   );
   if (branchValidRow.rows.length === 0) {
@@ -276,6 +276,14 @@ export async function completeSaleTx(
   const branchActive = branchValidRow.rows[0]?.['is_active'];
   if (branchActive === false || branchActive === 0) {
     throw new SaleRepoError(`Branch '${branchId}' is inactive`, 400);
+  }
+  // F-01: Reject direct sales against the Central Warehouse
+  const branchIsWarehouse = branchValidRow.rows[0]?.['is_warehouse'];
+  if (branchIsWarehouse === 1 || branchIsWarehouse === true) {
+    throw new SaleRepoError(
+      'Sales cannot be completed directly from the Central Warehouse. Transfer stock to a retail branch first.',
+      400
+    );
   }
 
   // Step 3: Validate Customer if provided

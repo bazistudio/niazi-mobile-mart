@@ -179,13 +179,18 @@ export function buildUsersRouter(pool: Pool): Router {
     }
 
     if (cleanBranchId) {
-      const bCheck = await pool.query('SELECT id, is_active FROM branches WHERE id = $1 LIMIT 1', [cleanBranchId]);
+      const bCheck = await pool.query('SELECT id, is_active, is_warehouse FROM branches WHERE id = $1 LIMIT 1', [cleanBranchId]);
       if (bCheck.rows.length === 0) {
         res.status(400).json({ error: `Branch '${cleanBranchId}' does not exist` });
         return;
       }
       if (bCheck.rows[0].is_active === 0) {
         res.status(400).json({ error: `Cannot assign user to deactivated branch '${cleanBranchId}'` });
+        return;
+      }
+      // F-05: Reject staff assignment to the Central Warehouse
+      if (bCheck.rows[0].is_warehouse === 1) {
+        res.status(400).json({ error: 'Staff accounts cannot be assigned to the Central Warehouse. Assign users to a retail branch.' });
         return;
       }
     }
@@ -339,13 +344,18 @@ export function buildUsersRouter(pool: Pool): Router {
         : undefined;
 
       if (cleanBranchId !== undefined && cleanBranchId !== null) {
-        const bCheck = await pool.query('SELECT id, is_active FROM branches WHERE id = $1 LIMIT 1', [cleanBranchId]);
+        const bCheck = await pool.query('SELECT id, is_active, is_warehouse FROM branches WHERE id = $1 LIMIT 1', [cleanBranchId]);
         if (bCheck.rows.length === 0) {
           res.status(400).json({ error: `Branch '${cleanBranchId}' does not exist` });
           return;
         }
         if (bCheck.rows[0].is_active === 0 && targetUser.branch_id !== cleanBranchId) {
           res.status(400).json({ error: `Cannot assign user to deactivated branch '${cleanBranchId}'` });
+          return;
+        }
+        // F-05: Reject staff assignment to the Central Warehouse
+        if (bCheck.rows[0].is_warehouse === 1) {
+          res.status(400).json({ error: 'Staff accounts cannot be assigned to the Central Warehouse. Assign users to a retail branch.' });
           return;
         }
       }

@@ -843,14 +843,17 @@ export async function getProductById(
     return mapProductRow(res.rows[0]!);
   }
 
+  // F-06: Include warehouse_stock and main_branch_stock to match listProducts() org-wide contract
   const res = await pool.query(
     `SELECT ${selectCols.split(', ').map(c => c.includes(' AS ') ? `p.${c}` : `p.${c}`).join(', ')},
-            COALESCE(SUM(s.quantity), 0)::bigint AS initial_quantity
+            COALESCE(SUM(s.quantity), 0)::bigint AS initial_quantity,
+            COALESCE(SUM(CASE WHEN s.branch_id = $2 THEN s.quantity ELSE 0 END), 0)::bigint AS warehouse_stock,
+            COALESCE(SUM(CASE WHEN s.branch_id = $3 THEN s.quantity ELSE 0 END), 0)::bigint AS main_branch_stock
      FROM products p
      LEFT JOIN stock s ON p.id = s.product_id
      WHERE p.id = $1
      GROUP BY p.id, p.name, p.normalized_name, p.sku, p.barcode, p.${caps.catCol}, p.brand_id, p.company_id, p.quality_id, p.color_id, p.unit_id, p.purchase_price, p.average_cost, p.sale_price, p.low_stock_threshold, p.is_active, p.description, p.created_at, p.updated_at`,
-    [id]
+    [id, CENTRAL_WAREHOUSE_ID, MAIN_BRANCH_ID]
   );
   if (res.rows.length === 0) {
     return null;

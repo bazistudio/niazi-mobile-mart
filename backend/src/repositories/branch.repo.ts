@@ -33,6 +33,9 @@ export interface Branch {
   name: string;
   code: string;
   is_active: number; // 1 = active, 0 = inactive
+  /** 1 = Central Warehouse (stock-holding only, not a retail POS branch); 0 = retail branch.
+   *  Added by migration 030_central_warehouse_location.sql. Defaults to 0 for all legacy rows. */
+  is_warehouse: number;
   created_at: string;
   updated_at: string;
 }
@@ -72,7 +75,7 @@ export class BranchRepo {
   // ---------------------------------------------------------------------------
   async listBranches(): Promise<Branch[]> {
     const result = await this.pool.query<Branch>(
-      `SELECT id, organization_id, name, code, is_active, created_at, updated_at
+      `SELECT id, organization_id, name, code, is_active, is_warehouse, created_at, updated_at
        FROM branches
        ORDER BY name ASC`
     );
@@ -85,7 +88,7 @@ export class BranchRepo {
   // ---------------------------------------------------------------------------
   async getBranchById(id: string): Promise<Branch | null> {
     const result = await this.pool.query<Branch>(
-      `SELECT id, organization_id, name, code, is_active, created_at, updated_at
+      `SELECT id, organization_id, name, code, is_active, is_warehouse, created_at, updated_at
        FROM branches
        WHERE id = $1`,
       [id]
@@ -120,7 +123,7 @@ export class BranchRepo {
       const result = await this.pool.query<Branch>(
         `INSERT INTO branches (id, organization_id, name, code, is_active, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, organization_id, name, code, is_active, created_at, updated_at`,
+         RETURNING id, organization_id, name, code, is_active, is_warehouse, created_at, updated_at`,
         [
           id,
           organizationId,
@@ -179,7 +182,7 @@ export class BranchRepo {
       `UPDATE branches
        SET ${fields.join(', ')}
        WHERE id = $${idx}
-       RETURNING id, organization_id, name, code, is_active, created_at, updated_at`,
+       RETURNING id, organization_id, name, code, is_active, is_warehouse, created_at, updated_at`,
       values
     );
 
