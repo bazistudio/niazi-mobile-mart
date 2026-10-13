@@ -86,7 +86,7 @@ import {
   receiveStock,
   ReceiveStockDto,
 } from './repositories/product.repo';
-import { transferStock, StockTransferRepoError } from './repositories/stock_transfer.repo';
+import { transferStock, transferStockBatch, StockTransferRepoError } from './repositories/stock_transfer.repo';
 import { authMiddleware, buildAuthMiddleware, buildActiveUserMiddleware, isAdmin, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity, CENTRAL_WAREHOUSE_ID } from './auth';
 
 // --- (Main server function continues) ---
@@ -775,6 +775,78 @@ async function main(): Promise<void> {
           return;
         }
         res.status(500).json({ error: err.message || 'Failed to transfer stock' });
+      }
+    }
+  );
+
+  // ── POST /api/v1/inventory/transfer/batch — Atomic multi-product stock transfer ────────
+  app.post(
+    ['/api/inventory/transfer/batch', '/api/v1/inventory/transfer/batch', '/api/stock/transfer/batch'],
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const identity = req.identity as RequestIdentity;
+
+        // Stock transfers require Organization Administrator permissions
+        if (!isOrgAdmin(identity)) {
+          res.status(403).json({ error: 'Forbidden: cross-branch stock transfers require organization administrator role' });
+          return;
+        }
+
+        const sourceId = (req.body?.source_branch_id || req.body?.sourceBranchId || req.body?.from_branch_id) as string | undefined;
+        const destId = (req.body?.destination_branch_id || req.body?.destinationBranchId || req.body?.to_branch_id) as string | undefined;
+        const items = req.body?.items as Array<{ product_id?: string; productId?: string; quantity: number }> | undefined;
+        const reason = req.body?.reason as string | undefined;
+        const notes = req.body?.notes as string | undefined;
+
+        if (!sourceId || !sourceId.trim()) {
+          res.status(400).json({ error: 'source_branch_id is required' });
+          return;
+        }
+        if (!destId || !destId.trim()) {
+          res.status(400).json({ error: 'destination_branch_id is required' });
+          return;
+        }
+        if (!items || !Array.isArray(items) || items.length === 0) {
+          res.status(400).json({ error: 'items array with at least one product is required' });
+          return;
+        }
+
+        // Phase 13 Fix: Both source and destination branches must be authorized for caller
+        if (!canAccessBranch(identity, sourceId)) {
+          res.status(403).json({ error: 'Access denied: cannot transfer stock from a branch you do not manage' });
+          return;
+        }
+
+        if (!canAccessBranch(identity, destId)) {
+          res.status(403).json({ error: 'Access denied: cannot transfer stock to a branch you do not manage' });
+          return;
+        }
+
+        // Audit log: warehouse movements are significant inventory events
+        if (sourceId.trim() === CENTRAL_WAREHOUSE_ID || destId.trim() === CENTRAL_WAREHOUSE_ID) {
+          console.log(`[inventory/transfer/batch] Warehouse batch movement: ${sourceId.trim()} → ${destId.trim()}, items=${items.length}, by=${identity.user_id}`);
+        }
+
+        const result = await transferStockBatch(pool, {
+          transfer_id: ((req.body?.transfer_id || req.body?.transferId || req.body?.idempotency_key) as string | undefined)?.trim() || null,
+          source_branch_id: sourceId.trim(),
+          destination_branch_id: destId.trim(),
+          items: items.map((i) => ({
+            product_id: String(i.product_id || i.productId || '').trim(),
+            quantity: Number(i.quantity ?? 0),
+          })),
+          reason: reason ?? null,
+          notes: notes ?? null,
+        }, identity.user_id);
+
+        res.status(200).json(result);
+      } catch (err: any) {
+        if (err instanceof StockTransferRepoError) {
+          res.status(err.statusCode).json({ error: err.message });
+          return;
+        }
+        res.status(500).json({ error: err.message || 'Failed to process batch stock transfer' });
       }
     }
   );

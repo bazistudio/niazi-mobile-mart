@@ -1264,6 +1264,7 @@ export const tauriClient = {
       name: 'Main Branch',
       code: 'MAIN',
       is_active: true,
+      is_warehouse: 0,
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
     };
@@ -2163,7 +2164,7 @@ export interface Branch {
   is_active: boolean;
   /** 1 = Central Warehouse (stock-holding only, not a retail POS branch); 0 = retail branch.
    *  Added by migration 030_central_warehouse_location.sql. Defaults to 0 for all legacy rows. */
-  is_warehouse: number;
+  is_warehouse?: number;
   created_at: string;
   updated_at: string;
 }

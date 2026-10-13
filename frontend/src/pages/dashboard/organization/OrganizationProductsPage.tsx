@@ -21,6 +21,7 @@ import { AddProductDrawer } from '@/features/inventory/components/AddProductDraw
 import { ProductEditModal } from '@/features/inventory/product/components/ProductEditModal';
 import { ProductDeleteDialog } from '@/features/inventory/product/components/ProductDeleteDialog';
 import { StockTransferModal } from '@/features/inventory/components/StockTransferModal';
+import { StockTransferWorkspace } from '@/features/inventory/components/StockTransferWorkspace';
 import { tauriClient, Branch } from '@/lib/tauri/tauriClient';
 import { httpClient } from '@/lib/http/httpClient';
 import { inventoryApi } from '@/features/inventory/api/inventory.api';
@@ -72,7 +73,7 @@ export function OrganizationProductsPage() {
         // Use the REST API directly (same as StockTransferModal) rather than the legacy Tauri IPC path
         const branchList = await httpClient.get<Branch[]>('/api/v1/branches');
         const activeBranches = branchList && branchList.length > 0 ? branchList : [
-          { id: '00000000-0000-0000-0000-000000000002', organization_id: 'org1', name: 'Main Branch', code: 'MAIN', is_active: true, created_at: '', updated_at: '' },
+          { id: '00000000-0000-0000-0000-000000000002', organization_id: 'org1', name: 'Main Branch', code: 'MAIN', is_active: true, is_warehouse: 0, created_at: '', updated_at: '' },
         ];
         setBranches(activeBranches);
         // Pre-select Central Warehouse as intake destination default (migration 030_central_warehouse_location.sql).
@@ -222,7 +223,7 @@ export function OrganizationProductsPage() {
             type="button"
             onClick={() => {
               setTransferProduct(null);
-              setTransferOpen(true);
+              setActiveTab('transfer');
             }}
             className="flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer"
           >
@@ -391,7 +392,7 @@ export function OrganizationProductsPage() {
                               type="button"
                               onClick={() => {
                                 setTransferProduct(p);
-                                setTransferOpen(true);
+                                setActiveTab('transfer');
                               }}
                               className="px-2.5 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-400 rounded text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1"
                               title="Transfer stock to branch"
@@ -544,28 +545,14 @@ export function OrganizationProductsPage() {
       )}
 
       {/* TAB 3: STOCK TRANSFER DISPATCH */}
-      {activeTab === 'transfer' && (
-        <div className="bg-white dark:bg-gray-800/90 rounded-xl p-8 border border-gray-200/80 dark:border-gray-700/80 shadow-sm text-center max-w-xl mx-auto">
-          <div className="w-14 h-14 rounded-full bg-emerald-500/10 mx-auto flex items-center justify-center text-emerald-600 dark:text-emerald-400 mb-4">
-            <ArrowRightLeft className="w-7 h-7" />
-          </div>
-          <h3 className="text-lg font-bold text-gray-900 dark:text-white">Inter-Branch Stock Transfer Dispatch</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto mt-2 leading-relaxed">
-            Dispatch stock from Main Branch (Central Stock) to operational retail branches. Uses Rust backend authorization and updates inventory atomically.
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              setTransferProduct(null);
-              setTransferOpen(true);
-            }}
-            className="mt-6 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold transition-all shadow-md inline-flex items-center gap-2 cursor-pointer"
-          >
-            <ArrowRightLeft className="w-4 h-4" />
-            Open Stock Transfer Dispatch Modal
-          </button>
-        </div>
-      )}
+      <div className={activeTab === 'transfer' ? 'block' : 'hidden'}>
+        <StockTransferWorkspace
+          isActiveTab={activeTab === 'transfer'}
+          initialProduct={transferProduct}
+          onClearInitialProduct={() => setTransferProduct(null)}
+          onSuccess={() => fetchProducts({ scope: 'organization' })}
+        />
+      </div>
 
       {/* TAB 4: BRANCH STOCK DISTRIBUTION */}
       {activeTab === 'distribution' && (
