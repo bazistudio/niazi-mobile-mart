@@ -98,6 +98,10 @@ export interface SaleSession {
   
   isScanMode: boolean;
   transactionId: string;
+  // P0 fix: idempotency key for the current checkout attempt.
+  // Generated on first executeTransaction() call and reused on retries.
+  // Cleared by clearCart() when the user starts a new sale.
+  checkoutIdempotencyKey?: string | null;
   linkedInvoiceId?: string;
   createdAt: number;
   updatedAt: number;
@@ -136,6 +140,7 @@ interface PosStore {
 
   // Transaction Lifecycle
   completeTransaction: (paymentBreakdown: { method: string; amount: number }[], customer: { id: string; name: string } | null, idempotencyKey?: string) => Promise<any>;
+  setCheckoutIdempotencyKey: (key: string | null) => void;
   processCashReturn: () => Promise<any>;
   processInvoiceReturn: (skipOverflowCheck?: boolean, forceCashRefund?: boolean) => Promise<any>;
   setLastInvoice: (invoice: InvoiceDocument | null) => void;
@@ -438,6 +443,8 @@ export const usePosStore = create<PosStore>()(
               mode: 'sale',
               transactionType: 'sale',
               transactionId: `TXN-${Date.now()}`, // Reset TXN id for next sale
+              // P0 fix: reset idempotency key so the next sale gets a fresh one
+              checkoutIdempotencyKey: null,
               linkedInvoiceId: undefined,
               invoiceDiscountType: 'fixed',
               invoiceDiscountValue: 0,
@@ -509,6 +516,15 @@ export const usePosStore = create<PosStore>()(
                 : { id: 'walk-in', name: 'Walk-In Customer' },
             };
           }),
+        });
+      },
+
+      setCheckoutIdempotencyKey: (key) => {
+        const { saleTabs, activeTabId } = get();
+        set({
+          saleTabs: saleTabs.map(tab =>
+            tab.id !== activeTabId ? tab : { ...tab, checkoutIdempotencyKey: key }
+          ),
         });
       },
 
@@ -605,11 +621,18 @@ export const usePosStore = create<PosStore>()(
           // Re-fetch inventory globally using decoupled event
           platformAdapter.emitEvent('inventory-updated');
 
+          // DEF-SALE-11 fix: invalidate all genuinely affected query caches after a completed sale.
+          // Previously only dashboard/sales/products were cleared; customer balances and cash
+          // sessions were stale until a hard reload.
           try {
             const qc = getQueryClient();
             qc.invalidateQueries({ queryKey: queryKeys.dashboard });
             qc.invalidateQueries({ queryKey: ['sales'] });
             qc.invalidateQueries({ queryKey: ['products'] });
+            // Customer balance and ledger entries change on credit/partial sales
+            qc.invalidateQueries({ queryKey: queryKeys.customers.all });
+            // Cash session running total changes on every CASH payment
+            qc.invalidateQueries({ queryKey: ['cash'] });
           } catch (qcErr) {
             console.warn('Query cache invalidation failed:', qcErr);
           }

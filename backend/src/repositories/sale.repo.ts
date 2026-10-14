@@ -6,6 +6,7 @@
 
 import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
+import { createHash } from 'crypto';
 
 // ─── Domain Types ─────────────────────────────────────────────────────────────
 
@@ -92,6 +93,8 @@ export interface CompleteSaleDto {
   payment_method?: string | null;
   payments?: SalePaymentInputDto[] | null;
   notes?: string | null;
+  // DEF-SALE-12: client-supplied idempotency key for duplicate submission protection
+  idempotency_key?: string | null;
 }
 
 export interface SaleFilterDto {
@@ -290,8 +293,11 @@ export async function completeSaleTx(
   let customerOpt: { id: string; name: string; credit_limit: number } | null = null;
   const rawCustomerId = dto.customer_id?.trim();
   if (rawCustomerId && rawCustomerId.length > 0 && rawCustomerId !== 'walk-in') {
+    // DEF-SALE-03 fix: lock the customer row with FOR UPDATE so that concurrent
+    // credit sales and customer payments cannot read the same pre-sale balance
+    // and breach the credit limit, or corrupt the chronological balance_after sequence.
     const custRow = await client.query(
-      'SELECT id, name, credit_limit, is_active FROM customers WHERE id = $1',
+      'SELECT id, name, credit_limit, is_active FROM customers WHERE id = $1 FOR UPDATE',
       [rawCustomerId]
     );
     if (custRow.rows.length === 0) {
@@ -469,15 +475,28 @@ export async function completeSaleTx(
   // P1 fix: if no stock row exists for (product, branch), fail explicitly — do NOT treat as zero.
   // A missing stock row means inventory was never initialized for this branch; silently proceeding
   // would allow phantom sales with no real stock deduction.
+  //
+  // DEF-SALE-02 fix: aggregate requested quantities by product_id BEFORE checking stock.
+  // Without aggregation, two lines for the same product each pass individually even when their
+  // combined quantity exceeds available stock, and Step 13's atomic decrement then crashes
+  // the database CHECK(quantity >= 0) constraint with an unhandled 500 error instead of a
+  // clean 400 validation response.
+  const aggregatedQty = new Map<string, number>();
   for (const line of preparedLines) {
+    aggregatedQty.set(line.product_id, (aggregatedQty.get(line.product_id) ?? 0) + line.quantity);
+  }
+
+  // Lock and validate each distinct product row exactly once.
+  for (const [productId, totalQtyRequested] of aggregatedQty.entries()) {
+    const matchingLine = preparedLines.find(l => l.product_id === productId)!;
     const stockRow = await client.query(
       'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2 FOR UPDATE',
-      [line.product_id, branchId]
+      [productId, branchId]
     );
 
     if (stockRow.rows.length === 0) {
       throw new SaleRepoError(
-        `Stock record not found for product '${line.product_name}' at this branch. ` +
+        `Stock record not found for product '${matchingLine.product_name}' at this branch. ` +
         `Please initialize stock before selling.`,
         400
       );
@@ -485,9 +504,9 @@ export async function completeSaleTx(
 
     const currentStock = Number((stockRow.rows[0] as Record<string, unknown>)?.['quantity'] ?? 0);
 
-    if (currentStock < line.quantity) {
+    if (currentStock < totalQtyRequested) {
       throw new SaleRepoError(
-        `Insufficient stock for product '${line.product_name}': available ${currentStock}, requested ${line.quantity}`,
+        `Insufficient stock for product '${matchingLine.product_name}': available ${currentStock}, requested ${totalQtyRequested}`,
         400
       );
     }
@@ -757,6 +776,65 @@ export async function completeSaleTx(
 
 // ─── Public Repository Functions ──────────────────────────────────────────────
 
+// ─── Idempotency Helpers ─────────────────────────────────────────────────────
+
+/**
+ * Builds a canonical SHA-256 hash of the financially meaningful fields.
+ * Fields are sorted deterministically so key order cannot affect the hash.
+ * Non-semantic fields (notes, terminal_id, idempotency_key itself) are excluded.
+ */
+function computePayloadHash(dto: CompleteSaleDto): string {
+  const canonical = {
+    branch_id: dto.branch_id ?? null,
+    customer_id: dto.customer_id ?? null,
+    discount: dto.discount ?? 0,
+    items: [...(dto.items ?? [])]
+      .sort((a, b) => a.product_id < b.product_id ? -1 : a.product_id > b.product_id ? 1 : 0)
+      .map(i => ({
+        product_id: i.product_id,
+        quantity: i.quantity,
+        unit_price: i.unit_price ?? i.price ?? null,
+        discount: i.discount ?? 0,
+      })),
+    payments: dto.payments
+      ? [...dto.payments]
+          .sort((a, b) => a.method < b.method ? -1 : a.method > b.method ? 1 : 0)
+          .map(p => ({ method: p.method, amount: p.amount }))
+      : null,
+    paid_amount: dto.paid_amount ?? null,
+    payment_method: dto.payment_method ?? null,
+  };
+  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+}
+
+/**
+ * Computes deterministic 32-bit signed integer pair for PostgreSQL pg_advisory_xact_lock.
+ * Scoped to branch_id and idempotency_key to ensure branch isolation.
+ */
+function computeAdvisoryLockKeys(branchId: string, idempotencyKey: string): [number, number] {
+  const hash = createHash('sha256').update(`${branchId}:${idempotencyKey}`).digest();
+  const k1 = hash.readInt32BE(0);
+  const k2 = hash.readInt32BE(4);
+  return [k1, k2];
+}
+
+/**
+ * P0 Atomic Idempotency: completeSale() wraps completeSaleTx() in a BEGIN/COMMIT block
+ * with a transaction-level PostgreSQL advisory lock and atomic re-check.
+ *
+ * Concurrency guarantees:
+ *   1. pg_advisory_xact_lock(k1, k2) serializes concurrent requests with the same (branch_id, key).
+ *   2. Only the first transaction proceeds to execute completeSaleTx().
+ *   3. Any concurrent identical request blocks on the advisory lock. Once unblocked,
+ *      it re-queries sale_idempotency_keys, finds the committed winner's row, verifies
+ *      the payload hash, issues ROLLBACK (performing zero financial side effects),
+ *      and returns the original committed sale result.
+ *   4. A mismatched payload with the same key is rejected with HTTP 409 Conflict.
+ *   5. If a winning transaction fails, it rolls back, releasing the lock without writing
+ *      an idempotency row, allowing the waiting request to execute safely.
+ *   6. Fail-closed: if the sale_idempotency_keys table is missing (migration 033 unapplied),
+ *      it raises a 500 error and aborts checkout immediately.
+ */
 export async function completeSale(
   pool: Pool,
   dto: CompleteSaleDto,
@@ -764,18 +842,181 @@ export async function completeSale(
   identityBranchId?: string | null,
   callerIsAdmin?: boolean
 ): Promise<SaleResultDto> {
-  const client = await pool.connect();
+  const rawIdempotencyKey = dto.idempotency_key?.trim() ?? null;
+
+  // Resolve the branch ID for lookup and lock scoping
+  let lookupBranchId: string | null = null;
+  if (!callerIsAdmin && identityBranchId?.trim()) {
+    lookupBranchId = identityBranchId.trim();
+  } else if (dto.branch_id?.trim()) {
+    lookupBranchId = dto.branch_id.trim();
+  } else if (identityBranchId?.trim()) {
+    lookupBranchId = identityBranchId.trim();
+  }
+
+  // ── Fast-path (read-only): if already committed, return cached sale immediately.
+  // This avoids acquiring a client or holding a transaction if the key was already processed.
+  if (rawIdempotencyKey && lookupBranchId) {
+    let existingRow: Record<string, unknown> | null = null;
+    try {
+      const existing = await pool.query(
+        'SELECT sale_id, payload_hash FROM sale_idempotency_keys WHERE idempotency_key = $1 AND branch_id = $2',
+        [rawIdempotencyKey, lookupBranchId]
+      );
+      if (existing.rows.length > 0) {
+        existingRow = existing.rows[0] as Record<string, unknown>;
+      }
+    } catch (lookupErr: unknown) {
+      const msg = (lookupErr as Error).message || String(lookupErr);
+      if (
+        msg.includes('sale_idempotency_keys') ||
+        msg.includes('does not exist') ||
+        msg.includes('relation') ||
+        (lookupErr as { code?: string }).code === '42P01'
+      ) {
+        console.error('[sale.repo] sale_idempotency_keys table missing — idempotency schema not applied. Failing closed.');
+        throw new SaleRepoError(
+          'Sale service is temporarily unavailable: required idempotency schema has not been applied. Contact your system administrator.',
+          500
+        );
+      }
+      throw lookupErr;
+    }
+
+    if (existingRow) {
+      const storedHash = existingRow['payload_hash'] as string | null;
+      const incomingHash = computePayloadHash(dto);
+
+      if (storedHash !== null && storedHash !== incomingHash) {
+        throw new SaleRepoError(
+          `Idempotency key '${rawIdempotencyKey}' was already used for a different payload. ` +
+          'Submit a new request with a unique idempotency key.',
+          409
+        );
+      }
+
+      const existingSaleId = existingRow['sale_id'] as string;
+      const originalSale = await getSaleById(pool, existingSaleId);
+      if (originalSale) {
+        const originalLines = await getSaleLines(pool, existingSaleId);
+        const originalPayments = await getSalePayments(pool, existingSaleId);
+        const creditAmt = Math.max(originalSale.total_amount - originalSale.paid_amount, 0);
+        return {
+          sale: originalSale,
+          lines: originalLines,
+          payments: originalPayments,
+          credit_amount: creditAmt,
+          customer_balance_after: null,
+          cogs: 0,
+          gross_profit: 0,
+          gross_margin: 0,
+        };
+      }
+    }
+  }
+
+  // ── Atomic checkout transaction with advisory lock and re-check
+  let client: PoolClient | null = null;
+  let result: SaleResultDto;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
-    const result = await completeSaleTx(client, dto, userId, null, identityBranchId, callerIsAdmin);
+
+    // P0: Acquire exclusive transaction-level advisory lock on (branch_id, idempotency_key)
+    // BEFORE executing completeSaleTx. If a concurrent identical request is running,
+    // this client blocks until the in-flight transaction completes.
+    if (rawIdempotencyKey && lookupBranchId) {
+      const [k1, k2] = computeAdvisoryLockKeys(lookupBranchId, rawIdempotencyKey);
+      await client.query('SELECT pg_advisory_xact_lock($1, $2)', [k1, k2]);
+
+      // Under the exclusive lock, re-check whether another transaction committed while we waited.
+      const recheck = await client.query(
+        'SELECT sale_id, payload_hash FROM sale_idempotency_keys WHERE idempotency_key = $1 AND branch_id = $2',
+        [rawIdempotencyKey, lookupBranchId]
+      );
+
+      if (recheck.rows.length > 0) {
+        // A concurrent transaction committed while we were waiting!
+        const row = recheck.rows[0] as Record<string, unknown>;
+        const storedHash = row['payload_hash'] as string | null;
+        const incomingHash = computePayloadHash(dto);
+
+        // Roll back this transaction immediately — NO sale is created, NO stock deducted.
+        await client.query('ROLLBACK');
+
+        if (storedHash !== null && storedHash !== incomingHash) {
+          throw new SaleRepoError(
+            `Idempotency key '${rawIdempotencyKey}' was already used for a different payload. ` +
+            'Submit a new request with a unique idempotency key.',
+            409
+          );
+        }
+
+        const existingSaleId = row['sale_id'] as string;
+        const originalSale = await getSaleById(pool, existingSaleId);
+        if (originalSale) {
+          const originalLines = await getSaleLines(pool, existingSaleId);
+          const originalPayments = await getSalePayments(pool, existingSaleId);
+          const creditAmt = Math.max(originalSale.total_amount - originalSale.paid_amount, 0);
+          return {
+            sale: originalSale,
+            lines: originalLines,
+            payments: originalPayments,
+            credit_amount: creditAmt,
+            customer_balance_after: null,
+            cogs: 0,
+            gross_profit: 0,
+            gross_margin: 0,
+          };
+        }
+      }
+    }
+
+    // Only the winning transaction executes completeSaleTx() — writes sale, decrements stock, etc.
+    result = await completeSaleTx(client, dto, userId, null, identityBranchId, callerIsAdmin);
+
+    // Insert the committed idempotency key INSIDE the same transaction before COMMIT
+    if (rawIdempotencyKey) {
+      const payloadHash = computePayloadHash(dto);
+      const targetBranchId = result.sale.branch_id;
+      await client.query(
+        `INSERT INTO sale_idempotency_keys (idempotency_key, branch_id, sale_id, payload_hash, created_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [rawIdempotencyKey, targetBranchId, result.sale.id, payloadHash, new Date().toISOString()]
+      );
+    }
+
     await client.query('COMMIT');
-    return result;
-  } catch (err) {
-    await client.query('ROLLBACK');
+  } catch (err: unknown) {
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Non-fatal: rollback may fail if client connection was aborted
+      }
+    }
+
+    const msg = (err as Error).message || String(err);
+    if (
+      msg.includes('sale_idempotency_keys') ||
+      (msg.includes('relation') && msg.includes('does not exist')) ||
+      (err as { code?: string }).code === '42P01'
+    ) {
+      console.error('[sale.repo] sale_idempotency_keys table missing — idempotency schema not applied. Failing closed.', err);
+      throw new SaleRepoError(
+        'Sale service is temporarily unavailable: required idempotency schema has not been applied. Contact your system administrator.',
+        500
+      );
+    }
+
     throw err;
   } finally {
-    client.release();
+    if (client) {
+      client.release();
+    }
   }
+
+  return result;
 }
 
 export async function getSaleById(pool: Pool, id: string): Promise<Sale | null> {

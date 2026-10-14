@@ -45,6 +45,7 @@ export interface ProfitMetricsDto {
 
 export interface DashboardProfitSummaryDto {
   today: ProfitMetricsDto;
+  this_week: ProfitMetricsDto;
   this_month: ProfitMetricsDto;
   total: ProfitMetricsDto;
 }
@@ -196,16 +197,44 @@ export async function getDashboardProfitSummary(
   pool: Pool,
   branchId?: string | null
 ): Promise<DashboardProfitSummaryDto> {
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString();
-  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).toISOString();
+  // DEF-SALE-08: Use PKT (UTC+5) timezone boundaries regardless of the host
+  // process timezone (Cloud Run runs in UTC).  Shift UTC now by +5 h to get
+  // the current PKT wall-clock date, build ISO timestamps that mark midnight
+  // and end-of-day in PKT, then convert back to UTC ISO strings for the query.
+  const PKT_OFFSET_MS = 5 * 60 * 60 * 1000;
+  const nowUtcMs = Date.now();
+  const pktMs = nowUtcMs + PKT_OFFSET_MS;
+  const pktDate = new Date(pktMs);
 
-  const [today, this_month, total] = await Promise.all([
+  // PKT calendar components
+  const pktYear  = pktDate.getUTCFullYear();
+  const pktMonth = pktDate.getUTCMonth();   // 0-based
+  const pktDay   = pktDate.getUTCDate();
+
+  // Midnight PKT = 19:00 previous day UTC (or 00:00 PKT - 5h)
+  const todayStartUtc = new Date(Date.UTC(pktYear, pktMonth, pktDay, 0, 0, 0, 0) - PKT_OFFSET_MS);
+  const todayEndUtc   = new Date(Date.UTC(pktYear, pktMonth, pktDay, 23, 59, 59, 999) - PKT_OFFSET_MS);
+  const monthStartUtc = new Date(Date.UTC(pktYear, pktMonth, 1, 0, 0, 0, 0) - PKT_OFFSET_MS);
+
+  // Week boundary: Monday 00:00 PKT. getUTCDay() returns 0=Sun..6=Sat;
+  // daysSinceMonday maps that to 0=Mon..6=Sun.
+  const pktDayOfWeek = pktDate.getUTCDay(); // 0=Sun,1=Mon,...,6=Sat
+  const daysSinceMonday = (pktDayOfWeek + 6) % 7; // 0=Mon,...,6=Sun
+  const weekStartUtc = new Date(
+    Date.UTC(pktYear, pktMonth, pktDay - daysSinceMonday, 0, 0, 0, 0) - PKT_OFFSET_MS
+  );
+
+  const todayStart = todayStartUtc.toISOString();
+  const todayEnd   = todayEndUtc.toISOString();
+  const monthStart = monthStartUtc.toISOString();
+  const weekStart  = weekStartUtc.toISOString();
+
+  const [today, this_week, this_month, total] = await Promise.all([
     getPeriodProfitMetrics(pool, todayStart, todayEnd, branchId),
+    getPeriodProfitMetrics(pool, weekStart, undefined, branchId),
     getPeriodProfitMetrics(pool, monthStart, undefined, branchId),
     getPeriodProfitMetrics(pool, undefined, undefined, branchId),
   ]);
 
-  return { today, this_month, total };
+  return { today, this_week, this_month, total };
 }

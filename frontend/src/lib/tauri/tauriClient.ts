@@ -2578,6 +2578,8 @@ export interface CompleteSaleDto {
   payment_method?: string | null;
   payments?: SalePaymentInputDto[] | null;
   notes?: string | null;
+  // DEF-SALE-12: client-supplied idempotency key for duplicate submission protection
+  idempotency_key?: string | null;
 }
 
 export interface SaleResultDto {
@@ -3200,6 +3202,7 @@ export interface DashboardBalancesDto {
 
 export interface DashboardProfitSummaryDto {
   today: ProfitMetricsDto;
+  this_week: ProfitMetricsDto;
   this_month: ProfitMetricsDto;
   total: ProfitMetricsDto;
 }

@@ -13,6 +13,10 @@ export interface InvoiceDocument {
 
   shop: ShopProfile;
 
+  // DEF-SALE-06: customer and cashier carried through for receipt printing
+  customer?: { id: string; name: string } | null;
+  cashier?: string | null;
+
   items: {
     name: string;
     qty: number;
@@ -41,12 +45,20 @@ export interface InvoiceDocument {
 }
 
 export class DocumentService {
-  static buildInvoice(transaction: DBTransaction, shopProfile: ShopProfile): InvoiceDocument {
+  static buildInvoice(
+    transaction: DBTransaction,
+    shopProfile: ShopProfile,
+    extras?: { customer?: { id: string; name: string } | null; cashier?: string | null }
+  ): InvoiceDocument {
     return {
       invoiceId: transaction.transactionId,
       transactionId: transaction.transactionId,
 
       shop: shopProfile,
+
+      // DEF-SALE-06: carry real customer and cashier identity to the receipt
+      customer: extras?.customer ?? null,
+      cashier: extras?.cashier ?? null,
 
       items: transaction.items.map(i => ({
         name: i.productName,

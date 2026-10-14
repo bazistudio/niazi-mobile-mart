@@ -8,6 +8,7 @@ import { PurchaseReturnModal } from '@/features/returns/PurchaseReturnModal';
 import { usePrintStore } from '@/lib/printer';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
 import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
+import { salesApi } from '@/services/sales.api';
 
 interface Props {
   item: HistoryItem;
@@ -23,7 +24,7 @@ export const HistoryRowActions: React.FC<Props> = ({ item }) => {
   const { openPreview } = usePrintStore();
   const { settings, shopHeader } = usePrinterStore();
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     setIsOpen(false);
     if (!settings || !shopHeader) return;
     
@@ -31,7 +32,18 @@ export const HistoryRowActions: React.FC<Props> = ({ item }) => {
     let docType = 'Generic';
 
     if (item.type === 'sale') {
-      html = printFormatter.formatSaleInvoice({ ...item, orderNumber: item.referenceId, totalAmount: item.amount, items: [] }, settings, shopHeader);
+      // DEF-SALE-05: fetch real persisted sale lines instead of passing empty array.
+      // Fallback gracefully so print still works if the fetch fails.
+      let saleItems: any[] = [];
+      try {
+        const result = await salesApi.getOrderById(item.id);
+        if (result.success && result.order?.items) {
+          saleItems = result.order.items;
+        }
+      } catch {
+        // non-fatal: proceed with empty items rather than blocking print
+      }
+      html = printFormatter.formatSaleInvoice({ ...item, orderNumber: item.referenceId, totalAmount: item.amount, items: saleItems }, settings, shopHeader);
       docType = 'SaleInvoice';
     } else if (item.type === 'purchase') {
       html = printFormatter.formatPurchaseInvoice({ ...item, invoiceNumber: item.referenceId, grandTotal: item.amount, items: [] }, settings, shopHeader);

@@ -38,8 +38,11 @@ export const salesService = {
     }
 
     if (period === 'weekly') {
-      const totalRevenue = summary.revenue?.thisMonth ? Math.round(summary.revenue.thisMonth / 4) : summary.revenue?.today || 0;
-      const totalOrders = summary.orders?.total ? Math.round(summary.orders.total / 4) : summary.orders?.today || 0;
+      // P1 fix: use actual week-to-date revenue and order count from backend
+      // (Monday 00:00 PKT through now). Do NOT fall back to dividing monthly
+      // totals — show 0 if the backend did not return weekly data.
+      const totalRevenue = summary.revenue?.thisWeek ?? 0;
+      const totalOrders = summary.orders?.thisWeek ?? 0;
       const averageOrderValue = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0;
       return {
         totalRevenue,

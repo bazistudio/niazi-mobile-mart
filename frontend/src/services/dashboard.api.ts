@@ -4,6 +4,7 @@ export interface DashboardMetrics {
   summary: {
     revenue: {
       today: number;
+      thisWeek: number;
       thisMonth: number;
       total: number;
       growth: number;
@@ -15,6 +16,7 @@ export interface DashboardMetrics {
     };
     orders: {
       today: number;
+      thisWeek: number;
       total: number;
     };
     inventory: {
@@ -65,6 +67,7 @@ export const dashboardApi = {
         summary: {
           revenue: {
             today: profitSummary.today.net_revenue,
+            thisWeek: profitSummary.this_week.net_revenue,
             thisMonth: profitSummary.this_month.net_revenue,
             total: profitSummary.total.net_revenue,
             growth: 0,
@@ -76,6 +79,7 @@ export const dashboardApi = {
           },
           orders: {
             today: profitSummary.today.orders_count,
+            thisWeek: profitSummary.this_week.orders_count,
             total: profitSummary.total.orders_count,
           },
           inventory: {

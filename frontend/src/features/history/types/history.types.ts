@@ -20,6 +20,7 @@ export type HistoryItem = {
 export type HistoryStats = {
   totalSales: number;
   totalInvoices: number;
+  totalPurchases?: number;
   totalExpenses: number;
   netRevenue: number;
   pendingPayments: number;

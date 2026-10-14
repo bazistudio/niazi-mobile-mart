@@ -51,8 +51,9 @@ export const InvoiceReceipt: React.FC = () => {
       const unified: UnifiedInvoice = {
         invoiceNo: invoice.invoiceId,
         date: new Date(invoice.createdAt || Date.now()).toLocaleString(),
-        customer: undefined,
-        cashier: 'Cashier',
+        // DEF-SALE-06: use real customer/cashier from InvoiceDocument (set during sale)
+        customer: invoice.customer ? { name: invoice.customer.name } : undefined,
+        cashier: invoice.cashier || 'Cashier',
         items: invoice.items.map(i => ({ 
           name: i.name, 
           qty: i.qty, 

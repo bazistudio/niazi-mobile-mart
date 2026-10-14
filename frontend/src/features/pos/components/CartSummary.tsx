@@ -16,6 +16,7 @@ import { CreditLimitWarningModal } from './modals/CreditLimitWarningModal';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
 import { GlobalLoadingOverlay } from '@/components/ui/GlobalLoadingOverlay';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
+import { useAuthStore } from '@/lib/auth/core/auth.store';
 
 export const CartSummary: React.FC = () => {
   const [mounted, setMounted] = useState(false);
@@ -26,6 +27,7 @@ export const CartSummary: React.FC = () => {
   const setSessionMode = usePosStore((s) => s.setSessionMode);
   const setInvoiceDiscount = usePosStore((s) => s.setInvoiceDiscount);
   const completeTransaction = usePosStore((s) => s.completeTransaction);
+  const setCheckoutIdempotencyKey = usePosStore((s) => s.setCheckoutIdempotencyKey);
   const setCustomer = usePosStore((s) => s.setCustomer);
 
   const { settings, shopHeader, fetchSettings } = usePrinterStore();
@@ -203,7 +205,13 @@ export const CartSummary: React.FC = () => {
     const isRefund = grandTotal < 0;
     setIsProcessing(true);
 
-    const idempotencyKey = `pos_txn_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    // P0 fix: reuse the persisted idempotency key for retries of the same checkout.
+    // Generate a fresh key only on the first call; clearCart() resets it for a new sale.
+    let idempotencyKey = activeSession.checkoutIdempotencyKey ?? null;
+    if (!idempotencyKey) {
+      idempotencyKey = `pos_txn_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      setCheckoutIdempotencyKey(idempotencyKey);
+    }
 
     try {
       const result = await completeTransaction(paymentBreakdown, targetCustomer, idempotencyKey);
@@ -230,17 +238,26 @@ export const CartSummary: React.FC = () => {
           subtotal: orderData.subtotal || 0,
           discountTotal: orderData.discountAmount || orderData.discountTotal || 0,
           grandTotal: orderData.totalAmount || orderData.grandTotal || 0,
-          totalPaid: orderData.totalAmount || orderData.grandTotal || 0,
-          remainingDue: 0,
-          changeReturned: 0,
-          paymentBreakdown: [
-            { method: orderData.paymentMethod || 'cash', amount: orderData.totalAmount || orderData.grandTotal || 0 },
-          ],
+          // DEF-SALE-01 fix: use actual paid/credit amounts from the committed sale record.
+          // orderData.paidAmount / totalPaid = amount actually received (set from sale.paid_amount).
+          // orderData.creditAmount = outstanding balance owed (set from saleResult.credit_amount).
+          totalPaid: orderData.paidAmount ?? orderData.totalPaid ?? (orderData.totalAmount || orderData.grandTotal || 0),
+          remainingDue: orderData.creditAmount ?? Math.max((orderData.totalAmount || 0) - (orderData.paidAmount ?? orderData.totalPaid ?? (orderData.totalAmount || 0)), 0),
+          changeReturned: orderData.changeAmount ?? 0,
+          paymentBreakdown: (orderData.payments && orderData.payments.length > 0)
+            ? orderData.payments.map((p: any) => ({ method: p.payment_method || p.method || 'cash', amount: p.amount || 0 }))
+            : [{ method: orderData.paymentMethod || 'cash', amount: orderData.paidAmount ?? orderData.totalPaid ?? (orderData.totalAmount || orderData.grandTotal || 0) }],
           createdAt: orderData.createdAt || Date.now(),
         };
 
         if (shouldPrint) {
-          const invoice = DocumentService.buildInvoice(mappedTransaction as any, realShopProfile as any);
+          // DEF-SALE-06: pass real customer and cashier to receipt
+          const authUser = useAuthStore.getState().user;
+          const invoiceExtras = {
+            customer: targetCustomer ?? null,
+            cashier: authUser?.name ?? null,
+          };
+          const invoice = DocumentService.buildInvoice(mappedTransaction as any, realShopProfile as any, invoiceExtras);
           // Set in store to trigger unified thermal printing in InvoiceReceipt.tsx
           usePosStore.getState().setLastInvoice(invoice);
           await DocumentService.logPrint(invoice.invoiceId, 'PRINT');

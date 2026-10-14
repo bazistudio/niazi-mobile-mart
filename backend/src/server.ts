@@ -286,15 +286,26 @@ async function main(): Promise<void> {
   app.use('/api/roles', rolesRouter);
   app.use('/api/v1/roles', rolesRouter);
 
-  app.get(['/api/organization/balances', '/api/v1/organization/balances'], async (_req: Request, res: Response) => {
-    try {
-      const branchRepo = new BranchRepo(pool);
-      const balances = await branchRepo.getDashboardBalances();
-      res.status(200).json(balances);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Failed to fetch dashboard balances' });
+  // DEF-SALE-10: Protect org balances endpoint — was unauthenticated, exposed to any caller.
+  // Now requires a valid JWT and organization-admin role.
+  app.get(
+    ['/api/organization/balances', '/api/v1/organization/balances'],
+    buildAuthMiddleware(pool),
+    async (req: Request, res: Response) => {
+      const identity = req.identity as RequestIdentity;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Access denied: Organization balances require organization administrator role' });
+        return;
+      }
+      try {
+        const branchRepo = new BranchRepo(pool);
+        const balances = await branchRepo.getDashboardBalances();
+        res.status(200).json(balances);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message || 'Failed to fetch dashboard balances' });
+      }
     }
-  });
+  );
 
   app.get(['/api/brands', '/api/v1/brands'], async (_req: Request, res: Response) => {
     try {

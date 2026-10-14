@@ -110,7 +110,8 @@ export const salesApi = {
               notes: p.notes || null,
             }))
           : null,
-        notes: payload.notes || payload.idempotencyKey || null,
+        notes: payload.notes || null,
+        idempotency_key: payload.idempotencyKey || null,
       });
 
       const order = mapSaleToOrder(saleResult.sale, saleResult.lines, saleResult.payments);
