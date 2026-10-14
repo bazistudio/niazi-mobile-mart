@@ -32,6 +32,7 @@ import {
   getSalePayments,
   SaleRepoError,
   type CompleteSaleDto,
+  type SaleResultDto,
 } from '../repositories/sale.repo.js';
 
 // ---------------------------------------------------------------------------
@@ -117,17 +118,17 @@ async function ensureFixtures(client: PoolClient): Promise<void> {
   await client.query(
     `INSERT INTO branches (id, organization_id, name, code, is_active, is_warehouse, created_at, updated_at)
      VALUES
-       ($1, $4, 'Test Branch A',  'TBRA', 1, 0, $5, $5),
-       ($2, $4, 'Test Branch B',  'TBRB', 1, 0, $5, $5),
-       ($3, $4, 'Test Warehouse', 'TWRH', 1, 1, $5, $5)
+       ($1, $4, 'Test Branch A',  'TBRA-${RUN_PREFIX}', 1, 0, $5, $5),
+       ($2, $4, 'Test Branch B',  'TBRB-${RUN_PREFIX}', 1, 0, $5, $5),
+       ($3, $4, 'Test Warehouse', 'TWRH-${RUN_PREFIX}', 1, 1, $5, $5)
      ON CONFLICT (id) DO NOTHING`,
     [BRANCH_A, BRANCH_B, BRANCH_WH, ORG_ID, now],
   );
 
-  // Category (required by products.category_id NOT NULL FK)
+  // Product Type (required by products.type_id NOT NULL FK)
   const CAT_ID = id('category-test');
   await client.query(
-    `INSERT INTO categories (id, name, code, is_active, created_at, updated_at)
+    `INSERT INTO product_types (id, name, code, is_active, created_at, updated_at)
      VALUES ($1, 'Test Category', 'TCAT-${RUN_PREFIX}', 1, $2, $2)
      ON CONFLICT (id) DO NOTHING`,
     [CAT_ID, now],
@@ -135,10 +136,10 @@ async function ensureFixtures(client: PoolClient): Promise<void> {
 
   // Products
   await client.query(
-    `INSERT INTO products (id, name, sku, category_id, purchase_price, average_cost, sale_price, is_active, created_at, updated_at)
+    `INSERT INTO products (id, name, normalized_name, sku, type_id, purchase_price, average_cost, sale_price, is_active, created_at, updated_at)
      VALUES
-       ($1, 'Phone X', 'SKU-PHNX-${RUN_PREFIX}', $4, 800, 820, 1000, 1, $3, $3),
-       ($2, 'Case Y',  'SKU-CASY-${RUN_PREFIX}', $4, 50,   55,  100, 1, $3, $3)
+       ($1, 'Phone X', 'phone x', 'SKU-PHNX-${RUN_PREFIX}', $4, 800, 820, 1000, 1, $3, $3),
+       ($2, 'Case Y',  'case y',  'SKU-CASY-${RUN_PREFIX}', $4, 50,   55,  100, 1, $3, $3)
      ON CONFLICT (id) DO NOTHING`,
     [PROD_X, PROD_Y, now, CAT_ID],
   );
@@ -146,19 +147,19 @@ async function ensureFixtures(client: PoolClient): Promise<void> {
   // Stock — Branch A
   await client.query(
     `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
-     VALUES ($1, $2, 5, $5), ($3, $2, 3, $5)
+     VALUES ($1, $2, 5, $4), ($3, $2, 3, $4)
      ON CONFLICT (product_id, branch_id)
      DO UPDATE SET quantity = EXCLUDED.quantity, updated_at = EXCLUDED.updated_at`,
-    [PROD_X, BRANCH_A, PROD_Y, BRANCH_A, now],
+    [PROD_X, BRANCH_A, PROD_Y, now],
   );
 
   // Stock — Branch B
   await client.query(
     `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
-     VALUES ($1, $2, 2, $5), ($3, $2, 1, $5)
+     VALUES ($1, $2, 2, $4), ($3, $2, 1, $4)
      ON CONFLICT (product_id, branch_id)
      DO UPDATE SET quantity = EXCLUDED.quantity, updated_at = EXCLUDED.updated_at`,
-    [PROD_X, BRANCH_B, PROD_Y, BRANCH_B, now],
+    [PROD_X, BRANCH_B, PROD_Y, now],
   );
 
   // Customers
@@ -176,7 +177,7 @@ async function ensureFixtures(client: PoolClient): Promise<void> {
   // User (cashier)
   await client.query(
     `INSERT INTO users (id, branch_id, name, username, login_key_hash, role, is_active, created_at, updated_at)
-     VALUES ($1, $2, 'Test Cashier', 'testcashier_${RUN_PREFIX}', 'hash', 'CASHIER', TRUE, $3, $3)
+     VALUES ($1, $2, 'Test Cashier', 'testcashier_${RUN_PREFIX}', 'hash', 'CASHIER', 1, $3, $3)
      ON CONFLICT (id) DO NOTHING`,
     [USER_A, BRANCH_A, now],
   );
@@ -394,6 +395,7 @@ describe('Sales Acceptance Suite — Niazi Mobile Mart v1.3.36', () => {
         [SESSION_A],
       );
 
+      await client.query('SAVEPOINT s06');
       await assert.rejects(
         () => saleTx(client, {
           items:    [{ product_id: PROD_X, quantity: 1 }],
@@ -408,6 +410,7 @@ describe('Sales Acceptance Suite — Niazi Mobile Mart v1.3.36', () => {
           return true;
         },
       );
+      await client.query('ROLLBACK TO SAVEPOINT s06');
 
       const { rows: stock } = await client.query<{ quantity: string }>(
         'SELECT quantity FROM stock WHERE product_id=$1 AND branch_id=$2',
@@ -544,17 +547,29 @@ describe('Sales Acceptance Suite — Niazi Mobile Mart v1.3.36', () => {
   // S10 — Concurrent credit sales against one customer's limit
   // -------------------------------------------------------------------------
   test('S10 — Concurrent credit sales: credit limit prevents double-spend', async () => {
-    // CUST_2 has limit=500. Fire two concurrent 500-unit credit sales.
+    // CUST_2 has limit=500. Fire two concurrent credit sales that together exceed the available credit limit.
     // At most one should succeed.
+    let originalStockQty: number | null = null;
+    let results: PromiseSettledResult<SaleResultDto>[] = [];
+
     const setup = await pool.connect();
     try {
       await setup.query('BEGIN');
       await ensureFixtures(setup);
-      // Reset CUST_2 ledger balance to 0 by removing any prior test ledger entries.
-      // customers has no outstanding_balance column; balance is derived from customer_ledger_entries.
+
+      // Capture original stock quantity before mutating it for the concurrency test
+      const { rows: origStockRows } = await setup.query<{ quantity: string }>(
+        'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2',
+        [PROD_Y, BRANCH_A],
+      );
+      if (origStockRows.length > 0 && origStockRows[0]?.quantity !== undefined) {
+        originalStockQty = Number(origStockRows[0].quantity);
+      }
+
+      // Ensure sufficient stock of PROD_Y for the concurrency test
       await setup.query(
-        `DELETE FROM customer_ledger_entries WHERE customer_id=$1`,
-        [CUST_2],
+        `UPDATE stock SET quantity=10 WHERE product_id=$1 AND branch_id=$2`,
+        [PROD_Y, BRANCH_A],
       );
       await setup.query('COMMIT');
     } catch (e) {
@@ -564,36 +579,55 @@ describe('Sales Acceptance Suite — Niazi Mobile Mart v1.3.36', () => {
       setup.release();
     }
 
-    const results = await Promise.allSettled([
-      completeSale(pool, {
-        customer_id: CUST_2,
-        items:       [{ product_id: PROD_Y, quantity: 1 }],
-        paid_amount: 0, payment_method: 'CREDIT',
-      }, USER_A, BRANCH_A, false),
-      completeSale(pool, {
-        customer_id: CUST_2,
-        items:       [{ product_id: PROD_Y, quantity: 1 }],
-        paid_amount: 0, payment_method: 'CREDIT',
-      }, USER_A, BRANCH_A, false),
-    ]);
+    try {
+      // Determine current balance so the test payload challenges the exact remaining credit limit
+      const { rows: balRows } = await pool.query<{ balance: string }>(
+        'SELECT COALESCE(SUM(debit) - SUM(credit), 0) AS balance FROM customer_ledger_entries WHERE customer_id = $1',
+        [CUST_2],
+      );
+      const usedBalance = Number(balRows[0]?.balance ?? 0);
+      const remainingHeadroom = Math.max(500 - usedBalance, 100);
+      const saleQty = Math.max(Math.floor(remainingHeadroom / 100), 1);
 
-    const successes = results.filter(r => r.status === 'fulfilled');
-    assert.ok(successes.length <= 1, `at most one credit sale should succeed against limit=500; got ${successes.length}`);
+      results = await Promise.allSettled([
+        completeSale(pool, {
+          customer_id: CUST_2,
+          items:       [{ product_id: PROD_Y, quantity: saleQty }],
+          paid_amount: 0, payment_method: 'CREDIT',
+        }, USER_A, BRANCH_A, false),
+        completeSale(pool, {
+          customer_id: CUST_2,
+          items:       [{ product_id: PROD_Y, quantity: saleQty }],
+          paid_amount: 0, payment_method: 'CREDIT',
+        }, USER_A, BRANCH_A, false),
+      ]);
 
-    // Cleanup
-    for (const r of successes) {
-      if (r.status === 'fulfilled') {
-        const saleId = (r.value as any).sale?.id;
-        if (saleId) {
-          await pool.query('DELETE FROM customer_ledger_entries WHERE reference_id=$1', [saleId]);
-          await pool.query('DELETE FROM stock_movements          WHERE reference_id=$1', [saleId]);
-          await pool.query('DELETE FROM sale_payments            WHERE sale_id=$1',      [saleId]);
-          await pool.query('DELETE FROM sale_lines               WHERE sale_id=$1',      [saleId]);
-          await pool.query('DELETE FROM sales                    WHERE id=$1',           [saleId]);
+      const successes = results.filter(r => r.status === 'fulfilled');
+      const failures = results.filter(r => r.status === 'rejected');
+      assert.equal(successes.length, 1, `exactly one credit sale should succeed against limit=500; got ${successes.length}`);
+      assert.equal(failures.length, 1, `exactly one credit sale should be rejected; got ${failures.length}`);
+    } finally {
+      // Safe cleanup in finally: delete ONLY records owned by this specific test run
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          const saleId = (r.value as any).sale?.id;
+          if (saleId) {
+            await pool.query('DELETE FROM sale_idempotency_keys WHERE sale_id=$1', [saleId]);
+            await pool.query('DELETE FROM customer_ledger_entries WHERE reference_id=$1', [saleId]);
+            await pool.query('DELETE FROM stock_movements          WHERE reference_id=$1', [saleId]);
+            await pool.query('DELETE FROM sale_payments            WHERE sale_id=$1',      [saleId]);
+            await pool.query('DELETE FROM sale_lines               WHERE sale_id=$1',      [saleId]);
+            await pool.query('DELETE FROM sales                    WHERE id=$1',           [saleId]);
+          }
         }
       }
+      if (originalStockQty !== null) {
+        await pool.query(
+          `UPDATE stock SET quantity=$1 WHERE product_id=$2 AND branch_id=$3`,
+          [originalStockQty, PROD_Y, BRANCH_A],
+        );
+      }
     }
-    await pool.query(`UPDATE customers SET outstanding_balance=0 WHERE id=$1`, [CUST_2]);
   });
 
   // -------------------------------------------------------------------------
@@ -987,7 +1021,7 @@ describe('Sales Acceptance Suite — Niazi Mobile Mart v1.3.36', () => {
         payments: [{ method: 'CASH', amount: 2100 }],
       });
 
-      const lines = await getSaleLines(pool, result.sale.id);
+      const lines = await getSaleLines(client as unknown as Pool, result.sale.id);
 
       assert.equal(lines.length, 2, 'reprint must show 2 persisted lines');
       const lineX = lines.find(l => l.product_id === PROD_X);

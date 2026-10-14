@@ -67,6 +67,8 @@ export const InvoiceReceipt: React.FC = () => {
         paymentMethod: invoice.paymentBreakdown?.[0]?.method || 'cash',
         tendered: invoice.summary.paid,
         change: invoice.summary.change,
+        // FINDING-02: pass outstanding balance so thermal formatter can print it
+        due: invoice.summary.due,
         shop: effectiveShop,
         returnPolicy: 'Goods once sold can only be returned or exchanged within 3 days with original receipt.'
       };

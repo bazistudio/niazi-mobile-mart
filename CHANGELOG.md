@@ -5,6 +5,15 @@ All notable changes to Niazi Mobile Mart will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.37] - 2026-10-14
+
+### Fixed
+- **Sales Idempotency & Checkout Hardening**: Eliminated multi-item concurrent checkout deadlock (`40P01`) via deterministic product ID sorting before `SELECT FOR UPDATE` locking in `sale.repo.ts`. Retries with identical idempotency key and payload safely return original sale without duplicating stock decrements or ledger entries.
+- **Idempotency Schema Alignment & Migration 034**: Corrected `branch_id` and `sale_id` column types in migration 033 from `UUID` to `TEXT(36)` to match the core schema convention. Added idempotent forward migration 034 to alter existing columns to `TEXT(36)` on upgraded databases without fresh-install regression.
+- **Sales-Return History Rollup**: Added completed sales returns to unified history repository queries with strictly parameterized branch filtering, resolving missing return records in branch and organization history.
+- **Invoice Due Balance & Reprint**: Added customer outstanding-balance (`due`) rendering and 80mm ESC/POS printer formatting. Hardened history reprint actions with `getSaleLines(saleId)` persistence retrieval.
+- **Integration Test Corrections**: Fixed PostgreSQL query parameter indexing and dynamic stock restoration in sales acceptance test suite.
+
 ## [1.3.13] - 2026-10-07
 
 ### Fixed

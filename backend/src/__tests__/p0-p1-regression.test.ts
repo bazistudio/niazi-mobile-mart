@@ -26,6 +26,7 @@
 import { strict as assert } from 'node:assert';
 import { test, describe, before, after } from 'node:test';
 import { readFileSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
@@ -93,9 +94,8 @@ const USER_A = '00000000-0000-0000-0000-000000000010';
 
 /** Stable deterministic UUID for a label within this run */
 function id(label: string): string {
-  const src = `${RUN_PREFIX}:${label}`;
-  const hex = Buffer.from(src).toString('hex').padEnd(32, '0').slice(0, 32);
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+  const hash = createHash('sha256').update(`${RUN_PREFIX}:${label}`).digest('hex');
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
 }
 
 const BRANCH_A = id('branch-a');
@@ -108,9 +108,9 @@ async function setupFixtures(client: PoolClient): Promise<void> {
   const now = new Date().toISOString();
   const todayDate = now.slice(0, 10);
 
-  // Category
+  // Product Type
   await client.query(
-    `INSERT INTO categories (id, name, code, is_active, created_at, updated_at)
+    `INSERT INTO product_types (id, name, code, is_active, created_at, updated_at)
      VALUES ($1, 'P0P1 Test Category', $2, 1, $3, $3) ON CONFLICT (id) DO NOTHING`,
     [CAT_ID, `TCAT-${RUN_PREFIX}`, now],
   );
@@ -129,15 +129,15 @@ async function setupFixtures(client: PoolClient): Promise<void> {
 
   // User assigned to BRANCH_A
   await client.query(
-    `INSERT INTO users (id, username, email, password_hash, role, branch_id, is_active, created_at, updated_at)
-     VALUES ($1, $2, $3, 'x', 'CASHIER', $4, 1, $5, $5) ON CONFLICT (id) DO NOTHING`,
-    [USER_A, `u-${RUN_PREFIX}`, `u-${RUN_PREFIX}@test.local`, BRANCH_A, now],
+    `INSERT INTO users (id, branch_id, name, username, login_key_hash, role, is_active, created_at, updated_at)
+     VALUES ($1, $2, 'P0P1 Cashier', $3, 'hash', 'CASHIER', 1, $4, $4) ON CONFLICT (id) DO NOTHING`,
+    [USER_A, BRANCH_A, `u-${RUN_PREFIX}`, now],
   );
 
   // Product
   await client.query(
-    `INSERT INTO products (id, name, sku, category_id, purchase_price, average_cost, sale_price, is_active, created_at, updated_at)
-     VALUES ($1, 'Test Phone', $2, $3, 800, 820, 1000, 1, $4, $4) ON CONFLICT (id) DO NOTHING`,
+    `INSERT INTO products (id, name, normalized_name, sku, type_id, purchase_price, average_cost, sale_price, is_active, created_at, updated_at)
+     VALUES ($1, 'Test Phone', 'test phone', $2, $3, 800, 820, 1000, 1, $4, $4) ON CONFLICT (id) DO NOTHING`,
     [PROD_X, `SKU-${RUN_PREFIX}`, CAT_ID, now],
   );
 
@@ -169,30 +169,30 @@ async function setupFixtures(client: PoolClient): Promise<void> {
 
 async function teardownFixtures(client: PoolClient): Promise<void> {
   const branches = [BRANCH_A, BRANCH_B];
-  await client.query(`DELETE FROM sale_idempotency_keys WHERE branch_id = ANY($1::uuid[])`, [branches]);
-  await client.query(`DELETE FROM cash_movements WHERE branch_id = ANY($1::uuid[])`, [branches]);
+  await client.query(`DELETE FROM sale_idempotency_keys WHERE branch_id = ANY($1::text[])`, [branches]);
+  await client.query(`DELETE FROM cash_movements WHERE branch_id = ANY($1::text[])`, [branches]);
   await client.query(
-    `DELETE FROM sale_payments WHERE sale_id IN (SELECT id FROM sales WHERE branch_id = ANY($1::uuid[]))`,
+    `DELETE FROM sale_payments WHERE sale_id IN (SELECT id FROM sales WHERE branch_id = ANY($1::text[]))`,
     [branches],
   );
   await client.query(
-    `DELETE FROM sale_lines WHERE sale_id IN (SELECT id FROM sales WHERE branch_id = ANY($1::uuid[]))`,
+    `DELETE FROM sale_lines WHERE sale_id IN (SELECT id FROM sales WHERE branch_id = ANY($1::text[]))`,
     [branches],
   );
   await client.query(
     `DELETE FROM customer_ledger_entries
-     WHERE reference_id IN (SELECT id FROM sales WHERE branch_id = ANY($1::uuid[]))
+     WHERE reference_id IN (SELECT id FROM sales WHERE branch_id = ANY($1::text[]))
         OR customer_id = $2`,
     [branches, CUST_1],
   );
-  await client.query(`DELETE FROM sales WHERE branch_id = ANY($1::uuid[])`, [branches]);
-  await client.query(`DELETE FROM stock_movements WHERE branch_id = ANY($1::uuid[])`, [branches]);
-  await client.query(`DELETE FROM cash_sessions WHERE branch_id = ANY($1::uuid[])`, [branches]);
-  await client.query(`DELETE FROM stock WHERE branch_id = ANY($1::uuid[])`, [branches]);
+  await client.query(`DELETE FROM sales WHERE branch_id = ANY($1::text[])`, [branches]);
+  await client.query(`DELETE FROM stock_movements WHERE branch_id = ANY($1::text[])`, [branches]);
+  await client.query(`DELETE FROM cash_sessions WHERE branch_id = ANY($1::text[])`, [branches]);
+  await client.query(`DELETE FROM stock WHERE branch_id = ANY($1::text[])`, [branches]);
   await client.query(`DELETE FROM customers WHERE id = $1`, [CUST_1]);
   await client.query(`DELETE FROM products WHERE id = $1`, [PROD_X]);
-  await client.query(`DELETE FROM branches WHERE id = ANY($1::uuid[])`, [branches]);
-  await client.query(`DELETE FROM categories WHERE id = $1`, [CAT_ID]);
+  await client.query(`DELETE FROM branches WHERE id = ANY($1::text[])`, [branches]);
+  await client.query(`DELETE FROM product_types WHERE id = $1`, [CAT_ID]);
   await client.query(`DELETE FROM users WHERE id = $1`, [USER_A]);
 }
 
@@ -386,7 +386,11 @@ describe('P0 — Idempotency (integration)', () => {
       const stockBefore = Number((before[0] as { quantity: number }).quantity);
 
       const ikey = `p0-5-${uuidv4()}`;
-      const dto = makeSaleDto({ idempotency_key: ikey, items: [{ product_id: PROD_X, quantity: 3 }] });
+      const dto = makeSaleDto({
+        idempotency_key: ikey,
+        items: [{ product_id: PROD_X, quantity: 3 }],
+        payments: [{ method: 'CASH', amount: 3000 }],
+      });
 
       await completeSale(pool, dto, USER_A, BRANCH_A, false);
       await completeSale(pool, dto, USER_A, BRANCH_A, false); // retry
@@ -782,7 +786,11 @@ describe('P1a — Week-to-date metrics (integration)', () => {
       const ikey = `p1a-11-${uuidv4()}`;
       const result = await completeSale(
         pool,
-        makeSaleDto({ idempotency_key: ikey, items: [{ product_id: PROD_X, quantity: 2 }] }),
+        makeSaleDto({
+          idempotency_key: ikey,
+          items: [{ product_id: PROD_X, quantity: 2 }],
+          payments: [{ method: 'CASH', amount: 2000 }],
+        }),
         USER_A, BRANCH_A, false,
       );
 

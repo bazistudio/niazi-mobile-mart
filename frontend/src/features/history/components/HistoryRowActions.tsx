@@ -9,6 +9,8 @@ import { usePrintStore } from '@/lib/printer';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
 import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
 import { salesApi } from '@/services/sales.api';
+import { purchaseApi } from '@/services/purchase.api';
+import { toast } from 'react-hot-toast';
 
 interface Props {
   item: HistoryItem;
@@ -32,21 +34,57 @@ export const HistoryRowActions: React.FC<Props> = ({ item }) => {
     let docType = 'Generic';
 
     if (item.type === 'sale') {
-      // DEF-SALE-05: fetch real persisted sale lines instead of passing empty array.
-      // Fallback gracefully so print still works if the fetch fails.
-      let saleItems: any[] = [];
+      // FINDING-03-C: Fail-closed sale reprint.
+      // Fetch authoritative persisted order record. If fetch fails or has no usable order,
+      // notify user and abort reprint immediately without opening preview.
+      let orderSource: any;
       try {
         const result = await salesApi.getOrderById(item.id);
-        if (result.success && result.order?.items) {
-          saleItems = result.order.items;
+        if (!result || !result.success || !result.order) {
+          toast.error('Failed to load sale details for printing. Please try again.');
+          return;
         }
+        orderSource = result.order;
       } catch {
-        // non-fatal: proceed with empty items rather than blocking print
+        toast.error('Failed to load sale details for printing. Please try again.');
+        return;
       }
-      html = printFormatter.formatSaleInvoice({ ...item, orderNumber: item.referenceId, totalAmount: item.amount, items: saleItems }, settings, shopHeader);
+      html = printFormatter.formatSaleInvoice(orderSource, settings, shopHeader);
       docType = 'SaleInvoice';
     } else if (item.type === 'purchase') {
-      html = printFormatter.formatPurchaseInvoice({ ...item, invoiceNumber: item.referenceId, grandTotal: item.amount, items: [] }, settings, shopHeader);
+      // FINDING-06-A: Fail-closed purchase reprint.
+      // Fetch authoritative purchase record and line items. If either request fails,
+      // notify user and abort reprint immediately without opening preview.
+      let purchaseSource: any;
+      try {
+        const [purchase, lines] = await Promise.all([
+          purchaseApi.getPurchaseById(item.id),
+          purchaseApi.getPurchaseLines(item.id),
+        ]);
+        if (!purchase || !Array.isArray(lines)) {
+          toast.error('Failed to load purchase details for printing. Please try again.');
+          return;
+        }
+        purchaseSource = {
+          invoiceNumber: purchase.purchase_number || item.referenceId,
+          grandTotal: purchase.total_amount ?? item.amount,
+          subtotal: purchase.subtotal ?? purchase.total_amount ?? item.amount,
+          discount: purchase.discount ?? 0,
+          supplierName: item.party?.name || undefined,
+          createdAt: purchase.created_at || item.createdAt,
+          paymentMethod: purchase.payment_status === 'UNPAID' ? 'credit' : 'cash',
+          items: lines.map((l: any) => ({
+            name: l.product_name_snapshot || l.name || 'Item',
+            quantity: l.quantity,
+            price: l.unit_cost,
+            total: l.line_total ?? ((l.quantity || 1) * (l.unit_cost || 0)),
+          })),
+        };
+      } catch {
+        toast.error('Failed to load purchase details for printing. Please try again.');
+        return;
+      }
+      html = printFormatter.formatPurchaseInvoice(purchaseSource, settings, shopHeader);
       docType = 'PurchaseInvoice';
     } else if (item.type === 'expense') {
       html = printFormatter.formatExpenseVoucher({ ...item, _id: item.id, amount: item.amount, title: item.referenceId }, settings, shopHeader);

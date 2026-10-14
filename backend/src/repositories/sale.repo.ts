@@ -487,7 +487,13 @@ export async function completeSaleTx(
   }
 
   // Lock and validate each distinct product row exactly once.
-  for (const [productId, totalQtyRequested] of aggregatedQty.entries()) {
+  // FINDING-01: Sort product IDs deterministically before acquiring row locks.
+  // Without a fixed order, two concurrent transactions acquiring locks in opposite
+  // cart-insertion order produce a classic deadlock (PostgreSQL 40P01). Sorting by
+  // product ID string guarantees every transaction acquires locks in the same order.
+  const sortedProductIds = Array.from(aggregatedQty.keys()).sort();
+  for (const productId of sortedProductIds) {
+    const totalQtyRequested = aggregatedQty.get(productId)!;
     const matchingLine = preparedLines.find(l => l.product_id === productId)!;
     const stockRow = await client.query(
       'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2 FOR UPDATE',

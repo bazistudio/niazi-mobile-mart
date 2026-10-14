@@ -27,6 +27,22 @@ function mapSaleToOrder(s: Sale, lines: any[] = [], payments: any[] = []): any {
     paymentMethod = 'credit';
   }
 
+  // Authoritative financial calculations
+  const totalAmount = Number(s.total_amount ?? 0);
+  const paidAmount = Number(s.paid_amount ?? 0);
+  const changeAmount = Number(s.change_amount ?? 0);
+
+  // Remaining balance due:
+  // For fully paid sales (PAID status or paid_amount >= total_amount), due is strictly 0.
+  // For partial or unpaid sales, due is the positive difference total_amount - paid_amount.
+  const isPaid = s.payment_status === 'PAID' || paidAmount >= totalAmount;
+  const remainingDue = isPaid ? 0 : Math.max(0, Math.round((totalAmount - paidAmount) * 100) / 100);
+
+  // Authoritative tendered calculation:
+  // When change was given (change_amount > 0), customer tendered paid_amount + change_amount.
+  // When underpaid or exact payment, tendered is paid_amount.
+  const tenderedAmount = changeAmount > 0 ? (paidAmount + changeAmount) : paidAmount;
+
   return {
     id: s.id,
     _id: s.id,
@@ -37,6 +53,7 @@ function mapSaleToOrder(s: Sale, lines: any[] = [], payments: any[] = []): any {
     customerId: s.customer_id,
     customerName: s.customer_name_snapshot,
     customer: s.customer_name_snapshot ? { name: s.customer_name_snapshot } : null,
+    performedBy: s.performed_by,
     subtotal: s.subtotal,
     discountAmount: s.discount,
     discountTotal: s.discount,
@@ -45,7 +62,14 @@ function mapSaleToOrder(s: Sale, lines: any[] = [], payments: any[] = []): any {
     grandTotal: s.total_amount,
     paidAmount: s.paid_amount,
     totalPaid: s.paid_amount,
+    tenderedAmount,
+    tendered: tenderedAmount,
     changeAmount: s.change_amount,
+    change: s.change_amount,
+    changeReturned: s.change_amount,
+    creditAmount: remainingDue,
+    remainingDue,
+    due: remainingDue,
     paymentStatus: s.payment_status,
     paymentMethod,
     saleStatus: s.sale_status,
@@ -116,6 +140,8 @@ export const salesApi = {
 
       const order = mapSaleToOrder(saleResult.sale, saleResult.lines, saleResult.payments);
       order.creditAmount = saleResult.credit_amount;
+      order.remainingDue = saleResult.credit_amount;
+      order.due = saleResult.credit_amount;
       order.customerBalanceAfter = saleResult.customer_balance_after;
 
       return {
@@ -192,8 +218,8 @@ export const salesApi = {
       if (!sale) {
         return { success: false, order: null };
       }
-      const lines = await tauriClient.saleGetLines(sale.id).catch(() => []);
-      const payments = await tauriClient.saleGetPayments(sale.id).catch(() => []);
+      const lines = await tauriClient.saleGetLines(sale.id);
+      const payments = await tauriClient.saleGetPayments(sale.id);
       return {
         success: true,
         order: mapSaleToOrder(sale, lines, payments),

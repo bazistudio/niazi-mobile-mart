@@ -11,7 +11,7 @@ import { Pool } from 'pg';
 
 export interface HistoryItem {
   id: string;
-  type: 'sale' | 'purchase' | 'payment' | 'expense' | 'import' | 'stock_adjustment';
+  type: 'sale' | 'purchase' | 'payment' | 'expense' | 'import' | 'stock_adjustment' | 'return';
   referenceId: string;
   party: {
     id: string;
@@ -106,6 +106,7 @@ export async function listHistoryItems(
     purchase: !typeFilter || typeFilter === 'purchase',
     payment: !typeFilter || typeFilter === 'payment',
     expense: !typeFilter || typeFilter === 'expense',
+    return: !typeFilter || typeFilter === 'return',
   };
 
   // We build one UNION ALL query so that ORDER BY and LIMIT/OFFSET apply to
@@ -304,6 +305,38 @@ export async function listHistoryItems(
       FROM expenses e
       LEFT JOIN expense_categories ec ON ec.id = e.category_id
       WHERE e.status != 'CANCELLED' ${clause}
+    `);
+  }
+
+  // ── 5. SALES RETURNS ──────────────────────────────────────────────────────
+  // FINDING-05: sales_returns were missing from the unified history union.
+  // Include only COMPLETED returns (CANCELLED returns had no financial effect).
+  // Refund methods: CASH (cash-out movement) or CUSTOMER_CREDIT (ledger credit).
+  // Neither the customer-ledger arm nor the cash-movement arm captures RETURN
+  // type entries, so adding this arm introduces no double-counting.
+  if (include.return) {
+    const { clause, params, nextIdx } = buildWhereFragments(filter, paramIdx, {
+      branchCol: 'branch_id',
+      dateCol: 'created_at',
+      searchCols: ['return_number', 'customer_name_snapshot'],
+    });
+    paramIdx = nextIdx;
+    allParams.push(...params);
+
+    unionArms.push(`
+      SELECT
+        id,
+        'return'                                       AS type,
+        return_number                                  AS "referenceId",
+        COALESCE(customer_id, '')                      AS party_id,
+        COALESCE(customer_name_snapshot, 'Walk-in Customer') AS party_name,
+        'customer'                                     AS party_type,
+        total_amount                                   AS amount,
+        'paid'                                         AS status,
+        'pos'                                          AS source,
+        created_at                                     AS "createdAt"
+      FROM sales_returns
+      WHERE status = 'COMPLETED' ${clause}
     `);
   }
 

@@ -1,6 +1,6 @@
 export type HistoryItem = {
   id: string;
-  type: "sale" | "purchase" | "payment" | "expense" | "import" | "stock_adjustment";
+  type: "sale" | "purchase" | "payment" | "expense" | "import" | "stock_adjustment" | "return";
   referenceId: string;
 
   party: {

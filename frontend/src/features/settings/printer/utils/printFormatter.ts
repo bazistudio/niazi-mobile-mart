@@ -90,7 +90,9 @@ export const printFormatter = {
       total: order.grandTotal ?? order.totalAmount ?? order.total ?? 0,
       paymentMethod: order.paymentMethod || 'cash',
       tendered: order.tenderedAmount ?? order.totalPaid,
-      change: order.changeReturned ?? order.change,
+      change: order.changeReturned ?? order.change ?? order.changeAmount,
+      // FINDING-02: outstanding balance owed after this sale
+      due: order.remainingDue ?? order.creditAmount ?? order.due,
       shop,
       returnPolicy: shop.returnPolicy || 'Goods once sold can only be returned/exchanged within 3 days with original receipt.',
       warrantyInstructions: shop.warrantyInstructions || undefined
@@ -365,6 +367,11 @@ const formatA4 = (invoice: UnifiedInvoice, settings: PrinterSettings, title: str
           <span>Payment Method:</span>
           <span style="text-transform: uppercase;">${invoice.paymentMethod || 'Cash'}</span>
         </div>
+        ${invoice.due && invoice.due > 0 ? `
+        <div style="display: flex; justify-content: space-between; margin-top: 6px; font-weight: bold; color: #c0392b; font-size: 13px; border-top: 1px dashed #000; padding-top: 4px;">
+          <span>Balance Due:</span>
+          <span>Rs ${invoice.due.toLocaleString()}</span>
+        </div>` : ''}
       </div>
       
       <div style="clear: both; margin-top: 50px; text-align: center; font-size: 11px;">
@@ -501,6 +508,13 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
         <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '10.5px' : '12px'}; font-weight: bold;">
           <span>Change Due:</span>
           <span>Rs ${invoice.change.toLocaleString()}</span>
+        </div>` : ''}
+
+        <!-- FINDING-02: Outstanding balance due (credit/partial sales only) -->
+        ${invoice.due && invoice.due > 0 ? `
+        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '10.5px' : '12px'}; font-weight: bold; color: #c0392b; border-top: 1px dashed #000; margin-top: 4px; padding-top: 4px;">
+          <span>Balance Due:</span>
+          <span>Rs ${invoice.due.toLocaleString()}</span>
         </div>` : ''}
       </div>
       

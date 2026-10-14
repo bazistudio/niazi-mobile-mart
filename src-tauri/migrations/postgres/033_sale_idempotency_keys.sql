@@ -27,10 +27,14 @@
 
 -- UP
 
+-- FINDING-04: branch_id and sale_id must be TEXT CHECK(length=36) to match the
+-- existing schema convention (branches.id, sales.id are TEXT PRIMARY KEY CHECK(length=36)).
+-- Declaring them as UUID causes a PostgreSQL type-operator mismatch on joins with sales.id.
+-- If this migration was already applied with UUID columns, migration 034 alters them.
 CREATE TABLE IF NOT EXISTS sale_idempotency_keys (
   idempotency_key  TEXT        NOT NULL,
-  branch_id        UUID        NOT NULL,
-  sale_id          UUID        NOT NULL,
+  branch_id        TEXT        NOT NULL CHECK(length(branch_id) = 36),
+  sale_id          TEXT        NOT NULL CHECK(length(sale_id) = 36),
   payload_hash     TEXT,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT sale_idempotency_keys_pkey PRIMARY KEY (idempotency_key, branch_id)
