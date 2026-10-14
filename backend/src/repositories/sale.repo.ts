@@ -256,7 +256,7 @@ export async function completeSaleTx(
     } else {
       // Admin with no branch context: resolve MAIN from DB (no hardcoded UUID)
       const branchRow = await client.query(
-        "SELECT id FROM branches WHERE code = 'MAIN' AND is_active = TRUE LIMIT 1"
+        "SELECT id FROM branches WHERE code = 'MAIN' AND is_active = 1 LIMIT 1"
       );
       if (branchRow.rows.length === 0) {
         throw new SaleRepoError(

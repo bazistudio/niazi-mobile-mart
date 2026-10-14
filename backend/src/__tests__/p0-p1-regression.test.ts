@@ -32,6 +32,7 @@ import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import {
   completeSale,
+  completeSaleTx,
   SaleRepoError,
   CompleteSaleDto,
   SaleResultDto,
@@ -91,6 +92,7 @@ after(async () => {
 const RUN_PREFIX = `p0p1-${Date.now()}`;
 const ORG_ID = '00000000-0000-0000-0000-000000000001';
 const USER_A = '00000000-0000-0000-0000-000000000010';
+const USER_B = '00000000-0000-0000-0000-000000000011';
 
 /** Stable deterministic UUID for a label within this run */
 function id(label: string): string {
@@ -101,8 +103,13 @@ function id(label: string): string {
 const BRANCH_A = id('branch-a');
 const BRANCH_B = id('branch-b');
 const PROD_X   = id('prod-x');
+const PROD_Y   = id('prod-y');
 const CAT_ID   = id('category');
 const CUST_1   = id('customer-1');
+
+// Deterministic ordering for multi-item opposing test: PROD_A < PROD_B
+const PROD_A = PROD_X < PROD_Y ? PROD_X : PROD_Y;
+const PROD_B = PROD_X < PROD_Y ? PROD_Y : PROD_X;
 
 async function setupFixtures(client: PoolClient): Promise<void> {
   const now = new Date().toISOString();
@@ -127,28 +134,40 @@ async function setupFixtures(client: PoolClient): Promise<void> {
     );
   }
 
-  // User assigned to BRANCH_A
-  await client.query(
-    `INSERT INTO users (id, branch_id, name, username, login_key_hash, role, is_active, created_at, updated_at)
-     VALUES ($1, $2, 'P0P1 Cashier', $3, 'hash', 'CASHIER', 1, $4, $4) ON CONFLICT (id) DO NOTHING`,
-    [USER_A, BRANCH_A, `u-${RUN_PREFIX}`, now],
-  );
+  // Users assigned to BRANCH_A
+  for (const [userId, username] of [
+    [USER_A, `u-${RUN_PREFIX}`],
+    [USER_B, `ub-${RUN_PREFIX}`],
+  ]) {
+    await client.query(
+      `INSERT INTO users (id, branch_id, name, username, login_key_hash, role, is_active, created_at, updated_at)
+       VALUES ($1, $2, 'P0P1 Cashier', $3, 'hash', 'CASHIER', 1, $4, $4) ON CONFLICT (id) DO NOTHING`,
+      [userId, BRANCH_A, username, now],
+    );
+  }
 
-  // Product
+  // Products
   await client.query(
     `INSERT INTO products (id, name, normalized_name, sku, type_id, purchase_price, average_cost, sale_price, is_active, created_at, updated_at)
-     VALUES ($1, 'Test Phone', 'test phone', $2, $3, 800, 820, 1000, 1, $4, $4) ON CONFLICT (id) DO NOTHING`,
-    [PROD_X, `SKU-${RUN_PREFIX}`, CAT_ID, now],
+     VALUES ($1, 'Test Phone X', 'test phone x', $2, $3, 800, 820, 1000, 1, $4, $4) ON CONFLICT (id) DO NOTHING`,
+    [PROD_X, `SKUX-${RUN_PREFIX}`, CAT_ID, now],
+  );
+  await client.query(
+    `INSERT INTO products (id, name, normalized_name, sku, type_id, purchase_price, average_cost, sale_price, is_active, created_at, updated_at)
+     VALUES ($1, 'Test Phone Y', 'test phone y', $2, $3, 900, 920, 1200, 1, $4, $4) ON CONFLICT (id) DO NOTHING`,
+    [PROD_Y, `SKUY-${RUN_PREFIX}`, CAT_ID, now],
   );
 
   // Stock for both branches
   for (const branchId of [BRANCH_A, BRANCH_B]) {
-    await client.query(
-      `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
-       VALUES ($1, $2, 500, $3)
-       ON CONFLICT (product_id, branch_id) DO UPDATE SET quantity = 500, updated_at = $3`,
-      [PROD_X, branchId, now],
-    );
+    for (const prodId of [PROD_X, PROD_Y]) {
+      await client.query(
+        `INSERT INTO stock (product_id, branch_id, quantity, updated_at)
+         VALUES ($1, $2, 500, $3)
+         ON CONFLICT (product_id, branch_id) DO UPDATE SET quantity = 500, updated_at = $3`,
+        [prodId, branchId, now],
+      );
+    }
   }
 
   // Open cash session for BRANCH_A (required for CASH sales)
@@ -190,10 +209,10 @@ async function teardownFixtures(client: PoolClient): Promise<void> {
   await client.query(`DELETE FROM cash_sessions WHERE branch_id = ANY($1::text[])`, [branches]);
   await client.query(`DELETE FROM stock WHERE branch_id = ANY($1::text[])`, [branches]);
   await client.query(`DELETE FROM customers WHERE id = $1`, [CUST_1]);
-  await client.query(`DELETE FROM products WHERE id = $1`, [PROD_X]);
+  await client.query(`DELETE FROM products WHERE id = ANY($1::text[])`, [[PROD_X, PROD_Y]]);
   await client.query(`DELETE FROM branches WHERE id = ANY($1::text[])`, [branches]);
   await client.query(`DELETE FROM product_types WHERE id = $1`, [CAT_ID]);
-  await client.query(`DELETE FROM users WHERE id = $1`, [USER_A]);
+  await client.query(`DELETE FROM users WHERE id = ANY($1::text[])`, [[USER_A, USER_B]]);
 }
 
 function makeSaleDto(overrides?: Partial<CompleteSaleDto>): CompleteSaleDto {
@@ -360,6 +379,166 @@ describe('P0 — Idempotency (integration)', () => {
       const { rows } = await pool.query(
         'SELECT COUNT(*) AS cnt FROM sales WHERE invoice_number = $1', [invoiceNumber]);
       assert.strictEqual(Number((rows[0] as { cnt: string }).cnt), 1, 'exactly one sale in DB');
+    } finally {
+      const c2 = await pool.connect();
+      try { await c2.query('BEGIN'); await teardownFixtures(c2); await c2.query('COMMIT'); }
+      finally { c2.release(); }
+    }
+  });
+
+  // ── P0-4b: Concurrent checkouts with opposing multi-item cart orders avoid deadlock ────
+
+  test('P0-4b: concurrent checkouts with opposing cart orders complete without 40P01 deadlock', { timeout: 30_000 }, async () => {
+    if (!requireDb('P0-4b')) return;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN'); await setupFixtures(client); await client.query('COMMIT');
+    } catch (e) { await client.query('ROLLBACK'); client.release(); throw e; }
+    client.release();
+
+    try {
+      const priceA = PROD_A === PROD_X ? 1000 : 1200;
+      const priceB = PROD_B === PROD_X ? 1000 : 1200;
+
+      // Initial stock in BRANCH_A: 500 of A, 500 of B
+      const { rows: stockInitA } = await pool.query(
+        'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2', [PROD_A, BRANCH_A]
+      );
+      const { rows: stockInitB } = await pool.query(
+        'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2', [PROD_B, BRANCH_A]
+      );
+      const initialStockA = Number((stockInitA[0] as { quantity: number }).quantity);
+      const initialStockB = Number((stockInitB[0] as { quantity: number }).quantity);
+      assert.strictEqual(initialStockA, 500);
+      assert.strictEqual(initialStockB, 500);
+
+      // Quantities per opposing run:
+      // Tx1 requests [PROD_A: 2, PROD_B: 3]
+      // Tx2 requests [PROD_B: 1, PROD_A: 4]  <-- Opposing input order!
+      const qtyA_tx1 = 2;
+      const qtyB_tx1 = 3;
+      const total1 = qtyA_tx1 * priceA + qtyB_tx1 * priceB;
+
+      const qtyB_tx2 = 1;
+      const qtyA_tx2 = 4;
+      const total2 = qtyB_tx2 * priceB + qtyA_tx2 * priceA;
+
+      const NUM_CONCURRENT_PAIRS = 5;
+      const observedSqlStates: string[] = [];
+      const successfulSaleIds: string[] = [];
+
+      for (let run = 0; run < NUM_CONCURRENT_PAIRS; run++) {
+        const key1 = `p0-4b-r${run}-tx1-${uuidv4()}`;
+        const key2 = `p0-4b-r${run}-tx2-${uuidv4()}`;
+
+        // Tx1 input order: [PROD_A, PROD_B]
+        const dto1: CompleteSaleDto = {
+          branch_id: BRANCH_A,
+          customer_id: null,
+          idempotency_key: key1,
+          items: [
+            { product_id: PROD_A, quantity: qtyA_tx1 },
+            { product_id: PROD_B, quantity: qtyB_tx1 },
+          ],
+          payments: [{ method: 'CASH', amount: total1 }],
+        };
+
+        // Tx2 input order: [PROD_B, PROD_A] (OPPOSITE CART ORDER)
+        const dto2: CompleteSaleDto = {
+          branch_id: BRANCH_A,
+          customer_id: null,
+          idempotency_key: key2,
+          items: [
+            { product_id: PROD_B, quantity: qtyB_tx2 },
+            { product_id: PROD_A, quantity: qtyA_tx2 },
+          ],
+          payments: [{ method: 'CASH', amount: total2 }],
+        };
+
+        // Synchronize launch with barrier so both requests enter checkout simultaneously
+        let releaseBarrier: () => void;
+        const barrier = new Promise<void>((resolve) => { releaseBarrier = resolve; });
+
+        const task1 = (async () => {
+          await barrier;
+          return completeSale(pool, dto1, USER_A, BRANCH_A, false);
+        })();
+
+        const task2 = (async () => {
+          await barrier;
+          return completeSale(pool, dto2, USER_B, BRANCH_A, false);
+        })();
+
+        releaseBarrier!();
+
+        const results = await Promise.allSettled([task1, task2]);
+
+        for (const res of results) {
+          if (res.status === 'rejected') {
+            const err = res.reason as any;
+            const sqlState = err?.code ?? 'UNKNOWN';
+            observedSqlStates.push(sqlState);
+            assert.notStrictEqual(sqlState, '40P01', `Deadlock detected (SQLSTATE 40P01) in run ${run}: ${err?.message}`);
+            assert.fail(`Unexpected rejection in run ${run}: ${err?.message} (SQLSTATE: ${sqlState})`);
+          } else {
+            successfulSaleIds.push(res.value.sale.id);
+            assert.strictEqual(res.value.sale.sale_status, 'COMPLETED');
+            assert.strictEqual(res.value.sale.payment_status, 'PAID');
+          }
+        }
+      }
+
+      // Assert that all 10 transactions (5 pairs) completed successfully
+      assert.strictEqual(
+        successfulSaleIds.length,
+        NUM_CONCURRENT_PAIRS * 2,
+        `All ${NUM_CONCURRENT_PAIRS * 2} sales completed without deadlock`,
+      );
+      assert.strictEqual(observedSqlStates.length, 0, 'Zero errors/deadlocks observed');
+
+      // Assert final stock consistency:
+      // In each run: Tx1 deducted 2 of A and 3 of B; Tx2 deducted 4 of A and 1 of B.
+      // Total deducted: 5 * (2 + 4) = 30 of A, 5 * (3 + 1) = 20 of B.
+      const totalExpectedDeductionA = NUM_CONCURRENT_PAIRS * (qtyA_tx1 + qtyA_tx2);
+      const totalExpectedDeductionB = NUM_CONCURRENT_PAIRS * (qtyB_tx1 + qtyB_tx2);
+
+      const { rows: stockFinalA } = await pool.query(
+        'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2', [PROD_A, BRANCH_A]
+      );
+      const { rows: stockFinalB } = await pool.query(
+        'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2', [PROD_B, BRANCH_A]
+      );
+      const finalStockA = Number((stockFinalA[0] as { quantity: number }).quantity);
+      const finalStockB = Number((stockFinalB[0] as { quantity: number }).quantity);
+
+      assert.strictEqual(finalStockA, initialStockA - totalExpectedDeductionA, 'Final stock A exactly matches expected');
+      assert.strictEqual(finalStockB, initialStockB - totalExpectedDeductionB, 'Final stock B exactly matches expected');
+      assert.ok(finalStockA > 0 && finalStockB > 0, 'Stock remained positive throughout');
+
+      // Assert sale lines and payment integrity for all created sales
+      for (const saleId of successfulSaleIds) {
+        const { rows: lines } = await pool.query(
+          'SELECT product_id, quantity, unit_price, line_total FROM sale_lines WHERE sale_id = $1',
+          [saleId]
+        );
+        assert.strictEqual(lines.length, 2, `Sale ${saleId} has exactly 2 sale lines`);
+
+        const { rows: payments } = await pool.query(
+          'SELECT payment_method, amount FROM sale_payments WHERE sale_id = $1',
+          [saleId]
+        );
+        assert.strictEqual(payments.length, 1, `Sale ${saleId} has exactly 1 payment record`);
+        assert.strictEqual((payments[0] as { payment_method: string }).payment_method, 'CASH');
+      }
+
+      // Assert cash movements were generated
+      const { rows: cashMovs } = await pool.query(
+        'SELECT COUNT(*) as cnt FROM cash_movements WHERE branch_id = $1 AND reference_id = ANY($2::text[])',
+        [BRANCH_A, successfulSaleIds]
+      );
+      assert.strictEqual(Number((cashMovs[0] as { cnt: string }).cnt), NUM_CONCURRENT_PAIRS * 2);
+
     } finally {
       const c2 = await pool.connect();
       try { await c2.query('BEGIN'); await teardownFixtures(c2); await c2.query('COMMIT'); }
@@ -625,6 +804,172 @@ describe('P0-8 — Fail-closed (unit, no DB)', () => {
   });
 
 }); // end P0-8 unit
+
+// ---------------------------------------------------------------------------
+// P0 — Main branch predicate & deterministic stock locking (unit, no DB)
+// ---------------------------------------------------------------------------
+
+describe('P0 — Main branch predicate & deterministic stock locking (unit, no DB)', () => {
+  const saleRepoPath = existsSync(resolve(__dirname, '../repositories/sale.repo.ts'))
+    ? resolve(__dirname, '../repositories/sale.repo.ts')
+    : resolve(__dirname, '../../src/repositories/sale.repo.ts');
+
+  test('P0-MAIN-1: sale.repo.ts uses is_active = 1 (integer-compatible predicate) for MAIN branch fallback', () => {
+    const src = readFileSync(saleRepoPath, 'utf-8');
+    const hasIntegerPredicate = /code\s*=\s*'MAIN'\s+AND\s+is_active\s*=\s*1/i.test(src);
+    const hasIncompatibleBoolean = /code\s*=\s*'MAIN'\s+AND\s+is_active\s*=\s*TRUE/i.test(src);
+    assert.ok(hasIntegerPredicate, "sale.repo.ts must query code = 'MAIN' AND is_active = 1");
+    assert.ok(!hasIncompatibleBoolean, "sale.repo.ts must NOT query is_active = TRUE on integer column");
+  });
+
+  test('P0-LOCK-1: sale.repo.ts sorts product IDs before stock FOR UPDATE row locking', () => {
+    const src = readFileSync(saleRepoPath, 'utf-8');
+    const sortsProductIds = /sortedProductIds\s*=\s*Array\.from\(aggregatedQty\.keys\(\)\)\.sort\(\)/.test(src);
+    assert.ok(sortsProductIds, 'sale.repo.ts must sort product IDs before FOR UPDATE row locking loop');
+  });
+
+  function createMockSaleClient() {
+    const queriesExecuted: { sql: string; params?: unknown[] }[] = [];
+    const lockedProductIds: string[] = [];
+
+    const mockClient = {
+      query: async (sqlOrConfig: string | { text: string; values?: unknown[] }, params?: unknown[]) => {
+        const sql = typeof sqlOrConfig === 'string' ? sqlOrConfig : sqlOrConfig.text;
+        const values = typeof sqlOrConfig === 'string' ? params : sqlOrConfig.values;
+        queriesExecuted.push({ sql, params: values });
+
+        if (sql.includes("code = 'MAIN'")) {
+          return { rows: [{ id: '00000000-0000-0000-0000-000000000002' }], rowCount: 1 };
+        }
+        if (sql.includes('FROM branches WHERE id = $1')) {
+          return { rows: [{ id: values?.[0] ?? 'b1', is_active: 1, is_warehouse: 0 }], rowCount: 1 };
+        }
+        if (sql.includes('FROM products WHERE id = $1')) {
+          const pid = values?.[0] as string;
+          return {
+            rows: [{
+              id: pid,
+              name: `Product ${pid}`,
+              sku: `SKU-${pid}`,
+              purchase_price: 100,
+              average_cost: 100,
+              sale_price: 200,
+              is_active: 1,
+            }],
+            rowCount: 1,
+          };
+        }
+        if (sql.includes('FROM stock WHERE product_id = $1 AND branch_id = $2 FOR UPDATE')) {
+          const pid = values?.[0] as string;
+          lockedProductIds.push(pid);
+          return { rows: [{ quantity: 100 }], rowCount: 1 };
+        }
+        if (sql.includes('CREATE TABLE IF NOT EXISTS user_invoice_counters')) {
+          return { rows: [], rowCount: 0 };
+        }
+        if (sql.includes('INSERT INTO user_invoice_counters')) {
+          return { rows: [{ next_val: 1 }], rowCount: 1 };
+        }
+        if (sql.includes('INSERT INTO sales')) {
+          return { rows: [], rowCount: 1 };
+        }
+        if (sql.includes('INSERT INTO sale_lines')) {
+          return { rows: [], rowCount: 1 };
+        }
+        if (sql.includes('UPDATE stock') && sql.includes('quantity = quantity - $1')) {
+          return { rows: [{ previous_stock: 100, new_stock: 99 }], rowCount: 1 };
+        }
+        if (sql.includes('INSERT INTO stock_movements')) {
+          return { rows: [], rowCount: 1 };
+        }
+        if (sql.includes('INSERT INTO sale_payments')) {
+          return { rows: [], rowCount: 1 };
+        }
+        if (sql.includes('FROM cash_sessions WHERE branch_id = $1')) {
+          return { rows: [{ id: '00000000-0000-0000-0000-000000000003' }], rowCount: 1 };
+        }
+        if (sql.includes('INSERT INTO cash_movements')) {
+          return { rows: [], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      },
+      queriesExecuted,
+      lockedProductIds,
+    };
+
+    return mockClient;
+  }
+
+  test('P0-MAIN-2: completeSaleTx executes query with is_active = 1 when resolving MAIN branch', async () => {
+    const mock = createMockSaleClient();
+    const dto: CompleteSaleDto = {
+      branch_id: undefined,
+      customer_id: null,
+      items: [{ product_id: 'prod-1', quantity: 1 }],
+      payments: [{ method: 'CASH', amount: 200 }],
+    };
+
+    await completeSaleTx(mock as unknown as PoolClient, dto, null, null, null, true);
+
+    const mainBranchQuery = mock.queriesExecuted.find(q => q.sql.includes("code = 'MAIN'"));
+    assert.ok(mainBranchQuery, 'must query branches for code = MAIN');
+    assert.ok(
+      mainBranchQuery.sql.includes('is_active = 1'),
+      `query must contain is_active = 1, got: ${mainBranchQuery.sql}`,
+    );
+    assert.ok(
+      !mainBranchQuery.sql.includes('is_active = TRUE'),
+      `query must NOT contain is_active = TRUE, got: ${mainBranchQuery.sql}`,
+    );
+  });
+
+  test('P0-LOCK-2: completeSaleTx locks stock rows in deterministic ascending product-ID order regardless of cart line order', async () => {
+    const mock = createMockSaleClient();
+    const dto: CompleteSaleDto = {
+      branch_id: 'b1',
+      customer_id: null,
+      items: [
+        { product_id: 'zeta-prod-99', quantity: 1 },
+        { product_id: 'alpha-prod-01', quantity: 2 },
+        { product_id: 'mid-prod-50', quantity: 1 },
+      ],
+      payments: [{ method: 'CASH', amount: 800 }],
+    };
+
+    await completeSaleTx(mock as unknown as PoolClient, dto, 'u1', null, 'b1', false);
+
+    assert.deepStrictEqual(
+      mock.lockedProductIds,
+      ['alpha-prod-01', 'mid-prod-50', 'zeta-prod-99'],
+      `stock locks must be acquired in ascending lexicographical product-ID order, got: ${JSON.stringify(mock.lockedProductIds)}`,
+    );
+  });
+
+  test('P0-LOCK-3: completeSaleTx aggregates duplicate cart lines and locks once with combined quantity', async () => {
+    const mock = createMockSaleClient();
+    const dto: CompleteSaleDto = {
+      branch_id: 'b1',
+      customer_id: null,
+      items: [
+        { product_id: 'prod-dup', quantity: 3 },
+        { product_id: 'prod-other', quantity: 1 },
+        { product_id: 'prod-dup', quantity: 2 },
+      ],
+      payments: [{ method: 'CASH', amount: 1200 }],
+    };
+
+    await completeSaleTx(mock as unknown as PoolClient, dto, 'u1', null, 'b1', false);
+
+    const dupLockCount = mock.lockedProductIds.filter(id => id === 'prod-dup').length;
+    assert.strictEqual(dupLockCount, 1, 'duplicate product must only be locked once FOR UPDATE');
+
+    assert.deepStrictEqual(
+      mock.lockedProductIds,
+      ['prod-dup', 'prod-other'],
+      'all unique product IDs must be locked in sorted order',
+    );
+  });
+});
 
 // ---------------------------------------------------------------------------
 // ============================================================
