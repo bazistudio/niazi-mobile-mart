@@ -602,9 +602,13 @@ export const usePosStore = create<PosStore>()(
             // Send order creation to API
             result = await salesApi.createOrder(payload);
           } catch (apiError: any) {
-            const errorMessage = apiError.response?.data?.message || apiError.message || "Unknown API error";
+            const errorMessage =
+              apiError.response?.data?.error ||
+              apiError.response?.data?.message ||
+              apiError.message ||
+              "Unknown API error";
             console.warn("Cloud API failed:", errorMessage);
-            toast.error("Backend Sync Failed: " + errorMessage);
+            toast.error("Checkout Failed: " + errorMessage);
             throw apiError;
           }
 

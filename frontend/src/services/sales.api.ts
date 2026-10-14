@@ -151,8 +151,9 @@ export const salesApi = {
         message: 'Sale completed successfully',
       };
     } catch (err: any) {
-      console.error('Failed to complete sale via Tauri IPC:', err);
-      throw new Error(err?.toString() || 'Failed to complete sale');
+      const msg = err?.message || err?.toString() || 'Failed to complete sale';
+      console.error('Failed to complete sale:', msg);
+      throw (err instanceof Error ? err : new Error(msg));
     }
   },
 

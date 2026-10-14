@@ -157,13 +157,21 @@ export async function httpFetch<T>(path: string, options: RequestInit = {}): Pro
     let errorMsg = `HTTP Error ${res.status}`;
     try {
       const errData = await res.json();
-      if (errData && errData.message) {
-        errorMsg = errData.message;
+      if (errData) {
+        if (typeof errData === 'string') {
+          errorMsg = errData;
+        } else if (errData.error) {
+          errorMsg = typeof errData.error === 'string' ? errData.error : JSON.stringify(errData.error);
+        } else if (errData.message) {
+          errorMsg = typeof errData.message === 'string' ? errData.message : JSON.stringify(errData.message);
+        }
       }
     } catch {
       // Ignore JSON error
     }
-    throw new Error(errorMsg);
+    const err = new Error(errorMsg);
+    (err as any).status = res.status;
+    throw err;
   }
 
   const text = await res.text();
@@ -1851,69 +1859,131 @@ export const tauriClient = {
     throw new Error('Tauri environment required');
   },
 
-  // â”€â”€ Cash Management & Daily Closing Domain (Phase 17) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Cash Management & Daily Closing Domain (Phase 17) ──────────────────────
   async cashSessionOpen(dto: OpenCashSessionDto): Promise<CashSession> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CashSession>('cash_session_open', { dto });
+    try {
+      return await httpFetch<CashSession>('/api/cash/sessions/open', {
+        method: 'POST',
+        body: JSON.stringify(dto),
+      });
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<CashSession>('cash_session_open', { dto });
+      }
+      throw e;
     }
-    throw new Error('Tauri environment required');
   },
 
   async cashSessionGetCurrent(branchId?: string): Promise<CashSession | null> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CashSession | null>('cash_session_get_current', { branchId });
+    try {
+      const qs = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+      const res = await httpFetch<{ session: CashSession | null }>(`/api/cash/sessions/current${qs}`);
+      return res?.session ?? null;
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<CashSession | null>('cash_session_get_current', { branchId });
+      }
+      return null;
     }
-    return null;
   },
 
   async cashSessionGetById(id: string): Promise<CashSession> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CashSession>('cash_session_get_by_id', { id });
+    try {
+      return await httpFetch<CashSession>(`/api/cash/sessions/${encodeURIComponent(id)}`);
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<CashSession>('cash_session_get_by_id', { id });
+      }
+      throw e;
     }
-    throw new Error('Tauri environment required');
   },
 
   async cashSessionClose(dto: CloseCashSessionDto): Promise<CashSession> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CashSession>('cash_session_close', { dto });
+    try {
+      return await httpFetch<CashSession>('/api/cash/sessions/close', {
+        method: 'POST',
+        body: JSON.stringify(dto),
+      });
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<CashSession>('cash_session_close', { dto });
+      }
+      throw e;
     }
-    throw new Error('Tauri environment required');
   },
 
   async cashSessionList(branchId?: string, limit?: number, offset?: number): Promise<CashSession[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CashSession[]>('cash_session_list', { branchId, limit, offset });
+    try {
+      const params = new URLSearchParams();
+      if (branchId) params.append('branch_id', branchId);
+      if (limit) params.append('limit', String(limit));
+      if (offset) params.append('offset', String(offset));
+      const qs = params.toString();
+      return await httpFetch<CashSession[]>(`/api/cash/sessions${qs ? `?${qs}` : ''}`);
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<CashSession[]>('cash_session_list', { branchId, limit, offset });
+      }
+      return [];
     }
-    return [];
   },
 
   async cashAdjustmentCreate(dto: CreateCashAdjustmentDto): Promise<CashMovement> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CashMovement>('cash_adjustment_create', { dto });
+    try {
+      return await httpFetch<CashMovement>('/api/cash/movements', {
+        method: 'POST',
+        body: JSON.stringify({
+          branch_id: dto.branch_id,
+          movement_type: 'CASH_ADJUSTMENT',
+          direction: dto.direction,
+          amount: dto.amount,
+          description: dto.reason,
+        }),
+      });
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<CashMovement>('cash_adjustment_create', { dto });
+      }
+      throw e;
     }
-    throw new Error('Tauri environment required');
   },
 
   async cashMovementList(filter?: CashMovementFilterDto): Promise<CashMovement[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<CashMovement[]>('cash_movement_list', { filter });
+    try {
+      const params = new URLSearchParams();
+      if (filter?.branch_id) params.append('branch_id', filter.branch_id);
+      if (filter?.limit) params.append('limit', String(filter.limit));
+      const qs = params.toString();
+      return await httpFetch<CashMovement[]>(`/api/cash/movements${qs ? `?${qs}` : ''}`);
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<CashMovement[]>('cash_movement_list', { filter });
+      }
+      return [];
     }
-    return [];
   },
 
   async cashDailySummary(branchId?: string, businessDate?: string): Promise<DailyCashSummaryDto> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<DailyCashSummaryDto>('cash_daily_summary', { branchId, businessDate });
+    try {
+      const params = new URLSearchParams();
+      if (branchId) params.append('branch_id', branchId);
+      if (businessDate) params.append('date', businessDate);
+      const qs = params.toString();
+      return await httpFetch<DailyCashSummaryDto>(`/api/cash/summary${qs ? `?${qs}` : ''}`);
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<DailyCashSummaryDto>('cash_daily_summary', { branchId, businessDate });
+      }
+      throw e;
     }
-    throw new Error('Tauri environment required');
   },
 
   // â”€â”€ Returns & Stock Reversal Domain (Phase 18) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

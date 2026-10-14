@@ -53,6 +53,11 @@ function sendError(_req: Request, res: Response, err: unknown): void {
     res.status(err.statusCode).json({ error: err.message });
     return;
   }
+  const status = (err as { statusCode?: number })?.statusCode;
+  if (status && typeof status === 'number' && status >= 400 && status < 600) {
+    res.status(status).json({ error: (err as Error).message });
+    return;
+  }
   const message = err instanceof Error ? err.message : 'Internal server error';
   res.status(500).json({ error: message });
 }

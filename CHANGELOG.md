@@ -5,6 +5,14 @@ All notable changes to Niazi Mobile Mart will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.38] - 2026-10-14
+
+### Fixed
+- **POS Checkout & Cash Session Management**: Fixed HTTP 500 error when completing sales from Main or sub-branches by ensuring `SaleRepoError` is properly raised and handled with standard 400 Bad Request status when a cash session is required.
+- **Cash Repository Schema Alignment**: Fixed column naming in `cash.repo.ts` (`opening_cash`, `actual_closing_cash`, `expected_closing_cash`, `business_date`) to align strictly with the PostgreSQL database schema. Added `getDailySummary`, `listCashSessions`, and `getCashSessionById`.
+- **Cash Routes & Endpoints**: Added missing backend cash routes (`GET /api/cash/sessions`, `GET /api/cash/sessions/:id`, `GET /api/cash/summary`) and enriched `sendError` handling.
+- **Frontend Cash Session Integration**: Wired HTTP API client for cash session operations (`cashSessionOpen`, `cashSessionGetCurrent`, `cashSessionClose`, `cashSessionList`, `cashDailySummary`), added register open indicator and quick cash drawer opener modal directly in POS Header and checkout drawer prompt.
+
 ## [1.3.37] - 2026-10-14
 
 ### Fixed

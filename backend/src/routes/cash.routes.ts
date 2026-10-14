@@ -9,7 +9,10 @@ import { buildAuthMiddleware, authorizePermission, canAccessBranch, RequestIdent
 import {
   closeCashSession,
   getCurrentCashSession,
+  getCashSessionById,
+  getDailySummary,
   listCashMovements,
+  listCashSessions,
   openCashSession,
   recordCashMovement,
   CashRepoError,
@@ -39,6 +42,11 @@ function sendError(_req: Request, res: Response, err: unknown): void {
   }
   if (err instanceof CashRepoError) {
     res.status(err.statusCode).json({ error: err.message });
+    return;
+  }
+  const status = (err as { statusCode?: number })?.statusCode;
+  if (status && typeof status === 'number' && status >= 400 && status < 600) {
+    res.status(status).json({ error: (err as Error).message });
     return;
   }
   const message = err instanceof Error ? err.message : 'Internal server error';
@@ -77,6 +85,91 @@ export function createCashRouter(pool: Pool): Router {
       }
       const session = await getCurrentCashSession(pool, branchId);
       res.status(200).json({ session });
+    } catch (err) {
+      sendError(req, res, err);
+    }
+  });
+
+  // ── GET /api/cash/sessions ───────────────────────────────────────────────
+  router.get('/sessions', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    const denied = authorizePermission(identity, 'pos', null);
+    if (denied) {
+      res.status(403).json({ error: denied });
+      return;
+    }
+
+    try {
+      const requestedBranchId = (req.query['branch_id'] as string) || undefined;
+      if (requestedBranchId && !canAccessBranch(identity, requestedBranchId)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to access this branch' });
+        return;
+      }
+
+      const branchId = requestedBranchId || identity.branch_id || null;
+      const limit = req.query['limit'] ? parseInt(req.query['limit'] as string, 10) : 20;
+      const offset = req.query['offset'] ? parseInt(req.query['offset'] as string, 10) : 0;
+      const sessions = await listCashSessions(pool, branchId, limit, offset);
+      res.status(200).json(sessions);
+    } catch (err) {
+      sendError(req, res, err);
+    }
+  });
+
+  // ── GET /api/cash/sessions/:id ───────────────────────────────────────────
+  router.get('/sessions/:id', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    const denied = authorizePermission(identity, 'pos', null);
+    if (denied) {
+      res.status(403).json({ error: denied });
+      return;
+    }
+
+    try {
+      const sessionId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const session = await getCashSessionById(pool, sessionId as string);
+      if (!session) {
+        res.status(404).json({ error: 'Cash session not found' });
+        return;
+      }
+      if (!canAccessBranch(identity, session.branch_id)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to access this branch' });
+        return;
+      }
+      res.status(200).json(session);
+    } catch (err) {
+      sendError(req, res, err);
+    }
+  });
+
+  // ── GET /api/cash/summary ────────────────────────────────────────────────
+  router.get('/summary', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    const denied = authorizePermission(identity, 'pos', null);
+    if (denied) {
+      res.status(403).json({ error: denied });
+      return;
+    }
+
+    try {
+      const requestedBranchId = (req.query['branch_id'] as string) || undefined;
+      if (requestedBranchId && !canAccessBranch(identity, requestedBranchId)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to access this branch' });
+        return;
+      }
+
+      const branchId = requestedBranchId || identity.branch_id;
+      if (!branchId) {
+        res.status(403).json({ error: 'Access denied: No branch assigned to your account' });
+        return;
+      }
+
+      const date = (req.query['date'] as string) || (req.query['business_date'] as string) || null;
+      const summary = await getDailySummary(pool, branchId, date);
+      res.status(200).json(summary);
     } catch (err) {
       sendError(req, res, err);
     }

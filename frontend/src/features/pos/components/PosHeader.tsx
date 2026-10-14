@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ProductSearch } from './ProductSearch';
 import { SaleTabNavigation } from './SaleTabNavigation';
 import { PosActionsDropdown } from './PosActionsDropdown';
@@ -10,10 +10,17 @@ import { UserMenu } from '@/components/layout/UserMenu';
 import { useTerminalStore } from '@/store/useTerminalStore';
 import { Lock } from 'lucide-react';
 import { SyncStatusBadge } from '@/components/common/SyncStatusBadge';
+import { useCashStore, CashSessionOpenModal } from '@/features/cash';
 
 export const PosHeader: React.FC = () => {
   const [isInvoiceLookupOpen, setInvoiceLookupOpen] = useState(false);
+  const [isCashOpenModalOpen, setCashOpenModalOpen] = useState(false);
   const lockTerminal = useTerminalStore((s) => s.lockTerminal);
+  const { currentSession, fetchCurrentState } = useCashStore();
+
+  useEffect(() => {
+    fetchCurrentState();
+  }, [fetchCurrentState]);
 
   return (
     <>
@@ -49,6 +56,27 @@ export const PosHeader: React.FC = () => {
 
         {/* Right Section: Actions Dropdown, Lock Terminal, Cashier Profile */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {/* Cash Register Session Status */}
+          <button
+            type="button"
+            onClick={() => {
+              if (!currentSession) {
+                setCashOpenModalOpen(true);
+              }
+            }}
+            className={`h-9 px-2.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-xs ${
+              currentSession
+                ? 'border-emerald-200 dark:border-emerald-800/60 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 cursor-default'
+                : 'border-amber-300 dark:border-amber-750 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 cursor-pointer animate-pulse'
+            }`}
+            title={currentSession ? `Register Open (Session ${currentSession.id.slice(0, 8)})` : 'Register Closed — Click to Open Session'}
+          >
+            <span className={`w-2 h-2 rounded-full ${currentSession ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+            <span className="hidden sm:inline">
+              {currentSession ? 'Register Open' : 'Open Register'}
+            </span>
+          </button>
+
           {/* Sync Engine Status Indicator */}
           <SyncStatusBadge />
 
@@ -75,6 +103,12 @@ export const PosHeader: React.FC = () => {
       <InvoiceLookupModal
         isOpen={isInvoiceLookupOpen}
         onClose={() => setInvoiceLookupOpen(false)}
+      />
+
+      {/* Cash Session Open Modal from Header */}
+      <CashSessionOpenModal
+        isOpen={isCashOpenModalOpen}
+        onClose={() => setCashOpenModalOpen(false)}
       />
     </>
   );

@@ -17,10 +17,13 @@ import { usePrinterStore } from '@/features/settings/printer/store/printer.store
 import { GlobalLoadingOverlay } from '@/components/ui/GlobalLoadingOverlay';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
+import { CashSessionOpenModal } from '@/features/cash';
 
 export const CartSummary: React.FC = () => {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  const [isCashOpenModalOpen, setCashOpenModalOpen] = useState(false);
 
   const clearCart = usePosStore((s) => s.clearCart);
   const activeSession = usePosStore((s) => s.getActiveSession());
@@ -268,8 +271,11 @@ export const CartSummary: React.FC = () => {
         // Reset customer selection
         setCustomer(null);
       }
-    } catch (error) {
-      // Error handled by store
+    } catch (error: any) {
+      const msg = (error?.message || '').toLowerCase();
+      if (msg.includes('cash session') || msg.includes('open a cash session') || msg.includes('till')) {
+        setCashOpenModalOpen(true);
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -498,6 +504,12 @@ export const CartSummary: React.FC = () => {
           }}
         />
       )}
+
+      {/* Cash Session Open Modal if drawer is closed during checkout */}
+      <CashSessionOpenModal
+        isOpen={isCashOpenModalOpen}
+        onClose={() => setCashOpenModalOpen(false)}
+      />
 
       <GlobalLoadingOverlay isOpen={isProcessing} message="Processing Transaction..." />
     </div>

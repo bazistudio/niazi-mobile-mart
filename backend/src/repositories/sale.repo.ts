@@ -750,9 +750,9 @@ export async function completeSaleTx(
     // cannot be tied to a session for reconciliation. Reject with a clear message so the
     // cashier opens a session before accepting cash.
     if (!openSessionId) {
-      throw Object.assign(
-        new Error('No open cash session found for this branch. Please open a cash session before accepting cash payments.'),
-        { statusCode: 400 }
+      throw new SaleRepoError(
+        'No open cash session found for this branch. Please open a cash session before accepting cash payments.',
+        400
       );
     }
 

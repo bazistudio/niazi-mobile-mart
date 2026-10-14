@@ -12,11 +12,16 @@ export type CashMovementDirection = 'IN' | 'OUT';
 export interface CashSession {
   id: string;
   branch_id: string;
+  business_date: string;
   opened_by: string;
   closed_by: string | null;
-  opening_float: number;
-  closing_float: number | null;
-  expected_amount: number | null;
+  opening_cash: number;
+  opening_float: number; // backward compatibility
+  expected_closing_cash: number | null;
+  expected_amount: number | null; // backward compatibility
+  actual_closing_cash: number | null;
+  closing_float: number | null; // backward compatibility
+  cash_variance: number | null;
   status: CashSessionStatus;
   notes: string | null;
   opened_at: string;
@@ -40,14 +45,35 @@ export interface CashMovement {
 
 export interface OpenCashSessionDto {
   branch_id: string;
-  opening_float: number;
+  opening_cash?: number;
+  opening_float?: number;
+  business_date?: string | null;
   notes?: string | null;
 }
 
 export interface CloseCashSessionDto {
   session_id: string;
-  closing_float: number;
+  actual_closing_cash?: number;
+  closing_float?: number;
   notes?: string | null;
+}
+
+export interface DailyCashSummaryDto {
+  session_id: string | null;
+  session_status: string;
+  business_date: string;
+  opening_cash: number;
+  cash_sales: number;
+  customer_payments: number;
+  supplier_payments: number;
+  cash_expenses: number;
+  cash_in_adjustments: number;
+  cash_out_adjustments: number;
+  total_cash_in: number;
+  total_cash_out: number;
+  expected_closing_cash: number;
+  actual_closing_cash: number | null;
+  cash_variance: number | null;
 }
 
 export interface RecordCashMovementDto {
@@ -68,26 +94,73 @@ export class CashRepoError extends Error {
   }
 }
 
+function mapCashSessionRow(row: Record<string, unknown>): CashSession {
+  const openingCash = Number(row['opening_cash'] ?? row['opening_float'] ?? 0);
+  const actualClosing = row['actual_closing_cash'] != null
+    ? Number(row['actual_closing_cash'])
+    : (row['closing_float'] != null ? Number(row['closing_float']) : null);
+  const expectedClosing = row['expected_closing_cash'] != null
+    ? Number(row['expected_closing_cash'])
+    : (row['expected_amount'] != null ? Number(row['expected_amount']) : null);
+  const variance = row['cash_variance'] != null ? Number(row['cash_variance']) : null;
+
+  return {
+    id: row['id'] as string,
+    branch_id: row['branch_id'] as string,
+    business_date: (row['business_date'] as string) || ((row['opened_at'] as string) || '').slice(0, 10),
+    opened_by: row['opened_by'] as string,
+    closed_by: (row['closed_by'] as string | null) ?? null,
+    opening_cash: openingCash,
+    opening_float: openingCash,
+    actual_closing_cash: actualClosing,
+    closing_float: actualClosing,
+    expected_closing_cash: expectedClosing,
+    expected_amount: expectedClosing,
+    cash_variance: variance,
+    status: row['status'] as CashSessionStatus,
+    notes: (row['notes'] as string | null) ?? null,
+    opened_at: row['opened_at'] as string,
+    closed_at: (row['closed_at'] as string | null) ?? null,
+  };
+}
+
 export async function getCurrentCashSession(pool: Pool, branchId: string): Promise<CashSession | null> {
   const res = await pool.query(
     "SELECT * FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' ORDER BY opened_at DESC LIMIT 1",
     [branchId]
   );
   if (res.rows.length === 0) return null;
-  const row = res.rows[0] as Record<string, unknown>;
-  return {
-    id: row['id'] as string,
-    branch_id: row['branch_id'] as string,
-    opened_by: row['opened_by'] as string,
-    closed_by: (row['closed_by'] as string | null) ?? null,
-    opening_float: Number(row['opening_float'] ?? 0),
-    closing_float: row['closing_float'] != null ? Number(row['closing_float']) : null,
-    expected_amount: row['expected_amount'] != null ? Number(row['expected_amount']) : null,
-    status: row['status'] as CashSessionStatus,
-    notes: (row['notes'] as string | null) ?? null,
-    opened_at: row['opened_at'] as string,
-    closed_at: (row['closed_at'] as string | null) ?? null,
-  };
+  return mapCashSessionRow(res.rows[0] as Record<string, unknown>);
+}
+
+export async function getCashSessionById(pool: Pool, sessionId: string): Promise<CashSession | null> {
+  const res = await pool.query(
+    'SELECT * FROM cash_sessions WHERE id = $1',
+    [sessionId]
+  );
+  if (res.rows.length === 0) return null;
+  return mapCashSessionRow(res.rows[0] as Record<string, unknown>);
+}
+
+export async function listCashSessions(
+  pool: Pool,
+  branchId?: string | null,
+  limit: number = 20,
+  offset: number = 0
+): Promise<CashSession[]> {
+  let query = 'SELECT * FROM cash_sessions WHERE 1=1';
+  const params: unknown[] = [];
+
+  if (branchId) {
+    query += ' AND branch_id = $1';
+    params.push(branchId);
+  }
+
+  query += ` ORDER BY opened_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+  params.push(limit, offset);
+
+  const res = await pool.query(query, params);
+  return res.rows.map((r) => mapCashSessionRow(r as Record<string, unknown>));
 }
 
 export async function openCashSession(
@@ -102,22 +175,29 @@ export async function openCashSession(
 
   const id = uuidv4();
   const now = new Date().toISOString();
+  const businessDate = dto.business_date || now.slice(0, 10);
+  const openingCash = dto.opening_cash ?? dto.opening_float ?? 0;
 
   await pool.query(
     `INSERT INTO cash_sessions (
-       id, branch_id, opened_by, opening_float, status, notes, opened_at
-     ) VALUES ($1, $2, $3, $4, 'OPEN', $5, $6)`,
-    [id, dto.branch_id, userId, dto.opening_float, dto.notes ?? null, now]
+       id, branch_id, business_date, opened_by, opening_cash, status, notes, opened_at
+     ) VALUES ($1, $2, $3, $4, $5, 'OPEN', $6, $7)`,
+    [id, dto.branch_id, businessDate, userId, openingCash, dto.notes ?? null, now]
   );
 
   return {
     id,
     branch_id: dto.branch_id,
+    business_date: businessDate,
     opened_by: userId,
     closed_by: null,
-    opening_float: dto.opening_float,
+    opening_cash: openingCash,
+    opening_float: openingCash,
+    actual_closing_cash: null,
     closing_float: null,
+    expected_closing_cash: null,
     expected_amount: null,
+    cash_variance: null,
     status: 'OPEN',
     notes: dto.notes ?? null,
     opened_at: now,
@@ -140,7 +220,7 @@ export async function closeCashSession(
   }
 
   const branchId = session['branch_id'] as string;
-  const openingFloat = Number(session['opening_float'] ?? 0);
+  const openingCash = Number(session['opening_cash'] ?? session['opening_float'] ?? 0);
 
   // Sum cash movements in this session
   const mvRes = await pool.query(
@@ -152,29 +232,129 @@ export async function closeCashSession(
   );
   const totalIn = Number(mvRes.rows[0]?.['total_in'] ?? 0);
   const totalOut = Number(mvRes.rows[0]?.['total_out'] ?? 0);
-  const expectedAmount = openingFloat + totalIn - totalOut;
+  const expectedClosingCash = openingCash + totalIn - totalOut;
 
+  const actualClosingCash = dto.actual_closing_cash ?? dto.closing_float ?? 0;
+  const variance = actualClosingCash - expectedClosingCash;
   const now = new Date().toISOString();
 
   await pool.query(
     `UPDATE cash_sessions
-     SET closing_float = $1, expected_amount = $2, closed_by = $3, status = 'CLOSED', closed_at = $4, notes = COALESCE($5, notes)
-     WHERE id = $6`,
-    [dto.closing_float, expectedAmount, userId, now, dto.notes ?? null, dto.session_id]
+     SET actual_closing_cash = $1, expected_closing_cash = $2, cash_variance = $3, closed_by = $4, status = 'CLOSED', closed_at = $5, notes = COALESCE($6, notes)
+     WHERE id = $7`,
+    [actualClosingCash, expectedClosingCash, variance, userId, now, dto.notes ?? null, dto.session_id]
   );
 
   return {
     id: dto.session_id,
     branch_id: branchId,
+    business_date: (session['business_date'] as string) || ((session['opened_at'] as string) || '').slice(0, 10),
     opened_by: session['opened_by'] as string,
     closed_by: userId,
-    opening_float: openingFloat,
-    closing_float: dto.closing_float,
-    expected_amount: expectedAmount,
+    opening_cash: openingCash,
+    opening_float: openingCash,
+    actual_closing_cash: actualClosingCash,
+    closing_float: actualClosingCash,
+    expected_closing_cash: expectedClosingCash,
+    expected_amount: expectedClosingCash,
+    cash_variance: variance,
     status: 'CLOSED',
     notes: (dto.notes as string | null) ?? (session['notes'] as string | null) ?? null,
     opened_at: session['opened_at'] as string,
     closed_at: now,
+  };
+}
+
+export async function getDailySummary(
+  pool: Pool,
+  branchId: string,
+  targetDate?: string | null
+): Promise<DailyCashSummaryDto> {
+  const date = targetDate || new Date().toISOString().slice(0, 10);
+
+  const sessRes = await pool.query(
+    "SELECT * FROM cash_sessions WHERE branch_id = $1 AND (business_date = $2 OR opened_at LIKE $3) ORDER BY opened_at DESC LIMIT 1",
+    [branchId, date, `${date}%`]
+  );
+
+  let sessionId: string | null = null;
+  let sessionStatus = 'NONE';
+  let openingCash = 0;
+  let actualClosingCash: number | null = null;
+  let variance: number | null = null;
+
+  if (sessRes.rows.length > 0) {
+    const s = sessRes.rows[0] as Record<string, unknown>;
+    sessionId = s['id'] as string;
+    sessionStatus = s['status'] as string;
+    openingCash = Number(s['opening_cash'] ?? s['opening_float'] ?? 0);
+    actualClosingCash = s['actual_closing_cash'] != null ? Number(s['actual_closing_cash']) : null;
+    variance = s['cash_variance'] != null ? Number(s['cash_variance']) : null;
+  }
+
+  const startTs = `${date}T00:00:00.000Z`;
+  const endTs = `${date}T23:59:59.999Z`;
+
+  const mvQuery = sessionId
+    ? "SELECT movement_type, direction, COALESCE(SUM(amount), 0)::BIGINT AS total FROM cash_movements WHERE session_id = $1 GROUP BY movement_type, direction"
+    : "SELECT movement_type, direction, COALESCE(SUM(amount), 0)::BIGINT AS total FROM cash_movements WHERE branch_id = $1 AND created_at >= $2 AND created_at <= $3 GROUP BY movement_type, direction";
+
+  const mvParams = sessionId ? [sessionId] : [branchId, startTs, endTs];
+  const mvRes = await pool.query(mvQuery, mvParams);
+
+  let cashSales = 0;
+  let customerPayments = 0;
+  let supplierPayments = 0;
+  let cashExpenses = 0;
+  let cashInAdjustments = 0;
+  let cashOutAdjustments = 0;
+  let totalCashIn = 0;
+  let totalCashOut = 0;
+
+  for (const row of mvRes.rows) {
+    const mType = (row['movement_type'] as string) || '';
+    const dir = (row['direction'] as string) || '';
+    const amt = Number(row['total'] ?? 0);
+
+    if (dir === 'IN') {
+      totalCashIn += amt;
+    } else if (dir === 'OUT') {
+      totalCashOut += amt;
+    }
+
+    if (mType === 'SALE_PAYMENT') {
+      if (dir === 'IN') cashSales += amt;
+      else cashSales -= amt;
+    } else if (mType === 'CUSTOMER_PAYMENT') {
+      customerPayments += amt;
+    } else if (mType === 'SUPPLIER_PAYMENT') {
+      supplierPayments += amt;
+    } else if (mType === 'EXPENSE') {
+      cashExpenses += amt;
+    } else if (mType === 'CASH_ADJUSTMENT') {
+      if (dir === 'IN') cashInAdjustments += amt;
+      else cashOutAdjustments += amt;
+    }
+  }
+
+  const expectedClosingCash = openingCash + totalCashIn - totalCashOut;
+
+  return {
+    session_id: sessionId,
+    session_status: sessionStatus,
+    business_date: date,
+    opening_cash: openingCash,
+    cash_sales: cashSales,
+    customer_payments: customerPayments,
+    supplier_payments: supplierPayments,
+    cash_expenses: cashExpenses,
+    cash_in_adjustments: cashInAdjustments,
+    cash_out_adjustments: cashOutAdjustments,
+    total_cash_in: totalCashIn,
+    total_cash_out: totalCashOut,
+    expected_closing_cash: expectedClosingCash,
+    actual_closing_cash: actualClosingCash,
+    cash_variance: variance != null ? variance : (actualClosingCash != null ? actualClosingCash - expectedClosingCash : null),
   };
 }
 

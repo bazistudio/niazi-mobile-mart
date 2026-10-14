@@ -38,10 +38,10 @@ export const useCashStore = create<CashState>((set, get) => ({
     try {
       set({ isLoading: true, error: null });
       const [currentSession, summary, movements, historySessions] = await Promise.all([
-        cashApi.getCurrentSession(),
-        cashApi.getDailySummary(),
-        cashApi.getMovements({ limit: 50 }),
-        cashApi.getSessionList(undefined, 20),
+        cashApi.getCurrentSession().catch(() => null),
+        cashApi.getDailySummary().catch(() => null),
+        cashApi.getMovements({ limit: 50 }).catch(() => []),
+        cashApi.getSessionList(undefined, 20).catch(() => []),
       ]);
 
       set({
