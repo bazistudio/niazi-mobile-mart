@@ -177,35 +177,33 @@ export function resolveIdentity(token: string): RequestIdentity {
 
 /**
  * Checks if identity has Organization-wide Administrative authority.
- * Organization admins are identified ONLY by their role claim (ADMIN, SUPER_ADMIN, OWNER).
- * UI page permissions (access_profile.allowed_pages '*') do NOT grant backend cross-branch authority.
- * Security fix (Phase 10 Blocker 1): removed wildcard page-permission escalation.
+ * In Niazi Mobile Mart, canonical ADMIN is always the Organization Admin.
+ * Its organization-wide authority does NOT depend on whether branch_id is NULL
+ * or assigned to a home/default branch.
+ * Legacy aliases (SUPER_ADMIN, OWNER, MULTI_ADMIN) are mapped here during transition.
  */
 export function isOrgAdmin(identity: RequestIdentity): boolean {
   if (!identity) return false;
   const r = String(identity.role || '').toUpperCase();
-  // OWNER and SUPER_ADMIN always have organization-wide authority
-  if (r === 'OWNER' || r === 'SUPER_ADMIN') return true;
-  // ADMIN and MULTI_ADMIN have organization-wide authority ONLY IF genuinely unassigned to a specific branch
-  if ((r === 'ADMIN' || r === 'MULTI_ADMIN') && (!identity.branch_id || !identity.branch_id.trim())) {
-    return true;
-  }
-  return false;
+  return r === 'ADMIN' || r === 'SUPER_ADMIN' || r === 'OWNER' || r === 'MULTI_ADMIN';
 }
 
 /**
  * Checks if identity has Branch-level Administrative authority.
- * Includes Organization Admins as well as SHOP_ADMIN / SHOPADMIN role.
+ * In Niazi Mobile Mart, canonical Branch Admin is SHOP_ADMIN (restricted to identity.branch_id).
+ * Organization Admins may also perform branch administrative operations.
+ * Legacy aliases (SHOPADMIN, BRANCH_ADMIN) are normalized here.
+ * NOTE: MANAGER is strictly an operational role and is NOT an administrator.
  */
 export function isBranchAdmin(identity: RequestIdentity): boolean {
   if (!identity) return false;
   if (isOrgAdmin(identity)) return true;
   const r = String(identity.role || '').toUpperCase();
-  return r === 'SHOPADMIN' || r === 'SHOP_ADMIN' || r === 'MANAGER';
+  return r === 'SHOP_ADMIN' || r === 'SHOPADMIN' || r === 'BRANCH_ADMIN';
 }
 
 /**
- * General admin check. Retained for backward compatibility.
+ * General admin check. Returns true if the caller is an Organization Admin or Branch Admin.
  */
 export function isAdmin(identity: RequestIdentity): boolean {
   return isBranchAdmin(identity);

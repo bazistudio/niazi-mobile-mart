@@ -5,6 +5,16 @@ All notable changes to Niazi Mobile Mart will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.40] - 2026-10-15
+
+### Fixed
+- **Canonical Admin Authorization**: Enforced canonical two-admin role model across backend and frontend layers. `ADMIN` is strictly the Organization Admin with organization-wide authority, independent of whether `branch_id` is assigned or NULL.
+- **Branch Admin Confinement**: Confined `SHOP_ADMIN` strictly to authorized branch operations, preventing cross-branch access leaks.
+- **Operational Role Isolation**: Decoupled `MANAGER` from admin helper bypasses (`isBranchAdmin`), keeping operational roles strictly bounded to their defined least-privilege profiles.
+- **Cash Register Open Permission**: Corrected permission check on `/api/cash/sessions/open` to require `pos` page and `cash:open` action, allowing cashiers to open registers without full admin escalation.
+- **Browser Branch Switcher Alignment**: Updated `ShopSwitcher` to ensure Organization Admins retain branch switching capabilities in the browser interface.
+- **POS Barcode Scanner Integration**: Added barcode scanner hook to `SaleWorkspace` to streamline checkout intake.
+
 ## [1.3.39] - 2026-10-15
 
 ### Fixed

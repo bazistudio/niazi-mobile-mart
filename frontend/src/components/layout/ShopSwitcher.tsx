@@ -27,13 +27,13 @@ export const ShopSwitcher = () => {
     setActiveShop,
   } = useOrganizationStore();
 
-  // Phase 13 (M-01a): ADMIN and MULTI_ADMIN are org-level only when they have NO branch
-  // assignment. A branch-assigned ADMIN or MULTI_ADMIN is a Branch Admin, not an Org Admin.
+  // Canonical Organization Admin: ADMIN is always an Org Admin with cross-branch switching authority.
+  // Legacy aliases (OWNER, SUPER_ADMIN, MULTI_ADMIN) are mapped for transition compatibility.
   const isOrgAdmin =
+    user?.role === 'ADMIN' ||
     user?.role === 'OWNER' ||
     user?.role === 'SUPER_ADMIN' ||
-    (user?.role === 'MULTI_ADMIN' && !user?.branch_id) ||
-    (user?.role === 'ADMIN' && !user?.branch_id);
+    user?.role === 'MULTI_ADMIN';
 
   // Fetch branches on mount or when auth/admin status changes
   const loadBranches = useCallback(async () => {

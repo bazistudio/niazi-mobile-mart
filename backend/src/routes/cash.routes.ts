@@ -179,7 +179,7 @@ export function createCashRouter(pool: Pool): Router {
   router.post('/sessions/open', async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;
 
-    const denied = authorizePermission(identity, 'pos', null);
+    const denied = authorizePermission(identity, 'pos', 'cash:open');
     if (denied) {
       res.status(403).json({ error: denied });
       return;

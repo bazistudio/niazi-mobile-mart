@@ -7,6 +7,7 @@ import { CartPanel } from './CartPanel';
 import { useInventoryStore } from '@/features/inventory/core/inventory.store';
 import { usePosStore } from '../store/usePosStore';
 import { DBInventory } from '@/types/db.types';
+import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import toast from 'react-hot-toast';
 
