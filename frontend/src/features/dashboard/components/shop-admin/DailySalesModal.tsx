@@ -10,12 +10,19 @@ import { printFormatter } from '@/features/settings/printer/utils/printFormatter
 import { queryKeys } from '@/lib/react-query/queryKeys';
 import toast from 'react-hot-toast';
 
+import { useOrganizationStore } from '@/store/useOrganizationStore';
+
 interface DailySalesModalProps {
   isOpen: boolean;
   onClose: () => void;
+  branchId?: string | null;
 }
 
-export const DailySalesModal = ({ isOpen, onClose }: DailySalesModalProps) => {
+export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: DailySalesModalProps) => {
+  // Use prop if supplied, else fallback to store activeShopId
+  const storeBranchId = useOrganizationStore((s) => s.activeShopId || s.activeShop?._id || null);
+  const effectiveBranchId = propBranchId !== undefined ? propBranchId : storeBranchId;
+
   const [dateFilter, setDateFilter] = useState<'today' | 'week' | 'month'>('today');
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -94,7 +101,7 @@ export const DailySalesModal = ({ isOpen, onClose }: DailySalesModalProps) => {
   const { startDate, endDate } = getDates();
 
   const { data: salesResponse, isLoading, error } = useQuery({
-    queryKey: queryKeys.sales(dateFilter, startDate, endDate, debouncedSearch),
+    queryKey: queryKeys.sales(effectiveBranchId, dateFilter, startDate, endDate, debouncedSearch),
     queryFn: () => {
       const cleanSearch = debouncedSearch.trim();
       return salesApi.getOrders({
@@ -102,6 +109,7 @@ export const DailySalesModal = ({ isOpen, onClose }: DailySalesModalProps) => {
         endDate,
         orderNumber: cleanSearch || undefined,
         limit: 500,
+        branchId: effectiveBranchId || undefined,
       });
     },
     enabled: isOpen,

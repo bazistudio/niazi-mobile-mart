@@ -148,6 +148,13 @@ export async function httpFetch<T>(path: string, options: RequestInit = {}): Pro
   }
 
   const url = `${getApiBaseUrl()}${path}`;
+  if (import.meta.env?.DEV) {
+    try {
+      const u = new URL(url);
+      const bId = u.searchParams.get('branch_id');
+      console.log(`[API DEV] ${options.method || 'GET'} ${u.pathname}${bId ? ` [branch_id=${bId}]` : ''}`);
+    } catch {}
+  }
   const res = await fetch(url, {
     ...options,
     headers,

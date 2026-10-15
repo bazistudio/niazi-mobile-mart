@@ -26,9 +26,13 @@ export const queryKeys = {
     all: ['inventory'] as const,
     stockAlerts: ['inventory', 'stock-alerts'] as const,
   },
-  dashboard: ['dashboard'] as const,
-  sales: (dateFilter?: string, startDate?: string, endDate?: string, search?: string) =>
-    ['sales', dateFilter, startDate, endDate, search] as const,
+  dashboard: {
+    all: ['dashboard'] as const,
+    byBranch: (branchId?: string | null) =>
+      branchId ? (['dashboard', branchId] as const) : (['dashboard', 'all'] as const),
+  },
+  sales: (branchId?: string | null, dateFilter?: string, startDate?: string, endDate?: string, search?: string) =>
+    ['sales', branchId ?? 'all', dateFilter, startDate, endDate, search] as const,
   customers: {
     all: ['customers'] as const,
     detail: (id: string) => ['customers', id] as const,

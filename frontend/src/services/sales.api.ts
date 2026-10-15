@@ -164,6 +164,7 @@ export const salesApi = {
     orderNumber?: string;
     customerId?: string;
     paymentStatus?: string;
+    branchId?: string | null;
   }): Promise<{
     success: boolean;
     data: any[];
@@ -182,6 +183,7 @@ export const salesApi = {
       }
 
       const sales = await tauriClient.saleList({
+        branch_id: params?.branchId || null,
         customer_id: params?.customerId || null,
         payment_status: params?.paymentStatus || null,
         start_date: params?.startDate || null,

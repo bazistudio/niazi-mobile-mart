@@ -58,9 +58,9 @@ export interface HourlyBreakdownData {
 }
 
 export const dashboardApi = {
-  getMetrics: async (): Promise<{ success: boolean; data: DashboardMetrics }> => {
+  getMetrics: async (branchId?: string | null): Promise<{ success: boolean; data: DashboardMetrics }> => {
     const stats = await tauriClient.organizationGetDashboardStats();
-    const profitSummary = await tauriClient.profitGetDashboardSummary();
+    const profitSummary = await tauriClient.profitGetDashboardSummary(branchId || undefined);
     return {
       success: true,
       data: {
@@ -97,10 +97,15 @@ export const dashboardApi = {
     };
   },
 
-  getHourlyBreakdown: async (_params?: { date?: string }): Promise<{ success: boolean; data: HourlyBreakdownData }> => {
+  getHourlyBreakdown: async (params?: { date?: string; branchId?: string | null }): Promise<{ success: boolean; data: HourlyBreakdownData }> => {
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const sales = await tauriClient.saleList({ start_date: todayStr, end_date: todayStr, limit: 500 }).catch(() => []);
+    const sales = await tauriClient.saleList({
+      start_date: todayStr,
+      end_date: todayStr,
+      branch_id: params?.branchId || undefined,
+      limit: 500,
+    }).catch(() => []);
 
     const hourlyMap: Record<number, { sales: number; count: number }> = {};
     for (let i = 0; i < 24; i++) {

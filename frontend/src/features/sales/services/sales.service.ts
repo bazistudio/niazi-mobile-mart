@@ -15,8 +15,8 @@ export const salesService = {
    * Calculates sales metrics for a given period from the canonical backend dashboard API.
    * This service acts as the read-only analytics layer.
    */
-  getMetrics: async (period: SalesPeriod): Promise<SalesMetrics> => {
-    const res = await dashboardApi.getMetrics();
+  getMetrics: async (period: SalesPeriod, branchId?: string | null): Promise<SalesMetrics> => {
+    const res = await dashboardApi.getMetrics(branchId);
     if (!res?.success || !res?.data) {
       throw new Error('Failed to retrieve sales metrics from backend');
     }

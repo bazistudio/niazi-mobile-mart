@@ -638,7 +638,7 @@ export const usePosStore = create<PosStore>()(
           // sessions were stale until a hard reload.
           try {
             const qc = getQueryClient();
-            qc.invalidateQueries({ queryKey: queryKeys.dashboard });
+            qc.invalidateQueries({ queryKey: queryKeys.dashboard.all });
             qc.invalidateQueries({ queryKey: ['sales'] });
             qc.invalidateQueries({ queryKey: ['products'] });
             // Customer balance and ledger entries change on credit/partial sales
@@ -688,7 +688,7 @@ export const usePosStore = create<PosStore>()(
 
           try {
             const qc = getQueryClient();
-            qc.invalidateQueries({ queryKey: queryKeys.dashboard });
+            qc.invalidateQueries({ queryKey: queryKeys.dashboard.all });
             qc.invalidateQueries({ queryKey: ['sales'] });
             qc.invalidateQueries({ queryKey: ['products'] });
           } catch (qcErr) {

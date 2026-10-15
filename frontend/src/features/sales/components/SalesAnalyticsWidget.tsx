@@ -5,8 +5,10 @@ import { BarChart3, TrendingUp, ShoppingCart, Target, Loader2 } from 'lucide-rea
 import { salesService, SalesMetrics, SalesPeriod } from '../services/sales.service';
 
 import { salesAdapter } from '@/features/realtime-sync/sync.adapters/sales.adapter';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 
 export const SalesAnalyticsWidget = () => {
+  const activeShopId = useOrganizationStore((s) => s.activeShopId || s.activeShop?._id || null);
   const [period, setPeriod] = useState<SalesPeriod>('today');
   const [metrics, setMetrics] = useState<SalesMetrics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -18,7 +20,7 @@ export const SalesAnalyticsWidget = () => {
     const fetchMetrics = () => {
       setIsLoading(true);
       setError(null);
-      salesService.getMetrics(period).then((data) => {
+      salesService.getMetrics(period, activeShopId).then((data) => {
         if (isMounted) {
           setMetrics(data);
           setError(null);
@@ -45,7 +47,7 @@ export const SalesAnalyticsWidget = () => {
       isMounted = false;
       unsubscribe();
     };
-  }, [period]);
+  }, [period, activeShopId]);
 
   const tabs: { value: SalesPeriod; label: string }[] = [
     { value: 'today', label: 'Today' },
@@ -97,7 +99,7 @@ export const SalesAnalyticsWidget = () => {
             onClick={() => {
               setIsLoading(true);
               setError(null);
-              salesService.getMetrics(period).then((data) => {
+              salesService.getMetrics(period, activeShopId).then((data) => {
                 setMetrics(data);
                 setIsLoading(false);
               }).catch(err => {
