@@ -12,15 +12,18 @@ import { Lock } from 'lucide-react';
 import { SyncStatusBadge } from '@/components/common/SyncStatusBadge';
 import { useCashStore, CashSessionOpenModal } from '@/features/cash';
 
+import { useOrganizationStore } from '@/store/useOrganizationStore';
+
 export const PosHeader: React.FC = () => {
   const [isInvoiceLookupOpen, setInvoiceLookupOpen] = useState(false);
   const [isCashOpenModalOpen, setCashOpenModalOpen] = useState(false);
   const lockTerminal = useTerminalStore((s) => s.lockTerminal);
+  const activeShopId = useOrganizationStore((s) => s.activeShopId || s.activeShop?._id);
   const { currentSession, fetchCurrentState } = useCashStore();
 
   useEffect(() => {
-    fetchCurrentState();
-  }, [fetchCurrentState]);
+    fetchCurrentState(activeShopId || undefined);
+  }, [fetchCurrentState, activeShopId]);
 
   return (
     <>

@@ -16,6 +16,7 @@ import {
   EXCHANGE_BLOCKED_MESSAGE,
   INVOICE_LOADED_CHECKOUT_BLOCKED_MESSAGE,
 } from '../services/posReturn.service';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 
 // Migrate legacy POS storage key if present
 if (typeof window !== 'undefined' && !localStorage.getItem('niazi-pos')) {
@@ -565,7 +566,14 @@ export const usePosStore = create<PosStore>()(
           // Fall back to session.customer if no customer was passed.
           const effectiveCustomer = customer ?? session.customer;
 
+          const activeShopId = useOrganizationStore.getState().activeShopId || useOrganizationStore.getState().activeShop?._id;
+          if (!activeShopId) {
+            toast.error("No active branch selected. Please select a shop before completing a sale.");
+            throw new Error("No active branch selected");
+          }
+
           const payload = {
+            branchId: activeShopId,
             items: [
               ...session.cart.map(item => ({
                 productId: item.productId,

@@ -7,12 +7,13 @@ import { CartPanel } from './CartPanel';
 import { useInventoryStore } from '@/features/inventory/core/inventory.store';
 import { usePosStore } from '../store/usePosStore';
 import { DBInventory } from '@/types/db.types';
-import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 import toast from 'react-hot-toast';
 
 export const SaleWorkspace: React.FC = () => {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
 
+  const activeShopId = useOrganizationStore((s) => s.activeShop?._id || s.activeShopId);
   const products = useInventoryStore((s) => s.products);
   const status = useInventoryStore((s) => s.status);
   const fetchProducts = useInventoryStore((s) => s.fetchProducts);
@@ -20,12 +21,10 @@ export const SaleWorkspace: React.FC = () => {
   const activeSession = usePosStore((s) => s.getActiveSession());
   const isReturnMode = activeSession?.mode === 'replace';
 
-  // Ensure inventory is loaded only once on initial mount
+  // Reload inventory on initial mount and when activeShopId changes
   useEffect(() => {
-    if (status === 'idle') {
-      fetchProducts();
-    }
-  }, [fetchProducts, status]);
+    fetchProducts();
+  }, [fetchProducts, activeShopId]);
 
   // Headless hardware scanner handler
   const handleScanComplete = useCallback(

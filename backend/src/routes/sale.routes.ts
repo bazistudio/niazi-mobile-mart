@@ -83,6 +83,12 @@ export function createSaleRouter(pool: Pool): Router {
       const dto = req.body as CompleteSaleDto;
       const callerIsOrgAdmin = isOrgAdmin(identity);
 
+      // Validate branch access if a branch is requested in body
+      if (dto.branch_id && !canAccessBranch(identity, dto.branch_id)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to sell on behalf of another branch' });
+        return;
+      }
+
       // P1 security fix: branch is resolved from server-side JWT identity, NOT from client DTO.
       // Non-org-admins always sell from their assigned branch regardless of what the client sends.
       // Org admins may select a branch explicitly via dto.branch_id; if omitted, identity branch is used.

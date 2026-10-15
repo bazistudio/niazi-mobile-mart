@@ -197,6 +197,12 @@ export function createCashRouter(pool: Pool): Router {
       if (!dto.branch_id && identity.branch_id) {
         dto.branch_id = identity.branch_id;
       }
+
+      if (!dto.branch_id) {
+        res.status(400).json({ error: 'branch_id is required to open a cash session' });
+        return;
+      }
+
       const session = await openCashSession(pool, dto, identity.user_id);
       res.status(201).json(session);
     } catch (err) {
