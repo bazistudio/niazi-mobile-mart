@@ -5,6 +5,14 @@ All notable changes to Niazi Mobile Mart will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.39] - 2026-10-15
+
+### Fixed
+- **Org Admin Branch Checkout Routing**: Resolved issue where organization admin checkouts defaulted to MAIN branch by reading authoritative active shop context from `useOrganizationStore` and passing `branchId` in POS checkout payload.
+- **Cross-Branch Authorization**: Hardened backend sales routes with server-side `canAccessBranch()` validation, rejecting cashier cross-branch spoofing with 403 Forbidden while strictly binding non-admins to their verified JWT branch.
+- **Branch Cash Session & Daily Summary**: Bound active branch context to cash session retrieval, daily summaries, movements, register opening/closing, and drawer adjustments.
+- **Live Branch Context Refresh**: Synchronized POS Header, Cash Management Page, and Sale Workspace to reload product catalog, stock counts, and drawer session data immediately when the active branch context is changed.
+
 ## [1.3.38] - 2026-10-14
 
 ### Fixed
