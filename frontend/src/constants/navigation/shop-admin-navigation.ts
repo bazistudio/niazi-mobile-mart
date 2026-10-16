@@ -54,7 +54,7 @@ export const shopAdminNavigation: NavigationGroup[] = [
     items: [
       { name: 'Customers', href: '/dashboard/shop-admin/customers', icon: Users, permission: PERMISSIONS.PARTIES_VIEW },
       { name: 'Suppliers', href: '/dashboard/shop-admin/suppliers', icon: Truck, permission: PERMISSIONS.PURCHASES_VIEW },
-      { name: 'Business Ledger', href: '/dashboard/shop-admin/business-ledger', icon: BookOpen, permission: PERMISSIONS.FINANCE_VIEW },
+      { name: 'Business Ledger', href: '/dashboard/shop-admin/ledger', icon: BookOpen, permission: PERMISSIONS.FINANCE_VIEW },
     ],
   },
   {

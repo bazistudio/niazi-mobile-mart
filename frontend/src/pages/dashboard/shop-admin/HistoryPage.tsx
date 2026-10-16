@@ -2,17 +2,25 @@ import React, { useEffect, useState } from 'react';
 import { HistoryStatsCards, HistoryFilters, HistoryTable, HistoryTimeline, useHistoryStore } from '@/features/history';
 import { SalesReturnsTable } from '@/features/returns/SalesReturnsTable';
 import { PurchaseReturnsTable } from '@/features/returns/PurchaseReturnsTable';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { History as HistoryIcon, LayoutList, GripVertical, RotateCcw } from 'lucide-react';
 
 export function HistoryPage() {
-  const { fetchHistory, fetchStats } = useHistoryStore();
+  const { fetchHistory, fetchStats, setFilters } = useHistoryStore();
   const [viewMode, setViewMode] = useState<'table' | 'timeline'>('table');
   const [activeTab, setActiveTab] = useState<'transactions' | 'sales_returns' | 'purchase_returns'>('transactions');
 
+  // Read the branch the org-admin has selected in the topbar.
+  // null = "All Shops" (org-wide); UUID = specific branch.
+  // Branch users are always locked to their own branch by the backend regardless of this value.
+  const activeBranchId = useOrganizationStore((state) => state.activeShop?._id ?? null);
+
   useEffect(() => {
-    fetchStats();
-    fetchHistory();
-  }, [fetchStats, fetchHistory]);
+    // On mount and whenever the selected branch changes, refresh both stats and
+    // history records scoped to the new branch context.
+    fetchStats(activeBranchId);
+    setFilters({ branch_id: activeBranchId, page: 1 });
+  }, [activeBranchId, fetchStats, setFilters]);
 
   return (
     <div className="flex flex-col gap-6 sm:gap-8 w-full max-w-7xl mx-auto pb-12">

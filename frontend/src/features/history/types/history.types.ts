@@ -34,6 +34,8 @@ export type HistoryFilterParams = {
   endDate?: string;
   status?: string;
   search?: string;
+  /** Branch UUID when an org-admin has selected a specific branch; null / undefined = org-wide. */
+  branch_id?: string | null;
 };
 
 export type LedgerTraceItem = {

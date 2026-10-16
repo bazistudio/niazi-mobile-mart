@@ -11,6 +11,9 @@ export const historyApi = {
       if (filters?.startDate) params.set('startDate', filters.startDate);
       if (filters?.endDate) params.set('endDate', filters.endDate);
       if (filters?.search) params.set('search', filters.search);
+      // Pass branch_id when an org-admin has selected a specific branch.
+      // The backend ignores this for non-org-admins (locks to identity.branch_id server-side).
+      if (filters?.branch_id) params.set('branch_id', filters.branch_id);
 
       const qs = params.toString();
       return await httpFetch<{ data: HistoryItem[]; total: number }>(`/api/history${qs ? '?' + qs : ''}`);
@@ -20,9 +23,12 @@ export const historyApi = {
     }
   },
 
-  getStats: async (): Promise<HistoryStats> => {
+  getStats: async (branchId?: string | null): Promise<HistoryStats> => {
     try {
-      const stats = await httpFetch<any>('/api/history/stats');
+      // Pass branch_id when an org-admin has selected a specific branch.
+      // The backend ignores this for non-org-admins (locks to identity.branch_id server-side).
+      const qs = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+      const stats = await httpFetch<any>(`/api/history/stats${qs}`);
       return {
         totalSales: Number(stats?.totalSales ?? 0),
         totalInvoices: Number(stats?.totalInvoices ?? 0),

@@ -1,13 +1,38 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Settings, Users, Printer, Building2 } from 'lucide-react';
+import { Settings, Users, Printer, Building2, Palette } from 'lucide-react';
 import { usePermissions } from '@/lib/auth/usePermissions';
 import { PERMISSIONS } from '@/constants/permissions';
 
 const navItems = [
-  { name: 'General', href: '/dashboard/shop-admin/settings', icon: Settings, permission: PERMISSIONS.SETTINGS_VIEW },
-  { name: 'Workforce', href: '/dashboard/shop-admin/settings/users', icon: Users, permission: PERMISSIONS.USERS_MANAGE },
-  { name: 'Printer', href: '/dashboard/shop-admin/settings/printer', icon: Printer, permission: PERMISSIONS.SETTINGS_VIEW },
+  {
+    name: 'General',
+    href: '/dashboard/shop-admin/settings',
+    icon: Settings,
+    permission: PERMISSIONS.SETTINGS_VIEW,
+    orgAdminOnly: true,
+  },
+  {
+    name: 'Workforce',
+    href: '/dashboard/shop-admin/settings/workforce',
+    icon: Users,
+    permission: PERMISSIONS.USERS_MANAGE,
+    orgAdminOnly: true,
+  },
+  {
+    name: 'Appearance',
+    href: '/dashboard/shop-admin/settings/appearance',
+    icon: Palette,
+    permission: PERMISSIONS.SETTINGS_VIEW,
+    orgAdminOnly: false,
+  },
+  {
+    name: 'Printer',
+    href: '/dashboard/shop-admin/settings/printer',
+    icon: Printer,
+    permission: PERMISSIONS.SETTINGS_VIEW,
+    orgAdminOnly: false,
+  },
 ];
 
 export const SettingsSidebar: React.FC = () => {
@@ -19,6 +44,7 @@ export const SettingsSidebar: React.FC = () => {
 
   const visibleNavItems = navItems.filter((item) => {
     if (item.permission && !hasPermission(item.permission)) return false;
+    if (item.orgAdminOnly && !isOrgAdmin) return false;
     return true;
   });
 
