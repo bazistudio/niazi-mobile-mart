@@ -52,6 +52,18 @@ for (const p of pubCandidates) {
   }
 }
 
+const envPath = path.join(process.cwd(), '.env');
+if (fs.existsSync(envPath) && !process.env['DATABASE_URL']) {
+  const envContent = fs.readFileSync(envPath, 'utf8');
+  for (const line of envContent.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('DATABASE_URL=')) {
+      process.env['DATABASE_URL'] = trimmed.substring('DATABASE_URL='.length).trim();
+      break;
+    }
+  }
+}
+
 const TEST_DB_URL = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? '';
 
 // Ensure test safety: never run against production
@@ -245,15 +257,23 @@ describe('Phase 2 — Canonical Authorization Matrix Suite', () => {
     assert.strictEqual(authorizePermission(ident, 'settings', null) !== null, true, 'Manager cannot access settings page');
   });
 
-  test('5. Unit: Legacy transition aliases evaluate correctly', () => {
+  test('5. Unit: Legacy transition aliases are temporarily blocked (fail-closed)', () => {
     const superAdmin = { user_id: '4', username: 's', role: 'SUPER_ADMIN' as any, organization_id: NIAZI_ORGANIZATION_ID, branch_id: null, access_profile: {} as any, authenticated_at_ms: Date.now() };
-    assert.strictEqual(isOrgAdmin(superAdmin), true);
+    assert.strictEqual(isOrgAdmin(superAdmin), false, 'SUPER_ADMIN must be blocked from org admin privileges');
+    assert.strictEqual(isBranchAdmin(superAdmin), false, 'SUPER_ADMIN must not qualify as branch admin');
+    assert.strictEqual(isAdmin(superAdmin), false, 'SUPER_ADMIN must not qualify as admin');
+
     const owner = { user_id: '5', username: 'o', role: 'OWNER' as any, organization_id: NIAZI_ORGANIZATION_ID, branch_id: null, access_profile: {} as any, authenticated_at_ms: Date.now() };
-    assert.strictEqual(isOrgAdmin(owner), true);
+    assert.strictEqual(isOrgAdmin(owner), false, 'OWNER must be blocked from org admin privileges');
+
     const multiAdmin = { user_id: '6', username: 'm', role: 'MULTI_ADMIN' as any, organization_id: NIAZI_ORGANIZATION_ID, branch_id: BRANCH_MAIN, access_profile: {} as any, authenticated_at_ms: Date.now() };
-    assert.strictEqual(isOrgAdmin(multiAdmin), true);
+    assert.strictEqual(isOrgAdmin(multiAdmin), false, 'MULTI_ADMIN must be blocked from org admin privileges');
+
     const legacyShop = { user_id: '7', username: 'ls', role: 'SHOPADMIN' as any, organization_id: NIAZI_ORGANIZATION_ID, branch_id: BRANCH_B, access_profile: {} as any, authenticated_at_ms: Date.now() };
-    assert.strictEqual(isBranchAdmin(legacyShop), true);
+    assert.strictEqual(isBranchAdmin(legacyShop), false, 'SHOPADMIN must be blocked from branch admin privileges');
+
+    const branchAdmin = { user_id: '8', username: 'ba', role: 'BRANCH_ADMIN' as any, organization_id: NIAZI_ORGANIZATION_ID, branch_id: BRANCH_B, access_profile: {} as any, authenticated_at_ms: Date.now() };
+    assert.strictEqual(isBranchAdmin(branchAdmin), false, 'BRANCH_ADMIN must be blocked from branch admin privileges');
   });
 
   // 2. Integration HTTP Route Verifications
@@ -323,5 +343,27 @@ describe('Phase 2 — Canonical Authorization Matrix Suite', () => {
       body: JSON.stringify({ branch_id: BRANCH_MAIN, items: [], payment_method: 'cash' }),
     });
     assert.strictEqual(res.status, 403, 'ACCOUNTANT without pos permission must be denied from sales endpoint');
+  });
+
+  test('13. Integration: Stale/Legacy JWTs with blocked roles are rejected at HTTP boundary', async () => {
+    const legacyRoles = ['SUPER_ADMIN', 'OWNER', 'MULTI_ADMIN', 'SHOPADMIN', 'BRANCH_ADMIN'];
+    for (const legacyRole of legacyRoles) {
+      const legacyToken = issueToken({
+        userId: ADMIN_MAIN_ID,
+        username: `legacy_${legacyRole.toLowerCase()}`,
+        role: legacyRole,
+        accessProfile: { allowed_pages: ['*'], allowed_actions: ['*'], limits: {} as any },
+        branchId: BRANCH_MAIN,
+      });
+
+      const res = await fetch(`${baseUrl}/api/products?branch_id=${BRANCH_MAIN}`, {
+        headers: { Authorization: `Bearer ${legacyToken}` },
+      });
+      assert.strictEqual(
+        res.status,
+        401,
+        `Token with legacy role '${legacyRole}' must be rejected with 401 Unauthorized`
+      );
+    }
   });
 });

@@ -33,7 +33,7 @@ import { Pool } from 'pg';
 import { UsersRepo } from '../repositories/users.repo';
 import { AuthRepo } from '../repositories/auth.repo';
 import { hashArgon2 } from '../services/argon2.service';
-import { buildAuthMiddleware, authMiddleware, isAdmin, isOrgAdmin as authIsOrgAdmin } from '../auth';
+import { buildAuthMiddleware, authMiddleware, isAdmin, isOrgAdmin as authIsOrgAdmin, BLOCKED_LEGACY_ADMIN_ROLES } from '../auth';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -151,6 +151,14 @@ export function buildUsersRouter(pool: Pool): Router {
     }
     if (typeof role !== 'string' || !role.trim()) {
       res.status(400).json({ error: 'role is required' });
+      return;
+    }
+
+    const upperRoleInput = role.trim().toUpperCase();
+    if (BLOCKED_LEGACY_ADMIN_ROLES.has(upperRoleInput)) {
+      res.status(400).json({
+        error: `Role '${role.trim()}' is a deprecated legacy alias and is blocked. Only canonical roles ('ADMIN', 'SHOP_ADMIN', etc.) are permitted.`,
+      });
       return;
     }
 
@@ -332,6 +340,16 @@ export function buildUsersRouter(pool: Pool): Router {
         // Cannot change branch assignment
         if (branch_id !== undefined && branch_id !== targetUser.branch_id) {
           res.status(403).json({ error: 'Forbidden: Organization Admin privileges required to change branch assignments' });
+          return;
+        }
+      }
+
+      if (role !== undefined && typeof role === 'string') {
+        const updateRoleUpper = role.trim().toUpperCase();
+        if (BLOCKED_LEGACY_ADMIN_ROLES.has(updateRoleUpper)) {
+          res.status(400).json({
+            error: `Role '${role.trim()}' is a deprecated legacy alias and is blocked. Only canonical roles ('ADMIN', 'SHOP_ADMIN', etc.) are permitted.`,
+          });
           return;
         }
       }

@@ -39,6 +39,7 @@ cloud-sql-proxy.exe
 # Documentation & Local Archives
 docs/*
 !docs/old-rust-backend/
+!docs/auth-cleanup/
 
 # Keys
 ~

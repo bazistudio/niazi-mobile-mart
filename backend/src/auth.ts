@@ -82,6 +82,21 @@ export const NIAZI_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
 // POS checkout is always bound to the user's JWT branch_id which is never the warehouse.
 export const CENTRAL_WAREHOUSE_ID = '00000000-0000-0000-0000-000000000003';
 
+// --- Legacy Admin Role Blocking (Temporary Compatibility Block) ---
+
+/**
+ * Legacy admin aliases slated for temporary runtime blocking.
+ * Canonical targets: ADMIN (Org Admin) and SHOP_ADMIN (Branch Admin).
+ * Fail-closed: All legacy admin aliases are rejected at the authentication/authorization boundary.
+ */
+export const BLOCKED_LEGACY_ADMIN_ROLES = new Set<string>([
+  'SUPER_ADMIN',
+  'OWNER',
+  'MULTI_ADMIN',
+  'SHOPADMIN',
+  'BRANCH_ADMIN',
+]);
+
 // --- Key Loading ---
 
 function requirePublicKey(): string {
@@ -162,6 +177,11 @@ export function resolveIdentity(token: string): RequestIdentity {
     throw new AuthError('Invalid or corrupted authentication token', 401);
   }
 
+  const roleUpper = String(claims.role || '').toUpperCase();
+  if (BLOCKED_LEGACY_ADMIN_ROLES.has(roleUpper)) {
+    throw new AuthError('Account role is deprecated or blocked. Please log in with a canonical role.', 401);
+  }
+
   return {
     user_id: claims.sub,
     username: claims.username,
@@ -180,26 +200,26 @@ export function resolveIdentity(token: string): RequestIdentity {
  * In Niazi Mobile Mart, canonical ADMIN is always the Organization Admin.
  * Its organization-wide authority does NOT depend on whether branch_id is NULL
  * or assigned to a home/default branch.
- * Legacy aliases (SUPER_ADMIN, OWNER, MULTI_ADMIN) are mapped here during transition.
+ * Legacy aliases (SUPER_ADMIN, OWNER, MULTI_ADMIN) are temporarily blocked at runtime (fail-closed).
  */
 export function isOrgAdmin(identity: RequestIdentity): boolean {
   if (!identity) return false;
   const r = String(identity.role || '').toUpperCase();
-  return r === 'ADMIN' || r === 'SUPER_ADMIN' || r === 'OWNER' || r === 'MULTI_ADMIN';
+  return r === 'ADMIN';
 }
 
 /**
  * Checks if identity has Branch-level Administrative authority.
  * In Niazi Mobile Mart, canonical Branch Admin is SHOP_ADMIN (restricted to identity.branch_id).
  * Organization Admins may also perform branch administrative operations.
- * Legacy aliases (SHOPADMIN, BRANCH_ADMIN) are normalized here.
+ * Legacy aliases (SHOPADMIN, BRANCH_ADMIN) are temporarily blocked at runtime (fail-closed).
  * NOTE: MANAGER is strictly an operational role and is NOT an administrator.
  */
 export function isBranchAdmin(identity: RequestIdentity): boolean {
   if (!identity) return false;
   if (isOrgAdmin(identity)) return true;
   const r = String(identity.role || '').toUpperCase();
-  return r === 'SHOP_ADMIN' || r === 'SHOPADMIN' || r === 'BRANCH_ADMIN';
+  return r === 'SHOP_ADMIN';
 }
 
 /**
@@ -394,9 +414,10 @@ export function buildAuthMiddleware(pool: Pool): (req: Request, res: Response, n
     }
 
     // JWT verified — now confirm the account is still active in the database.
+    // Also verify that the persisted role is not a blocked legacy admin alias.
     // Fail-CLOSED: any DB error returns 503 and never calls next().
     pool.query(
-      'SELECT is_active, status FROM users WHERE id = $1 LIMIT 1',
+      'SELECT is_active, status, role FROM users WHERE id = $1 LIMIT 1',
       [identity.user_id]
     ).then((result) => {
       if (result.rows.length === 0) {
@@ -407,12 +428,20 @@ export function buildAuthMiddleware(pool: Pool): (req: Request, res: Response, n
       const row = result.rows[0] as Record<string, unknown>;
       const isActive = Boolean(row['is_active']);
       const status = String(row['status'] ?? '');
+      const dbRole = String(row['role'] ?? '').toUpperCase();
+
+      if (BLOCKED_LEGACY_ADMIN_ROLES.has(dbRole)) {
+        console.warn(`[auth] 401 User ${identity.user_id} possesses blocked legacy admin role '${dbRole}' on ${req.method} ${req.originalUrl || req.path}`);
+        res.status(401).json({ error: 'Account role is deprecated or blocked. Contact your administrator.' });
+        return;
+      }
+
       if (!isActive || status !== 'ACTIVE') {
         console.warn(`[auth] 401 Disabled user ${identity.user_id} (status=${status}) attempted access on ${req.method} ${req.originalUrl || req.path}`);
         res.status(401).json({ error: 'Account is disabled. Contact your administrator.' });
         return;
       }
-      // Account confirmed active — attach identity and continue.
+      // Account confirmed active and role valid — attach identity and continue.
       req.identity = identity;
       next();
     }).catch((err: unknown) => {
