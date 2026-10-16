@@ -5,6 +5,19 @@ All notable changes to Niazi Mobile Mart will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.41] - 2026-10-17
+
+### Added
+- **Server-Authoritative Atomic POS Exchange Workflow**: Introduced atomic exchange processing via `POST /api/sales/exchange` and `exchange.repo.ts`, resolving return lines and replacement items in a single atomic database transaction.
+- **Three-Way Settlement Support**: Full support for balanced exchanges (`BALANCED_ZERO`), customer payment collections on positive differences (`POSITIVE_COLLECTION`), and refunds on negative differences (`NEGATIVE_REFUND`).
+- **PostgreSQL Migration 035**: Expanded `sales_returns.refund_method` check constraint to include `'CREDIT'` and `'EXCHANGE'`.
+- **Exchange UI & Settlement Modal**: Added dedicated exchange settlement modal with walk-in customer cash enforcement and customer ledger credit options.
+- **Automated Regression Suite**: Comprehensive 12-test automated suite in `exchange-atomic.test.ts` verifying atomicity, concurrency, advisory locks, idempotency caching, and transaction rollback.
+
+### Fixed
+- **Exchange Payment Offset Typing**: Fixed internal return offset payment typing by recording `'OTHER'` with linked return reference number, preserving standard payment method constraints.
+- **Exchange Ledger Replay Parity**: Synchronized ledger and cash session movements to guarantee that identical exchange replays yield cached results with zero duplicate row insertions.
+
 ## [1.3.40] - 2026-10-15
 
 ### Fixed
