@@ -8,6 +8,7 @@ import {
   CreateCashAdjustmentDto,
 } from '../types/cash.types';
 import { cashApi } from '@/services/cash.api';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 import toast from 'react-hot-toast';
 
 interface CashState {
@@ -19,7 +20,7 @@ interface CashState {
   isActionLoading: boolean;
   error: string | null;
 
-  fetchCurrentState: () => Promise<void>;
+  fetchCurrentState: (explicitBranchId?: string) => Promise<void>;
   openSession: (dto: OpenCashSessionDto) => Promise<void>;
   closeSession: (dto: CloseCashSessionDto) => Promise<void>;
   createAdjustment: (dto: CreateCashAdjustmentDto) => Promise<void>;
@@ -34,14 +35,20 @@ export const useCashStore = create<CashState>((set, get) => ({
   isActionLoading: false,
   error: null,
 
-  fetchCurrentState: async () => {
+  fetchCurrentState: async (explicitBranchId?: string) => {
     try {
       set({ isLoading: true, error: null });
+      const branchId =
+        explicitBranchId ||
+        useOrganizationStore.getState().activeShopId ||
+        useOrganizationStore.getState().activeShop?._id ||
+        undefined;
+
       const [currentSession, summary, movements, historySessions] = await Promise.all([
-        cashApi.getCurrentSession().catch(() => null),
-        cashApi.getDailySummary().catch(() => null),
-        cashApi.getMovements({ limit: 50 }).catch(() => []),
-        cashApi.getSessionList(undefined, 20).catch(() => []),
+        cashApi.getCurrentSession(branchId).catch(() => null),
+        cashApi.getDailySummary(branchId).catch(() => null),
+        cashApi.getMovements({ branch_id: branchId, limit: 50 }).catch(() => []),
+        cashApi.getSessionList(branchId, 20).catch(() => []),
       ]);
 
       set({
@@ -63,8 +70,13 @@ export const useCashStore = create<CashState>((set, get) => ({
   openSession: async (dto) => {
     try {
       set({ isActionLoading: true, error: null });
-      await cashApi.openSession(dto);
-      await get().fetchCurrentState();
+      const activeShopId =
+        dto.branch_id ||
+        useOrganizationStore.getState().activeShopId ||
+        useOrganizationStore.getState().activeShop?._id ||
+        undefined;
+      await cashApi.openSession({ ...dto, branch_id: activeShopId });
+      await get().fetchCurrentState(activeShopId);
       set({ isActionLoading: false });
       toast.success('Cash session opened successfully');
     } catch (err: any) {
@@ -79,7 +91,11 @@ export const useCashStore = create<CashState>((set, get) => ({
     try {
       set({ isActionLoading: true, error: null });
       await cashApi.closeSession(dto);
-      await get().fetchCurrentState();
+      const activeShopId =
+        useOrganizationStore.getState().activeShopId ||
+        useOrganizationStore.getState().activeShop?._id ||
+        undefined;
+      await get().fetchCurrentState(activeShopId);
       set({ isActionLoading: false });
       toast.success('Daily cash session closed successfully');
     } catch (err: any) {
@@ -93,8 +109,13 @@ export const useCashStore = create<CashState>((set, get) => ({
   createAdjustment: async (dto) => {
     try {
       set({ isActionLoading: true, error: null });
-      await cashApi.createAdjustment(dto);
-      await get().fetchCurrentState();
+      const activeShopId =
+        dto.branch_id ||
+        useOrganizationStore.getState().activeShopId ||
+        useOrganizationStore.getState().activeShop?._id ||
+        undefined;
+      await cashApi.createAdjustment({ ...dto, branch_id: activeShopId });
+      await get().fetchCurrentState(activeShopId);
       set({ isActionLoading: false });
       toast.success(`Cash ${dto.direction} adjustment recorded`);
     } catch (err: any) {

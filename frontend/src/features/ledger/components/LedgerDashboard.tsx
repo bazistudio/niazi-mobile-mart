@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import { LedgerBook } from './LedgerBook';
 import { httpClient } from '@/lib/http/httpClient';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
+import { usePermissions } from '@/lib/auth/usePermissions';
 
 // ─── REST types ────────────────────────────────────────────────────────────────
 
@@ -103,24 +105,55 @@ export const LedgerDashboard: React.FC = () => {
   const [directoryTab, setDirectoryTab] = useState<'CUSTOMER' | 'SUPPLIER' | 'EXPENSE'>('CUSTOMER');
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Fetch customers via REST
+  // ── Branch context ───────────────────────────────────────────────────────────
+  // activeShop._id: the branch currently selected in the topbar switcher.
+  // null means org-admin is viewing "All Shops" (org-wide rollup).
+  // Branch users are always locked to their own branch by the backend;
+  // passing their activeShopId is redundant but harmless (resolveBranch()
+  // validates it matches identity.branch_id and rejects mismatches).
+  const activeShopId = useOrganizationStore((state) => state.activeShop?._id ?? null);
+  const { role } = usePermissions();
+  const isOrgAdmin =
+    role === 'OWNER' || role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'ADMIN';
+
+  // Effective branch for expense filtering:
+  // - Org admin with a specific branch selected: pass that branch_id to the API.
+  // - Org admin viewing "All Shops" (activeShopId === null): omit branch_id → org-wide.
+  // - Branch user: backend ignores the param and locks to identity.branch_id anyway.
+  const effectiveBranchId: string | null = activeShopId;
+
+  // Build the expense URL with an optional branch_id query parameter.
+  // The backend's resolveBranch() will enforce authorization server-side.
+  const expenseUrl =
+    effectiveBranchId
+      ? `/api/v1/expenses?limit=200&branch_id=${encodeURIComponent(effectiveBranchId)}`
+      : '/api/v1/expenses?limit=200';
+
+  // ── Queries ─────────────────────────────────────────────────────────────────
+  // Query keys include the branch context so that switching branches triggers
+  // a fresh fetch and never reuses another branch's cached result.
+  // Customers and suppliers are org-wide entities; their directories do not
+  // change by branch, so their keys use a static 'all' sentinel. The expense
+  // key includes the effective branch so a branch switch refetches.
+
+  // Fetch customers via REST (org-wide — intentional)
   const { data: customersRaw = [], isLoading: isLoadingCustomers } = useQuery<CustomerSummary[]>({
-    queryKey: ['ledger', 'customers'],
+    queryKey: ['ledger', 'customers', 'all'],
     queryFn: () => httpClient.get<CustomerSummary[]>('/api/customers?limit=500&is_active=true'),
     staleTime: 2 * 60 * 1000,
   });
 
-  // Fetch suppliers via REST
+  // Fetch suppliers via REST (org-wide — intentional)
   const { data: suppliersRaw = [], isLoading: isLoadingSuppliers } = useQuery<SupplierSummary[]>({
-    queryKey: ['ledger', 'suppliers'],
+    queryKey: ['ledger', 'suppliers', 'all'],
     queryFn: () => httpClient.get<SupplierSummary[]>('/api/suppliers?limit=500&is_active=true'),
     staleTime: 2 * 60 * 1000,
   });
 
-  // Fetch expenses via REST
+  // Fetch expenses via REST (branch-scoped when a specific branch is active)
   const { data: expensesRaw = [], isLoading: isLoadingExpenses } = useQuery<ExpenseRecord[]>({
-    queryKey: ['ledger', 'expenses'],
-    queryFn: () => httpClient.get<ExpenseRecord[]>('/api/v1/expenses?limit=200'),
+    queryKey: ['ledger', 'expenses', effectiveBranchId ?? 'all'],
+    queryFn: () => httpClient.get<ExpenseRecord[]>(expenseUrl),
     staleTime: 2 * 60 * 1000,
   });
 
@@ -185,7 +218,9 @@ export const LedgerDashboard: React.FC = () => {
       <div>
         <h1 className="text-2xl font-black text-gray-900 dark:text-white">General Ledger</h1>
         <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mt-1">
-          Receivables, payables, and expense tracking across all branches
+          {isOrgAdmin && !effectiveBranchId
+            ? 'Receivables, payables, and expense tracking across all branches'
+            : 'Receivables, payables, and expense tracking'}
         </p>
       </div>
 

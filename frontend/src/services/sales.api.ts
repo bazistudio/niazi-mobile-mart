@@ -19,9 +19,44 @@ export interface CreateOrderPayload {
   idempotencyKey?: string;
 }
 
-function mapSaleToOrder(s: Sale, lines: any[] = [], payments: any[] = []): any {
+export function mapSaleToOrder(s: Sale, lines: any[] = [], payments: any[] = []): any {
   let paymentMethod = 'cash';
-  if (payments && payments.length > 0) {
+  const hasPayments = payments && payments.length > 0;
+
+  // Detect whether this sale involves an internal exchange return offset
+  const hasExchangeOffset =
+    hasPayments &&
+    payments.some(
+      (p: any) =>
+        (p.payment_method === 'OTHER' || p.method === 'OTHER') &&
+        ((p.notes && String(p.notes).startsWith('Exchange Return Offset:')) ||
+          (p.reference_number && String(p.reference_number).startsWith('RET-')) ||
+          (p.referenceNumber && String(p.referenceNumber).startsWith('RET-')))
+    );
+
+  // Non-offset genuine tenders (e.g. CASH, CARD, BANK)
+  const genuineTenders = hasPayments
+    ? payments.filter(
+        (p: any) =>
+          !(
+            (p.payment_method === 'OTHER' || p.method === 'OTHER') &&
+            ((p.notes && String(p.notes).startsWith('Exchange Return Offset:')) ||
+              (p.reference_number && String(p.reference_number).startsWith('RET-')) ||
+              (p.referenceNumber && String(p.referenceNumber).startsWith('RET-')))
+          )
+      )
+    : [];
+
+  if (hasExchangeOffset) {
+    if (genuineTenders.length > 0) {
+      // Genuine external tender provided alongside exchange offset (e.g. cash, card)
+      const primaryTender = (genuineTenders[0].payment_method || genuineTenders[0].method || '').toLowerCase();
+      paymentMethod = primaryTender ? `${primaryTender} / exchange` : 'exchange';
+    } else {
+      // Fully settled via exchange merchandise return offset
+      paymentMethod = 'exchange';
+    }
+  } else if (hasPayments) {
     paymentMethod = (payments[0].payment_method || payments[0].method || 'cash').toLowerCase();
   } else if (s.payment_status === 'UNPAID' || (s.paid_amount !== undefined && s.paid_amount < s.total_amount)) {
     paymentMethod = 'credit';
@@ -157,6 +192,71 @@ export const salesApi = {
     }
   },
 
+  processExchange: async (payload: {
+    originalSaleId: string;
+    returnLines: { saleLineId: string; quantity: number }[];
+    replacementItems: { productId: string; quantity: number; unitPrice?: number; discount?: number }[];
+    replacementDiscount?: number;
+    refundMethod?: 'CASH' | 'CREDIT' | null;
+    payments?: { method: string; amount: number; referenceNumber?: string; notes?: string }[];
+    paymentMethod?: string;
+    paidAmount?: number;
+    idempotencyKey: string;
+    notes?: string;
+    reason?: string;
+  }) => {
+    try {
+      const res = await tauriClient.salesExchange({
+        original_sale_id: payload.originalSaleId,
+        return_lines: payload.returnLines.map((l) => ({
+          sale_line_id: l.saleLineId,
+          quantity: l.quantity,
+        })),
+        replacement_items: payload.replacementItems.map((i) => ({
+          product_id: i.productId,
+          quantity: i.quantity,
+          unit_price: i.unitPrice,
+          price: i.unitPrice,
+          discount: i.discount || 0,
+        })),
+        replacement_discount: payload.replacementDiscount ?? null,
+        refund_method: payload.refundMethod ?? null,
+        payments: payload.payments
+          ? payload.payments.map((p) => ({
+              method: p.method,
+              amount: p.amount,
+              reference_number: p.referenceNumber || null,
+              notes: p.notes || null,
+            }))
+          : null,
+        payment_method: payload.paymentMethod || null,
+        paid_amount: payload.paidAmount !== undefined ? payload.paidAmount : null,
+        idempotency_key: payload.idempotencyKey,
+        notes: payload.notes || null,
+        reason: payload.reason || null,
+      });
+
+      const order = mapSaleToOrder(
+        res.replacement_sale.sale,
+        res.replacement_sale.lines,
+        res.replacement_sale.payments
+      );
+      order.creditAmount = res.replacement_sale.credit_amount;
+      order.customerBalanceAfter = res.customer_balance_after;
+
+      return {
+        success: true,
+        exchangeResult: res,
+        order,
+        message: 'Exchange completed successfully',
+      };
+    } catch (err: any) {
+      const msg = err?.message || err?.toString() || 'Failed to complete exchange';
+      console.error('Failed to complete exchange:', msg);
+      throw (err instanceof Error ? err : new Error(msg));
+    }
+  },
+
   getOrders: async (params?: {
     startDate?: string;
     endDate?: string;
@@ -164,6 +264,7 @@ export const salesApi = {
     orderNumber?: string;
     customerId?: string;
     paymentStatus?: string;
+    branchId?: string | null;
   }): Promise<{
     success: boolean;
     data: any[];
@@ -182,6 +283,7 @@ export const salesApi = {
       }
 
       const sales = await tauriClient.saleList({
+        branch_id: params?.branchId || null,
         customer_id: params?.customerId || null,
         payment_status: params?.paymentStatus || null,
         start_date: params?.startDate || null,

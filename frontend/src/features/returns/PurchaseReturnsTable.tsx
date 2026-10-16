@@ -5,9 +5,11 @@ import { PurchaseReturn } from '@/lib/tauri/tauriClient';
 
 interface Props {
   purchaseId?: string;
+  /** Branch UUID selected in the org-admin topbar; null / undefined = org-wide (or non-admin — locked server-side). */
+  branchId?: string | null;
 }
 
-export const PurchaseReturnsTable: React.FC<Props> = ({ purchaseId }) => {
+export const PurchaseReturnsTable: React.FC<Props> = ({ purchaseId, branchId }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [returns, setReturns] = useState<PurchaseReturn[]>([]);
@@ -21,7 +23,7 @@ export const PurchaseReturnsTable: React.FC<Props> = ({ purchaseId }) => {
           const list = await returnsApi.getPurchaseReturnsByPurchase(purchaseId);
           setReturns(list);
         } else {
-          const list = await returnsApi.listPurchaseReturns();
+          const list = await returnsApi.listPurchaseReturns(branchId != null ? { branch_id: branchId } : undefined);
           setReturns(list);
         }
       } catch (err: any) {
@@ -31,7 +33,7 @@ export const PurchaseReturnsTable: React.FC<Props> = ({ purchaseId }) => {
       }
     }
     loadReturns();
-  }, [purchaseId]);
+  }, [purchaseId, branchId]);
 
   if (loading) {
     return <div className="p-8 text-center text-gray-500">Loading purchase returns history...</div>;

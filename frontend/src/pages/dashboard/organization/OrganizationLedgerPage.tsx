@@ -9,21 +9,26 @@ import {
   ArrowUpRight, 
   Receipt, 
   Scale,
-  Search,
-  Download
+  Download,
+  Info
 } from 'lucide-react';
+import { LedgerDashboard } from '@/features/ledger/components/LedgerDashboard';
+import { CreditLedgerTab } from '@/features/customers/components/CreditLedgerTab';
+import { HistoryTable, HistoryStatsCards, HistoryFilters, useHistoryStore } from '@/features/history';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 
 export function OrganizationLedgerPage() {
-  const [activeTab, setActiveTab] = useState('org');
+  const [activeTab, setActiveTab] = useState<string>('org');
+  const activeBranchId = useOrganizationStore((state) => state.activeShop?._id ?? null);
+  const activeShop = useOrganizationStore((state) => state.activeShop);
 
   const ledgerSections = [
     { id: 'org', label: 'Organization Ledger', icon: BookOpen, desc: 'Enterprise chart of accounts and consolidated general ledger.' },
     { id: 'branches', label: 'Branch Ledgers', icon: Store, desc: 'Shop-specific sub-ledgers and inter-branch balance accounts.' },
     { id: 'customers', label: 'Customer Ledger', icon: UserCheck, desc: 'Central customer credit, debit lines, and outstanding balances.' },
     { id: 'suppliers', label: 'Supplier Ledger', icon: Truck, desc: 'Vendor payables, procurement dues, and payment records.' },
-    { id: 'receivables', label: 'Receivables', icon: ArrowDownLeft, desc: 'Pending enterprise receivables and credit aging buckets.' },
-    { id: 'payables', label: 'Payables', icon: ArrowUpRight, desc: 'Upcoming liabilities, vendor terms, and pending settlements.' },
-    { id: 'transactions', label: 'Transactions', icon: Receipt, desc: 'Consolidated double-entry transaction journal across branches.' },
+    { id: 'receivables', label: 'Receivables & Payables', icon: ArrowDownLeft, desc: 'Pending enterprise receivables and supplier liabilities.' },
+    { id: 'transactions', label: 'Transactions Journal', icon: Receipt, desc: 'Consolidated double-entry transaction journal across branches.' },
     { id: 'balance', label: 'Balance Summary', icon: Scale, desc: 'Consolidated trial balance and organization liquidity summary.' },
   ];
 
@@ -32,15 +37,15 @@ export function OrganizationLedgerPage() {
   return (
     <OrganizationPageShell
       title="Organization Ledger"
-      description="Consolidated financial ledger overview and cross-branch accounts reconciliation."
-      badge="Financial Control"
+      description="Consolidated financial ledger overview, customer credit accounts, and cross-branch accounts reconciliation."
+      badge={activeShop ? `Scope: ${activeShop.name}` : 'Scope: All Branches'}
       action={
         <button
-          disabled
-          className="flex items-center gap-2 px-3.5 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-medium text-gray-400 cursor-not-allowed shadow-sm"
+          onClick={() => window.print()}
+          className="flex items-center gap-2 px-3.5 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 shadow-sm transition-colors cursor-pointer"
         >
           <Download className="w-3.5 h-3.5" />
-          <span>Export Ledger</span>
+          <span>Print / Export</span>
         </button>
       }
     >
@@ -53,7 +58,7 @@ export function OrganizationLedgerPage() {
             <button
               key={sec.id}
               onClick={() => setActiveTab(sec.id)}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
                 isActive
                   ? 'bg-primary text-white shadow-sm'
                   : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200/60 dark:border-gray-700'
@@ -66,41 +71,59 @@ export function OrganizationLedgerPage() {
         })}
       </div>
 
-      {/* Control / Filter Bar */}
-      <div className="bg-white dark:bg-gray-800/90 rounded-xl p-4 border border-gray-200/80 dark:border-gray-700/80 shadow-sm flex flex-col md:flex-row items-center justify-between gap-3">
-        <div className="flex items-center gap-2 w-full md:w-auto flex-1 max-w-md">
-          <div className="relative w-full">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder={`Search ${currentSection.label.toLowerCase()} entries...`}
-              disabled
-              className="w-full pl-9 pr-4 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-500 cursor-not-allowed"
-            />
+      {/* Tab 1: Organization Ledger & Balance Summary */}
+      {(activeTab === 'org' || activeTab === 'balance' || activeTab === 'receivables') && (
+        <div className="space-y-4">
+          <LedgerDashboard />
+        </div>
+      )}
+
+      {/* Tab 2: Branch Ledgers */}
+      {activeTab === 'branches' && (
+        <div className="space-y-4">
+          <div className="bg-blue-50/70 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 flex items-start gap-3">
+            <Info className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+            <div className="text-sm text-blue-900 dark:text-blue-200">
+              <p className="font-semibold">Branch Sub-Ledger View</p>
+              <p className="text-xs mt-0.5 text-blue-700 dark:text-blue-300">
+                Viewing ledger for: <strong>{activeShop ? activeShop.name : 'Consolidated (All Branches)'}</strong>. Use the topbar branch switcher to inspect individual physical branch ledgers.
+              </p>
+            </div>
           </div>
+          <LedgerDashboard />
         </div>
+      )}
 
-        <div className="flex items-center gap-2 text-xs text-gray-500">
-          <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md">Currency: PKR</span>
-          <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md">Fiscal Year: Current</span>
+      {/* Tab 3: Customer Ledger */}
+      {activeTab === 'customers' && (
+        <div className="bg-white dark:bg-gray-900 rounded-xl p-6 border border-gray-200 dark:border-gray-800 shadow-sm">
+          <CreditLedgerTab />
         </div>
-      </div>
+      )}
 
-      {/* Main Empty State View */}
-      <div className="bg-white dark:bg-gray-800/90 rounded-xl p-12 border border-gray-200/80 dark:border-gray-700/80 shadow-sm text-center">
-        <div className="w-14 h-14 rounded-full bg-primary/10 mx-auto flex items-center justify-center text-primary mb-4">
-          <BookOpen className="w-7 h-7" />
+      {/* Tab 4: Supplier Ledger (Truthful phase status) */}
+      {activeTab === 'suppliers' && (
+        <div className="bg-white dark:bg-gray-800/90 rounded-xl p-12 border border-gray-200/80 dark:border-gray-700/80 shadow-sm text-center">
+          <div className="w-14 h-14 rounded-full bg-orange-100 dark:bg-orange-900/30 mx-auto flex items-center justify-center text-orange-600 dark:text-orange-400 mb-4">
+            <Truck className="w-7 h-7" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Supplier Ledger Module
+          </h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto mt-1.5 leading-relaxed">
+            Central vendor procurement and supplier ledger statements are scheduled for full rollout in Phase 6. Customer credit and operational expense ledgers are fully active in the Organization Ledger tab.
+          </p>
         </div>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {currentSection.label}
-        </h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto mt-1.5 leading-relaxed">
-          {currentSection.desc}
-        </p>
-        <div className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-xs text-gray-500">
-          <span>Consolidated ledger statements and cross-branch reconciliation will appear here.</span>
+      )}
+
+      {/* Tab 5: Transactions Journal */}
+      {activeTab === 'transactions' && (
+        <div className="space-y-6">
+          <HistoryStatsCards />
+          <HistoryFilters />
+          <HistoryTable />
         </div>
-      </div>
+      )}
     </OrganizationPageShell>
   );
 }

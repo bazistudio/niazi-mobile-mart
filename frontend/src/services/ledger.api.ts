@@ -24,6 +24,9 @@ export interface LedgerStatementEntry {
   debit: number;
   credit: number;
   balance: number;
+  branch_id?: string | null;
+  branch_name?: string | null;
+  branch_code?: string | null;
 }
 
 export interface CustomerStatementDto {
@@ -61,6 +64,9 @@ export interface LedgerTimelineEntry {
   credit: number;
   debitAccount: string;
   creditAccount: string;
+  branch_id?: string | null;
+  branch_name?: string | null;
+  branch_code?: string | null;
 }
 
 export interface PartyLedgerResponse {
@@ -100,6 +106,9 @@ function mapCustomerEntry(entry: LedgerStatementEntry): LedgerTimelineEntry {
     credit: entry.credit,
     debitAccount: isPayment ? 'cash' : 'receivable',
     creditAccount: isPayment ? 'receivable' : 'sales',
+    branch_id: entry.branch_id ?? null,
+    branch_name: entry.branch_name ?? null,
+    branch_code: entry.branch_code ?? null,
   };
 }
 
@@ -127,15 +136,18 @@ export const ledgerApi = {
   /**
    * Fetch the full ledger statement for a customer or supplier.
    * Returns a PartyLedgerResponse with timeline + raw statement for summary cards.
+   * Optionally filtered by branchId when specified by caller (e.g. Org Admin).
    */
   getPartyLedger: async (
     partyId: string,
-    partyType: 'CUSTOMER' | 'SUPPLIER'
+    partyType: 'CUSTOMER' | 'SUPPLIER',
+    branchId?: string | null
   ): Promise<PartyLedgerResponse> => {
     try {
+      const branchParam = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : '';
       if (partyType === 'CUSTOMER') {
         const statement = await httpClient.get<CustomerStatementDto>(
-          `/api/v1/customers/${encodeURIComponent(partyId)}/ledger`
+          `/api/v1/customers/${encodeURIComponent(partyId)}/ledger${branchParam}`
         );
         return {
           success: true,
@@ -149,7 +161,7 @@ export const ledgerApi = {
         };
       } else {
         const statement = await httpClient.get<SupplierStatementDto>(
-          `/api/v1/suppliers/${encodeURIComponent(partyId)}/ledger`
+          `/api/v1/suppliers/${encodeURIComponent(partyId)}/ledger${branchParam}`
         );
         return {
           success: true,
@@ -173,8 +185,10 @@ export const ledgerApi = {
   },
 
   /** Shorthand helpers */
-  getCustomerLedger: (customerId: string) => ledgerApi.getPartyLedger(customerId, 'CUSTOMER'),
-  getSupplierLedger: (supplierId: string) => ledgerApi.getPartyLedger(supplierId, 'SUPPLIER'),
+  getCustomerLedger: (customerId: string, branchId?: string | null) =>
+    ledgerApi.getPartyLedger(customerId, 'CUSTOMER', branchId),
+  getSupplierLedger: (supplierId: string, branchId?: string | null) =>
+    ledgerApi.getPartyLedger(supplierId, 'SUPPLIER', branchId),
 
   /**
    * Record a customer receivable payment or supplier payable payout.

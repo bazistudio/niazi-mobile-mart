@@ -18,6 +18,7 @@ import { GlobalLoadingOverlay } from '@/components/ui/GlobalLoadingOverlay';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 import { CashSessionOpenModal } from '@/features/cash';
+import { ExchangeSettlementModal } from './modals/ExchangeSettlementModal';
 
 export const CartSummary: React.FC = () => {
   const [mounted, setMounted] = useState(false);
@@ -32,6 +33,7 @@ export const CartSummary: React.FC = () => {
   const completeTransaction = usePosStore((s) => s.completeTransaction);
   const setCheckoutIdempotencyKey = usePosStore((s) => s.setCheckoutIdempotencyKey);
   const setCustomer = usePosStore((s) => s.setCustomer);
+  const processCashReturn = usePosStore((s) => s.processCashReturn);
 
   const { settings, shopHeader, fetchSettings } = usePrinterStore();
 
@@ -46,6 +48,10 @@ export const CartSummary: React.FC = () => {
   const [isMultiPaymentOpen, setMultiPaymentOpen] = useState(false);
   const [isDiscountModalOpen, setDiscountModalOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<'sale' | 'print' | null>(null);
+
+  // GAP-03: Exchange settlement modal state
+  const [isExchangeModalOpen, setExchangeModalOpen] = useState(false);
+  const [pendingExchangeShouldPrint, setPendingExchangeShouldPrint] = useState(false);
   
   const selectedCustomer = activeSession?.customer && activeSession.customer.id !== 'walk-in'
     ? activeSession.customer
@@ -113,6 +119,27 @@ export const CartSummary: React.FC = () => {
   }
   const grandTotal = preDiscountTotal - invoiceDiscountAmount;
 
+  // GAP-02: If no linked invoice, open InvoiceLookupModal so the cashier can select
+  // the original sale. If an invoice is already linked, proceed directly with cash return.
+  const handleCashReturn = async () => {
+    if (!activeSession) return;
+    if (!activeSession.linkedInvoiceId) {
+      // No invoice linked — guide the cashier to select one first.
+      window.dispatchEvent(new CustomEvent('pos:open-invoice-lookup', { detail: { heading: 'Select Sale Invoice for Cash Return' } }));
+      toast('Select the original sale invoice to proceed with Cash Return.', { icon: '🔍' });
+      return;
+    }
+    if (activeSession.cart.length === 0 && (!activeSession.returnedItems || activeSession.returnedItems.length === 0)) {
+      toast.error('Add items to return before processing a Cash Return.');
+      return;
+    }
+    try {
+      await processCashReturn();
+    } catch {
+      // processCashReturn already toasts on error
+    }
+  };
+
   const handleClearCart = () => {
     if (isCartEmpty) return;
     if (window.confirm('Are you sure you want to clear the current sale tab?')) {
@@ -121,9 +148,16 @@ export const CartSummary: React.FC = () => {
     }
   };
 
+  // GAP-03: In replace mode with returned items, always show exchange settlement first.
   const handleCashSale = () => {
     if (isCartEmpty) {
       toast.error('Cart is empty');
+      return;
+    }
+
+    if (activeSession.mode === 'replace' && returnedItems.length > 0) {
+      setPendingExchangeShouldPrint(false);
+      setExchangeModalOpen(true);
       return;
     }
 
@@ -137,9 +171,16 @@ export const CartSummary: React.FC = () => {
     setMultiPaymentOpen(true);
   };
 
+  // GAP-03: Same interception for Pay & Print.
   const handlePayAndPrint = () => {
     if (isCartEmpty) {
       toast.error('Cart is empty');
+      return;
+    }
+
+    if (activeSession.mode === 'replace' && returnedItems.length > 0) {
+      setPendingExchangeShouldPrint(true);
+      setExchangeModalOpen(true);
       return;
     }
 
@@ -153,11 +194,117 @@ export const CartSummary: React.FC = () => {
     setMultiPaymentOpen(true);
   };
 
+  const triggerReceiptPrint = async (orderData: any, targetCustomer: { id: string; name: string } | null) => {
+    if (!orderData) return;
+    try {
+      const activeShop = useOrganizationStore.getState().activeShop;
+      const realShopProfile = {
+        name: shopHeader?.name || activeShop?.name || 'Niazi Mobile Mart',
+        address: shopHeader?.address || (activeShop as any)?.address || 'Main Branch',
+        phone1: shopHeader?.phone || (activeShop as any)?.phone || '',
+      };
+      const authUser = useAuthStore.getState().user;
+      const invoiceExtras = {
+        customer: targetCustomer ?? null,
+        cashier: authUser?.name ?? null,
+      };
+      const mappedTransaction: any = {
+        transactionId: orderData.orderNumber || orderData.transactionId || orderData._id || `TXN-${Date.now()}`,
+        items:
+          orderData.items?.map((i: any) => ({
+            productName: i.name || i.productName || 'Item',
+            quantity: i.quantity || 1,
+            unitPrice: i.price || i.unitPrice || 0,
+            discount: i.discount || 0,
+            subtotal: (i.price || i.unitPrice || 0) * (i.quantity || 1),
+          })) || [],
+        subtotal: orderData.subtotal || 0,
+        discountTotal: orderData.discountAmount || orderData.discountTotal || 0,
+        grandTotal: orderData.totalAmount || orderData.grandTotal || 0,
+        totalPaid: orderData.paidAmount ?? orderData.totalPaid ?? (orderData.totalAmount || orderData.grandTotal || 0),
+        remainingDue: orderData.creditAmount ?? Math.max((orderData.totalAmount || 0) - (orderData.paidAmount ?? orderData.totalPaid ?? (orderData.totalAmount || 0)), 0),
+        changeReturned: orderData.changeAmount ?? 0,
+        paymentBreakdown: (orderData.payments && orderData.payments.length > 0)
+          ? orderData.payments.map((p: any) => ({ method: p.payment_method || p.method || 'cash', amount: p.amount || 0 }))
+          : [{ method: orderData.paymentMethod || 'cash', amount: orderData.paidAmount ?? orderData.totalPaid ?? (orderData.totalAmount || orderData.grandTotal || 0) }],
+        createdAt: orderData.createdAt || Date.now(),
+      };
+      const invoice = DocumentService.buildInvoice(mappedTransaction as any, realShopProfile as any, invoiceExtras);
+      usePosStore.getState().setLastInvoice(invoice);
+      await DocumentService.logPrint(invoice.invoiceId, 'PRINT');
+    } catch (printErr) {
+      console.error('Failed to trigger receipt print:', printErr);
+    }
+  };
+
+  // GAP-03: Called by ExchangeSettlementModal onConfirm.
+  // Routes to atomic exchange backend endpoint (returns + replacement sale in 1 transaction)
+  const processExchange = usePosStore((s) => s.processExchange);
+  const handleExchangeConfirm = async (options?: { refundMethod?: 'CASH' | 'CREDIT' }) => {
+    setExchangeModalOpen(false);
+
+    // If customer owes positive difference, collect payment via MultiPaymentModal if not already paid
+    if (grandTotal > 0) {
+      setPendingAction(pendingExchangeShouldPrint ? 'print' : 'sale');
+      setMultiPaymentOpen(true);
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const res = await processExchange({
+        refundMethod: options?.refundMethod,
+      });
+      toast.success('Exchange processed successfully.');
+      window.dispatchEvent(new CustomEvent('pos:sale-completed'));
+      if (pendingExchangeShouldPrint && res?.order) {
+        await triggerReceiptPrint(res.order, selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name } : null);
+      }
+    } catch (error: any) {
+      const msg = (error?.message || '').toLowerCase();
+      if (msg.includes('cash session') || msg.includes('open a cash session') || msg.includes('till')) {
+        setCashOpenModalOpen(true);
+      } else {
+        toast.error(error?.message || 'Exchange failed to process');
+      }
+    } finally {
+      setIsProcessing(false);
+      setPendingExchangeShouldPrint(false);
+    }
+  };
+
   const handleMultiPaymentConfirm = async (
     paymentBreakdown: { method: string; amount: number }[],
     shouldPrint: boolean = false
   ) => {
     setMultiPaymentOpen(false);
+
+    if (activeSession.mode === 'replace' && (activeSession.returnedItems?.length ?? 0) > 0) {
+      setIsProcessing(true);
+      try {
+        const res = await processExchange({
+          paymentBreakdown,
+        });
+        toast.success('Exchange processed successfully.');
+        window.dispatchEvent(new CustomEvent('pos:sale-completed'));
+        if (shouldPrint || pendingAction === 'print') {
+          if (res?.order) {
+            await triggerReceiptPrint(res.order, selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name } : null);
+          }
+        }
+      } catch (error: any) {
+        const msg = (error?.message || '').toLowerCase();
+        if (msg.includes('cash session') || msg.includes('open a cash session') || msg.includes('till')) {
+          setCashOpenModalOpen(true);
+        } else {
+          toast.error(error?.message || 'Exchange failed to process');
+        }
+      } finally {
+        setIsProcessing(false);
+      }
+      return;
+    }
+
     await processTransaction(paymentBreakdown, null, shouldPrint || pendingAction === 'print');
   };
 
@@ -268,6 +415,9 @@ export const CartSummary: React.FC = () => {
 
         toast.success(isRefund ? `Refund Processed. Paid: Rs ${Math.abs(grandTotal).toLocaleString()}` : 'Sale completed successfully');
 
+        // Dispatch sale completed event to trigger rotating green border effect
+        window.dispatchEvent(new CustomEvent('pos:sale-completed'));
+
         // Reset customer selection
         setCustomer(null);
       }
@@ -291,60 +441,58 @@ export const CartSummary: React.FC = () => {
         </div>
       )}
 
-      {/* Subtotal Row */}
-      <div className="flex justify-between items-center text-xs">
-        <span className="text-text-muted font-bold uppercase tracking-wider text-[10px]">Subtotal</span>
-        <span className="font-black text-text-primary tabular-nums">Rs {subtotal.toLocaleString()}</span>
-      </div>
-
-      {/* Invoice Discount Row */}
-      <div className="flex justify-between items-center py-1.5 border-y border-border/70">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider">Discount</span>
+      {/* Subtotal & Payment Method Row */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pt-1 border-t border-border/70">
+        {/* Payment Methods Pills */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-600 text-white shadow-xs cursor-default">
+            Cash
+          </span>
           <button
             type="button"
-            onClick={() => setDiscountModalOpen(true)}
-            title="Open Discount Presets"
-            className="px-1.5 py-0.5 rounded bg-primary/10 hover:bg-primary/20 text-primary transition-colors text-[10px] font-bold flex items-center gap-1 shadow-xs"
+            onClick={() => setMultiPaymentOpen(true)}
+            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-surface-hover hover:bg-border text-text-secondary transition-colors"
           >
-            <Tag className="h-3 w-3" />
-            <span>Presets</span>
+            Bank
+          </button>
+          <button
+            type="button"
+            onClick={() => setMultiPaymentOpen(true)}
+            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-surface-hover hover:bg-border text-text-secondary transition-colors"
+          >
+            EasyPaisa
+          </button>
+          <button
+            type="button"
+            onClick={() => setMultiPaymentOpen(true)}
+            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-surface-hover hover:bg-border text-text-secondary transition-colors"
+          >
+            JazzCash
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (selectedCustomer) {
+                setLedgerModalOpen(true);
+              } else {
+                setCustomerModalOpen(true);
+              }
+            }}
+            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-surface-hover hover:bg-border text-text-secondary transition-colors"
+          >
+            Khata
           </button>
         </div>
 
-        <div className="flex items-center gap-1 border border-border rounded-lg overflow-hidden bg-surface-hover/60">
-          <input
-            type="number"
-            value={activeSession.invoiceDiscountValue || ''}
-            placeholder="0"
-            onChange={(e) => setInvoiceDiscount(activeSession.invoiceDiscountType, parseFloat(e.target.value) || 0)}
-            className="w-14 text-xs font-black text-center py-1 bg-transparent text-text-primary focus:outline-none focus:bg-surface no-spinners transition-colors"
-          />
-          <button
-            type="button"
-            onClick={() =>
-              setInvoiceDiscount(
-                activeSession.invoiceDiscountType === 'percentage' ? 'fixed' : 'percentage',
-                activeSession.invoiceDiscountValue
-              )
-            }
-            className="px-2 py-1 text-[10px] font-black bg-border/60 text-text-secondary hover:text-text-primary hover:bg-border transition-colors"
-          >
-            {activeSession.invoiceDiscountType === 'percentage' ? '%' : 'Rs'}
-          </button>
+        {/* Subtotal */}
+        <div className="flex items-center gap-1.5 text-xs text-text-muted shrink-0 self-end sm:self-center">
+          <span className="text-[10px] uppercase font-bold tracking-wider">Subtotal:</span>
+          <span className="font-bold text-text-primary tabular-nums">Rs {subtotal.toLocaleString()}</span>
         </div>
       </div>
-
-      {/* Applied Discount Indicator */}
-      {invoiceDiscountAmount > 0 && (
-        <div className="flex justify-between items-center text-xs font-bold text-danger tabular-nums">
-          <span className="text-[10px] uppercase tracking-wider">Discount Deducted</span>
-          <span>- Rs {invoiceDiscountAmount.toLocaleString()}</span>
-        </div>
-      )}
 
       {/* Total Due Row: High Visual Dominance */}
-      <div className="flex justify-between items-center pt-1">
+      <div className="flex justify-between items-center pt-0.5">
         <div className="flex flex-col">
           <span className="text-xs font-black uppercase tracking-widest text-text-secondary">
             {grandTotal < 0 ? 'Refund Due' : 'Total Due'}
@@ -354,7 +502,7 @@ export const CartSummary: React.FC = () => {
           </span>
         </div>
 
-        <div className={`flex items-baseline ${grandTotal < 0 ? 'text-danger' : 'text-primary'}`}>
+        <div className={`flex items-baseline ${grandTotal < 0 ? 'text-danger' : 'text-emerald-600 dark:text-emerald-400'}`}>
           <span className="text-sm mr-1 text-text-muted font-bold">Rs</span>
           {isEditingTotal ? (
             <input
@@ -402,10 +550,10 @@ export const CartSummary: React.FC = () => {
           onClick={handleClearCart}
           disabled={isCartEmpty || isProcessing}
           title="Clear Cart (Ctrl+Delete)"
-          className="col-span-3 h-11 flex items-center justify-center gap-1.5 rounded-xl border border-border bg-surface-hover/60 text-danger hover:bg-danger/10 hover:border-danger/30 transition-all disabled:opacity-disabled shadow-xs"
+          className="col-span-3 h-11 flex items-center justify-center gap-1.5 rounded-xl border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-all disabled:opacity-disabled shadow-xs"
         >
           <Trash2 className="h-4 w-4" />
-          <span className="text-xs font-bold hidden sm:inline">Clear</span>
+          <span className="text-xs font-bold hidden sm:inline">Clear Cart</span>
         </button>
 
         {/* Quick Cash Sale Button */}
@@ -414,10 +562,10 @@ export const CartSummary: React.FC = () => {
           onClick={handleCashSale}
           disabled={isCartEmpty || isProcessing}
           title="Quick Cash Sale (Ctrl+S)"
-          className="col-span-4 h-11 flex items-center justify-center gap-1.5 rounded-xl border border-secondary/40 bg-secondary/10 text-secondary hover:bg-secondary/20 transition-all shadow-xs disabled:opacity-disabled"
+          className="col-span-4 h-11 flex items-center justify-center gap-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all shadow-xs disabled:opacity-disabled"
         >
           <Banknote className="h-4 w-4" />
-          <span className="text-xs font-black uppercase tracking-wider">Sale</span>
+          <span className="text-xs font-black uppercase tracking-wider">SALE</span>
         </button>
 
         {/* Pay & Print Button */}
@@ -426,10 +574,59 @@ export const CartSummary: React.FC = () => {
           onClick={handlePayAndPrint}
           disabled={isCartEmpty || isProcessing}
           title="Pay & Print / Split Tender (Ctrl+P)"
-          className="col-span-5 h-11 flex items-center justify-center gap-1.5 rounded-xl bg-primary text-white hover:bg-primary-hover active:bg-primary-active transition-all shadow-sm hover:shadow disabled:opacity-disabled"
+          className="col-span-5 h-11 flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white transition-all shadow-sm hover:shadow disabled:opacity-disabled font-black"
         >
           <Printer className="h-4 w-4" />
-          <span className="text-xs font-black uppercase tracking-wider">Pay & Print</span>
+          <span className="text-xs font-black uppercase tracking-wider">PAY & PRINT (F12)</span>
+        </button>
+      </div>
+
+      {/* Extra Action Buttons Row (Directly below SALE / PAY & PRINT) */}
+      <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border/60">
+        {/* 1. Cash Return */}
+        <button
+          type="button"
+          onClick={handleCashReturn}
+          className="h-9 px-2 rounded-xl bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
+          title="Cash Return / Refund"
+        >
+          <Banknote className="h-3.5 w-3.5" />
+          <span className="truncate">Cash Return</span>
+        </button>
+
+        {/* 2. Product Replace */}
+        <button
+          type="button"
+          onClick={() => {
+            setSessionMode(activeSession.mode === 'replace' ? 'sale' : 'replace');
+            toast.success(
+              activeSession.mode === 'replace' ? 'Standard Sale Mode' : 'Product Replace Mode Active',
+              { icon: '🔁' }
+            );
+          }}
+          className={`h-9 px-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 ${
+            activeSession.mode === 'replace'
+              ? 'bg-indigo-700 text-white ring-2 ring-indigo-400'
+              : 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white'
+          }`}
+          title="Exchange / Replace Product"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          <span className="truncate">Product Replace</span>
+        </button>
+
+        {/* 3. Return by Invoice */}
+        <button
+          type="button"
+          onClick={() => {
+            const ev = new CustomEvent('pos:open-invoice-lookup');
+            window.dispatchEvent(ev);
+          }}
+          className="h-9 px-2 rounded-xl bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
+          title="Lookup Past Invoice for Return"
+        >
+          <Tag className="h-3.5 w-3.5" />
+          <span className="truncate">Return by Invoice</span>
         </button>
       </div>
 
@@ -510,6 +707,27 @@ export const CartSummary: React.FC = () => {
         isOpen={isCashOpenModalOpen}
         onClose={() => setCashOpenModalOpen(false)}
       />
+
+      {/* GAP-03: Exchange Settlement Modal — shown when replace mode checkout is initiated */}
+      {isExchangeModalOpen && (
+        <ExchangeSettlementModal
+          summary={{
+            returnedValue: returnTotal,
+            replacementValue: subtotal,
+            exchangeDifference: grandTotal,
+            hasLinkedInvoice: !!activeSession.linkedInvoiceId,
+            linkedInvoiceId: activeSession.linkedInvoiceId,
+          }}
+          isProcessing={isProcessing}
+          hasCustomerAccount={!!selectedCustomer && selectedCustomer.id !== 'walk-in'}
+          onConfirm={handleExchangeConfirm}
+          onCancel={() => setExchangeModalOpen(false)}
+          onSelectInvoice={() => {
+            setExchangeModalOpen(false);
+            window.dispatchEvent(new CustomEvent('pos:open-invoice-lookup', { detail: { heading: 'Select Original Invoice for Exchange' } }));
+          }}
+        />
+      )}
 
       <GlobalLoadingOverlay isOpen={isProcessing} message="Processing Transaction..." />
     </div>

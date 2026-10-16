@@ -7,7 +7,7 @@
 import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 
-export type RefundMethod = 'CASH' | 'CREDIT' | 'ORIGINAL';
+export type RefundMethod = 'CASH' | 'CREDIT' | 'ORIGINAL' | 'EXCHANGE';
 export type ReturnStatus = 'COMPLETED' | 'VOIDED';
 
 export interface SalesReturn {

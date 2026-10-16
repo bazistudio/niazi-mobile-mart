@@ -14,10 +14,14 @@ import { useQuery } from '@tanstack/react-query';
 import { dashboardApi } from '@/services/dashboard.api';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { queryKeys } from '@/lib/react-query/queryKeys';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 
 export const ShopAdminDashboard = () => {
   const [filter, setFilter] = useState<'today' | 'week' | 'month'>('today');
   const [isDailySalesModalOpen, setIsDailySalesModalOpen] = useState(false);
+
+  // Canonical branch context from store: reactive to topbar branch switcher
+  const activeShopId = useOrganizationStore((s) => s.activeShopId || s.activeShop?._id || null);
 
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -38,27 +42,27 @@ export const ShopAdminDashboard = () => {
     }
   };
 
-  // 1. Authoritative Metrics Query
+  // 1. Authoritative Metrics Query (Scoped by active branch)
   const {
     data: dashboardResponse,
     isLoading: isMetricsLoading,
     refetch: refetchMetrics,
   } = useQuery({
-    queryKey: queryKeys.dashboard,
-    queryFn: () => dashboardApi.getMetrics(),
+    queryKey: queryKeys.dashboard.byBranch(activeShopId),
+    queryFn: () => dashboardApi.getMetrics(activeShopId),
     staleTime: 30000,
     retry: 1,
     refetchOnWindowFocus: false,
   });
 
-  // 2. Dedicated Backend Hourly Breakdown Query (Pre-aggregated hourly, category, and top product)
+  // 2. Dedicated Backend Hourly Breakdown Query (Scoped by active branch)
   const {
     data: hourlyBreakdownResponse,
     isLoading: isHourlyLoading,
     refetch: refetchHourly,
   } = useQuery({
-    queryKey: [...queryKeys.dashboard, 'hourly-breakdown'],
-    queryFn: () => dashboardApi.getHourlyBreakdown(),
+    queryKey: [...queryKeys.dashboard.byBranch(activeShopId), 'hourly-breakdown'],
+    queryFn: () => dashboardApi.getHourlyBreakdown({ branchId: activeShopId }),
     staleTime: 30000,
     retry: 1,
     refetchOnWindowFocus: false,
@@ -214,6 +218,7 @@ export const ShopAdminDashboard = () => {
       <DailySalesModal
         isOpen={isDailySalesModalOpen}
         onClose={handleCloseModal}
+        branchId={activeShopId}
       />
     </div>
   );

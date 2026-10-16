@@ -27,6 +27,10 @@ import {
   CompleteSaleDto,
   SaleFilterDto,
 } from '../repositories/sale.repo';
+import {
+  processAtomicExchange,
+  ProcessExchangeDto,
+} from '../repositories/exchange.repo';
 
 // ─── Error Response Helper ────────────────────────────────────────────────────
 
@@ -83,10 +87,43 @@ export function createSaleRouter(pool: Pool): Router {
       const dto = req.body as CompleteSaleDto;
       const callerIsOrgAdmin = isOrgAdmin(identity);
 
+      // Validate branch access if a branch is requested in body
+      if (dto.branch_id && !canAccessBranch(identity, dto.branch_id)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to sell on behalf of another branch' });
+        return;
+      }
+
       // P1 security fix: branch is resolved from server-side JWT identity, NOT from client DTO.
       // Non-org-admins always sell from their assigned branch regardless of what the client sends.
       // Org admins may select a branch explicitly via dto.branch_id; if omitted, identity branch is used.
       const result = await completeSale(pool, dto, identity.user_id, identity.branch_id, callerIsOrgAdmin);
+      res.status(201).json(result);
+    } catch (err) {
+      sendError(req, res, err);
+    }
+  });
+
+  // ── POST /api/sales/exchange ─────────────────────────────────────────────
+  router.post('/exchange', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    const denied = authorizePermission(identity, 'pos', 'pos:sale');
+    if (denied) {
+      res.status(403).json({ error: denied });
+      return;
+    }
+
+    try {
+      const dto = req.body as ProcessExchangeDto;
+      const callerIsOrgAdmin = isOrgAdmin(identity);
+
+      const result = await processAtomicExchange(
+        pool,
+        dto,
+        identity.user_id,
+        identity.branch_id,
+        callerIsOrgAdmin
+      );
       res.status(201).json(result);
     } catch (err) {
       sendError(req, res, err);

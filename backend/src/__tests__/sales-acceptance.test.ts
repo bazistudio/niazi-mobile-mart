@@ -200,7 +200,15 @@ async function saleTx(
   identityBranchId: string | null = BRANCH_A,
   isAdmin = false,
 ) {
-  return completeSaleTx(client, dto, userId, null, identityBranchId, isAdmin);
+  await client.query('SAVEPOINT saletx_sp');
+  try {
+    const res = await completeSaleTx(client, dto, userId, null, identityBranchId, isAdmin);
+    await client.query('RELEASE SAVEPOINT saletx_sp');
+    return res;
+  } catch (e) {
+    await client.query('ROLLBACK TO SAVEPOINT saletx_sp');
+    throw e;
+  }
 }
 
 /** Assert two numbers are within `tolerance` of each other. */

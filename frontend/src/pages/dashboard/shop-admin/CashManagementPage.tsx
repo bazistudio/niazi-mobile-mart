@@ -8,17 +8,19 @@ import {
   CashMovementsTable,
   CashSessionHistoryTable,
 } from '@/features/cash';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { Coins, RefreshCw } from 'lucide-react';
 
 export const CashManagementPage: React.FC = () => {
+  const activeShopId = useOrganizationStore((s) => s.activeShopId || s.activeShop?._id);
   const { fetchCurrentState, isLoading } = useCashStore();
   const [isOpenModalActive, setIsOpenModalActive] = useState(false);
   const [isCloseModalActive, setIsCloseModalActive] = useState(false);
   const [isAdjustmentModalActive, setIsAdjustmentModalActive] = useState(false);
 
   useEffect(() => {
-    fetchCurrentState();
-  }, [fetchCurrentState]);
+    fetchCurrentState(activeShopId || undefined);
+  }, [fetchCurrentState, activeShopId]);
 
   return (
     <div className="flex flex-col gap-6 sm:gap-8 w-full max-w-7xl mx-auto pb-12">
@@ -40,7 +42,7 @@ export const CashManagementPage: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => fetchCurrentState()}
+          onClick={() => fetchCurrentState(activeShopId || undefined)}
           disabled={isLoading}
           className="self-start sm:self-auto flex items-center gap-2 px-4 py-2 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-700 rounded-xl text-sm font-medium transition-colors shadow-sm disabled:opacity-50"
         >

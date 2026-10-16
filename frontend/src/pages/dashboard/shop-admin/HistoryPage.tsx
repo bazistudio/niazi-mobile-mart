@@ -2,17 +2,25 @@ import React, { useEffect, useState } from 'react';
 import { HistoryStatsCards, HistoryFilters, HistoryTable, HistoryTimeline, useHistoryStore } from '@/features/history';
 import { SalesReturnsTable } from '@/features/returns/SalesReturnsTable';
 import { PurchaseReturnsTable } from '@/features/returns/PurchaseReturnsTable';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { History as HistoryIcon, LayoutList, GripVertical, RotateCcw } from 'lucide-react';
 
 export function HistoryPage() {
-  const { fetchHistory, fetchStats } = useHistoryStore();
+  const { fetchHistory, fetchStats, setFilters, filters, total } = useHistoryStore();
   const [viewMode, setViewMode] = useState<'table' | 'timeline'>('table');
   const [activeTab, setActiveTab] = useState<'transactions' | 'sales_returns' | 'purchase_returns'>('transactions');
 
+  // Read the branch the org-admin has selected in the topbar.
+  // null = "All Shops" (org-wide); UUID = specific branch.
+  // Branch users are always locked to their own branch by the backend regardless of this value.
+  const activeBranchId = useOrganizationStore((state) => state.activeShop?._id ?? null);
+
   useEffect(() => {
-    fetchStats();
-    fetchHistory();
-  }, [fetchStats, fetchHistory]);
+    // On mount and whenever the selected branch changes, refresh both stats and
+    // history records scoped to the new branch context.
+    fetchStats(activeBranchId);
+    setFilters({ branch_id: activeBranchId, page: 1 });
+  }, [activeBranchId, fetchStats, setFilters]);
 
   return (
     <div className="flex flex-col gap-6 sm:gap-8 w-full max-w-7xl mx-auto pb-12">
@@ -93,17 +101,45 @@ export function HistoryPage() {
         </>
       )}
 
-      {activeTab === 'sales_returns' && <SalesReturnsTable />}
+      {activeTab === 'sales_returns' && <SalesReturnsTable branchId={activeBranchId} />}
 
-      {activeTab === 'purchase_returns' && <PurchaseReturnsTable />}
+      {activeTab === 'purchase_returns' && <PurchaseReturnsTable branchId={activeBranchId} />}
 
-      <div className="flex items-center justify-between mt-4">
-        <span className="text-sm text-gray-500">Showing all records for selected filters</span>
-        <div className="flex items-center gap-2">
-          <button className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 cursor-pointer">Previous</button>
-          <button className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 cursor-pointer">Next</button>
-        </div>
-      </div>
+      {activeTab === 'transactions' && (() => {
+        const limit = filters.limit ?? 10;
+        const currentPage = filters.page ?? 1;
+        const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
+        const isFirstPage = currentPage <= 1;
+        const isLastPage = currentPage >= totalPages;
+        const start = total === 0 ? 0 : (currentPage - 1) * limit + 1;
+        const end = Math.min(currentPage * limit, total);
+        return (
+          <div className="flex items-center justify-between mt-4">
+            <span className="text-sm text-gray-500">
+              {total > 0 ? `Showing ${start}–${end} of ${total} records` : 'No records'}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => !isFirstPage && setFilters({ page: currentPage - 1 })}
+                disabled={isFirstPage}
+                className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Previous
+              </button>
+              <span className="text-sm text-gray-600 dark:text-gray-400 px-1">
+                {currentPage} / {totalPages}
+              </span>
+              <button
+                onClick={() => !isLastPage && setFilters({ page: currentPage + 1 })}
+                disabled={isLastPage}
+                className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

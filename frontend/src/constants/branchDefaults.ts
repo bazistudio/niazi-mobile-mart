@@ -11,20 +11,44 @@
 export const MAIN_BRANCH_ID = '00000000-0000-0000-0000-000000000002';
 
 /**
- * The five default navigation destinations for non-Main branches.
+ * The default navigation destinations for non-Main branches.
  *
- * Non-Main branch staff should see only these destinations by default.
+ * Non-Main branch staff see only these destinations by default.
  * Existing permission checks on each item remain enforced — this list
  * does not grant any new permissions.
  *
  * Main Branch retains the full navigation set and is not filtered.
+ *
+ * Customer Ledger is not listed here because it is accessed through
+ * /dashboard/shop-admin/customers/:id (customer detail), not as a
+ * standalone parameterized default destination.
+ *
+ * Business Ledger (/dashboard/shop-admin/ledger) shows org-wide party
+ * directories (customers/suppliers — intentionally org-scoped) and
+ * branch-scoped expenses (resolveBranch() enforced on the backend).
+ * Individual party ledger statements are keyed by party ID and carry
+ * all entries regardless of branch; branch staff should be aware they
+ * see org-wide party history. The existing FINANCE_VIEW / REPORTS_VIEW
+ * PermissionGuard remains active and is not weakened by this entry.
+ *
+ * Cash Management (/dashboard/shop-admin/cash) is branch-scoped at the
+ * backend: every cash-session, drawer, and movement query is gated by
+ * canAccessBranch(identity, targetBranchId) which enforces
+ * identity.branch_id === targetBranchId for non-org-admin users.
+ * The existing FINANCE_VIEW PermissionGuard on the route is not weakened.
  */
 export const NON_MAIN_BRANCH_DEFAULT_HREFS: ReadonlySet<string> = new Set([
-  '/dashboard/shop-admin',           // Dashboard
-  '/dashboard/shop-admin/pos',       // POS / Sales
-  '/dashboard/shop-admin/sales',     // Sales Analytics
-  '/dashboard/shop-admin/inventory', // Products & Stock
-  '/dashboard/shop-admin/stock',     // Stock
+  '/dashboard/shop-admin',              // Dashboard
+  '/dashboard/shop-admin/pos',          // POS / Sales
+  '/dashboard/shop-admin/sales',        // Sales Analytics
+  '/dashboard/shop-admin/inventory',    // Products & Stock
+  '/dashboard/shop-admin/stock',        // Stock
+  '/dashboard/shop-admin/history',      // Sales History (backend already enforces branch scope)
+  '/dashboard/shop-admin/customers',    // Customer Directory (backend enforces branch scope)
+  '/dashboard/shop-admin/expenses',     // Branch Expenses (backend auto-attributes to branch)
+  '/dashboard/shop-admin/settings',     // Branch Settings (printer / invoice config)
+  '/dashboard/shop-admin/ledger',       // Business Ledger (org-wide parties; branch-scoped expenses)
+  '/dashboard/shop-admin/cash',         // Cash Management (backend enforces branch scope via canAccessBranch)
 ]);
 
 /**

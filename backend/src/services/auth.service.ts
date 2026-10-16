@@ -24,6 +24,7 @@
 import { AuthRepo, UserRow } from '../repositories/auth.repo';
 import { verifyArgon2 } from './argon2.service';
 import { issueToken } from './jwt.service';
+import { BLOCKED_LEGACY_ADMIN_ROLES } from '../auth';
 
 // ---------------------------------------------------------------------------
 // Constants — must match Rust
@@ -139,7 +140,15 @@ export class AuthService {
       );
     }
 
-    // 2. Check account status
+    // 2. Check account status & legacy role deprecation
+    if (BLOCKED_LEGACY_ADMIN_ROLES.has(String(user.role || '').toUpperCase())) {
+      throw new AuthServiceError(
+        'Account role is deprecated or blocked. Contact your administrator.',
+        'DISABLED',
+        403
+      );
+    }
+
     if (user.status === 'PENDING') {
       throw new AuthServiceError(
         'Account is pending approval. Contact your administrator.',

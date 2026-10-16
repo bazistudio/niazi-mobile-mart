@@ -12,10 +12,13 @@ import { getQueryClient } from '@/components/providers/ReactQueryProvider';
 import { queryKeys } from '@/lib/react-query/queryKeys';
 import {
   createCashReturnForInvoice,
+  allocateReturnLines,
   WALK_IN_RETURN_BLOCKED_MESSAGE,
   EXCHANGE_BLOCKED_MESSAGE,
   INVOICE_LOADED_CHECKOUT_BLOCKED_MESSAGE,
 } from '../services/posReturn.service';
+import { returnsApi } from '@/services/returns.api';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 
 // Migrate legacy POS storage key if present
 if (typeof window !== 'undefined' && !localStorage.getItem('niazi-pos')) {
@@ -143,6 +146,10 @@ interface PosStore {
   setCheckoutIdempotencyKey: (key: string | null) => void;
   processCashReturn: () => Promise<any>;
   processInvoiceReturn: (skipOverflowCheck?: boolean, forceCashRefund?: boolean) => Promise<any>;
+  processExchange: (options?: {
+    refundMethod?: 'CASH' | 'CREDIT';
+    paymentBreakdown?: { method: string; amount: number }[];
+  }) => Promise<any>;
   setLastInvoice: (invoice: InvoiceDocument | null) => void;
 
   // Status Message
@@ -565,7 +572,14 @@ export const usePosStore = create<PosStore>()(
           // Fall back to session.customer if no customer was passed.
           const effectiveCustomer = customer ?? session.customer;
 
+          const activeShopId = useOrganizationStore.getState().activeShopId || useOrganizationStore.getState().activeShop?._id;
+          if (!activeShopId) {
+            toast.error("No active branch selected. Please select a shop before completing a sale.");
+            throw new Error("No active branch selected");
+          }
+
           const payload = {
+            branchId: activeShopId,
             items: [
               ...session.cart.map(item => ({
                 productId: item.productId,
@@ -630,7 +644,7 @@ export const usePosStore = create<PosStore>()(
           // sessions were stale until a hard reload.
           try {
             const qc = getQueryClient();
-            qc.invalidateQueries({ queryKey: queryKeys.dashboard });
+            qc.invalidateQueries({ queryKey: queryKeys.dashboard.all });
             qc.invalidateQueries({ queryKey: ['sales'] });
             qc.invalidateQueries({ queryKey: ['products'] });
             // Customer balance and ledger entries change on credit/partial sales
@@ -680,7 +694,7 @@ export const usePosStore = create<PosStore>()(
 
           try {
             const qc = getQueryClient();
-            qc.invalidateQueries({ queryKey: queryKeys.dashboard });
+            qc.invalidateQueries({ queryKey: queryKeys.dashboard.all });
             qc.invalidateQueries({ queryKey: ['sales'] });
             qc.invalidateQueries({ queryKey: ['products'] });
           } catch (qcErr) {
@@ -821,6 +835,94 @@ export const usePosStore = create<PosStore>()(
           return result;
         } catch (error: any) {
           console.error("Invoice Return failed", error);
+          throw error;
+        }
+      },
+
+      processExchange: async (options) => {
+        const session = get().getActiveSession();
+        if (!session) return;
+
+        if (!session.linkedInvoiceId) {
+          toast.error("Original invoice is required for an exchange. Please select an invoice first.");
+          return;
+        }
+
+        const returnedItems = session.returnedItems ?? [];
+        if (returnedItems.length === 0) {
+          toast.error("No returned items found for this exchange.");
+          return;
+        }
+
+        if (session.cart.length === 0) {
+          toast.error("No replacement items in cart for this exchange.");
+          return;
+        }
+
+        // Fetch authoritative returnable lines for the original sale
+        let returnLinesPayload: { saleLineId: string; quantity: number }[] = [];
+        try {
+          const info = await returnsApi.getSaleReturnableInfo(session.linkedInvoiceId);
+          const allocated = allocateReturnLines(
+            returnedItems.map((item) => ({
+              productId: item.productId,
+              productName: item.productName,
+              quantity: item.quantity,
+            })),
+            info.lines
+          );
+          returnLinesPayload = allocated.map((l: { sale_line_id: string; quantity: number }) => ({
+            saleLineId: l.sale_line_id,
+            quantity: l.quantity,
+          }));
+        } catch (allocErr: any) {
+          const msg = allocErr?.message || "Failed to validate returnable items";
+          toast.error(msg);
+          throw allocErr;
+        }
+
+        // Reuse existing checkout idempotency key or generate durable one
+        let idempotencyKey = session.checkoutIdempotencyKey;
+        if (!idempotencyKey) {
+          idempotencyKey = `pos_exchange_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+          get().setCheckoutIdempotencyKey(idempotencyKey);
+        }
+
+        try {
+          const res = await salesApi.processExchange({
+            originalSaleId: session.linkedInvoiceId,
+            returnLines: returnLinesPayload,
+            replacementItems: session.cart.map((item) => ({
+              productId: item.productId,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              discount: 0,
+            })),
+            replacementDiscount: session.invoiceDiscountValue || 0,
+            refundMethod: options?.refundMethod ?? null,
+            payments: options?.paymentBreakdown?.map((p) => ({
+              method: p.method,
+              amount: p.amount,
+            })),
+            idempotencyKey,
+            notes: `POS Exchange against original sale ${session.linkedInvoiceId}`,
+          });
+
+          if (!res.success) {
+            throw new Error(res.message || 'Exchange failed');
+          }
+
+          set((state) => ({
+            transactions: [...state.transactions, res.order as any],
+          }));
+
+          // Clear cart and reset idempotency key on success
+          get().clearCart();
+          platformAdapter.emitEvent('inventory-updated');
+
+          return res;
+        } catch (error: any) {
+          console.error("Exchange execution failed:", error);
           throw error;
         }
       },

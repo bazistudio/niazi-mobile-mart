@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useCashStore } from '../store/cash.store';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { X, Unlock } from 'lucide-react';
 
 interface Props {
@@ -21,8 +22,10 @@ export const CashSessionOpenModal: React.FC<Props> = ({ isOpen, onClose }) => {
       return;
     }
 
+    const activeShopId = useOrganizationStore.getState().activeShopId || useOrganizationStore.getState().activeShop?._id;
     const todayStr = new Date().toISOString().split('T')[0];
     await openSession({
+      branch_id: activeShopId || undefined,
       opening_cash: amount,
       business_date: todayStr,
       notes: notes.trim() ? notes.trim() : null,

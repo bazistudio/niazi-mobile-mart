@@ -20,7 +20,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { buildAuthMiddleware, authorizePermission, RequestIdentity } from '../auth';
+import { buildAuthMiddleware, authorizePermission, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
 import {
   CustomerRepoError,
   CustomerFilter,
@@ -269,8 +269,37 @@ export function createCustomerV1Router(pool: Pool): Router {
 
     try {
       const id = req.params['id'] as string;
-      // Rust: customer_service.get_statement(&id) — full chronological statement
-      const statement = await getCustomerStatement(pool, id);
+      const callerIsOrgAdmin = isOrgAdmin(identity);
+      const requestedBranchId = (req.query['branch_id'] as string)?.trim() || undefined;
+
+      let effectiveBranchId: string | null = null;
+      if (callerIsOrgAdmin) {
+        if (requestedBranchId) {
+          if (!canAccessBranch(identity, requestedBranchId)) {
+            res.status(403).json({ error: 'FORBIDDEN', message: 'Access to this branch is not authorized' });
+            return;
+          }
+          effectiveBranchId = requestedBranchId;
+        } else {
+          // Org Admin without branch_id query parameter views organization-wide ledger (all branches)
+          effectiveBranchId = null;
+        }
+      } else {
+        // Non-org-admin users are strictly locked to their assigned branch_id.
+        // If client sends a different branch_id, reject with 403 Forbidden.
+        if (requestedBranchId && requestedBranchId !== identity.branch_id) {
+          res.status(403).json({ error: 'FORBIDDEN', message: 'Cannot access ledger data for a foreign branch' });
+          return;
+        }
+        if (!identity.branch_id) {
+          res.status(403).json({ error: 'FORBIDDEN', message: 'No branch assigned to your account' });
+          return;
+        }
+        effectiveBranchId = identity.branch_id;
+      }
+
+      // Rust: customer_service.get_statement(&id) — statement filtered by authorized branch if specified
+      const statement = await getCustomerStatement(pool, id, effectiveBranchId);
       res.status(200).json(statement);
     } catch (err) {
       if (err instanceof CustomerRepoError && err.statusCode === 404) {

@@ -148,6 +148,13 @@ export async function httpFetch<T>(path: string, options: RequestInit = {}): Pro
   }
 
   const url = `${getApiBaseUrl()}${path}`;
+  if (import.meta.env?.DEV) {
+    try {
+      const u = new URL(url);
+      const bId = u.searchParams.get('branch_id');
+      console.log(`[API DEV] ${options.method || 'GET'} ${u.pathname}${bId ? ` [branch_id=${bId}]` : ''}`);
+    } catch {}
+  }
   const res = await fetch(url, {
     ...options,
     headers,
@@ -1720,6 +1727,13 @@ export const tauriClient = {
     });
   },
 
+  async salesExchange(dto: ProcessExchangeDto): Promise<ExchangeResultDto> {
+    return await httpFetch<ExchangeResultDto>('/api/sales/exchange', {
+      method: 'POST',
+      body: JSON.stringify(dto),
+    });
+  },
+
   async saleGetById(id: string): Promise<Sale | null> {
     try {
       return await httpFetch<Sale>(`/api/sales/${encodeURIComponent(id)}`);
@@ -2652,6 +2666,37 @@ export interface CompleteSaleDto {
   idempotency_key?: string | null;
 }
 
+export interface ProcessExchangeReturnLineDto {
+  sale_line_id: string;
+  quantity: number;
+}
+
+export interface ProcessExchangeDto {
+  original_sale_id: string;
+  return_lines: ProcessExchangeReturnLineDto[];
+  replacement_items: SaleItemDto[];
+  replacement_discount?: number | null;
+  refund_method?: 'CASH' | 'CREDIT' | null;
+  payments?: SalePaymentInputDto[] | null;
+  payment_method?: string | null;
+  paid_amount?: number | null;
+  notes?: string | null;
+  reason?: string | null;
+  idempotency_key: string;
+}
+
+export interface ExchangeResultDto {
+  success: boolean;
+  sales_return: any;
+  return_lines: any[];
+  replacement_sale: SaleResultDto;
+  difference: number;
+  settlement_type: 'POSITIVE_COLLECTION' | 'NEGATIVE_REFUND' | 'BALANCED_ZERO';
+  refund_method?: 'CASH' | 'CREDIT' | null;
+  cash_refunded?: number | null;
+  customer_balance_after?: number | null;
+}
+
 export interface SaleResultDto {
   sale: Sale;
   lines: SaleLine[];
@@ -3024,7 +3069,7 @@ export interface DailyCashSummaryDto {
 }
 
 // â”€â”€ Type Definitions for Returns & Stock Reversal (Phase 18) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-export type SalesRefundMethod = 'CASH' | 'CUSTOMER_CREDIT';
+export type SalesRefundMethod = 'CASH' | 'CUSTOMER_CREDIT' | 'CREDIT' | 'EXCHANGE';
 export type PurchaseSettlementMethod = 'CASH' | 'SUPPLIER_CREDIT';
 export type ReturnStatus = 'COMPLETED' | 'CANCELLED';
 
