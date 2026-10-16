@@ -11,6 +11,9 @@ Niazi Mobile Mart operates on a strict **two-administrator model**:
 
 In previous releases, legacy role aliases inherited from upstream SaaS architecture were permitted through transition mapping logic. This release implements **temporary runtime blocking** at the authentication and authorization boundary to eliminate administrative privilege inheritance from legacy role aliases, without permanently removing compatibility mappings, database records, or historical transaction attribution.
 
+- **Introducing Release Commit:** `706b52969f5959e2682441add5973eac52f37cbd`
+- **Prior Committed Baseline (Phase 5A):** `dc4ce3b46c67d8b2d07a265d67525eba50b19163`
+
 ### Targeted Legacy Aliases
 The five legacy administrator aliases blocked at runtime are:
 1. **`SUPER_ADMIN`** (Legacy Organization Admin alias)
