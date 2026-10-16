@@ -48,23 +48,44 @@ for (const p of pubCandidates) {
   }
 }
 
-// ── Database URL ──────────────────────────────────────────────────────────────
-const envPath = path.join(process.cwd(), '.env');
-if (fs.existsSync(envPath) && !process.env['DATABASE_URL']) {
-  const envContent = fs.readFileSync(envPath, 'utf8');
-  for (const line of envContent.split('\n')) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('DATABASE_URL=')) {
-      process.env['DATABASE_URL'] = trimmed.substring('DATABASE_URL='.length).trim();
-      break;
-    }
-  }
+// ── Disposable Test Database Safety Guard ────────────────────────────────────
+// Explicitly require TEST_DATABASE_URL or isolated test DB marker. Never fallback to production.
+const TEST_DB_URL = process.env['TEST_DATABASE_URL'] ?? '';
+
+if (!TEST_DB_URL || !TEST_DB_URL.trim()) {
+  console.error('[BLOCKED] TEST_DATABASE_URL is not set. Refusing to run tests against unspecified or shared database.');
+  process.exit(1);
 }
 
-const TEST_DB_URL = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? '';
+try {
+  const parsedUrl = new URL(TEST_DB_URL);
+  const hostname = parsedUrl.hostname.toLowerCase();
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 
-if (!TEST_DB_URL.includes('localhost') && !TEST_DB_URL.includes('127.0.0.1')) {
-  console.error('[BLOCKED] DATABASE_URL is not local. Refusing to run tests against non-local database.');
+  if (!isLocalhost) {
+    console.error(`[BLOCKED] TEST_DATABASE_URL host "${hostname}" is not localhost/127.0.0.1. Refusing to run tests.`);
+    process.exit(1);
+  }
+
+  // Reject Cloud SQL, production, staging, and shared naming patterns even on local tunnels
+  const DANGEROUS_PATTERNS = ['cloud', 'cloudsql', 'prod', 'production', 'prd', 'staging', 'live'];
+  const fullUrlLower = TEST_DB_URL.toLowerCase();
+  for (const pat of DANGEROUS_PATTERNS) {
+    if (fullUrlLower.includes(pat)) {
+      console.error(`[BLOCKED] TEST_DATABASE_URL contains dangerous pattern "${pat}". Refusing to run tests.`);
+      process.exit(1);
+    }
+  }
+
+  // Database name must explicitly be marked for testing
+  const dbName = parsedUrl.pathname.replace(/^\//, '').toLowerCase();
+  const isMarkedTestDb = dbName.includes('test') || dbName.includes('disposable') || dbName.endsWith('_test');
+  if (!isMarkedTestDb) {
+    console.error(`[BLOCKED] Database name "${dbName}" is not explicitly marked as test/disposable. Refusing to run tests.`);
+    process.exit(1);
+  }
+} catch (urlErr) {
+  console.error('[BLOCKED] Invalid TEST_DATABASE_URL format:', (urlErr as Error).message);
   process.exit(1);
 }
 

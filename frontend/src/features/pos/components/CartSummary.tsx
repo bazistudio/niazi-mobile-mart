@@ -194,23 +194,82 @@ export const CartSummary: React.FC = () => {
     setMultiPaymentOpen(true);
   };
 
+  const triggerReceiptPrint = async (orderData: any, targetCustomer: { id: string; name: string } | null) => {
+    if (!orderData) return;
+    try {
+      const activeShop = useOrganizationStore.getState().activeShop;
+      const realShopProfile = {
+        name: shopHeader?.name || activeShop?.name || 'Niazi Mobile Mart',
+        address: shopHeader?.address || (activeShop as any)?.address || 'Main Branch',
+        phone1: shopHeader?.phone || (activeShop as any)?.phone || '',
+      };
+      const authUser = useAuthStore.getState().user;
+      const invoiceExtras = {
+        customer: targetCustomer ?? null,
+        cashier: authUser?.name ?? null,
+      };
+      const mappedTransaction: any = {
+        transactionId: orderData.orderNumber || orderData.transactionId || orderData._id || `TXN-${Date.now()}`,
+        items:
+          orderData.items?.map((i: any) => ({
+            productName: i.name || i.productName || 'Item',
+            quantity: i.quantity || 1,
+            unitPrice: i.price || i.unitPrice || 0,
+            discount: i.discount || 0,
+            subtotal: (i.price || i.unitPrice || 0) * (i.quantity || 1),
+          })) || [],
+        subtotal: orderData.subtotal || 0,
+        discountTotal: orderData.discountAmount || orderData.discountTotal || 0,
+        grandTotal: orderData.totalAmount || orderData.grandTotal || 0,
+        totalPaid: orderData.paidAmount ?? orderData.totalPaid ?? (orderData.totalAmount || orderData.grandTotal || 0),
+        remainingDue: orderData.creditAmount ?? Math.max((orderData.totalAmount || 0) - (orderData.paidAmount ?? orderData.totalPaid ?? (orderData.totalAmount || 0)), 0),
+        changeReturned: orderData.changeAmount ?? 0,
+        paymentBreakdown: (orderData.payments && orderData.payments.length > 0)
+          ? orderData.payments.map((p: any) => ({ method: p.payment_method || p.method || 'cash', amount: p.amount || 0 }))
+          : [{ method: orderData.paymentMethod || 'cash', amount: orderData.paidAmount ?? orderData.totalPaid ?? (orderData.totalAmount || orderData.grandTotal || 0) }],
+        createdAt: orderData.createdAt || Date.now(),
+      };
+      const invoice = DocumentService.buildInvoice(mappedTransaction as any, realShopProfile as any, invoiceExtras);
+      usePosStore.getState().setLastInvoice(invoice);
+      await DocumentService.logPrint(invoice.invoiceId, 'PRINT');
+    } catch (printErr) {
+      console.error('Failed to trigger receipt print:', printErr);
+    }
+  };
+
   // GAP-03: Called by ExchangeSettlementModal onConfirm.
-  // The only backend path for replace mode is processInvoiceReturn (requires linkedInvoiceId).
-  const processInvoiceReturn = usePosStore((s) => s.processInvoiceReturn);
-  const handleExchangeConfirm = async () => {
+  // Routes to atomic exchange backend endpoint (returns + replacement sale in 1 transaction)
+  const processExchange = usePosStore((s) => s.processExchange);
+  const handleExchangeConfirm = async (options?: { refundMethod?: 'CASH' | 'CREDIT' }) => {
     setExchangeModalOpen(false);
+
+    // If customer owes positive difference, collect payment via MultiPaymentModal if not already paid
+    if (grandTotal > 0) {
+      setPendingAction(pendingExchangeShouldPrint ? 'print' : 'sale');
+      setMultiPaymentOpen(true);
+      return;
+    }
+
     setIsProcessing(true);
     try {
-      await processInvoiceReturn();
+      const res = await processExchange({
+        refundMethod: options?.refundMethod,
+      });
       toast.success('Exchange processed successfully.');
       window.dispatchEvent(new CustomEvent('pos:sale-completed'));
+      if (pendingExchangeShouldPrint && res?.order) {
+        await triggerReceiptPrint(res.order, selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name } : null);
+      }
     } catch (error: any) {
       const msg = (error?.message || '').toLowerCase();
       if (msg.includes('cash session') || msg.includes('open a cash session') || msg.includes('till')) {
         setCashOpenModalOpen(true);
+      } else {
+        toast.error(error?.message || 'Exchange failed to process');
       }
     } finally {
       setIsProcessing(false);
+      setPendingExchangeShouldPrint(false);
     }
   };
 
@@ -219,6 +278,33 @@ export const CartSummary: React.FC = () => {
     shouldPrint: boolean = false
   ) => {
     setMultiPaymentOpen(false);
+
+    if (activeSession.mode === 'replace' && (activeSession.returnedItems?.length ?? 0) > 0) {
+      setIsProcessing(true);
+      try {
+        const res = await processExchange({
+          paymentBreakdown,
+        });
+        toast.success('Exchange processed successfully.');
+        window.dispatchEvent(new CustomEvent('pos:sale-completed'));
+        if (shouldPrint || pendingAction === 'print') {
+          if (res?.order) {
+            await triggerReceiptPrint(res.order, selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name } : null);
+          }
+        }
+      } catch (error: any) {
+        const msg = (error?.message || '').toLowerCase();
+        if (msg.includes('cash session') || msg.includes('open a cash session') || msg.includes('till')) {
+          setCashOpenModalOpen(true);
+        } else {
+          toast.error(error?.message || 'Exchange failed to process');
+        }
+      } finally {
+        setIsProcessing(false);
+      }
+      return;
+    }
+
     await processTransaction(paymentBreakdown, null, shouldPrint || pendingAction === 'print');
   };
 
@@ -633,6 +719,7 @@ export const CartSummary: React.FC = () => {
             linkedInvoiceId: activeSession.linkedInvoiceId,
           }}
           isProcessing={isProcessing}
+          hasCustomerAccount={!!selectedCustomer && selectedCustomer.id !== 'walk-in'}
           onConfirm={handleExchangeConfirm}
           onCancel={() => setExchangeModalOpen(false)}
           onSelectInvoice={() => {

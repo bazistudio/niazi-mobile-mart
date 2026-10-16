@@ -47,7 +47,8 @@ export interface ExchangeSettlementSummary {
 export interface ExchangeSettlementModalProps {
   summary: ExchangeSettlementSummary;
   isProcessing?: boolean;
-  onConfirm: () => void;
+  hasCustomerAccount?: boolean;
+  onConfirm: (options?: { refundMethod?: 'CASH' | 'CREDIT' }) => void;
   onCancel: () => void;
   /** Called when the cashier wants to select/change the linked invoice */
   onSelectInvoice: () => void;
@@ -69,6 +70,7 @@ function fmt(amount: number): string {
 export const ExchangeSettlementModal: React.FC<ExchangeSettlementModalProps> = ({
   summary,
   isProcessing = false,
+  hasCustomerAccount = false,
   onConfirm,
   onCancel,
   onSelectInvoice,
@@ -78,6 +80,8 @@ export const ExchangeSettlementModal: React.FC<ExchangeSettlementModalProps> = (
   const isBalanced   = Math.round(exchangeDifference) === 0;
   const customerPays = exchangeDifference > 0;
   const customerOwed = exchangeDifference < 0;
+
+  const [refundMethod, setRefundMethod] = React.useState<'CASH' | 'CREDIT'>('CASH');
 
   // The confirm button is only active when there is a linked invoice
   const canConfirm = hasLinkedInvoice && !isProcessing;
@@ -194,14 +198,49 @@ export const ExchangeSettlementModal: React.FC<ExchangeSettlementModalProps> = (
           )}
         </div>
 
-        {/* ── Settlement method note ───────────────────────────────────── */}
+        {/* ── Settlement method note / selection ───────────────────────── */}
         {!isBalanced && hasLinkedInvoice && (
-          <div className="px-4 pb-3">
-            <p className="text-[11px] text-text-muted leading-relaxed">
-              {customerPays
-                ? 'Collect the extra amount from the customer before confirming.'
-                : 'The difference will be credited to the customer\'s account. Cash refund requires the return-overflow workflow after processing.'}
-            </p>
+          <div className="px-4 pb-3 flex flex-col gap-2">
+            {customerPays ? (
+              <p className="text-[11px] text-text-muted leading-relaxed">
+                Collect the extra amount from the customer before confirming.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[11px] font-semibold text-text-secondary">Refund Settlement Method:</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRefundMethod('CASH')}
+                    className={`h-8 rounded-lg text-xs font-bold border transition-all ${
+                      refundMethod === 'CASH'
+                        ? 'bg-rose-500/20 border-rose-500 text-rose-600 dark:text-rose-400'
+                        : 'bg-surface border-border text-text-muted hover:bg-surface-hover'
+                    }`}
+                  >
+                    Cash Refund
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRefundMethod('CREDIT')}
+                    disabled={!hasCustomerAccount}
+                    title={!hasCustomerAccount ? 'Customer account required for ledger credit' : undefined}
+                    className={`h-8 rounded-lg text-xs font-bold border transition-all ${
+                      refundMethod === 'CREDIT'
+                        ? 'bg-indigo-500/20 border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                        : 'bg-surface border-border text-text-muted hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed'
+                    }`}
+                  >
+                    Account Credit
+                  </button>
+                </div>
+                {!hasCustomerAccount && (
+                  <p className="text-[10px] text-text-muted">
+                    Walk-in customer: difference will be refunded in Cash.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -218,7 +257,7 @@ export const ExchangeSettlementModal: React.FC<ExchangeSettlementModalProps> = (
             </button>
             <button
               type="button"
-              onClick={onConfirm}
+              onClick={() => onConfirm({ refundMethod: customerOwed ? refundMethod : undefined })}
               disabled={!canConfirm}
               className="flex-1 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-sm font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
