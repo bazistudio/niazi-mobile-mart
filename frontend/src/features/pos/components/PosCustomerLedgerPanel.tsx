@@ -187,7 +187,7 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
           ) : (
             <div className="divide-y divide-border/60">
               {recentEntries.map((row, idx) => {
-                const dateFormatted = new Date(row.date).toLocaleDateString('en-GB', {
+                const dateFormatted = new Date(row.timestamp).toLocaleDateString('en-GB', {
                   day: '2-digit',
                   month: 'short',
                 });
@@ -207,7 +207,7 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
                       {row.credit > 0 ? row.credit.toLocaleString() : '—'}
                     </div>
                     <div className="col-span-2 text-right font-black text-text-primary tabular-nums">
-                      {row.balance.toLocaleString()}
+                      {row.runningBalance.toLocaleString()}
                     </div>
                   </div>
                 );
@@ -282,10 +282,14 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
       )}
 
       {/* Receive Payment / Settle Balance Modal */}
+      {/* GAP-04: standaloneMode=true causes the modal to call ledgerApi.recordPayment itself
+          and show a thermal-style print-receipt option after the payment is confirmed.
+          onSuccess here only closes and refetches; the API call is handled inside the modal. */}
       {isReceivePaymentOpen && selectedCustomer && (
         <LedgerSettlementModal
           customer={selectedCustomer as any}
           invoiceTotal={0}
+          standaloneMode
           onClose={() => setReceivePaymentOpen(false)}
           onSuccess={() => {
             setReceivePaymentOpen(false);

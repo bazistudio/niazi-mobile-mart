@@ -584,20 +584,22 @@ export async function getCustomerStatement(
   let branchFilterSql = '';
   if (branchId && branchId.trim()) {
     queryParams.push(branchId.trim());
-    branchFilterSql = ` AND COALESCE(s.branch_id, cm.branch_id, u.branch_id) = $2`;
+    // GAP-01: include sr.branch_id in branch filter so RETURN entries are correctly scoped
+    branchFilterSql = ` AND COALESCE(s.branch_id, cm.branch_id, sr.branch_id, u.branch_id) = $2`;
   }
 
   const result = await pool.query(
     `SELECT cle.id, cle.created_at AS date, cle.reference_number, cle.description, cle.entry_type,
             cle.debit, cle.credit, cle.balance_after AS balance,
-            COALESCE(s.branch_id, cm.branch_id, u.branch_id) AS branch_id,
+            COALESCE(s.branch_id, cm.branch_id, sr.branch_id, u.branch_id) AS branch_id,
             b.name AS branch_name,
             b.code AS branch_code
      FROM customer_ledger_entries cle
      LEFT JOIN sales s ON s.id = cle.reference_id OR s.invoice_number = cle.reference_number
      LEFT JOIN cash_movements cm ON cm.reference_id = cle.reference_id OR cm.reference_number = cle.reference_number
+     LEFT JOIN sales_returns sr ON sr.id = cle.reference_id
      LEFT JOIN users u ON u.id = cle.performed_by
-     LEFT JOIN branches b ON b.id = COALESCE(s.branch_id, cm.branch_id, u.branch_id)
+     LEFT JOIN branches b ON b.id = COALESCE(s.branch_id, cm.branch_id, sr.branch_id, u.branch_id)
      WHERE cle.customer_id = $1${branchFilterSql}
      ORDER BY cle.created_at ASC, cle.id ASC`,
     queryParams

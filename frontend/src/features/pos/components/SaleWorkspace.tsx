@@ -15,6 +15,7 @@ import toast from 'react-hot-toast';
 
 export const SaleWorkspace: React.FC = () => {
   const [isInvoiceLookupOpen, setInvoiceLookupOpen] = useState(false);
+  const [invoiceLookupHeading, setInvoiceLookupHeading] = useState<string | undefined>(undefined);
   const [isSaleSuccess, setIsSaleSuccess] = useState(false);
 
   const activeShopId = useOrganizationStore((s) => s.activeShop?._id || s.activeShopId);
@@ -26,7 +27,12 @@ export const SaleWorkspace: React.FC = () => {
 
   // Listen for custom event to open invoice lookup from extra actions toolbar
   useEffect(() => {
-    const handleOpenLookup = () => setInvoiceLookupOpen(true);
+    const handleOpenLookup = (e: Event) => {
+      // GAP-02: read optional heading from event detail (e.g. 'Select Sale Invoice for Cash Return')
+      const detail = (e as CustomEvent<{ heading?: string }>).detail;
+      setInvoiceLookupHeading(detail?.heading);
+      setInvoiceLookupOpen(true);
+    };
     window.addEventListener('pos:open-invoice-lookup', handleOpenLookup);
     return () => window.removeEventListener('pos:open-invoice-lookup', handleOpenLookup);
   }, []);
@@ -113,7 +119,8 @@ export const SaleWorkspace: React.FC = () => {
       {isInvoiceLookupOpen && (
         <InvoiceLookupModal
           isOpen={isInvoiceLookupOpen}
-          onClose={() => setInvoiceLookupOpen(false)}
+          onClose={() => { setInvoiceLookupOpen(false); setInvoiceLookupHeading(undefined); }}
+          heading={invoiceLookupHeading}
         />
       )}
     </main>

@@ -8,9 +8,11 @@ import { salesApi } from '@/services/sales.api';
 interface InvoiceLookupModalProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Optional heading override, e.g. 'Select Sale Invoice for Cash Return' */
+  heading?: string;
 }
 
-export const InvoiceLookupModal: React.FC<InvoiceLookupModalProps> = ({ isOpen, onClose }) => {
+export const InvoiceLookupModal: React.FC<InvoiceLookupModalProps> = ({ isOpen, onClose, heading }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedTerm, setDebouncedTerm] = useState('');
   const [results, setResults] = useState<any[]>([]);
@@ -77,7 +79,7 @@ export const InvoiceLookupModal: React.FC<InvoiceLookupModalProps> = ({ isOpen, 
               <Receipt className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-text-primary">Invoice Lookup & Return</h3>
+              <h3 className="text-sm font-bold text-text-primary">{heading ?? 'Invoice Lookup & Return'}</h3>
               <p className="text-xs text-text-muted">Search previous sales for return or replacement</p>
             </div>
           </div>

@@ -18,6 +18,7 @@ import { GlobalLoadingOverlay } from '@/components/ui/GlobalLoadingOverlay';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 import { CashSessionOpenModal } from '@/features/cash';
+import { ExchangeSettlementModal } from './modals/ExchangeSettlementModal';
 
 export const CartSummary: React.FC = () => {
   const [mounted, setMounted] = useState(false);
@@ -32,6 +33,7 @@ export const CartSummary: React.FC = () => {
   const completeTransaction = usePosStore((s) => s.completeTransaction);
   const setCheckoutIdempotencyKey = usePosStore((s) => s.setCheckoutIdempotencyKey);
   const setCustomer = usePosStore((s) => s.setCustomer);
+  const processCashReturn = usePosStore((s) => s.processCashReturn);
 
   const { settings, shopHeader, fetchSettings } = usePrinterStore();
 
@@ -46,6 +48,10 @@ export const CartSummary: React.FC = () => {
   const [isMultiPaymentOpen, setMultiPaymentOpen] = useState(false);
   const [isDiscountModalOpen, setDiscountModalOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<'sale' | 'print' | null>(null);
+
+  // GAP-03: Exchange settlement modal state
+  const [isExchangeModalOpen, setExchangeModalOpen] = useState(false);
+  const [pendingExchangeShouldPrint, setPendingExchangeShouldPrint] = useState(false);
   
   const selectedCustomer = activeSession?.customer && activeSession.customer.id !== 'walk-in'
     ? activeSession.customer
@@ -113,6 +119,27 @@ export const CartSummary: React.FC = () => {
   }
   const grandTotal = preDiscountTotal - invoiceDiscountAmount;
 
+  // GAP-02: If no linked invoice, open InvoiceLookupModal so the cashier can select
+  // the original sale. If an invoice is already linked, proceed directly with cash return.
+  const handleCashReturn = async () => {
+    if (!activeSession) return;
+    if (!activeSession.linkedInvoiceId) {
+      // No invoice linked — guide the cashier to select one first.
+      window.dispatchEvent(new CustomEvent('pos:open-invoice-lookup', { detail: { heading: 'Select Sale Invoice for Cash Return' } }));
+      toast('Select the original sale invoice to proceed with Cash Return.', { icon: '🔍' });
+      return;
+    }
+    if (activeSession.cart.length === 0 && (!activeSession.returnedItems || activeSession.returnedItems.length === 0)) {
+      toast.error('Add items to return before processing a Cash Return.');
+      return;
+    }
+    try {
+      await processCashReturn();
+    } catch {
+      // processCashReturn already toasts on error
+    }
+  };
+
   const handleClearCart = () => {
     if (isCartEmpty) return;
     if (window.confirm('Are you sure you want to clear the current sale tab?')) {
@@ -121,9 +148,16 @@ export const CartSummary: React.FC = () => {
     }
   };
 
+  // GAP-03: In replace mode with returned items, always show exchange settlement first.
   const handleCashSale = () => {
     if (isCartEmpty) {
       toast.error('Cart is empty');
+      return;
+    }
+
+    if (activeSession.mode === 'replace' && returnedItems.length > 0) {
+      setPendingExchangeShouldPrint(false);
+      setExchangeModalOpen(true);
       return;
     }
 
@@ -137,9 +171,16 @@ export const CartSummary: React.FC = () => {
     setMultiPaymentOpen(true);
   };
 
+  // GAP-03: Same interception for Pay & Print.
   const handlePayAndPrint = () => {
     if (isCartEmpty) {
       toast.error('Cart is empty');
+      return;
+    }
+
+    if (activeSession.mode === 'replace' && returnedItems.length > 0) {
+      setPendingExchangeShouldPrint(true);
+      setExchangeModalOpen(true);
       return;
     }
 
@@ -151,6 +192,26 @@ export const CartSummary: React.FC = () => {
 
     setPendingAction('print');
     setMultiPaymentOpen(true);
+  };
+
+  // GAP-03: Called by ExchangeSettlementModal onConfirm.
+  // The only backend path for replace mode is processInvoiceReturn (requires linkedInvoiceId).
+  const processInvoiceReturn = usePosStore((s) => s.processInvoiceReturn);
+  const handleExchangeConfirm = async () => {
+    setExchangeModalOpen(false);
+    setIsProcessing(true);
+    try {
+      await processInvoiceReturn();
+      toast.success('Exchange processed successfully.');
+      window.dispatchEvent(new CustomEvent('pos:sale-completed'));
+    } catch (error: any) {
+      const msg = (error?.message || '').toLowerCase();
+      if (msg.includes('cash session') || msg.includes('open a cash session') || msg.includes('till')) {
+        setCashOpenModalOpen(true);
+      }
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleMultiPaymentConfirm = async (
@@ -439,13 +500,7 @@ export const CartSummary: React.FC = () => {
         {/* 1. Cash Return */}
         <button
           type="button"
-          onClick={() => {
-            if (activeSession.returnedItems && activeSession.returnedItems.length > 0) {
-              handleCashReturn();
-            } else {
-              toast('Add items into return cart first or load an invoice to process Cash Return.', { icon: 'ℹ️' });
-            }
-          }}
+          onClick={handleCashReturn}
           className="h-9 px-2 rounded-xl bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
           title="Cash Return / Refund"
         >
@@ -457,7 +512,7 @@ export const CartSummary: React.FC = () => {
         <button
           type="button"
           onClick={() => {
-            setSessionMode(activeSession.mode === 'replace' ? 'normal' : 'replace');
+            setSessionMode(activeSession.mode === 'replace' ? 'sale' : 'replace');
             toast.success(
               activeSession.mode === 'replace' ? 'Standard Sale Mode' : 'Product Replace Mode Active',
               { icon: '🔁' }
@@ -566,6 +621,26 @@ export const CartSummary: React.FC = () => {
         isOpen={isCashOpenModalOpen}
         onClose={() => setCashOpenModalOpen(false)}
       />
+
+      {/* GAP-03: Exchange Settlement Modal — shown when replace mode checkout is initiated */}
+      {isExchangeModalOpen && (
+        <ExchangeSettlementModal
+          summary={{
+            returnedValue: returnTotal,
+            replacementValue: subtotal,
+            exchangeDifference: grandTotal,
+            hasLinkedInvoice: !!activeSession.linkedInvoiceId,
+            linkedInvoiceId: activeSession.linkedInvoiceId,
+          }}
+          isProcessing={isProcessing}
+          onConfirm={handleExchangeConfirm}
+          onCancel={() => setExchangeModalOpen(false)}
+          onSelectInvoice={() => {
+            setExchangeModalOpen(false);
+            window.dispatchEvent(new CustomEvent('pos:open-invoice-lookup', { detail: { heading: 'Select Original Invoice for Exchange' } }));
+          }}
+        />
+      )}
 
       <GlobalLoadingOverlay isOpen={isProcessing} message="Processing Transaction..." />
     </div>
