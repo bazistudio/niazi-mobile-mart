@@ -124,6 +124,9 @@ export interface CustomerStatementRowDto {
   debit: number;
   credit: number;
   balance: number;
+  branch_id?: string | null;
+  branch_name?: string | null;
+  branch_code?: string | null;
 }
 
 export interface CustomerStatementDto {
@@ -577,11 +580,18 @@ export async function getCustomerStatement(
   }
 
   const result = await pool.query(
-    `SELECT id, created_at AS date, reference_number, description, entry_type,
-            debit, credit, balance_after AS balance
-     FROM customer_ledger_entries
-     WHERE customer_id = $1
-     ORDER BY created_at ASC, id ASC`,
+    `SELECT cle.id, cle.created_at AS date, cle.reference_number, cle.description, cle.entry_type,
+            cle.debit, cle.credit, cle.balance_after AS balance,
+            COALESCE(s.branch_id, cm.branch_id, u.branch_id) AS branch_id,
+            b.name AS branch_name,
+            b.code AS branch_code
+     FROM customer_ledger_entries cle
+     LEFT JOIN sales s ON s.id = cle.reference_id OR s.invoice_number = cle.reference_number
+     LEFT JOIN cash_movements cm ON cm.reference_id = cle.reference_id OR cm.reference_number = cle.reference_number
+     LEFT JOIN users u ON u.id = cle.performed_by
+     LEFT JOIN branches b ON b.id = COALESCE(s.branch_id, cm.branch_id, u.branch_id)
+     WHERE cle.customer_id = $1
+     ORDER BY cle.created_at ASC, cle.id ASC`,
     [customerId]
   );
 
@@ -595,6 +605,9 @@ export async function getCustomerStatement(
       debit: Number(row['debit']),
       credit: Number(row['credit']),
       balance: Number(row['balance']),
+      branch_id: (row['branch_id'] as string | null) ?? null,
+      branch_name: (row['branch_name'] as string | null) ?? null,
+      branch_code: (row['branch_code'] as string | null) ?? null,
     })
   );
 

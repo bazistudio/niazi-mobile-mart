@@ -24,6 +24,9 @@ export interface LedgerStatementEntry {
   debit: number;
   credit: number;
   balance: number;
+  branch_id?: string | null;
+  branch_name?: string | null;
+  branch_code?: string | null;
 }
 
 export interface CustomerStatementDto {
@@ -61,6 +64,9 @@ export interface LedgerTimelineEntry {
   credit: number;
   debitAccount: string;
   creditAccount: string;
+  branch_id?: string | null;
+  branch_name?: string | null;
+  branch_code?: string | null;
 }
 
 export interface PartyLedgerResponse {
@@ -100,6 +106,9 @@ function mapCustomerEntry(entry: LedgerStatementEntry): LedgerTimelineEntry {
     credit: entry.credit,
     debitAccount: isPayment ? 'cash' : 'receivable',
     creditAccount: isPayment ? 'receivable' : 'sales',
+    branch_id: entry.branch_id ?? null,
+    branch_name: entry.branch_name ?? null,
+    branch_code: entry.branch_code ?? null,
   };
 }
 

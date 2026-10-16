@@ -324,11 +324,16 @@ export const LedgerBook: React.FC<LedgerBookProps> = ({ initialParty, readonly }
 
                         {/* Reference */}
                         <td className="px-5 py-4">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             {rowIcon}
                             <span className="font-black text-gray-900 dark:text-white text-sm">
                               {highlightText(entry.transactionId, searchQuery)}
                             </span>
+                            {entry.branch_name && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700">
+                                {entry.branch_code || entry.branch_name}
+                              </span>
+                            )}
                           </div>
                         </td>
 

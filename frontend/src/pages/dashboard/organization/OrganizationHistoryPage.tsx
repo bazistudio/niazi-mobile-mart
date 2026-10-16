@@ -1,101 +1,146 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { OrganizationPageShell } from '@/features/dashboard/components/organization/OrganizationPageShell';
 import { 
-  History, 
-  ShoppingCart, 
-  Package, 
-  Store, 
-  UserCheck, 
-  Truck, 
-  Users, 
-  Receipt,
-  Search,
-  Calendar
+  Receipt, 
+  RotateCcw,
+  LayoutList,
+  GripVertical
 } from 'lucide-react';
+import { HistoryStatsCards, HistoryFilters, HistoryTable, HistoryTimeline, useHistoryStore } from '@/features/history';
+import { SalesReturnsTable } from '@/features/returns/SalesReturnsTable';
+import { PurchaseReturnsTable } from '@/features/returns/PurchaseReturnsTable';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 
 export function OrganizationHistoryPage() {
-  const [activeTab, setActiveTab] = useState('sales');
+  const { fetchHistory, fetchStats, setFilters, filters, total } = useHistoryStore();
+  const [viewMode, setViewMode] = useState<'table' | 'timeline'>('table');
+  const [activeTab, setActiveTab] = useState<'transactions' | 'sales_returns' | 'purchase_returns'>('transactions');
 
-  const historySections = [
-    { id: 'sales', label: 'Sales History', icon: Receipt, desc: 'Historical customer sales and checkout records across all branches.' },
-    { id: 'purchase', label: 'Purchase History', icon: ShoppingCart, desc: 'Historical vendor orders and goods received notes.' },
-    { id: 'inventory', label: 'Inventory History', icon: Package, desc: 'Historical stock adjustments, write-offs, and batch histories.' },
-    { id: 'branch', label: 'Branch History', icon: Store, desc: 'Historical branch opening, status updates, and transfer records.' },
-    { id: 'customer', label: 'Customer History', icon: UserCheck, desc: 'Historical customer orders, returns, and payment settlements.' },
-    { id: 'supplier', label: 'Supplier History', icon: Truck, desc: 'Historical supplier transactions, returns, and payables history.' },
-    { id: 'employee', label: 'Employee History', icon: Users, desc: 'Historical staffing assignments, role changes, and shift summaries.' },
-  ];
+  const activeBranchId = useOrganizationStore((state) => state.activeShop?._id ?? null);
+  const activeShop = useOrganizationStore((state) => state.activeShop);
 
-  const currentSection = historySections.find((s) => s.id === activeTab) || historySections[0];
+  useEffect(() => {
+    fetchStats(activeBranchId);
+    setFilters({ branch_id: activeBranchId, page: 1 });
+  }, [activeBranchId, fetchStats, setFilters]);
 
   return (
     <OrganizationPageShell
       title="Organization History"
-      description="Consolidated historical business activity and operational records across all organization branches (distinct from security Audit Logs)."
-      badge="Event Archives"
+      description="Consolidated historical business transactions, returns, and ledger movements across branches."
+      badge={activeShop ? `Scope: ${activeShop.name}` : 'Scope: All Branches'}
     >
       {/* Tab Navigation */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-gray-200 dark:border-gray-800">
-        {historySections.map((sec) => {
-          const Icon = sec.icon;
-          const isActive = activeTab === sec.id;
-          return (
+      <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 pb-2">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setActiveTab('transactions')}
+            className={`pb-2 px-4 text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 ${
+              activeTab === 'transactions'
+                ? 'border-[#006970] text-[#006970]'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+          >
+            <Receipt className="w-4 h-4" />
+            All Transactions
+          </button>
+          <button
+            onClick={() => setActiveTab('sales_returns')}
+            className={`pb-2 px-4 text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 ${
+              activeTab === 'sales_returns'
+                ? 'border-[#e76f51] text-[#e76f51]'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+          >
+            <RotateCcw className="w-4 h-4 text-[#e76f51]" />
+            Sales Returns
+          </button>
+          <button
+            onClick={() => setActiveTab('purchase_returns')}
+            className={`pb-2 px-4 text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 ${
+              activeTab === 'purchase_returns'
+                ? 'border-[#2a9d8f] text-[#2a9d8f]'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+          >
+            <RotateCcw className="w-4 h-4 text-[#2a9d8f]" />
+            Purchase Returns
+          </button>
+        </div>
+
+        {activeTab === 'transactions' && (
+          <div className="flex items-center bg-white dark:bg-gray-800 rounded-lg p-1 border border-gray-200 dark:border-gray-700 shadow-sm">
             <button
-              key={sec.id}
-              onClick={() => setActiveTab(sec.id)}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
-                isActive
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200/60 dark:border-gray-700'
+              onClick={() => setViewMode('table')}
+              className={`p-1.5 rounded-md flex items-center transition-colors cursor-pointer ${
+                viewMode === 'table' ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
               }`}
+              title="Table View"
             >
-              <Icon className="w-4 h-4" />
-              <span>{sec.label}</span>
+              <LayoutList className="w-4 h-4" />
             </button>
-          );
-        })}
+            <button
+              onClick={() => setViewMode('timeline')}
+              className={`p-1.5 rounded-md flex items-center transition-colors cursor-pointer ${
+                viewMode === 'timeline' ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+              }`}
+              title="Timeline View"
+            >
+              <GripVertical className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Filter / Search Bar (Placeholder) */}
-      <div className="bg-white dark:bg-gray-800/90 rounded-xl p-4 border border-gray-200/80 dark:border-gray-700/80 shadow-sm flex flex-col md:flex-row items-center justify-between gap-3">
-        <div className="flex items-center gap-2 w-full md:w-auto flex-1 max-w-md">
-          <div className="relative w-full">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder={`Search ${currentSection.label.toLowerCase()}...`}
-              disabled
-              className="w-full pl-9 pr-4 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-500 cursor-not-allowed"
-            />
-          </div>
-        </div>
+      {/* Main Views */}
+      {activeTab === 'transactions' && (
+        <div className="space-y-6">
+          <HistoryStatsCards />
+          <HistoryFilters />
+          {viewMode === 'table' ? <HistoryTable /> : <HistoryTimeline />}
 
-        <div className="flex items-center gap-2 w-full md:w-auto">
-          <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-500">
-            <Calendar className="w-3.5 h-3.5 text-gray-400" />
-            <span>All Dates</span>
-          </div>
-          <div className="px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-500">
-            <span>All Branches</span>
-          </div>
+          {/* Pagination */}
+          {(() => {
+            const limit = filters.limit ?? 10;
+            const currentPage = filters.page ?? 1;
+            const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
+            const isFirstPage = currentPage <= 1;
+            const isLastPage = currentPage >= totalPages;
+            const start = total === 0 ? 0 : (currentPage - 1) * limit + 1;
+            const end = Math.min(currentPage * limit, total);
+            return (
+              <div className="flex items-center justify-between mt-4">
+                <span className="text-sm text-gray-500">
+                  {total > 0 ? `Showing ${start}–${end} of ${total} records` : 'No records'}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => !isFirstPage && setFilters({ page: currentPage - 1 })}
+                    disabled={isFirstPage}
+                    className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-sm text-gray-600 dark:text-gray-400 px-1">
+                    {currentPage} / {totalPages}
+                  </span>
+                  <button
+                    onClick={() => !isLastPage && setFilters({ page: currentPage + 1 })}
+                    disabled={isLastPage}
+                    className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
         </div>
-      </div>
+      )}
 
-      {/* History Records Container (Empty State) */}
-      <div className="bg-white dark:bg-gray-800/90 rounded-xl p-12 border border-gray-200/80 dark:border-gray-700/80 shadow-sm text-center">
-        <div className="w-14 h-14 rounded-full bg-primary/10 mx-auto flex items-center justify-center text-primary mb-4">
-          <History className="w-7 h-7" />
-        </div>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {currentSection.label} Records
-        </h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto mt-1.5 leading-relaxed">
-          {currentSection.desc}
-        </p>
-        <p className="text-xs text-gray-400 dark:text-gray-500 mt-4 italic">
-          Historical event records will appear here as business operations occur across branches.
-        </p>
-      </div>
+      {activeTab === 'sales_returns' && <SalesReturnsTable branchId={activeBranchId} />}
+
+      {activeTab === 'purchase_returns' && <PurchaseReturnsTable branchId={activeBranchId} />}
     </OrganizationPageShell>
   );
 }
