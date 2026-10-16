@@ -42,8 +42,8 @@ export const queryKeys = {
     all: ['suppliers'] as const,
     detail: (id: string) => ['suppliers', id] as const,
   },
-  ledger: (partyType?: string, partyId?: string) =>
-    ['ledger', partyType, partyId] as const,
+  ledger: (partyType?: string, partyId?: string, branchId?: string | null) =>
+    ['ledger', partyType, partyId, branchId ?? 'all'] as const,
   orders: ['orders'] as const,
   ordersToday: ['orders', 'today'] as const,
 };

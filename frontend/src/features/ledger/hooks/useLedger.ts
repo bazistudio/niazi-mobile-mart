@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { ledgerApi } from '@/services/ledger.api';
 import { queryKeys } from '@/lib/react-query/queryKeys';
 
+import { useOrganizationStore } from '@/store/useOrganizationStore';
+
 export type PartyType = 'CUSTOMER' | 'SUPPLIER';
 
 export interface SelectedParty {
@@ -19,6 +21,7 @@ export function useLedger(initialParty?: SelectedParty | null) {
   const [selectedParty, setSelectedParty] = useState<SelectedParty | null>(initialParty || null);
   const [activeTab, setActiveTab] = useState<LedgerBookTab>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const activeShopId = useOrganizationStore((state) => state.activeShopId || state.activeShop?._id || null);
 
   // Sync state with incoming props
   React.useEffect(() => {
@@ -29,8 +32,8 @@ export function useLedger(initialParty?: SelectedParty | null) {
 
   // Fetch Ledger data for selected party
   const { data: ledgerResponse, isLoading: isLedgerLoading, refetch: refetchLedger } = useQuery({
-    queryKey: queryKeys.ledger(selectedParty?.type, selectedParty?.id),
-    queryFn: () => ledgerApi.getPartyLedger(selectedParty!.id, selectedParty!.type),
+    queryKey: queryKeys.ledger(selectedParty?.type, selectedParty?.id, activeShopId),
+    queryFn: () => ledgerApi.getPartyLedger(selectedParty!.id, selectedParty!.type, activeShopId),
     enabled: !!selectedParty,
   });
 

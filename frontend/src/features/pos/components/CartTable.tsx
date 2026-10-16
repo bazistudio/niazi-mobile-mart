@@ -50,23 +50,24 @@ export const CartTable = () => {
   const renderItemRow = (item: CartItem, isReturn: boolean, index: number) => {
     const key = `${isReturn ? 'ret' : 'new'}-${item.productId}`;
     const inputValue = localQuantities[key] !== undefined ? localQuantities[key] : item.quantity;
+    const lineTotal = item.unitPrice * item.quantity;
 
     return (
       <div
         key={key}
-        className={`flex items-center px-2 py-0.5 border-b last:border-b-0 transition-colors group ${
+        className={`flex items-center px-3 py-1.5 border-b last:border-b-0 transition-colors group ${
           isReturn
             ? 'border-warning/20 bg-warning/5'
             : 'border-border hover:bg-surface-hover'
         }`}
       >
-        {/* S.No */}
-        <div className="w-10 text-xs font-bold text-text-muted">
+        {/* 1. S.No */}
+        <div className="w-12 text-xs font-bold text-text-muted">
           {index + 1}
         </div>
 
-        {/* Product Name */}
-        <div className="flex-1 min-w-[120px] pr-2">
+        {/* 2. Product Name */}
+        <div className="flex-1 min-w-[140px] pr-2">
           <p
             className={`text-sm font-bold truncate flex items-center gap-1.5 ${
               isReturn ? 'text-warning' : 'text-text-primary'
@@ -78,22 +79,13 @@ export const CartTable = () => {
           </p>
         </div>
 
-        {/* Stock Qty */}
-        <div className="w-16 text-center text-xs font-medium text-text-muted">
-          {!isReturn && item.maxStock <= 3 ? (
-            <span className="text-danger font-bold">{item.maxStock}</span>
-          ) : (
-            item.maxStock
-          )}
+        {/* 3. IMEI / Serial */}
+        <div className="w-32 text-xs font-mono text-text-muted truncate pr-2">
+          {item.barcode || item.sku || '—'}
         </div>
 
-        {/* Sale Price */}
-        <div className="w-24 text-right text-sm font-black text-primary tabular-nums">
-          {item.unitPrice.toLocaleString()}
-        </div>
-
-        {/* Sale Qty Controls */}
-        <div className="w-32 flex justify-center px-2">
+        {/* 4. Quantity Stepper */}
+        <div className="w-28 flex justify-center px-1">
           <div className="flex items-center gap-1 bg-surface-hover p-0.5 rounded-md border border-border">
             <button
               type="button"
@@ -102,7 +94,7 @@ export const CartTable = () => {
               aria-label="Decrease quantity"
               className="p-1 rounded bg-surface text-text-secondary hover:bg-border/30 transition-all disabled:opacity-30 shadow-xs"
             >
-              <Minus className="h-3.5 w-3.5" />
+              <Minus className="h-3 w-3" />
             </button>
             <input
               type="number"
@@ -110,7 +102,7 @@ export const CartTable = () => {
               onChange={(e) => handleQtyChange(item.productId, e.target.value, item.maxStock, isReturn)}
               onBlur={() => handleQtyBlur(item.productId, item.quantity, isReturn)}
               aria-label={`Quantity for ${item.productName}`}
-              className="text-sm font-black w-8 text-center tabular-nums bg-transparent text-text-primary focus:outline-none focus:bg-surface rounded no-spinners"
+              className="text-xs font-black w-8 text-center tabular-nums bg-transparent text-text-primary focus:outline-none focus:bg-surface rounded no-spinners"
               min="1"
               max={isReturn ? undefined : item.maxStock}
             />
@@ -121,20 +113,35 @@ export const CartTable = () => {
               aria-label="Increase quantity"
               className="p-1 rounded bg-surface text-text-secondary hover:bg-border/30 transition-all disabled:opacity-30 shadow-xs"
             >
-              <Plus className="h-3.5 w-3.5" />
+              <Plus className="h-3 w-3" />
             </button>
           </div>
         </div>
 
-        {/* Delete Icon */}
+        {/* 5. Unit Price */}
+        <div className="w-24 text-right text-xs font-bold text-text-primary tabular-nums">
+          Rs {item.unitPrice.toLocaleString()}
+        </div>
+
+        {/* 6. Discount */}
+        <div className="w-16 text-center text-xs font-medium text-text-muted">
+          0%
+        </div>
+
+        {/* 7. Line Total */}
+        <div className="w-28 text-right text-xs font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
+          Rs {lineTotal.toLocaleString()}
+        </div>
+
+        {/* 8. Delete Icon */}
         <div className="w-12 flex justify-center">
           <button
             type="button"
             onClick={() => removeFromCart(item.productId, isReturn)}
             aria-label={`Remove ${item.productName}`}
-            className="text-text-muted hover:text-danger hover:bg-danger/10 p-1.5 rounded-md transition-all opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="text-text-muted hover:text-danger hover:bg-danger/10 p-1.5 rounded-md transition-all opacity-80 hover:opacity-100"
           >
-            <Trash2 className="h-4 w-4" />
+            <Trash2 className="h-4 w-4 text-red-500" />
           </button>
         </div>
       </div>
@@ -142,16 +149,18 @@ export const CartTable = () => {
   };
 
   return (
-    <div className="flex-1 h-full flex flex-col overflow-hidden min-h-0 bg-surface border border-border rounded-xl shadow-card">
+    <div className="flex-1 h-full flex flex-col overflow-hidden min-h-0 bg-surface">
 
-      {/* Table Header */}
-      <div className="flex items-center px-2 py-1.5 border-b border-border bg-surface-hover/60 text-[10px] font-black text-text-muted uppercase tracking-widest shrink-0">
-        <div className="w-10">S.No</div>
-        <div className="flex-1 min-w-[120px]">Product Name</div>
-        <div className="w-16 text-center">Stock</div>
-        <div className="w-24 text-right">Sale Price</div>
-        <div className="w-32 text-center">Qty</div>
-        <div className="w-12 text-center">Act</div>
+      {/* Table Header: Exactly matching approved PNG */}
+      <div className="flex items-center px-3 py-2 border-b border-border bg-surface-hover/70 text-[10px] font-black text-text-muted uppercase tracking-widest shrink-0">
+        <div className="w-12">S.No</div>
+        <div className="flex-1 min-w-[140px]">Product Name</div>
+        <div className="w-32">IMEI / Serial</div>
+        <div className="w-28 text-center">Qty</div>
+        <div className="w-24 text-right">Price</div>
+        <div className="w-16 text-center">Disc</div>
+        <div className="w-28 text-right">Total</div>
+        <div className="w-12 text-center">Del</div>
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar pb-2">

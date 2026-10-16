@@ -268,6 +268,9 @@ export const CartSummary: React.FC = () => {
 
         toast.success(isRefund ? `Refund Processed. Paid: Rs ${Math.abs(grandTotal).toLocaleString()}` : 'Sale completed successfully');
 
+        // Dispatch sale completed event to trigger rotating green border effect
+        window.dispatchEvent(new CustomEvent('pos:sale-completed'));
+
         // Reset customer selection
         setCustomer(null);
       }
@@ -291,60 +294,58 @@ export const CartSummary: React.FC = () => {
         </div>
       )}
 
-      {/* Subtotal Row */}
-      <div className="flex justify-between items-center text-xs">
-        <span className="text-text-muted font-bold uppercase tracking-wider text-[10px]">Subtotal</span>
-        <span className="font-black text-text-primary tabular-nums">Rs {subtotal.toLocaleString()}</span>
-      </div>
-
-      {/* Invoice Discount Row */}
-      <div className="flex justify-between items-center py-1.5 border-y border-border/70">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider">Discount</span>
+      {/* Subtotal & Payment Method Row */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pt-1 border-t border-border/70">
+        {/* Payment Methods Pills */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-600 text-white shadow-xs cursor-default">
+            Cash
+          </span>
           <button
             type="button"
-            onClick={() => setDiscountModalOpen(true)}
-            title="Open Discount Presets"
-            className="px-1.5 py-0.5 rounded bg-primary/10 hover:bg-primary/20 text-primary transition-colors text-[10px] font-bold flex items-center gap-1 shadow-xs"
+            onClick={() => setMultiPaymentOpen(true)}
+            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-surface-hover hover:bg-border text-text-secondary transition-colors"
           >
-            <Tag className="h-3 w-3" />
-            <span>Presets</span>
+            Bank
+          </button>
+          <button
+            type="button"
+            onClick={() => setMultiPaymentOpen(true)}
+            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-surface-hover hover:bg-border text-text-secondary transition-colors"
+          >
+            EasyPaisa
+          </button>
+          <button
+            type="button"
+            onClick={() => setMultiPaymentOpen(true)}
+            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-surface-hover hover:bg-border text-text-secondary transition-colors"
+          >
+            JazzCash
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (selectedCustomer) {
+                setLedgerModalOpen(true);
+              } else {
+                setCustomerModalOpen(true);
+              }
+            }}
+            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-surface-hover hover:bg-border text-text-secondary transition-colors"
+          >
+            Khata
           </button>
         </div>
 
-        <div className="flex items-center gap-1 border border-border rounded-lg overflow-hidden bg-surface-hover/60">
-          <input
-            type="number"
-            value={activeSession.invoiceDiscountValue || ''}
-            placeholder="0"
-            onChange={(e) => setInvoiceDiscount(activeSession.invoiceDiscountType, parseFloat(e.target.value) || 0)}
-            className="w-14 text-xs font-black text-center py-1 bg-transparent text-text-primary focus:outline-none focus:bg-surface no-spinners transition-colors"
-          />
-          <button
-            type="button"
-            onClick={() =>
-              setInvoiceDiscount(
-                activeSession.invoiceDiscountType === 'percentage' ? 'fixed' : 'percentage',
-                activeSession.invoiceDiscountValue
-              )
-            }
-            className="px-2 py-1 text-[10px] font-black bg-border/60 text-text-secondary hover:text-text-primary hover:bg-border transition-colors"
-          >
-            {activeSession.invoiceDiscountType === 'percentage' ? '%' : 'Rs'}
-          </button>
+        {/* Subtotal */}
+        <div className="flex items-center gap-1.5 text-xs text-text-muted shrink-0 self-end sm:self-center">
+          <span className="text-[10px] uppercase font-bold tracking-wider">Subtotal:</span>
+          <span className="font-bold text-text-primary tabular-nums">Rs {subtotal.toLocaleString()}</span>
         </div>
       </div>
-
-      {/* Applied Discount Indicator */}
-      {invoiceDiscountAmount > 0 && (
-        <div className="flex justify-between items-center text-xs font-bold text-danger tabular-nums">
-          <span className="text-[10px] uppercase tracking-wider">Discount Deducted</span>
-          <span>- Rs {invoiceDiscountAmount.toLocaleString()}</span>
-        </div>
-      )}
 
       {/* Total Due Row: High Visual Dominance */}
-      <div className="flex justify-between items-center pt-1">
+      <div className="flex justify-between items-center pt-0.5">
         <div className="flex flex-col">
           <span className="text-xs font-black uppercase tracking-widest text-text-secondary">
             {grandTotal < 0 ? 'Refund Due' : 'Total Due'}
@@ -354,7 +355,7 @@ export const CartSummary: React.FC = () => {
           </span>
         </div>
 
-        <div className={`flex items-baseline ${grandTotal < 0 ? 'text-danger' : 'text-primary'}`}>
+        <div className={`flex items-baseline ${grandTotal < 0 ? 'text-danger' : 'text-emerald-600 dark:text-emerald-400'}`}>
           <span className="text-sm mr-1 text-text-muted font-bold">Rs</span>
           {isEditingTotal ? (
             <input
@@ -402,10 +403,10 @@ export const CartSummary: React.FC = () => {
           onClick={handleClearCart}
           disabled={isCartEmpty || isProcessing}
           title="Clear Cart (Ctrl+Delete)"
-          className="col-span-3 h-11 flex items-center justify-center gap-1.5 rounded-xl border border-border bg-surface-hover/60 text-danger hover:bg-danger/10 hover:border-danger/30 transition-all disabled:opacity-disabled shadow-xs"
+          className="col-span-3 h-11 flex items-center justify-center gap-1.5 rounded-xl border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-all disabled:opacity-disabled shadow-xs"
         >
           <Trash2 className="h-4 w-4" />
-          <span className="text-xs font-bold hidden sm:inline">Clear</span>
+          <span className="text-xs font-bold hidden sm:inline">Clear Cart</span>
         </button>
 
         {/* Quick Cash Sale Button */}
@@ -414,10 +415,10 @@ export const CartSummary: React.FC = () => {
           onClick={handleCashSale}
           disabled={isCartEmpty || isProcessing}
           title="Quick Cash Sale (Ctrl+S)"
-          className="col-span-4 h-11 flex items-center justify-center gap-1.5 rounded-xl border border-secondary/40 bg-secondary/10 text-secondary hover:bg-secondary/20 transition-all shadow-xs disabled:opacity-disabled"
+          className="col-span-4 h-11 flex items-center justify-center gap-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all shadow-xs disabled:opacity-disabled"
         >
           <Banknote className="h-4 w-4" />
-          <span className="text-xs font-black uppercase tracking-wider">Sale</span>
+          <span className="text-xs font-black uppercase tracking-wider">SALE</span>
         </button>
 
         {/* Pay & Print Button */}
@@ -426,10 +427,65 @@ export const CartSummary: React.FC = () => {
           onClick={handlePayAndPrint}
           disabled={isCartEmpty || isProcessing}
           title="Pay & Print / Split Tender (Ctrl+P)"
-          className="col-span-5 h-11 flex items-center justify-center gap-1.5 rounded-xl bg-primary text-white hover:bg-primary-hover active:bg-primary-active transition-all shadow-sm hover:shadow disabled:opacity-disabled"
+          className="col-span-5 h-11 flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white transition-all shadow-sm hover:shadow disabled:opacity-disabled font-black"
         >
           <Printer className="h-4 w-4" />
-          <span className="text-xs font-black uppercase tracking-wider">Pay & Print</span>
+          <span className="text-xs font-black uppercase tracking-wider">PAY & PRINT (F12)</span>
+        </button>
+      </div>
+
+      {/* Extra Action Buttons Row (Directly below SALE / PAY & PRINT) */}
+      <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border/60">
+        {/* 1. Cash Return */}
+        <button
+          type="button"
+          onClick={() => {
+            if (activeSession.returnedItems && activeSession.returnedItems.length > 0) {
+              handleCashReturn();
+            } else {
+              toast('Add items into return cart first or load an invoice to process Cash Return.', { icon: 'ℹ️' });
+            }
+          }}
+          className="h-9 px-2 rounded-xl bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
+          title="Cash Return / Refund"
+        >
+          <Banknote className="h-3.5 w-3.5" />
+          <span className="truncate">Cash Return</span>
+        </button>
+
+        {/* 2. Product Replace */}
+        <button
+          type="button"
+          onClick={() => {
+            setSessionMode(activeSession.mode === 'replace' ? 'normal' : 'replace');
+            toast.success(
+              activeSession.mode === 'replace' ? 'Standard Sale Mode' : 'Product Replace Mode Active',
+              { icon: '🔁' }
+            );
+          }}
+          className={`h-9 px-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 ${
+            activeSession.mode === 'replace'
+              ? 'bg-indigo-700 text-white ring-2 ring-indigo-400'
+              : 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white'
+          }`}
+          title="Exchange / Replace Product"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          <span className="truncate">Product Replace</span>
+        </button>
+
+        {/* 3. Return by Invoice */}
+        <button
+          type="button"
+          onClick={() => {
+            const ev = new CustomEvent('pos:open-invoice-lookup');
+            window.dispatchEvent(ev);
+          }}
+          className="h-9 px-2 rounded-xl bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
+          title="Lookup Past Invoice for Return"
+        >
+          <Tag className="h-3.5 w-3.5" />
+          <span className="truncate">Return by Invoice</span>
         </button>
       </div>
 

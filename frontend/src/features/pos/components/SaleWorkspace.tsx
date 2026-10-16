@@ -4,6 +4,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { CategoryFilterBar } from './CategoryFilterBar';
 import { ProductCardGrid } from './ProductCardGrid';
 import { CartPanel } from './CartPanel';
+import { PosCustomerLedgerPanel } from './PosCustomerLedgerPanel';
+import { InvoiceLookupModal } from './modals/InvoiceLookupModal';
 import { useInventoryStore } from '@/features/inventory/core/inventory.store';
 import { usePosStore } from '../store/usePosStore';
 import { DBInventory } from '@/types/db.types';
@@ -12,15 +14,32 @@ import { useOrganizationStore } from '@/store/useOrganizationStore';
 import toast from 'react-hot-toast';
 
 export const SaleWorkspace: React.FC = () => {
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [isInvoiceLookupOpen, setInvoiceLookupOpen] = useState(false);
+  const [isSaleSuccess, setIsSaleSuccess] = useState(false);
 
   const activeShopId = useOrganizationStore((s) => s.activeShop?._id || s.activeShopId);
   const products = useInventoryStore((s) => s.products);
-  const status = useInventoryStore((s) => s.status);
   const fetchProducts = useInventoryStore((s) => s.fetchProducts);
   const addToCart = usePosStore((s) => s.addToCart);
   const activeSession = usePosStore((s) => s.getActiveSession());
   const isReturnMode = activeSession?.mode === 'replace';
+
+  // Listen for custom event to open invoice lookup from extra actions toolbar
+  useEffect(() => {
+    const handleOpenLookup = () => setInvoiceLookupOpen(true);
+    window.addEventListener('pos:open-invoice-lookup', handleOpenLookup);
+    return () => window.removeEventListener('pos:open-invoice-lookup', handleOpenLookup);
+  }, []);
+
+  // Listen for sale completion to trigger green animated border
+  useEffect(() => {
+    const handleSaleDone = () => {
+      setIsSaleSuccess(true);
+      setTimeout(() => setIsSaleSuccess(false), 3500);
+    };
+    window.addEventListener('pos:sale-completed', handleSaleDone);
+    return () => window.removeEventListener('pos:sale-completed', handleSaleDone);
+  }, []);
 
   // Reload inventory on initial mount and when activeShopId changes
   useEffect(() => {
@@ -76,30 +95,27 @@ export const SaleWorkspace: React.FC = () => {
   useBarcodeScanner({ onScan: handleScanComplete });
 
   return (
-    <main className="flex-1 flex flex-col min-h-0 bg-background overflow-hidden p-2 sm:p-2.5 gap-2 select-none">
-      {/* Main Dual-Column Content */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-2 sm:gap-2.5 min-h-0 overflow-hidden">
-        {/* Left Side: Full-Width Product Catalog (7 cols on lg, 8 cols on xl) */}
-        <div className="lg:col-span-7 xl:col-span-8 flex flex-col min-h-0 overflow-hidden rounded-xl border border-border bg-surface shadow-xs">
-          {/* Category Filter Pills Header */}
-          <div className="p-2 border-b border-border/70 shrink-0 bg-surface-hover/20">
-            <CategoryFilterBar
-              selectedCategoryId={selectedCategoryId}
-              onSelectCategory={setSelectedCategoryId}
-            />
-          </div>
-
-          {/* Product Grid Area */}
-          <div className="flex-1 min-h-0 overflow-hidden p-1">
-            <ProductCardGrid selectedCategoryId={selectedCategoryId} />
-          </div>
+    <main className="flex-1 flex flex-col min-h-0 bg-background overflow-hidden p-2 sm:p-3 gap-2 select-none">
+      {/* Main Dual-Column Content: Left 2/3 (8 cols) & Right 1/3 (4 cols) */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-hidden">
+        {/* Left 2/3: Full-Width POS Cart Workspace */}
+        <div className="lg:col-span-8 flex flex-col min-h-0 overflow-hidden">
+          <CartPanel isSaleSuccess={isSaleSuccess} />
         </div>
 
-        {/* Right Side: Unified Active Sale & Checkout (5 cols on lg, 4 cols on xl) */}
-        <div className="lg:col-span-5 xl:col-span-4 flex flex-col min-h-0 overflow-hidden">
-          <CartPanel />
+        {/* Right 1/3: Customer & Ledger Panel */}
+        <div className="lg:col-span-4 flex flex-col min-h-0 overflow-hidden">
+          <PosCustomerLedgerPanel isSaleSuccess={isSaleSuccess} />
         </div>
       </div>
+
+      {/* Invoice Lookup Modal for Return by Invoice action */}
+      {isInvoiceLookupOpen && (
+        <InvoiceLookupModal
+          isOpen={isInvoiceLookupOpen}
+          onClose={() => setInvoiceLookupOpen(false)}
+        />
+      )}
     </main>
   );
 };

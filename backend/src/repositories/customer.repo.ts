@@ -572,11 +572,19 @@ export async function getCustomerLedger(
  */
 export async function getCustomerStatement(
   pool: Pool,
-  customerId: string
+  customerId: string,
+  branchId?: string | null
 ): Promise<CustomerStatementDto> {
   const customer = await getCustomerById(pool, customerId);
   if (!customer) {
     throw new CustomerRepoError(`Customer '${customerId}' not found`, 404);
+  }
+
+  const queryParams: unknown[] = [customerId];
+  let branchFilterSql = '';
+  if (branchId && branchId.trim()) {
+    queryParams.push(branchId.trim());
+    branchFilterSql = ` AND COALESCE(s.branch_id, cm.branch_id, u.branch_id) = $2`;
   }
 
   const result = await pool.query(
@@ -590,9 +598,9 @@ export async function getCustomerStatement(
      LEFT JOIN cash_movements cm ON cm.reference_id = cle.reference_id OR cm.reference_number = cle.reference_number
      LEFT JOIN users u ON u.id = cle.performed_by
      LEFT JOIN branches b ON b.id = COALESCE(s.branch_id, cm.branch_id, u.branch_id)
-     WHERE cle.customer_id = $1
+     WHERE cle.customer_id = $1${branchFilterSql}
      ORDER BY cle.created_at ASC, cle.id ASC`,
-    [customerId]
+    queryParams
   );
 
   const entries: CustomerStatementRowDto[] = result.rows.map(
