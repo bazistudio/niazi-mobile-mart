@@ -18,6 +18,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Pool } from 'pg';
 
 import { buildAuthMiddleware, authorizePermission, authorizeProductMutation, isAdmin, isOrgAdmin, canAccessBranch, RequestIdentity, CENTRAL_WAREHOUSE_ID } from '../auth';
+import { writeChangeLogEntry } from '../repositories/change_log.repo';
 import {
   createProduct,
   createProductWithInitialStock,
@@ -227,6 +228,27 @@ export function createProductRouter(pool: Pool): Router {
       }
 
       res.status(201).json(product);
+      // Write change_log + pg_notify (best-effort, after commit)
+      setImmediate(() => {
+        const orgId = identity.organization_id;
+        const bId = (product as any).branch_id ?? branchId;
+        if (orgId && bId) {
+          pool.connect().then(cl => {
+            cl.query('BEGIN')
+              .then(() => writeChangeLogEntry(cl, {
+                organizationId: orgId,
+                branchId: bId,
+                eventType: 'PRODUCT_CREATED',
+                entityType: 'product',
+                entityId: (product as any).id ?? id,
+                payloadStr: JSON.stringify({ product_id: (product as any).id ?? id, branch_id: bId }),
+              }))
+              .then(() => cl.query('COMMIT'))
+              .catch(() => cl.query('ROLLBACK').catch(() => {}))
+              .finally(() => cl.release());
+          }).catch(() => {});
+        }
+      });
     } catch (err) {
       sendError(req, res, err);
     }
@@ -251,6 +273,27 @@ export function createProductRouter(pool: Pool): Router {
       const dto = req.body as UpdateProductDto;
       const product = await updateProduct(pool, id, dto);
       res.status(200).json(product);
+      // Write change_log + pg_notify (best-effort, after commit)
+      setImmediate(() => {
+        const orgId = identity.organization_id;
+        const bId = identity.branch_id;
+        if (orgId && bId) {
+          pool.connect().then(cl => {
+            cl.query('BEGIN')
+              .then(() => writeChangeLogEntry(cl, {
+                organizationId: orgId,
+                branchId: bId,
+                eventType: 'PRODUCT_UPDATED',
+                entityType: 'product',
+                entityId: id,
+                payloadStr: JSON.stringify({ product_id: id }),
+              }))
+              .then(() => cl.query('COMMIT'))
+              .catch(() => cl.query('ROLLBACK').catch(() => {}))
+              .finally(() => cl.release());
+          }).catch(() => {});
+        }
+      });
     } catch (err) {
       sendError(req, res, err);
     }
@@ -274,6 +317,27 @@ export function createProductRouter(pool: Pool): Router {
       const id = req.params['id'] as string;
       await deactivateProduct(pool, id);
       res.status(200).json({ message: 'Product deactivated' });
+      // Write change_log + pg_notify (best-effort, after commit)
+      setImmediate(() => {
+        const orgId = identity.organization_id;
+        const bId = identity.branch_id;
+        if (orgId && bId) {
+          pool.connect().then(cl => {
+            cl.query('BEGIN')
+              .then(() => writeChangeLogEntry(cl, {
+                organizationId: orgId,
+                branchId: bId,
+                eventType: 'PRODUCT_DEACTIVATED',
+                entityType: 'product',
+                entityId: id,
+                payloadStr: JSON.stringify({ product_id: id }),
+              }))
+              .then(() => cl.query('COMMIT'))
+              .catch(() => cl.query('ROLLBACK').catch(() => {}))
+              .finally(() => cl.release());
+          }).catch(() => {});
+        }
+      });
     } catch (err) {
       sendError(req, res, err);
     }

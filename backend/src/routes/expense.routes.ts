@@ -41,6 +41,7 @@ import { Pool } from 'pg';
 import { buildAuthMiddleware, authorizePermission, isOrgAdmin } from '../auth';
 import { ExpenseService, ExpenseServiceError } from '../services/expense.service';
 import type { ExpenseFilterDto } from '../services/expense.service';
+import { writeChangeLogEntry } from '../repositories/change_log.repo';
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -304,6 +305,27 @@ export function buildExpenseRouter(pool: Pool): Router {
         identity.user_id
       );
       res.status(201).json(expense);
+
+      setImmediate(() => {
+        const orgId = identity.organization_id;
+        const bId = expense.branch_id || identity.branch_id;
+        if (orgId && bId) {
+          pool.connect().then(cl => {
+            cl.query('BEGIN')
+              .then(() => writeChangeLogEntry(cl, {
+                organizationId: orgId,
+                branchId: bId,
+                eventType: 'EXPENSE_CREATED',
+                entityType: 'expense',
+                entityId: expense.id,
+                payloadStr: JSON.stringify({ expense_id: expense.id, amount: expense.amount, branch_id: bId }),
+              }))
+              .then(() => cl.query('COMMIT'))
+              .catch(() => cl.query('ROLLBACK').catch(() => {}))
+              .finally(() => cl.release());
+          }).catch(() => {});
+        }
+      });
     } catch (err: unknown) {
       handleError(res, err, 'create_expense');
     }
@@ -366,6 +388,27 @@ export function buildExpenseRouter(pool: Pool): Router {
 
       const cancelled = await service.cancelExpense(id, identity.user_id);
       res.status(200).json(cancelled);
+
+      setImmediate(() => {
+        const orgId = identity.organization_id;
+        const bId = cancelled.branch_id || identity.branch_id;
+        if (orgId && bId) {
+          pool.connect().then(cl => {
+            cl.query('BEGIN')
+              .then(() => writeChangeLogEntry(cl, {
+                organizationId: orgId,
+                branchId: bId,
+                eventType: 'EXPENSE_CANCELLED',
+                entityType: 'expense',
+                entityId: cancelled.id,
+                payloadStr: JSON.stringify({ expense_id: cancelled.id, branch_id: bId }),
+              }))
+              .then(() => cl.query('COMMIT'))
+              .catch(() => cl.query('ROLLBACK').catch(() => {}))
+              .finally(() => cl.release());
+          }).catch(() => {});
+        }
+      });
     } catch (err: unknown) {
       handleError(res, err, 'cancel_expense');
     }

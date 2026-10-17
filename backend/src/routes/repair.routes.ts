@@ -24,6 +24,7 @@ import {
   RepairRepoError,
   RepairJobFilters,
 } from '../repositories/repair.repo';
+import { writeChangeLogEntry } from '../repositories/change_log.repo';
 
 export function buildRepairRouter(pool: Pool): Router {
   const router = Router();
@@ -133,6 +134,28 @@ export function buildRepairRouter(pool: Pool): Router {
 
       const job = await createRepairJob(pool, dto, identity.user_id);
       res.status(201).json(job);
+
+      setImmediate(() => {
+        const orgId = identity.organization_id;
+        const bId = (job as any)?.branch_id || dto.branch_id || identity.branch_id;
+        const jobId = (job as any)?.id || (job as any)?.job_id;
+        if (orgId && bId && jobId) {
+          pool.connect().then(cl => {
+            cl.query('BEGIN')
+              .then(() => writeChangeLogEntry(cl, {
+                organizationId: orgId,
+                branchId: bId,
+                eventType: 'REPAIR_CREATED',
+                entityType: 'repair',
+                entityId: jobId,
+                payloadStr: JSON.stringify({ repair_id: jobId, branch_id: bId }),
+              }))
+              .then(() => cl.query('COMMIT'))
+              .catch(() => cl.query('ROLLBACK').catch(() => {}))
+              .finally(() => cl.release());
+          }).catch(() => {});
+        }
+      });
     } catch (err: any) {
       if (err instanceof RepairRepoError) {
         res.status(err.statusCode).json({ error: err.message });
@@ -174,6 +197,28 @@ export function buildRepairRouter(pool: Pool): Router {
 
       const job = await updateRepairStatus(pool, id, { status: status.trim(), note }, identity.user_id);
       res.status(200).json(job);
+
+      setImmediate(() => {
+        const orgId = identity.organization_id;
+        const bId = (job as any)?.branch_id || (existingJob as any)?.branch_id || identity.branch_id;
+        const jobId = (job as any)?.id || (job as any)?.job_id || id;
+        if (orgId && bId && jobId) {
+          pool.connect().then(cl => {
+            cl.query('BEGIN')
+              .then(() => writeChangeLogEntry(cl, {
+                organizationId: orgId,
+                branchId: bId,
+                eventType: 'REPAIR_UPDATED',
+                entityType: 'repair',
+                entityId: jobId,
+                payloadStr: JSON.stringify({ repair_id: jobId, branch_id: bId, status }),
+              }))
+              .then(() => cl.query('COMMIT'))
+              .catch(() => cl.query('ROLLBACK').catch(() => {}))
+              .finally(() => cl.release());
+          }).catch(() => {});
+        }
+      });
     } catch (err: any) {
       if (err instanceof RepairRepoError) {
         res.status(err.statusCode).json({ error: err.message });
@@ -218,6 +263,28 @@ export function buildRepairRouter(pool: Pool): Router {
 
       const job = await addRepairPart(pool, id, dto, identity.user_id);
       res.status(200).json(job);
+
+      setImmediate(() => {
+        const orgId = identity.organization_id;
+        const bId = (job as any)?.branch_id || (existingJob as any)?.branch_id || identity.branch_id;
+        const jobId = (job as any)?.id || (job as any)?.job_id || id;
+        if (orgId && bId && jobId) {
+          pool.connect().then(cl => {
+            cl.query('BEGIN')
+              .then(() => writeChangeLogEntry(cl, {
+                organizationId: orgId,
+                branchId: bId,
+                eventType: 'REPAIR_UPDATED',
+                entityType: 'repair',
+                entityId: jobId,
+                payloadStr: JSON.stringify({ repair_id: jobId, branch_id: bId }),
+              }))
+              .then(() => cl.query('COMMIT'))
+              .catch(() => cl.query('ROLLBACK').catch(() => {}))
+              .finally(() => cl.release());
+          }).catch(() => {});
+        }
+      });
     } catch (err: any) {
       if (err instanceof RepairRepoError) {
         res.status(err.statusCode).json({ error: err.message });
@@ -259,6 +326,28 @@ export function buildRepairRouter(pool: Pool): Router {
 
       const job = await addRepairPayment(pool, id, dto, identity.user_id);
       res.status(200).json(job);
+
+      setImmediate(() => {
+        const orgId = identity.organization_id;
+        const bId = (job as any)?.branch_id || (existingJob as any)?.branch_id || identity.branch_id;
+        const jobId = (job as any)?.id || (job as any)?.job_id || id;
+        if (orgId && bId && jobId) {
+          pool.connect().then(cl => {
+            cl.query('BEGIN')
+              .then(() => writeChangeLogEntry(cl, {
+                organizationId: orgId,
+                branchId: bId,
+                eventType: 'REPAIR_UPDATED',
+                entityType: 'repair',
+                entityId: jobId,
+                payloadStr: JSON.stringify({ repair_id: jobId, branch_id: bId }),
+              }))
+              .then(() => cl.query('COMMIT'))
+              .catch(() => cl.query('ROLLBACK').catch(() => {}))
+              .finally(() => cl.release());
+          }).catch(() => {});
+        }
+      });
     } catch (err: any) {
       if (err instanceof RepairRepoError) {
         res.status(err.statusCode).json({ error: err.message });

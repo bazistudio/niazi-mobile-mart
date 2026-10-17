@@ -24,6 +24,7 @@
 
 import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
+import { writeChangeLogEntry } from './change_log.repo';
 
 // ─── Error class (mirrors Rust AppError → HTTP mapping) ──────────────────────
 
@@ -874,6 +875,35 @@ export async function recordCustomerPayment(
           now,
         ]
       );
+    }
+
+    // Atomic change_log entry + pg_notify before COMMIT
+    try {
+      if (branchId) {
+        const orgRow = await client.query<{ organization_id: string }>(
+          'SELECT organization_id FROM branches WHERE id = $1',
+          [branchId]
+        );
+        const orgId = orgRow.rows[0]?.organization_id;
+        if (orgId) {
+          await writeChangeLogEntry(client, {
+            organizationId: orgId,
+            branchId,
+            eventType: 'PAYMENT_RECEIVED',
+            entityType: 'customer_payment',
+            entityId: entryId,
+            payloadStr: JSON.stringify({
+              customer_id: customerId,
+              amount: dto.amount,
+              payment_method: paymentMethod,
+              receipt_number: receiptNumber,
+              balance_after: balanceAfter,
+            }),
+          });
+        }
+      }
+    } catch (logErr) {
+      console.error('[customer.repo] Failed to write atomic change_log entry for payment:', logErr);
     }
 
     await client.query('COMMIT');

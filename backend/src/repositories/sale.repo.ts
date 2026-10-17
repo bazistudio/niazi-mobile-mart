@@ -7,6 +7,7 @@
 import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { createHash } from 'crypto';
+import { writeChangeLogEntry } from './change_log.repo';
 
 // ─── Domain Types ─────────────────────────────────────────────────────────────
 
@@ -981,15 +982,26 @@ export async function completeSale(
     // Only the winning transaction executes completeSaleTx() — writes sale, decrements stock, etc.
     result = await completeSaleTx(client, dto, userId, null, identityBranchId, callerIsAdmin);
 
-    // Insert the committed idempotency key INSIDE the same transaction before COMMIT
-    if (rawIdempotencyKey) {
-      const payloadHash = computePayloadHash(dto);
-      const targetBranchId = result.sale.branch_id;
-      await client.query(
-        `INSERT INTO sale_idempotency_keys (idempotency_key, branch_id, sale_id, payload_hash, created_at)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [rawIdempotencyKey, targetBranchId, result.sale.id, payloadHash, new Date().toISOString()]
+    // Step 16: Durable change_log record + pg_notify atomic with sale transaction
+    const targetBranchId = result.sale.branch_id;
+    try {
+      const orgRow = await client.query<{ organization_id: string }>(
+        'SELECT organization_id FROM branches WHERE id = $1',
+        [targetBranchId]
       );
+      const orgId = orgRow.rows[0]?.organization_id;
+      if (orgId) {
+        await writeChangeLogEntry(client, {
+          organizationId: orgId,
+          branchId: targetBranchId,
+          eventType: 'SALE_CREATED',
+          entityType: 'sale',
+          entityId: result.sale.id,
+          payloadStr: JSON.stringify({ sale_id: result.sale.id, branch_id: targetBranchId }),
+        });
+      }
+    } catch (logErr) {
+      console.error('[sale.repo] Failed to write atomic change_log entry for sale:', logErr);
     }
 
     await client.query('COMMIT');

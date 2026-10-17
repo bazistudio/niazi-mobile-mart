@@ -36,6 +36,7 @@
  */
 
 import express, { Request, Response, NextFunction } from 'express';
+import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { getPool } from './db';
@@ -88,6 +89,9 @@ import {
 } from './repositories/product.repo';
 import { transferStock, transferStockBatch, StockTransferRepoError } from './repositories/stock_transfer.repo';
 import { authMiddleware, buildAuthMiddleware, buildActiveUserMiddleware, isAdmin, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity, CENTRAL_WAREHOUSE_ID } from './auth';
+import { writeChangeLogEntry } from './repositories/change_log.repo';
+import { initWsServer } from './ws/wsServer';
+import { startPgListener } from './ws/pgListener';
 
 // --- (Main server function continues) ---
 
@@ -649,6 +653,28 @@ async function main(): Promise<void> {
           reference_id: referenceId,
         });
         res.status(200).json({ data: newStock, newStock });
+      // Write change_log + pg_notify (best-effort, after committed mutation)
+      setImmediate(() => {
+        const _orgId = identity.organization_id;
+        const _branchId = branchId.trim();
+        const _entityId = productId;
+        if (_orgId && _branchId && _entityId) {
+          pool.connect().then(cl => {
+            cl.query('BEGIN')
+              .then(() => writeChangeLogEntry(cl, {
+                organizationId: _orgId,
+                branchId: _branchId,
+                eventType: 'INVENTORY_OPERATION_RECORDED',
+                entityType: 'stock',
+                entityId: _entityId,
+                payloadStr: JSON.stringify({ product_id: _entityId, branch_id: _branchId }),
+              }))
+              .then(() => cl.query('COMMIT'))
+              .catch(() => cl.query('ROLLBACK').catch(() => {}))
+              .finally(() => cl.release());
+          }).catch(() => {});
+        }
+      });
       } catch (err: any) {
         const statusCode = err?.statusCode ?? 500;
         res.status(statusCode).json({ error: err.message || 'Failed to adjust stock' });
@@ -703,6 +729,28 @@ async function main(): Promise<void> {
           reference_id: referenceId,
         });
         res.status(200).json({ data: newStock, newStock });
+      // Write change_log + pg_notify (best-effort, after committed mutation)
+      setImmediate(() => {
+        const _orgId = identity.organization_id;
+        const _branchId = branchId.trim();
+        const _entityId = productId;
+        if (_orgId && _branchId && _entityId) {
+          pool.connect().then(cl => {
+            cl.query('BEGIN')
+              .then(() => writeChangeLogEntry(cl, {
+                organizationId: _orgId,
+                branchId: _branchId,
+                eventType: 'INVENTORY_OPERATION_RECORDED',
+                entityType: 'stock',
+                entityId: _entityId,
+                payloadStr: JSON.stringify({ product_id: _entityId, branch_id: _branchId }),
+              }))
+              .then(() => cl.query('COMMIT'))
+              .catch(() => cl.query('ROLLBACK').catch(() => {}))
+              .finally(() => cl.release());
+          }).catch(() => {});
+        }
+      });
       } catch (err: any) {
         const statusCode = err?.statusCode ?? 500;
         res.status(statusCode).json({ error: err.message || 'Failed to apply stock delta' });
@@ -780,6 +828,33 @@ async function main(): Promise<void> {
         }, identity.user_id);
 
         res.status(200).json(result);
+      // Write change_log + pg_notify (best-effort, after committed transfer)
+      setImmediate(() => {
+        const _orgId = identity.organization_id;
+        // Cross-branch transfer: notify org-wide (null branchId) so all branch subscribers can refresh
+        if (_orgId && result.product_id) {
+          const srcB = result.source_branch_id;
+          pool.connect().then(cl => {
+            cl.query('BEGIN')
+              .then(() => writeChangeLogEntry(cl, {
+                organizationId: _orgId,
+                branchId: srcB,
+                eventType: 'STOCK_TRANSFER_COMPLETED',
+                entityType: 'stock_transfer',
+                entityId: result.transfer_id,
+                payloadStr: JSON.stringify({
+                  transfer_id: result.transfer_id,
+                  product_id: result.product_id,
+                  source_branch_id: result.source_branch_id,
+                  destination_branch_id: result.destination_branch_id,
+                }),
+              }))
+              .then(() => cl.query('COMMIT'))
+              .catch(() => cl.query('ROLLBACK').catch(() => {}))
+              .finally(() => cl.release());
+          }).catch(() => {});
+        }
+      });
       } catch (err: any) {
         if (err instanceof StockTransferRepoError) {
           res.status(err.statusCode).json({ error: err.message });
@@ -852,6 +927,36 @@ async function main(): Promise<void> {
         }, identity.user_id);
 
         res.status(200).json(result);
+        // Write change_log + pg_notify (best-effort, after committed batch transfer)
+        setImmediate(() => {
+          const _orgId = identity.organization_id;
+          const srcBranch = result.source_branch_id;
+          const dstBranch = result.destination_branch_id;
+          if (_orgId && srcBranch && dstBranch) {
+            const batchId = result.batch_id;
+            const notifyBranch = (branchId: string) =>
+              pool.connect().then(cl => {
+                cl.query('BEGIN')
+                  .then(() => writeChangeLogEntry(cl, {
+                    organizationId: _orgId,
+                    branchId,
+                    eventType: 'STOCK_TRANSFER_COMPLETED',
+                    entityType: 'stock_transfer_batch',
+                    entityId: batchId,
+                    payloadStr: JSON.stringify({
+                      batch_id: batchId,
+                      source_branch_id: srcBranch,
+                      destination_branch_id: dstBranch,
+                    }),
+                  }))
+                  .then(() => cl.query('COMMIT'))
+                  .catch(() => cl.query('ROLLBACK').catch(() => {}))
+                  .finally(() => cl.release());
+              }).catch(() => {});
+            notifyBranch(srcBranch);
+            if (dstBranch !== srcBranch) notifyBranch(dstBranch);
+          }
+        });
       } catch (err: any) {
         if (err instanceof StockTransferRepoError) {
           res.status(err.statusCode).json({ error: err.message });
@@ -927,6 +1032,27 @@ async function main(): Promise<void> {
 
         const result = await receiveStock(pool, dto, identity.user_id ?? null);
         res.status(200).json(result);
+        // Write change_log + pg_notify (best-effort, after committed receive)
+        setImmediate(() => {
+          const _orgId = identity.organization_id;
+          const _branchId = dto.branch_id;
+          if (_orgId && _branchId && dto.product_id) {
+            pool.connect().then(cl => {
+              cl.query('BEGIN')
+                .then(() => writeChangeLogEntry(cl, {
+                  organizationId: _orgId,
+                  branchId: _branchId,
+                  eventType: 'INVENTORY_OPERATION_RECORDED',
+                  entityType: 'stock',
+                  entityId: dto.product_id,
+                  payloadStr: JSON.stringify({ product_id: dto.product_id, branch_id: _branchId }),
+                }))
+                .then(() => cl.query('COMMIT'))
+                .catch(() => cl.query('ROLLBACK').catch(() => {}))
+                .finally(() => cl.release());
+            }).catch(() => {});
+          }
+        });
       } catch (err: any) {
         if (err && typeof err.statusCode === 'number') {
           res.status(err.statusCode).json({ error: err.message }); return;
@@ -1007,11 +1133,26 @@ async function main(): Promise<void> {
     res.status(404).json({ error: 'Not Found', path: req.originalUrl });
   });
 
+  const httpServer = http.createServer(app);
+
   await new Promise<void>((resolve) => {
-    app.listen(port, () => resolve());
+    httpServer.listen(port, () => resolve());
   });
 
   console.log(`[server] Niazi Standalone TypeScript Backend listening on port ${port}`);
+
+  // Attach WebSocket server (must be after httpServer.listen)
+  initWsServer(httpServer);
+
+  // Start PostgreSQL LISTEN/NOTIFY listener for cross-instance broadcast
+  const dbUrl = process.env['DATABASE_URL'];
+  if (dbUrl) {
+    startPgListener(dbUrl).catch((err) => {
+      console.error('[server] Failed to start PG listener:', err);
+    });
+  } else {
+    console.warn('[server] DATABASE_URL not set — real-time WebSocket events disabled');
+  }
 }
 
 main().catch((err) => {

@@ -16,7 +16,8 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.13.3",
-    "uuid": "^11.0.3"
+    "uuid": "^11.0.3",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
@@ -24,6 +25,7 @@
     "@types/node": "^22.10.5",
     "@types/pg": "^8.11.10",
     "@types/uuid": "^10.0.0",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "@types/ws": "^8.5.13"
   }
 }

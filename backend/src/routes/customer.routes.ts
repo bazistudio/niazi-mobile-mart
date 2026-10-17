@@ -21,6 +21,7 @@ import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
 import { buildAuthMiddleware, authorizePermission, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
+import { writeChangeLogEntry } from '../repositories/change_log.repo';
 import {
   CustomerRepoError,
   CustomerFilter,
@@ -152,6 +153,27 @@ export function createCustomerRouter(pool: Pool): Router {
 
       const customer = await createCustomer(pool, dto);
       res.status(201).json(customer);
+
+      setImmediate(() => {
+        const orgId = identity.organization_id;
+        const branchId = identity.branch_id;
+        if (orgId && branchId) {
+          pool.connect().then(cl => {
+            cl.query('BEGIN')
+              .then(() => writeChangeLogEntry(cl, {
+                organizationId: orgId,
+                branchId,
+                eventType: 'CUSTOMER_CREATED',
+                entityType: 'customer',
+                entityId: customer.id,
+                payloadStr: JSON.stringify({ customer_id: customer.id, name: customer.name }),
+              }))
+              .then(() => cl.query('COMMIT'))
+              .catch(() => cl.query('ROLLBACK').catch(() => {}))
+              .finally(() => cl.release());
+          }).catch(() => {});
+        }
+      });
     } catch (err) {
       // Rust: Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": "CREATE_FAILED", "message": e})))
       if (err instanceof CustomerRepoError) {
@@ -184,6 +206,27 @@ export function createCustomerRouter(pool: Pool): Router {
 
       const updated = await updateCustomer(pool, id, dto);
       res.status(200).json(updated);
+
+      setImmediate(() => {
+        const orgId = identity.organization_id;
+        const branchId = identity.branch_id;
+        if (orgId && branchId) {
+          pool.connect().then(cl => {
+            cl.query('BEGIN')
+              .then(() => writeChangeLogEntry(cl, {
+                organizationId: orgId,
+                branchId,
+                eventType: 'CUSTOMER_UPDATED',
+                entityType: 'customer',
+                entityId: updated.id,
+                payloadStr: JSON.stringify({ customer_id: updated.id, name: updated.name }),
+              }))
+              .then(() => cl.query('COMMIT'))
+              .catch(() => cl.query('ROLLBACK').catch(() => {}))
+              .finally(() => cl.release());
+          }).catch(() => {});
+        }
+      });
     } catch (err) {
       sendError(req, res, err);
     }
@@ -203,6 +246,27 @@ export function createCustomerRouter(pool: Pool): Router {
       const id = req.params['id'] as string;
       await deactivateCustomer(pool, id);
       res.status(200).json({ success: true, message: 'Customer deactivated successfully' });
+
+      setImmediate(() => {
+        const orgId = identity.organization_id;
+        const branchId = identity.branch_id;
+        if (orgId && branchId) {
+          pool.connect().then(cl => {
+            cl.query('BEGIN')
+              .then(() => writeChangeLogEntry(cl, {
+                organizationId: orgId,
+                branchId,
+                eventType: 'CUSTOMER_UPDATED',
+                entityType: 'customer',
+                entityId: id,
+                payloadStr: JSON.stringify({ customer_id: id, is_active: false }),
+              }))
+              .then(() => cl.query('COMMIT'))
+              .catch(() => cl.query('ROLLBACK').catch(() => {}))
+              .finally(() => cl.release());
+          }).catch(() => {});
+        }
+      });
     } catch (err) {
       sendError(req, res, err);
     }

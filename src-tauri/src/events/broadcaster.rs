@@ -6,6 +6,7 @@ pub mod event_names {
     pub const STOCK_UPDATED: &str = "domain:stock_updated";
     pub const ORDER_CREATED: &str = "domain:order_created";
     pub const REPAIR_STATUS_CHANGED: &str = "domain:repair_status_changed";
+    pub const SYNC_PULL_COMPLETED: &str = "domain:sync_pull_completed";
 }
 
 /// Dispatches a structured domain event across the Tauri WebView event bus

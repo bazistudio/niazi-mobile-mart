@@ -4,6 +4,7 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { Topbar } from '@/components/layout/Topbar';
 import { DashboardShell } from '@/components/layout/DashboardShell';
 import { useDashboardShortcuts } from '@/hooks/useDashboardShortcuts';
+import { useSyncEngine } from '@/features/realtime-sync/hooks/useSyncEngine';
 
 interface OrganizationDashboardLayoutProps {
   children?: React.ReactNode;
@@ -12,6 +13,9 @@ interface OrganizationDashboardLayoutProps {
 export const OrganizationDashboardLayout = ({ children }: OrganizationDashboardLayoutProps) => {
   // Initialize Global Dashboard Shortcuts
   useDashboardShortcuts();
+
+  // Initialize Real-time WebSocket Synchronization Engine
+  useSyncEngine();
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
