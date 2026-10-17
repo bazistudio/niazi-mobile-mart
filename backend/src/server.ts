@@ -882,6 +882,10 @@ async function main(): Promise<void> {
         const productId    = (req.body?.product_id  || req.body?.productId)  as string | undefined;
         const qtyReceived  = Number(req.body?.quantity_received ?? req.body?.quantityReceived ?? 0);
         const unitCost     = Number(req.body?.unit_cost         ?? req.body?.unitCost         ?? 0);
+        const newSalePriceRaw = req.body?.new_sale_price ?? req.body?.newSalePrice;
+        const newSalePrice = newSalePriceRaw !== undefined && newSalePriceRaw !== null
+          ? Number(newSalePriceRaw)
+          : null;
         const supplierId   = (req.body?.supplier_id  || req.body?.supplierId  || null) as string | null;
         const notes        = (req.body?.notes || null) as string | null;
 
@@ -907,12 +911,16 @@ async function main(): Promise<void> {
         if (unitCost < 0 || !Number.isFinite(unitCost)) {
           res.status(400).json({ error: 'unit_cost cannot be negative' }); return;
         }
+        if (newSalePrice !== null && (newSalePrice < 0 || !Number.isFinite(newSalePrice))) {
+          res.status(400).json({ error: 'new_sale_price cannot be negative' }); return;
+        }
 
         const dto: ReceiveStockDto = {
           product_id:        productId.trim(),
           branch_id:         branchId.trim(),
           quantity_received: qtyReceived,
           unit_cost:         Math.round(unitCost),
+          new_sale_price:    newSalePrice !== null ? Math.round(newSalePrice) : null,
           supplier_id:       supplierId,
           notes:             notes,
         };

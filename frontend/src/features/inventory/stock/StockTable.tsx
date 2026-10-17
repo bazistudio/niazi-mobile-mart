@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ArrowUpDown, ArrowUp, ArrowDown, History } from 'lucide-react';
+import { ArrowUpDown, ArrowUp, ArrowDown, History, Plus } from 'lucide-react';
 import { InventoryProduct, SortField, SortDirection, InventoryAdjustmentType } from '@/features/inventory/types';
 import { StockStatus } from './stock.types';
 import { selectSortConfig, selectSetSort, selectFetchProducts } from '@/features/inventory/core/inventory.selectors';
 import { inventoryApi } from '../api/inventory.api';
 import { usePermissions } from '@/lib/auth/usePermissions';
 import { PERMISSIONS } from '@/constants/permissions';
+import { QuickStockAdjustModal } from '../components/QuickStockAdjustModal';
 
 interface StockTableProps {
   products: InventoryProduct[];
@@ -32,6 +33,7 @@ export const StockTable = ({ products, isLoading }: StockTableProps) => {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<string>('');
+  const [restockProduct, setRestockProduct] = useState<InventoryProduct | null>(null);
 
   const handleSort = (field: SortField) => {
     setSort({
@@ -91,7 +93,7 @@ export const StockTable = ({ products, isLoading }: StockTableProps) => {
     { label: 'SKU' },
     { label: 'Current Stock', field: 'stock' },
     { label: 'Status' },
-    { label: 'History' },
+    { label: 'Actions' },
   ];
 
   if (products.length === 0 && !isLoading) {
@@ -104,97 +106,126 @@ export const StockTable = ({ products, isLoading }: StockTableProps) => {
   }
 
   return (
-    <div className="overflow-x-auto relative">
-      {isLoading && (
-        <div className="absolute inset-0 z-10 bg-white/50 dark:bg-gray-900/50 flex items-start justify-center pt-8 pointer-events-none">
-          <div className="h-6 w-6 rounded-full border-2 border-[#006970] border-t-transparent animate-spin"></div>
-        </div>
-      )}
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-100 dark:border-gray-800">
-            {columns.map((col) => (
-              <th
-                key={col.label}
-                className={`px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide whitespace-nowrap ${col.field ? 'cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200' : ''}`}
-                onClick={() => col.field && handleSort(col.field)}
-              >
-                <span className="flex items-center gap-1.5">
-                  {col.label}
-                  {col.field && <SortIcon field={col.field} activeField={sort.field} direction={sort.direction} />}
-                </span>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
-          {products.map((product) => (
-            <tr
-              key={product.id}
-              className={`group transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/40 ${rowBg(product)}`}
-            >
-              <td className="px-4 py-1.5 font-medium text-gray-900 dark:text-white">
-                {product.name}
-              </td>
-              <td className="px-4 py-1.5">
-                <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-gray-600 dark:text-gray-400">
-                  {product.sku}
-                </code>
-              </td>
-              <td className="px-4 py-1.5">
-                {editingId === product.id && canAdjustStock && isOrgAdmin ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min="0"
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      onBlur={() => commitEdit(product.id)}
-                      onKeyDown={(e) => handleKeyDown(e, product.id)}
-                      autoFocus
-                      className="w-20 rounded border border-[#006970] bg-white dark:bg-gray-800 px-2 py-1 text-sm font-semibold text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#006970]"
-                    />
-                    <span className="text-xs text-gray-500">Press Enter</span>
-                  </div>
-                ) : (
-                  <span
-                    className={`font-semibold transition-colors inline-block px-2 py-1 border border-transparent rounded ${
-                      canAdjustStock && isOrgAdmin ? 'cursor-pointer hover:text-[#006970] dark:hover:text-[#00B4BB] hover:border-[#006970]/30' : ''
-                    } ${
-                      product.status === StockStatus.OUT_OF_STOCK ? 'text-red-600 dark:text-red-400' :
-                      product.status === StockStatus.LOW_STOCK ? 'text-amber-600 dark:text-amber-400' :
-                      'text-gray-900 dark:text-white'
-                    }`}
-                    onClick={() => (canAdjustStock && isOrgAdmin ? startEdit(product) : undefined)}
-                    title={canAdjustStock && isOrgAdmin ? 'Click to adjust stock' : undefined}
-                  >
-                    {product.stock} {product.unit}
-                  </span>
-                )}
-              </td>
-              <td className="px-4 py-1.5">
-                <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium ${
-                    product.status === StockStatus.HEALTHY ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400' :
-                    product.status === StockStatus.LOW_STOCK ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400' :
-                    'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'
-                  }`}>
-                  {product.status.replace('_', ' ')}
-                </span>
-              </td>
-              <td className="px-4 py-1.5">
-                <button
-                  className="p-1.5 text-gray-400 hover:text-[#006970] hover:bg-[#006970]/10 rounded-lg transition-colors"
-                  title="View Stock History"
-                  onClick={() => alert('Stock History view coming soon!')}
+    <>
+      <div className="overflow-x-auto relative">
+        {isLoading && (
+          <div className="absolute inset-0 z-10 bg-white/50 dark:bg-gray-900/50 flex items-start justify-center pt-8 pointer-events-none">
+            <div className="h-6 w-6 rounded-full border-2 border-[#006970] border-t-transparent animate-spin"></div>
+          </div>
+        )}
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-100 dark:border-gray-800">
+              {columns.map((col) => (
+                <th
+                  key={col.label}
+                  className={`px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide whitespace-nowrap ${col.field ? 'cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200' : ''}`}
+                  onClick={() => col.field && handleSort(col.field)}
                 >
-                  <History className="w-4 h-4" />
-                </button>
-              </td>
+                  <span className="flex items-center gap-1.5">
+                    {col.label}
+                    {col.field && <SortIcon field={col.field} activeField={sort.field} direction={sort.direction} />}
+                  </span>
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
+            {products.map((product) => (
+              <tr
+                key={product.id}
+                className={`group transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/40 ${rowBg(product)}`}
+              >
+                <td className="px-4 py-1.5 font-medium text-gray-900 dark:text-white">
+                  {product.name}
+                </td>
+                <td className="px-4 py-1.5">
+                  <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-gray-600 dark:text-gray-400">
+                    {product.sku}
+                  </code>
+                </td>
+                <td className="px-4 py-1.5">
+                  {editingId === product.id && canAdjustStock && isOrgAdmin ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="0"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onBlur={() => commitEdit(product.id)}
+                        onKeyDown={(e) => handleKeyDown(e, product.id)}
+                        autoFocus
+                        className="w-20 rounded border border-[#006970] bg-white dark:bg-gray-800 px-2 py-1 text-sm font-semibold text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#006970]"
+                      />
+                      <span className="text-xs text-gray-500">Press Enter</span>
+                    </div>
+                  ) : (
+                    <span
+                      className={`font-semibold transition-colors inline-block px-2 py-1 border border-transparent rounded ${
+                        canAdjustStock && isOrgAdmin ? 'cursor-pointer hover:text-[#006970] dark:hover:text-[#00B4BB] hover:border-[#006970]/30' : ''
+                      } ${
+                        product.status === StockStatus.OUT_OF_STOCK ? 'text-red-600 dark:text-red-400' :
+                        product.status === StockStatus.LOW_STOCK ? 'text-amber-600 dark:text-amber-400' :
+                        'text-gray-900 dark:text-white'
+                      }`}
+                      onClick={() => (canAdjustStock && isOrgAdmin ? startEdit(product) : undefined)}
+                      title={canAdjustStock && isOrgAdmin ? 'Click to adjust stock' : undefined}
+                    >
+                      {product.stock} {product.unit}
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-1.5">
+                  <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium ${
+                      product.status === StockStatus.HEALTHY ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400' :
+                      product.status === StockStatus.LOW_STOCK ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400' :
+                      'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'
+                    }`}>
+                    {product.status.replace('_', ' ')}
+                  </span>
+                </td>
+                <td className="px-4 py-1.5">
+                  <div className="flex items-center gap-1.5">
+                    {canAdjustStock && (
+                      <button
+                        type="button"
+                        onClick={() => setRestockProduct(product)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-[#006970]/10 text-[#006970] dark:bg-[#006970]/20 dark:text-[#00B4BB] hover:bg-[#006970]/20 dark:hover:bg-[#006970]/30 transition-colors"
+                        title="Restock Product"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Restock</span>
+                      </button>
+                    )}
+                    <button
+                      className="p-1 text-gray-400 hover:text-[#006970] hover:bg-[#006970]/10 rounded-lg transition-colors"
+                      title="View Stock History"
+                      onClick={() => alert('Stock History view coming soon!')}
+                    >
+                      <History className="w-4 h-4" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Quick Restock / Stock Adjust Modal */}
+      {restockProduct && (
+        <QuickStockAdjustModal
+          product={restockProduct}
+          isOpen={true}
+          initialMode="RESTOCK"
+          onClose={() => setRestockProduct(null)}
+          onSuccess={() => {
+            setRestockProduct(null);
+            fetchProducts();
+          }}
+        />
+      )}
+    </>
   );
 };
 

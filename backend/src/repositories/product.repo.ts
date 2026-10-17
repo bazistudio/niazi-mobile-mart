@@ -1740,6 +1740,7 @@ export interface ReceiveStockDto {
   branch_id: string;        // target branch
   quantity_received: number; // must be > 0
   unit_cost: number;         // must be >= 0 (whole PKR rupees)
+  new_sale_price?: number | null; // optional updated sale_price (must be >= 0)
   supplier_id?: string | null;
   notes?: string | null;
 }
@@ -1747,6 +1748,8 @@ export interface ReceiveStockDto {
 export interface ReceiveStockResult {
   new_quantity: number;       // resulting stock at the branch
   new_average_cost: number;   // updated products.average_cost
+  new_purchase_price: number; // updated products.purchase_price (latest batch cost)
+  new_sale_price?: number;    // updated products.sale_price if provided
   movement_id: string;        // stock_movements.id of the IN row
 }
 
@@ -1781,13 +1784,23 @@ export async function receiveStock(
 
     // ── Step 1: Lock products row ─────────────────────────────────────────────
     const productRes = await client.query(
-      `SELECT average_cost FROM products WHERE id = $1 FOR UPDATE`,
+      `SELECT average_cost, purchase_price, sale_price FROM products WHERE id = $1 FOR UPDATE`,
       [productId]
     );
     if (productRes.rowCount === 0) {
       throw new RepoError(`Product ${productId} not found`, 404);
     }
     const cOld = Math.round(Number(productRes.rows[0]['average_cost'] ?? 0));
+    const currentSalePrice = Math.round(Number(productRes.rows[0]['sale_price'] ?? 0));
+
+    let updatedSalePrice = currentSalePrice;
+    if (dto.new_sale_price !== undefined && dto.new_sale_price !== null) {
+      const parsedSalePrice = Math.round(Number(dto.new_sale_price));
+      if (parsedSalePrice < 0) {
+        throw new RepoError('Sale price cannot be negative', 400);
+      }
+      updatedSalePrice = parsedSalePrice;
+    }
 
     // ── Step 2: Lock branch stock row (create if absent) ──────────────────────
     // We lock with FOR UPDATE; if no row exists yet we treat prevStock=0
@@ -1815,10 +1828,15 @@ export async function receiveStock(
       ? Math.round(((qOld * cOld) + (qRec * cNew)) / denominator)
       : cNew; // fallback when warehouse was empty
 
-    // ── Step 5: UPDATE products.average_cost ─────────────────────────────────
+    // ── Step 5: UPDATE products.average_cost, purchase_price, sale_price ──────
     await client.query(
-      `UPDATE products SET average_cost = $1, updated_at = $2 WHERE id = $3`,
-      [cWac, now, productId]
+      `UPDATE products 
+       SET average_cost = $1, 
+           purchase_price = $2, 
+           sale_price = $3, 
+           updated_at = $4 
+       WHERE id = $5`,
+      [cWac, cNew, updatedSalePrice, now, productId]
     );
 
     // ── Step 6: Upsert stock.quantity += quantity_received ────────────────────
@@ -1863,9 +1881,11 @@ export async function receiveStock(
     client.release();
 
     return {
-      new_quantity:     newQty,
-      new_average_cost: cWac,
-      movement_id:      movementId,
+      new_quantity:       newQty,
+      new_average_cost:   cWac,
+      new_purchase_price: cNew,
+      new_sale_price:     updatedSalePrice,
+      movement_id:        movementId,
     };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});

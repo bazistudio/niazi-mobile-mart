@@ -331,6 +331,7 @@ export interface ReceiveStockApiDto {
   branch_id: string;
   quantity_received: number;
   unit_cost: number;
+  new_sale_price?: number | null;
   supplier_id?: string | null;
   notes?: string | null;
 }
@@ -338,5 +339,7 @@ export interface ReceiveStockApiDto {
 export interface ReceiveStockApiResult {
   new_quantity: number;
   new_average_cost: number;
+  new_purchase_price?: number;
+  new_sale_price?: number;
   movement_id: string;
 }
