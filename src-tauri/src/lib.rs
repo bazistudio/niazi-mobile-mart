@@ -167,7 +167,9 @@ pub fn run() {
                 {
                     let sync_worker_ref = sync_worker.clone();
                     let app_state_ref = app_state_for_setup.clone();
+                    let handle_for_sync = app.handle().clone();
                     tauri::async_runtime::spawn(async move {
+                        sync_worker_ref.set_app_handle(handle_for_sync).await;
                         *app_state_ref.sync_worker.write().await = Some(sync_worker_ref.clone());
                         sync_worker_ref.start();
                     });

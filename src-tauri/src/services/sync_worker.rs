@@ -27,6 +27,7 @@ pub struct SyncWorkerDaemon {
     app_state: Arc<AppState>,
     status: Arc<RwLock<SyncEngineStatus>>,
     execution_lock: Arc<tokio::sync::Mutex<()>>,
+    app_handle: Arc<RwLock<Option<tauri::AppHandle>>>,
 }
 
 impl SyncWorkerDaemon {
@@ -44,7 +45,13 @@ impl SyncWorkerDaemon {
                 last_error: None,
             })),
             execution_lock: Arc::new(tokio::sync::Mutex::new(())),
+            app_handle: Arc::new(RwLock::new(None)),
         }
+    }
+
+    pub async fn set_app_handle(&self, handle: tauri::AppHandle) {
+        let mut w = self.app_handle.write().await;
+        *w = Some(handle);
     }
 
     pub fn get_status_lock(&self) -> Arc<RwLock<SyncEngineStatus>> {
@@ -410,6 +417,7 @@ impl SyncWorkerDaemon {
         };
 
         let mut current_after_seq = last_seq;
+        let mut changes_applied = false;
 
         loop {
             let pull_url = format!(
@@ -458,9 +466,30 @@ impl SyncWorkerDaemon {
                 break;
             }
 
+            changes_applied = true;
             current_after_seq = pull_dto.next_sequence;
             if !pull_dto.has_more {
                 break;
+            }
+        }
+
+        // Emit domain:sync_pull_completed across Tauri WebView if changes were successfully applied and no error occurred
+        if changes_applied {
+            let st = self.status.read().await;
+            if st.last_error.is_none() {
+                drop(st);
+                let app_guard = self.app_handle.read().await;
+                if let Some(ref handle) = *app_guard {
+                    let payload = serde_json::json!({
+                        "applied": true,
+                        "last_sequence": current_after_seq,
+                    });
+                    let _ = crate::events::broadcaster::emit_domain_event(
+                        handle,
+                        crate::events::broadcaster::event_names::SYNC_PULL_COMPLETED,
+                        &payload,
+                    );
+                }
             }
         }
 

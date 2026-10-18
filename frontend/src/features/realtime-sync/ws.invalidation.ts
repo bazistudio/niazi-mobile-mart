@@ -142,4 +142,6 @@ export function handleCatchUp(queryClient: QueryClient): void {
   queryClient.invalidateQueries({ queryKey: ['customers'] });
   queryClient.invalidateQueries({ queryKey: ['ledger'] });
   queryClient.invalidateQueries({ queryKey: ['repairs'] });
+  queryClient.invalidateQueries({ queryKey: ['orders'] });
+  queryClient.invalidateQueries({ queryKey: ['inventory'] });
 }
