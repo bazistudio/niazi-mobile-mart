@@ -33,8 +33,10 @@ import path from 'node:path';
 
 // Load keys for test execution
 const privCandidates = [
-  path.join(process.cwd(), 'backend', 'jwt_private.pem'),
+  path.join(process.cwd(), 'jwt_private_key.pem'),
   path.join(process.cwd(), 'jwt_private.pem'),
+  path.join(process.cwd(), 'backend', 'jwt_private_key.pem'),
+  path.join(process.cwd(), 'backend', 'jwt_private.pem'),
 ];
 for (const p of privCandidates) {
   if (fs.existsSync(p)) {
@@ -43,8 +45,10 @@ for (const p of privCandidates) {
   }
 }
 const pubCandidates = [
-  path.join(process.cwd(), 'backend', 'jwt_pub.pem'),
+  path.join(process.cwd(), 'jwt_pub2.pem'),
   path.join(process.cwd(), 'jwt_pub.pem'),
+  path.join(process.cwd(), 'backend', 'jwt_pub2.pem'),
+  path.join(process.cwd(), 'backend', 'jwt_pub.pem'),
 ];
 for (const p of pubCandidates) {
   if (fs.existsSync(p)) {

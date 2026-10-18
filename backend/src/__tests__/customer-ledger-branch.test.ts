@@ -28,8 +28,10 @@ import { NIAZI_ORGANIZATION_ID } from '../auth.js';
 
 // ── JWT key bootstrap (mirrors canonical-auth-matrix.test.ts) ────────────────
 const privCandidates = [
-  path.join(process.cwd(), 'backend', 'jwt_private.pem'),
+  path.join(process.cwd(), 'jwt_private_key.pem'),
   path.join(process.cwd(), 'jwt_private.pem'),
+  path.join(process.cwd(), 'backend', 'jwt_private_key.pem'),
+  path.join(process.cwd(), 'backend', 'jwt_private.pem'),
 ];
 for (const p of privCandidates) {
   if (fs.existsSync(p)) {
@@ -38,8 +40,10 @@ for (const p of privCandidates) {
   }
 }
 const pubCandidates = [
-  path.join(process.cwd(), 'backend', 'jwt_pub.pem'),
+  path.join(process.cwd(), 'jwt_pub2.pem'),
   path.join(process.cwd(), 'jwt_pub.pem'),
+  path.join(process.cwd(), 'backend', 'jwt_pub2.pem'),
+  path.join(process.cwd(), 'backend', 'jwt_pub.pem'),
 ];
 for (const p of pubCandidates) {
   if (fs.existsSync(p)) {
@@ -168,16 +172,18 @@ describe('GAP-05 — Customer Ledger Branch Isolation Suite', () => {
     // sale A belongs to BRANCH_A
     await pool.query(
       `INSERT INTO sales (id, invoice_number, branch_id, customer_id, customer_name_snapshot,
-         subtotal, total_discount, total_amount, payment_method, status, performed_by, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, 'Ledger Test Customer', 1000, 0, 1000, 'CREDIT', 'COMPLETED', $5, $6, $6)
+         subtotal, discount, tax_amount, total_amount, paid_amount, change_amount,
+         payment_status, sale_status, performed_by, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, 'Ledger Test Customer', 1000, 0, 0, 1000, 0, 0, 'UNPAID', 'COMPLETED', $5, $6, $6)
        ON CONFLICT (id) DO NOTHING`,
       [saleIdA, `INV-CLBT-A-${RUN_PREFIX}`, BRANCH_A, CUSTOMER_ID, SHOP_ADMIN_A_ID, now]
     );
     // sale B belongs to BRANCH_B
     await pool.query(
       `INSERT INTO sales (id, invoice_number, branch_id, customer_id, customer_name_snapshot,
-         subtotal, total_discount, total_amount, payment_method, status, performed_by, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, 'Ledger Test Customer', 500, 0, 500, 'CREDIT', 'COMPLETED', $5, $6, $6)
+         subtotal, discount, tax_amount, total_amount, paid_amount, change_amount,
+         payment_status, sale_status, performed_by, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, 'Ledger Test Customer', 500, 0, 0, 500, 0, 0, 'UNPAID', 'COMPLETED', $5, $6, $6)
        ON CONFLICT (id) DO NOTHING`,
       [saleIdB, `INV-CLBT-B-${RUN_PREFIX}`, BRANCH_B, CUSTOMER_ID, SHOP_ADMIN_B_ID, now]
     );

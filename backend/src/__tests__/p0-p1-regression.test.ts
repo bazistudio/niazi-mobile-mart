@@ -210,6 +210,7 @@ async function teardownFixtures(client: PoolClient): Promise<void> {
   await client.query(`DELETE FROM stock WHERE branch_id = ANY($1::text[])`, [branches]);
   await client.query(`DELETE FROM customers WHERE id = $1`, [CUST_1]);
   await client.query(`DELETE FROM products WHERE id = ANY($1::text[])`, [[PROD_X, PROD_Y]]);
+  await client.query(`DELETE FROM change_log WHERE branch_id = ANY($1::text[])`, [branches]);
   await client.query(`DELETE FROM branches WHERE id = ANY($1::text[])`, [branches]);
   await client.query(`DELETE FROM product_types WHERE id = $1`, [CAT_ID]);
   await client.query(`DELETE FROM users WHERE id = ANY($1::text[])`, [[USER_A, USER_B]]);

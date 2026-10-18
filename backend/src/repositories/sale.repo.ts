@@ -1004,6 +1004,17 @@ export async function completeSale(
       console.error('[sale.repo] Failed to write atomic change_log entry for sale:', logErr);
     }
 
+    // Step 17: Persist idempotency key atomically within the sale transaction
+    if (rawIdempotencyKey && lookupBranchId) {
+      const payloadHash = computePayloadHash(dto);
+      await client.query(
+        `INSERT INTO sale_idempotency_keys (idempotency_key, branch_id, sale_id, payload_hash, created_at)
+         VALUES ($1, $2, $3, $4, now())
+         ON CONFLICT (idempotency_key, branch_id) DO NOTHING`,
+        [rawIdempotencyKey, lookupBranchId, result.sale.id, payloadHash]
+      );
+    }
+
     await client.query('COMMIT');
   } catch (err: unknown) {
     if (client) {

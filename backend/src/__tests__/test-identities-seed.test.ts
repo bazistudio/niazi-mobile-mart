@@ -217,25 +217,46 @@ describe('Test Account Seed Safety & Verification Suite', () => {
       process.env[spec.envPasswordKey] = 'MockTestSecret#2026';
     }
 
-    const initialCountRes = await pool.query<{ count: string }>('SELECT count(*) FROM users;');
-    const initialCount = parseInt(initialCountRes.rows[0]?.count ?? '0', 10);
+    // Seed the two auxiliary branches required by the seed spec (BRA, BRB).
+    // Migration 001 already creates MAIN; these are test-only and removed in finally.
+    const ORG_ID = '00000000-0000-0000-0000-000000000001';
+    const BRANCH_BRA_ID = '00000000-0000-0000-0000-000000000010';
+    const BRANCH_BRB_ID = '00000000-0000-0000-0000-000000000011';
+    const now = new Date().toISOString();
+    await pool.query(
+      `INSERT INTO branches (id, organization_id, name, code, is_active, created_at, updated_at)
+       VALUES ($1, $2, 'Branch Alpha', 'BRA', 1, $3, $3),
+              ($4, $2, 'Branch Beta',  'BRB', 1, $3, $3)
+       ON CONFLICT (id) DO NOTHING`,
+      [BRANCH_BRA_ID, ORG_ID, now, BRANCH_BRB_ID]
+    );
 
-    const dryRunResult = await runTestIdentitiesSeed(pool, {
-      dryRun: true,
-      requireExplicitOptIn: true,
-    });
+    try {
+      const initialCountRes = await pool.query<{ count: string }>('SELECT count(*) FROM users;');
+      const initialCount = parseInt(initialCountRes.rows[0]?.count ?? '0', 10);
 
-    assert.strictEqual(dryRunResult.dryRun, true);
-    assert.strictEqual(dryRunResult.accountsCreated.length, CANONICAL_TEST_SPECS.length);
+      const dryRunResult = await runTestIdentitiesSeed(pool, {
+        dryRun: true,
+        requireExplicitOptIn: true,
+      });
 
-    // Verify atomic rollback: user table count must NOT have changed
-    const afterCountRes = await pool.query<{ count: string }>('SELECT count(*) FROM users;');
-    const afterCount = parseInt(afterCountRes.rows[0]?.count ?? '0', 10);
-    assert.strictEqual(afterCount, initialCount, 'Dry-run must not persist any new users to the database');
+      assert.strictEqual(dryRunResult.dryRun, true);
+      assert.strictEqual(dryRunResult.accountsCreated.length, CANONICAL_TEST_SPECS.length);
 
-    // Clean up test secrets from environment
-    for (const spec of CANONICAL_TEST_SPECS) {
-      delete process.env[spec.envPasswordKey];
+      // Verify atomic rollback: user table count must NOT have changed
+      const afterCountRes = await pool.query<{ count: string }>('SELECT count(*) FROM users;');
+      const afterCount = parseInt(afterCountRes.rows[0]?.count ?? '0', 10);
+      assert.strictEqual(afterCount, initialCount, 'Dry-run must not persist any new users to the database');
+    } finally {
+      // Remove the auxiliary test branches seeded above
+      await pool.query(
+        `DELETE FROM branches WHERE id = ANY($1::text[])`,
+        [[BRANCH_BRA_ID, BRANCH_BRB_ID]]
+      );
+      // Clean up test secrets from environment
+      for (const spec of CANONICAL_TEST_SPECS) {
+        delete process.env[spec.envPasswordKey];
+      }
     }
   });
 

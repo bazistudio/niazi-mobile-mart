@@ -5,6 +5,14 @@ All notable changes to Niazi Mobile Mart will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.42] - 2026-10-18
+
+### Fixed
+- **Sale Idempotency Key Persistence**: `completeSale()` in `sale.repo.ts` now INSERTs into `sale_idempotency_keys` atomically within the sale transaction (before COMMIT), ensuring that duplicate submissions with the same `idempotency_key` correctly return the original sale instead of creating a duplicate.
+- **Test Fixture Column Names**: Fixed `customer-ledger-branch.test.ts` `before()` hook to use correct `sales` table column names (`discount`, `payment_status`, `sale_status`) and supply all required NOT NULL columns (`tax_amount`, `paid_amount`, `change_amount`).
+- **Test Teardown FK Violation**: Added `DELETE FROM change_log WHERE branch_id = ANY(...)` to `p0-p1-regression.test.ts` `teardownFixtures()` before deleting branches, resolving RESTRICT FK constraint violation on `change_log.branch_id`.
+- **Test Prerequisite Branch Seeding**: `test-identities-seed.test.ts` test 11 now seeds the `BRA` and `Branch Beta` (`BRB`) branches required by `runTestIdentitiesSeed()` and removes them atomically in a `finally` block, eliminating the `[PREREQUISITE MISSING]` failure.
+
 ## [1.3.41] - 2026-10-17
 
 ### Added
