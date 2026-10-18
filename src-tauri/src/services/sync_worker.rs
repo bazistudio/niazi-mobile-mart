@@ -21,13 +21,77 @@ pub struct SyncEngineStatus {
     pub last_error: Option<String>,
 }
 
+/// Receives downstream-sync domain events produced by `SyncWorkerDaemon`.
+///
+/// Production implementation: the real Tauri `AppHandle`, routed through
+/// `crate::events::broadcaster::emit_domain_event`.
+/// Test implementation: a recorder that captures the exact event name and payload
+/// produced by the downstream-pull path (it does NOT prove native WebView delivery).
+pub trait SyncEventSink: Send + Sync {
+    fn emit_sync_event(&self, event_name: &str, payload: &serde_json::Value) -> Result<(), String>;
+}
+
+impl SyncEventSink for tauri::AppHandle {
+    fn emit_sync_event(&self, event_name: &str, payload: &serde_json::Value) -> Result<(), String> {
+        crate::events::broadcaster::emit_domain_event(self, event_name, payload).map_err(|e| e.to_string())
+    }
+}
+
+/// Upstream endpoint selection for central-server HTTP calls made by the worker.
+#[derive(Debug, Clone)]
+enum UpstreamEndpoint {
+    /// Production behaviour (unchanged): `CENTRAL_SERVER_URL`, else `DEFAULT_CENTRAL_SERVER_URL`.
+    Production,
+    /// Test lockdown: only a validated IPv4-loopback URL may be used.
+    /// `None` means fail closed: every request is refused before an HTTP client is built.
+    TestLoopback(Option<String>),
+}
+
+/// Result of one `sync_downstream_pull()` call. Existing callers may ignore it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DownstreamPullOutcome {
+    /// Preconditions not met (no authenticated session or no SQLite). No request sent.
+    Skipped,
+    /// The current pull failed (cursor, endpoint, client, HTTP, parse or batch error).
+    /// No completion event is emitted.
+    Failed(String),
+    /// The pull succeeded but upstream returned no changes. No completion event is emitted.
+    NoChanges,
+    /// One or more batches were applied and their cursors committed.
+    /// `event_delivered` is false when no sink is registered or the sink reported an error.
+    Applied { last_sequence: i64, event_delivered: bool },
+}
+
+/// Strictly validates a test upstream URL. Accepts only `http://127.0.0.1:<expected_port>`
+/// with no credentials, query, fragment or non-root path. Parsed-URL checks, not string prefixes.
+pub fn validate_test_upstream(url: &str, expected_port: u16) -> Result<reqwest::Url, String> {
+    let parsed = reqwest::Url::parse(url).map_err(|e| format!("Test upstream URL is not parseable: {e}"))?;
+    if parsed.scheme() != "http" {
+        return Err(format!("Test upstream scheme must be 'http', got '{}'", parsed.scheme()));
+    }
+    if parsed.host_str() != Some("127.0.0.1") {
+        return Err(format!("Test upstream host must be exactly 127.0.0.1, got {:?}", parsed.host_str()));
+    }
+    if parsed.port() != Some(expected_port) {
+        return Err(format!("Test upstream port must be {expected_port}, got {:?}", parsed.port()));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("Test upstream URL must not contain credentials".to_string());
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() || (parsed.path() != "/" && !parsed.path().is_empty()) {
+        return Err("Test upstream URL must not contain a path, query or fragment".to_string());
+    }
+    Ok(parsed)
+}
+
 /// Background synchronization daemon responsible for outbox pushes and 15-minute reconciliation pulls
 #[derive(Clone)]
 pub struct SyncWorkerDaemon {
     app_state: Arc<AppState>,
     status: Arc<RwLock<SyncEngineStatus>>,
     execution_lock: Arc<tokio::sync::Mutex<()>>,
-    app_handle: Arc<RwLock<Option<tauri::AppHandle>>>,
+    event_sink: Arc<RwLock<Option<Arc<dyn SyncEventSink>>>>,
+    upstream: Arc<RwLock<UpstreamEndpoint>>,
 }
 
 impl SyncWorkerDaemon {
@@ -45,13 +109,52 @@ impl SyncWorkerDaemon {
                 last_error: None,
             })),
             execution_lock: Arc::new(tokio::sync::Mutex::new(())),
-            app_handle: Arc::new(RwLock::new(None)),
+            event_sink: Arc::new(RwLock::new(None)),
+            upstream: Arc::new(RwLock::new(UpstreamEndpoint::Production)),
         }
     }
 
     pub async fn set_app_handle(&self, handle: tauri::AppHandle) {
-        let mut w = self.app_handle.write().await;
-        *w = Some(handle);
+        let mut w = self.event_sink.write().await;
+        *w = Some(Arc::new(handle));
+    }
+
+    /// TEST-ONLY: installs a recorder sink in place of the Tauri `AppHandle`.
+    #[doc(hidden)]
+    pub async fn set_event_sink_for_test(&self, sink: Arc<dyn SyncEventSink>) {
+        let mut w = self.event_sink.write().await;
+        *w = Some(sink);
+    }
+
+    /// TEST-ONLY: enters fail-closed lockdown. Until a validated loopback endpoint is set,
+    /// every central-server request is refused. There is no path back to production mode.
+    #[doc(hidden)]
+    pub async fn lock_upstream_for_test(&self) {
+        let mut w = self.upstream.write().await;
+        *w = UpstreamEndpoint::TestLoopback(None);
+    }
+
+    /// TEST-ONLY: enters lockdown, then installs `url` only if it validates as
+    /// `http://127.0.0.1:<expected_port>`. On rejection the worker stays locked (fail closed).
+    #[doc(hidden)]
+    pub async fn set_test_upstream(&self, url: &str, expected_port: u16) -> Result<(), String> {
+        let mut w = self.upstream.write().await;
+        *w = UpstreamEndpoint::TestLoopback(None);
+        let parsed = validate_test_upstream(url, expected_port)?;
+        *w = UpstreamEndpoint::TestLoopback(Some(parsed.as_str().trim_end_matches('/').to_string()));
+        Ok(())
+    }
+
+    /// Resolves the central-server base URL. Production behaviour is unchanged.
+    async fn resolve_server_url(&self) -> Result<String, String> {
+        match &*self.upstream.read().await {
+            UpstreamEndpoint::Production => Ok(std::env::var("CENTRAL_SERVER_URL")
+                .unwrap_or_else(|_| DEFAULT_CENTRAL_SERVER_URL.to_string())),
+            UpstreamEndpoint::TestLoopback(Some(url)) => Ok(url.clone()),
+            UpstreamEndpoint::TestLoopback(None) => Err(
+                "Test upstream lockdown: no validated loopback endpoint configured; request refused".to_string(),
+            ),
+        }
     }
 
     pub fn get_status_lock(&self) -> Arc<RwLock<SyncEngineStatus>> {
@@ -191,8 +294,14 @@ impl SyncWorkerDaemon {
             return;
         }
 
-        let server_url = std::env::var("CENTRAL_SERVER_URL")
-            .unwrap_or_else(|_| DEFAULT_CENTRAL_SERVER_URL.to_string());
+        let server_url = match self.resolve_server_url().await {
+            Ok(u) => u,
+            Err(msg) => {
+                let mut st = self.status.write().await;
+                st.last_error = Some(msg);
+                return;
+            }
+        };
 
         let client = match reqwest::Client::builder().timeout(Duration::from_secs(10)).build() {
             Ok(c) => c,
@@ -383,17 +492,19 @@ impl SyncWorkerDaemon {
         }
     }
 
-    /// Pulls updated central change log deltas and applies them to local SQLite
-    pub async fn sync_downstream_pull(&self) {
+    /// Pulls updated central change log deltas and applies them to local SQLite.
+    ///
+    /// Returns the outcome of THIS pull. Existing callers (900 s timer, manual sync) ignore it.
+    pub async fn sync_downstream_pull(&self) -> DownstreamPullOutcome {
         let session = self.app_state.get_session().await;
         let token = match &session.active_token {
             Some(t) if session.is_authenticated => t.clone(),
-            _ => return, // Wait for user authentication
+            _ => return DownstreamPullOutcome::Skipped, // Wait for user authentication
         };
 
         let db = match &self.app_state.db {
             Some(db) => db.clone(),
-            None => return, // SQLite required for desktop apply
+            None => return DownstreamPullOutcome::Skipped, // SQLite required for desktop apply
         };
 
         let cursor_repo = crate::repositories::SQLiteSyncCursorRepository::new(db.clone());
@@ -402,22 +513,31 @@ impl SyncWorkerDaemon {
         let last_seq = match cursor_repo.get_last_applied_sequence("downstream_delta", org_id).await {
             Ok(seq) => seq,
             Err(e) => {
+                let msg = format!("Failed to get downstream sync cursor: {e}");
                 let mut st = self.status.write().await;
-                st.last_error = Some(format!("Failed to get downstream sync cursor: {e}"));
-                return;
+                st.last_error = Some(msg.clone());
+                return DownstreamPullOutcome::Failed(msg);
             }
         };
 
-        let server_url = std::env::var("CENTRAL_SERVER_URL")
-            .unwrap_or_else(|_| DEFAULT_CENTRAL_SERVER_URL.to_string());
+        let server_url = match self.resolve_server_url().await {
+            Ok(u) => u,
+            Err(msg) => {
+                let mut st = self.status.write().await;
+                st.last_error = Some(msg.clone());
+                return DownstreamPullOutcome::Failed(msg);
+            }
+        };
 
         let client = match reqwest::Client::builder().timeout(Duration::from_secs(10)).build() {
             Ok(c) => c,
-            Err(_) => return,
+            Err(e) => return DownstreamPullOutcome::Failed(format!("Failed to build HTTP client: {e}")),
         };
 
         let mut current_after_seq = last_seq;
         let mut changes_applied = false;
+        // Outcome of THIS pull only. Set on any HTTP, network, parse or batch error.
+        let mut pull_error: Option<String> = None;
 
         loop {
             let pull_url = format!(
@@ -436,12 +556,15 @@ impl SyncWorkerDaemon {
                 Ok(r) => {
                     let err_msg = format!("Sync pull HTTP {}", r.status());
                     let mut st = self.status.write().await;
-                    st.last_error = Some(err_msg);
+                    st.last_error = Some(err_msg.clone());
+                    pull_error = Some(err_msg);
                     break;
                 }
                 Err(e) => {
+                    let err_msg = format!("Sync pull network error: {e}");
                     let mut st = self.status.write().await;
-                    st.last_error = Some(format!("Sync pull network error: {e}"));
+                    st.last_error = Some(err_msg.clone());
+                    pull_error = Some(err_msg);
                     break;
                 }
             };
@@ -449,8 +572,10 @@ impl SyncWorkerDaemon {
             let pull_dto: crate::domain::change_log::DeltaPullResponseDto = match resp.json().await {
                 Ok(dto) => dto,
                 Err(e) => {
+                    let err_msg = format!("Failed to parse sync pull JSON: {e}");
                     let mut st = self.status.write().await;
-                    st.last_error = Some(format!("Failed to parse sync pull JSON: {e}"));
+                    st.last_error = Some(err_msg.clone());
+                    pull_error = Some(err_msg);
                     break;
                 }
             };
@@ -461,8 +586,10 @@ impl SyncWorkerDaemon {
 
             let applier = crate::services::change_applier::ChangeApplier::new(db.clone());
             if let Err(e) = applier.apply_batch(org_id, &pull_dto.changes, pull_dto.next_sequence).await {
+                let err_msg = format!("Failed to apply downstream sync batch: {e}");
                 let mut st = self.status.write().await;
-                st.last_error = Some(format!("Failed to apply downstream sync batch: {e}"));
+                st.last_error = Some(err_msg.clone());
+                pull_error = Some(err_msg);
                 break;
             }
 
@@ -473,27 +600,46 @@ impl SyncWorkerDaemon {
             }
         }
 
-        // Emit domain:sync_pull_completed across Tauri WebView if changes were successfully applied and no error occurred
-        if changes_applied {
-            let st = self.status.read().await;
-            if st.last_error.is_none() {
-                drop(st);
-                let app_guard = self.app_handle.read().await;
-                if let Some(ref handle) = *app_guard {
-                    let payload = serde_json::json!({
-                        "applied": true,
-                        "last_sequence": current_after_seq,
-                    });
-                    let _ = crate::events::broadcaster::emit_domain_event(
-                        handle,
-                        crate::events::broadcaster::event_names::SYNC_PULL_COMPLETED,
-                        &payload,
-                    );
+        // Completion-event decision (Phase 2-F):
+        // - Based ONLY on this pull's outcome (`pull_error`, `changes_applied`), not on the shared
+        //   `status.last_error`, which may hold a stale diagnostic from an earlier unrelated
+        //   push/pull. That stale diagnostic is intentionally left untouched here.
+        // - Any error in this pull (including a failure on a later page after earlier pages were
+        //   committed) suppresses the success event.
+        // - Skipped individual changes: `ChangeApplier::apply_batch` isolates per-change failures
+        //   (logs, skips, advances the cursor past them) and returns Ok. Such a batch is treated as
+        //   applied and the event IS emitted, because the cursor genuinely advanced.
+        let outcome = if let Some(err) = pull_error {
+            DownstreamPullOutcome::Failed(err)
+        } else if changes_applied {
+            let payload = serde_json::json!({
+                "applied": true,
+                "last_sequence": current_after_seq,
+            });
+            let sink = self.event_sink.read().await.clone();
+            let event_delivered = match sink {
+                Some(sink) => match sink.emit_sync_event(
+                    crate::events::broadcaster::event_names::SYNC_PULL_COMPLETED,
+                    &payload,
+                ) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        tracing::warn!("[SyncWorkerDaemon] sync_pull_completed emission failed: {e}");
+                        false
+                    }
+                },
+                None => {
+                    tracing::warn!("[SyncWorkerDaemon] No event sink registered; sync_pull_completed not delivered");
+                    false
                 }
-            }
-        }
+            };
+            DownstreamPullOutcome::Applied { last_sequence: current_after_seq, event_delivered }
+        } else {
+            DownstreamPullOutcome::NoChanges
+        };
 
         self.sync_auth_snapshots().await;
+        outcome
     }
 
     /// Pulls central authentication snapshots and updates local SQLiteAuthSnapshotRepository
@@ -509,8 +655,13 @@ impl SyncWorkerDaemon {
             None => return, // SQLite required for desktop snapshot persistence
         };
 
-        let server_url = std::env::var("CENTRAL_SERVER_URL")
-            .unwrap_or_else(|_| DEFAULT_CENTRAL_SERVER_URL.to_string());
+        let server_url = match self.resolve_server_url().await {
+            Ok(u) => u,
+            Err(msg) => {
+                info!("[SyncWorkerDaemon] Auth snapshot sync skipped: {msg}");
+                return;
+            }
+        };
 
         let client = match reqwest::Client::builder().timeout(Duration::from_secs(10)).build() {
             Ok(c) => c,
