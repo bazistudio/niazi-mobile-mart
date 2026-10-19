@@ -1,6 +1,45 @@
 import { UnifiedInvoice, PrinterSettings, ShopHeader } from '../types/printer.types';
 
 /**
+ * HTML entity escaping helper for untrusted text in print templates.
+ * Escapes &, <, >, ", and ' to prevent HTML injection while preserving valid Unicode (Urdu/Arabic).
+ */
+export function escapeHtml(str: unknown): string {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * RTL / Urdu rendering helpers (Task 5.2)
+ * Wraps text containing Arabic/Urdu characters in RTL-aware markup.
+ * Uses system Nastaliq/Naskh fonts — no external CDN needed.
+ */
+const RTL_FONT_STACK = '"Jameel Noori Nastaleeq", "Noto Nastaliq Urdu", "Noto Naskh Arabic", "Traditional Arabic", serif';
+
+function hasUrdu(text: string): boolean {
+  return /[؀-ۿ]/.test(text);
+}
+
+function rtlSpan(text: string, extraStyle: string = ''): string {
+  const safeText = escapeHtml(text);
+  if (!hasUrdu(text)) return safeText;
+  return `<span dir="rtl" style="display:inline-block;text-align:right;font-family:${RTL_FONT_STACK};unicode-bidi:embed;${extraStyle}">${safeText}</span>`;
+}
+
+function rtlDiv(text: string, baseStyle: string = ''): string {
+  const safeText = escapeHtml(text);
+  if (!hasUrdu(text)) return `<div style="${baseStyle}">${safeText}</div>`;
+  return `<div dir="rtl" style="${baseStyle};text-align:right;font-family:${RTL_FONT_STACK};unicode-bidi:embed;">${safeText}</div>`;
+}
+
+
+
+/**
  * Privacy-preserving IMEI masking helper
  * Example: '352849102938475' -> '3528********8475'
  */
@@ -274,11 +313,10 @@ export const printFormatter = {
 };
 
 const renderDocument = (invoice: UnifiedInvoice, settings: PrinterSettings, title: string): string => {
-  const paperWidth = settings.paperSize?.width || (settings.printerType === 'THERMAL_58MM' ? '58mm' : settings.printerType === 'A4' ? 'A4' : '80mm');
+  // Legacy '58mm' / THERMAL_58MM values fall through to the 80mm path (Task 5.5)
+  const paperWidth = settings.paperSize?.width || (settings.printerType === 'A4' ? 'A4' : '80mm');
   
-  if (paperWidth === '58mm' || settings.printerType === 'THERMAL_58MM') {
-    return formatThermal(invoice, settings, 58, title);
-  }
+  // '58mm' / THERMAL_58MM remapped to 80mm path (Task 5.5)
   if (paperWidth === 'A4' || settings.printerType === 'A4' || settings.printerType === 'PDF_ONLY') {
     return formatA4(invoice, settings, title);
   }
@@ -299,8 +337,8 @@ const formatA4 = (invoice: UnifiedInvoice, settings: PrinterSettings, title: str
       <div style="text-align: center; margin-bottom: 20px;">
         ${settings.invoice?.showLogo && invoice.shop.logoUrl ? `<img src="${invoice.shop.logoUrl}" style="max-height: 70px; margin-bottom: 5px;" />` : ''}
         ${settings.invoice?.showShopInfo !== false ? `
-          <h1 style="margin: 4px 0; font-size: 22px; font-weight: bold;">${invoice.shop.name}</h1>
-          ${invoice.shop.address ? `<p style="margin: 2px 0; white-space: pre-wrap;">${invoice.shop.address}</p>` : ''}
+          <h1 style="margin: 4px 0; font-size: 22px; font-weight: bold;">${rtlSpan(invoice.shop.name)}</h1>
+          ${invoice.shop.address ? `<p style="margin: 2px 0; white-space: pre-wrap; ${hasUrdu(invoice.shop.address) ? 'direction:rtl;text-align:right;font-family:' + RTL_FONT_STACK : ''}">${invoice.shop.address}</p>` : ''}
           ${invoice.shop.phone ? `<p style="margin: 2px 0;">Phone: ${invoice.shop.phone}</p>` : ''}
           ${invoice.shop.taxNumber ? `<p style="margin: 2px 0;">NTN / Tax #: ${invoice.shop.taxNumber}</p>` : ''}
         ` : ''}
@@ -375,17 +413,17 @@ const formatA4 = (invoice: UnifiedInvoice, settings: PrinterSettings, title: str
       </div>
       
       <div style="clear: both; margin-top: 50px; text-align: center; font-size: 11px;">
-        <p style="white-space: pre-wrap; margin: 0;">${invoice.shop.footerText || 'Thank you for your business!'}</p>
+        <p style="white-space: pre-wrap; margin: 0;">${rtlSpan(invoice.shop.footerText || 'Thank you for your business!')}</p>
         <p style="font-size: 9px; color: #888; margin-top: 6px;">Powered by Niazi Mobile Mart</p>
       </div>
     </div>
   `;
 };
 
-const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width: number, title: string): string => {
-  const is58 = width === 58;
-  const pxWidth = is58 ? 220 : 304;
-  const baseFontSize = is58 ? 11 : 13.5;
+const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, _width: number, title: string): string => {
+  // _width retained for call-site compat; 58mm is remapped to 80mm (Task 5.5)
+  const pxWidth = 304;
+  const baseFontSize = 13.5;
   const fontFamily = settings.font?.family === 'monospace' ? 'Courier, "Courier New", monospace' : 'Arial, sans-serif';
 
   return `
@@ -403,20 +441,20 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
       
       <!-- Store Header Identity -->
       <div style="text-align: center; margin-bottom: 8px;">
-        ${!is58 && settings.invoice?.showLogo && invoice.shop.logoUrl ? `<img src="${invoice.shop.logoUrl}" style="max-width: 70%; max-height: 55px; margin-bottom: 4px;" />` : ''}
+        ${settings.invoice?.showLogo && invoice.shop.logoUrl ? `<img src="${invoice.shop.logoUrl}" style="max-width: 70%; max-height: 55px; margin-bottom: 4px;" />` : ''}
         ${settings.invoice?.showShopInfo !== false ? `
-          <div style="font-weight: 900; font-size: ${is58 ? '14px' : '17px'}; text-transform: uppercase; letter-spacing: 0.5px;">${invoice.shop.name}</div>
-          ${invoice.shop.branchName ? `<div style="font-size: ${is58 ? '10.5px' : '12px'}; font-weight: bold; margin-top: 2px; color: #222;">[ ${invoice.shop.branchName} ]</div>` : ''}
-          ${invoice.shop.address ? `<div style="font-size: ${is58 ? '10px' : '11px'}; white-space: pre-wrap; margin-top: 2px;">${invoice.shop.address}</div>` : ''}
-          ${invoice.shop.phone || invoice.shop.secondaryPhone ? `<div style="font-size: ${is58 ? '10px' : '11px'}; margin-top: 2px;">Tel: ${invoice.shop.phone}${invoice.shop.secondaryPhone ? ' / ' + invoice.shop.secondaryPhone : ''}</div>` : ''}
-          ${invoice.shop.whatsapp ? `<div style="font-size: ${is58 ? '10px' : '11px'};">WhatsApp: ${invoice.shop.whatsapp}</div>` : ''}
-          ${invoice.shop.taxNumber ? `<div style="font-size: ${is58 ? '10px' : '11px'};">NTN: ${invoice.shop.taxNumber}</div>` : ''}
+          ${rtlDiv(invoice.shop.name, "font-weight:900;font-size:17px;text-transform:uppercase;letter-spacing:0.5px;text-align:center;")}
+          ${invoice.shop.branchName ? `<div style="font-size: 12px; font-weight: bold; margin-top: 2px; color: #222;">[ ${invoice.shop.branchName} ]</div>` : ''}
+          ${invoice.shop.address ? rtlDiv(invoice.shop.address, 'font-size:11px;white-space:pre-wrap;margin-top:2px;text-align:center;') : ''}
+          ${invoice.shop.phone || invoice.shop.secondaryPhone ? `<div style="font-size: 11px; margin-top: 2px;">Tel: ${invoice.shop.phone}${invoice.shop.secondaryPhone ? ' / ' + invoice.shop.secondaryPhone : ''}</div>` : ''}
+          ${invoice.shop.whatsapp ? `<div style="font-size: 11px;">WhatsApp: ${invoice.shop.whatsapp}</div>` : ''}
+          ${invoice.shop.taxNumber ? `<div style="font-size: 11px;">NTN: ${invoice.shop.taxNumber}</div>` : ''}
         ` : ''}
-        <div style="margin-top: 4px; font-weight: bold; font-size: ${is58 ? '11px' : '12.5px'}; text-transform: uppercase; letter-spacing: 0.5px;">*** ${title} ***</div>
+        <div style="margin-top: 4px; font-weight: bold; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.5px;">*** ${title} ***</div>
       </div>
       
       <!-- Meta Information Section -->
-      <div style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 5px 0; margin-bottom: 6px; font-size: ${is58 ? '10px' : '11.5px'};">
+      <div style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 5px 0; margin-bottom: 6px; font-size: 11.5px;">
         <div style="display: flex; justify-content: space-between;">
           <span>Invoice #:</span>
           <span style="font-weight: bold;">${invoice.invoiceNo}</span>
@@ -444,13 +482,13 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
       </div>
 
       <!-- Items Table: Item (1st), Qty (2nd), Price (3rd), Amount (4th) -->
-      <table style="width: 100%; text-align: left; margin-bottom: 6px; font-size: ${is58 ? '10.5px' : '12px'}; border-collapse: collapse;">
+      <table style="width: 100%; text-align: left; margin-bottom: 6px; font-size: 12px; border-collapse: collapse;">
         <thead>
           <tr style="border-bottom: 1px dashed #000;">
-            <th style="padding: 3px 2px; width: ${is58 ? '58%' : '46%'}; text-align: left;">Item</th>
-            <th style="padding: 3px 0; width: ${is58 ? '16%' : '12%'}; text-align: center;">Qty</th>
-            ${!is58 ? `<th style="padding: 3px 0; width: 20%; text-align: right;">Price</th>` : ''}
-            <th style="padding: 3px 0; width: ${is58 ? '26%' : '22%'}; text-align: right;">Amount</th>
+            <th style="padding: 3px 2px; width: 46%; text-align: left;">Item</th>
+            <th style="padding: 3px 0; width: 12%; text-align: center;">Qty</th>
+            <th style="padding: 3px 0; width: 20%; text-align: right;">Price</th>
+            <th style="padding: 3px 0; width: 22%; text-align: right;">Amount</th>
           </tr>
         </thead>
         <tbody>
@@ -461,7 +499,7 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
                 ${item.imei ? `<div style="font-size: 9.5px; color: #333;">IMEI: ${maskImei(item.imei)}</div>` : ''}
               </td>
               <td style="padding: 4px 0; text-align: center; font-weight: bold;">${item.qty}</td>
-              ${!is58 ? `<td style="padding: 4px 0; text-align: right; tabular-nums;">${item.price.toLocaleString()}</td>` : ''}
+              <td style="padding: 4px 0; text-align: right; tabular-nums;">${item.price.toLocaleString()}</td>
               <td style="padding: 4px 0; text-align: right; font-weight: bold; tabular-nums;">${item.total.toLocaleString()}</td>
             </tr>
           `).join('')}
@@ -469,7 +507,7 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
       </table>
       
       <!-- Financial Summary Totals -->
-      <div style="border-top: 1px dashed #000; padding-top: 5px; font-size: ${is58 ? '11px' : '12.5px'};">
+      <div style="border-top: 1px dashed #000; padding-top: 5px; font-size: 12.5px;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
           <span>Subtotal:</span>
           <span style="font-weight: bold;">Rs ${invoice.subtotal.toLocaleString()}</span>
@@ -487,32 +525,32 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
           <span>+ Rs ${invoice.tax.toLocaleString()}</span>
         </div>` : ''}
         
-        <div style="display: flex; justify-content: space-between; font-weight: 900; font-size: ${is58 ? '13.5px' : '15px'}; border-top: 1px solid #000; border-bottom: 1px solid #000; margin: 5px 0; padding: 5px 0;">
+        <div style="display: flex; justify-content: space-between; font-weight: 900; font-size: 15px; border-top: 1px solid #000; border-bottom: 1px solid #000; margin: 5px 0; padding: 5px 0;">
           <span>Grand Total:</span>
           <span>Rs ${invoice.total.toLocaleString()}</span>
         </div>
         
         <!-- Tender & Change Breakdown -->
-        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '10px' : '11.5px'}; margin-top: 4px;">
+        <div style="display: flex; justify-content: space-between; font-size: 11.5px; margin-top: 4px;">
           <span>Payment Method:</span>
           <span style="font-weight: bold; text-transform: uppercase;">${invoice.paymentMethod || 'Cash'}</span>
         </div>
         
         ${invoice.tendered && invoice.tendered > 0 ? `
-        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '10px' : '11.5px'};">
+        <div style="display: flex; justify-content: space-between; font-size: 11.5px;">
           <span>Tendered:</span>
           <span>Rs ${invoice.tendered.toLocaleString()}</span>
         </div>` : ''}
         
         ${invoice.change && invoice.change > 0 ? `
-        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '10.5px' : '12px'}; font-weight: bold;">
+        <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: bold;">
           <span>Change Due:</span>
           <span>Rs ${invoice.change.toLocaleString()}</span>
         </div>` : ''}
 
         <!-- FINDING-02: Outstanding balance due (credit/partial sales only) -->
         ${invoice.due && invoice.due > 0 ? `
-        <div style="display: flex; justify-content: space-between; font-size: ${is58 ? '10.5px' : '12px'}; font-weight: bold; color: #c0392b; border-top: 1px dashed #000; margin-top: 4px; padding-top: 4px;">
+        <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: bold; color: #c0392b; border-top: 1px dashed #000; margin-top: 4px; padding-top: 4px;">
           <span>Balance Due:</span>
           <span>Rs ${invoice.due.toLocaleString()}</span>
         </div>` : ''}
@@ -520,28 +558,198 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
       
       <!-- Return Policy & Warranty Instructions -->
       ${invoice.returnPolicy || invoice.shop.returnPolicy ? `
-      <div style="border-top: 1px dashed #000; margin-top: 8px; padding-top: 5px; text-align: center; font-size: ${is58 ? '9px' : '10.5px'};">
+      <div style="border-top: 1px dashed #000; margin-top: 8px; padding-top: 5px; text-align: center; font-size: 10.5px;">
         <div style="font-weight: bold; margin-bottom: 1px;">Return Policy:</div>
-        <div>${invoice.returnPolicy || invoice.shop.returnPolicy}</div>
+        ${rtlDiv(invoice.returnPolicy || invoice.shop.returnPolicy || '', 'text-align:center;')}
       </div>` : ''}
 
       ${invoice.warrantyInstructions || invoice.shop.warrantyInstructions ? `
-      <div style="border-top: 1px dotted #000; margin-top: 5px; padding-top: 4px; text-align: center; font-size: ${is58 ? '8.5px' : '10px'}; color: #222;">
+      <div style="border-top: 1px dotted #000; margin-top: 5px; padding-top: 4px; text-align: center; font-size: 10px; color: #222;">
         <div style="font-weight: bold; margin-bottom: 1px;">Warranty Terms:</div>
-        <div>${invoice.warrantyInstructions || invoice.shop.warrantyInstructions}</div>
+        ${rtlDiv(invoice.warrantyInstructions || invoice.shop.warrantyInstructions || '', 'text-align:center;')}
       </div>` : ''}
       
       <!-- Barcode Section -->
       ${settings.invoice?.showBarcode !== false ? `
       <div style="margin-top: 8px;">
-        ${generateBarcodeSvg(invoice.invoiceNo, pxWidth - 28, is58 ? 32 : 38)}
+        ${generateBarcodeSvg(invoice.invoiceNo, pxWidth - 28, 38)}
       </div>` : ''}
       
       <!-- Footer & Branding -->
-      <div style="text-align: center; margin-top: 10px; font-size: ${is58 ? '9.5px' : '10.5px'}; border-top: 1px dashed #000; padding-top: 5px;">
+      <div style="text-align: center; margin-top: 10px; font-size: 10.5px; border-top: 1px dashed #000; padding-top: 5px;">
         <div style="font-weight: bold;">${invoice.shop.footerText || 'Thank you for shopping with us!'}</div>
         <div style="font-size: 9px; color: #555; margin-top: 4px; letter-spacing: 0.5px;">Powered by Niazi Mobile Mart</div>
       </div>
     </div>
   `;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Task 5.3 — Exchange / Sales-Return Receipt
+// Renders a clearly labelled exchange settlement receipt for 80mm and A4.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ExchangeReceiptData {
+  invoiceNo: string;
+  date: string;
+  cashier?: string;
+  customer?: { name: string; phone?: string };
+  shop: ShopHeader;
+  returnedItems: { name: string; qty: number; unitPrice: number; total: number; imei?: string }[];
+  returnedCredit: number;
+  replacementItems: { name: string; qty: number; unitPrice: number; total: number; imei?: string }[];
+  replacementValue: number;
+  settlementType: 'POSITIVE_COLLECTION' | 'NEGATIVE_REFUND' | 'BALANCED_ZERO';
+  cashCollected?: number;
+  cashRefunded?: number;
+  refundMethod?: string;
+  customerBalanceAfter?: number;
+}
+
+export const formatExchangeReceipt = (
+  data: ExchangeReceiptData,
+  settings: PrinterSettings
+): string => {
+  const isA4 = (
+    settings.paperSize?.width === 'A4' ||
+    settings.printerType === 'A4' ||
+    settings.printerType === 'PDF_ONLY'
+  );
+  return isA4
+    ? _formatExchangeA4(data, settings)
+    : _formatExchangeThermal(data, settings);
+};
+
+const _exchangeItemRows = (items: ExchangeReceiptData['returnedItems'], thermal: boolean): string =>
+  items.map(i => thermal
+    ? `<tr style="vertical-align:top;border-bottom:1px dotted #ccc;">
+        <td style="padding:3px 2px;word-break:break-word;"><div style="font-weight:600;">${i.name}</div>${i.imei ? `<div style="font-size:9px;color:#333;">IMEI: ${maskImei(i.imei)}</div>` : ''}</td>
+        <td style="padding:3px 0;text-align:center;">${i.qty}</td>
+        <td style="padding:3px 0;text-align:right;">${i.unitPrice.toLocaleString()}</td>
+        <td style="padding:3px 0;text-align:right;font-weight:bold;">${i.total.toLocaleString()}</td>
+      </tr>`
+    : `<tr style="border-bottom:1px solid #eee;">
+        <td style="padding:6px;"><div>${i.name}</div>${i.imei ? `<div style="font-size:10px;color:#555;font-family:monospace;">IMEI: ${maskImei(i.imei)}</div>` : ''}</td>
+        <td style="text-align:center;padding:6px;">${i.qty}</td>
+        <td style="text-align:right;padding:6px;">${i.unitPrice.toLocaleString()}</td>
+        <td style="text-align:right;padding:6px;font-weight:bold;">${i.total.toLocaleString()}</td>
+      </tr>`
+  ).join('');
+
+const _exchangeSettlementLine = (data: ExchangeReceiptData, thermal: boolean): string => {
+  const diff = data.replacementValue - data.returnedCredit;
+  const diffLabel = diff > 0 ? '(Customer owes)' : diff < 0 ? '(We owe customer)' : '(Balanced)';
+
+  let cashLine = '';
+  if (data.settlementType === 'POSITIVE_COLLECTION' && (data.cashCollected ?? 0) > 0) {
+    cashLine = thermal
+      ? `<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:bold;color:#155724;border-top:1px solid #000;border-bottom:1px solid #000;margin:4px 0;padding:4px 0;"><span>Cash Collected:</span><span>Rs ${(data.cashCollected ?? 0).toLocaleString()}</span></div>`
+      : `<div style="display:flex;justify-content:space-between;font-weight:bold;font-size:14px;color:#155724;border:1px solid #155724;padding:8px;border-radius:4px;margin-top:8px;"><span>Cash Collected from Customer:</span><span>Rs ${(data.cashCollected ?? 0).toLocaleString()}</span></div>`;
+  } else if (data.settlementType === 'NEGATIVE_REFUND' && (data.cashRefunded ?? 0) > 0) {
+    // F-02 fix: EXCHANGE refund method must not be labelled as a cash refund.
+    // When the settlement is applied to an exchange (no cash changes hands),
+    // use 'Applied to Exchange'. CASH falls through to the existing cash label.
+    const lbl = data.refundMethod === 'CREDIT'
+      ? (thermal ? 'Added to Credit' : 'Added to Customer Credit')
+      : data.refundMethod === 'EXCHANGE'
+      ? (thermal ? 'Applied to Exchange' : 'Applied to Exchange')
+      : (thermal ? 'Cash Refunded' : 'Cash Refunded to Customer');
+    cashLine = thermal
+      ? `<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:bold;color:#c0392b;border-top:1px solid #000;border-bottom:1px solid #000;margin:4px 0;padding:4px 0;"><span>${lbl}:</span><span>Rs ${(data.cashRefunded ?? 0).toLocaleString()}</span></div>`
+      : `<div style="display:flex;justify-content:space-between;font-weight:bold;font-size:14px;color:#c0392b;border:1px solid #c0392b;padding:8px;border-radius:4px;margin-top:8px;"><span>${lbl}:</span><span>Rs ${(data.cashRefunded ?? 0).toLocaleString()}</span></div>`;
+  } else {
+    cashLine = thermal
+      ? `<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:bold;color:#155724;border-top:1px solid #000;border-bottom:1px solid #000;margin:4px 0;padding:4px 0;"><span>Balanced — No Cash Exchange</span><span>Rs 0</span></div>`
+      : `<div style="display:flex;justify-content:space-between;font-weight:bold;font-size:14px;color:#155724;border:1px solid #155724;padding:8px;border-radius:4px;margin-top:8px;"><span>Balanced Exchange — No Cash Transfer</span><span>Rs 0</span></div>`;
+  }
+
+  const balLine = data.customerBalanceAfter !== undefined
+    ? (thermal
+        ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#444;margin-top:3px;"><span>Customer Balance:</span><span style="font-weight:bold;">${data.customerBalanceAfter < 0 ? 'Cr ' : 'Dr '}Rs ${Math.abs(data.customerBalanceAfter).toLocaleString()}</span></div>`
+        : `<div style="display:flex;justify-content:space-between;font-size:12px;margin-top:8px;border-top:1px dashed #000;padding-top:6px;"><span><strong>Customer Balance After:</strong></span><span style="font-weight:bold;">${data.customerBalanceAfter < 0 ? 'Cr ' : 'Dr '}Rs ${Math.abs(data.customerBalanceAfter).toLocaleString()}</span></div>`)
+    : '';
+
+  return cashLine + balLine;
+};
+
+const _formatExchangeThermal = (data: ExchangeReceiptData, settings: PrinterSettings): string => {
+  const isPureReturn = !data.replacementItems || data.replacementItems.length === 0;
+  const docTitle = isPureReturn ? 'SALES RETURN / CREDIT NOTE' : 'EXCHANGE RECEIPT';
+  const fontFamily = settings.font?.family === 'monospace' ? 'Courier, "Courier New", monospace' : 'Arial, sans-serif';
+  const tblHead = `<table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:4px;"><thead><tr style="border-bottom:1px dashed #000;"><th style="text-align:left;padding:3px 2px;width:46%;">Item</th><th style="text-align:center;padding:3px 0;width:10%;">Qty</th><th style="text-align:right;padding:3px 0;width:22%;">Price</th><th style="text-align:right;padding:3px 0;width:22%;">Amount</th></tr></thead><tbody>`;
+
+  return `<div style="font-family:${fontFamily};font-size:13.5px;width:304px;margin:0 auto;line-height:1.3;color:#000;background:#fff;padding:8px 14px;box-sizing:border-box;">
+    <style>@media print{body,html{background:#fff !important;color:#000 !important;margin:0 !important;padding:0 !important;}}</style>
+    <div style="text-align:center;margin-bottom:8px;">
+      ${settings.invoice?.showLogo && data.shop.logoUrl ? `<img src="${escapeHtml(data.shop.logoUrl)}" style="max-width:70%;max-height:55px;margin-bottom:4px;" />` : ''}
+      ${settings.invoice?.showShopInfo !== false ? `${rtlDiv(data.shop.name, 'font-weight:900;font-size:17px;text-transform:uppercase;letter-spacing:0.5px;text-align:center;')}${data.shop.branchName ? `<div style="font-size:12px;font-weight:bold;margin-top:2px;color:#222;">[ ${escapeHtml(data.shop.branchName)} ]</div>` : ''}${data.shop.address ? rtlDiv(data.shop.address, 'font-size:11px;white-space:pre-wrap;margin-top:2px;text-align:center;') : ''}${data.shop.phone ? `<div style="font-size:11px;margin-top:2px;">Tel: ${escapeHtml(data.shop.phone)}</div>` : ''}${data.shop.taxNumber ? `<div style="font-size:11px;">NTN: ${escapeHtml(data.shop.taxNumber)}</div>` : ''}` : ''}
+      <div style="margin-top:4px;font-weight:bold;font-size:12.5px;text-transform:uppercase;letter-spacing:0.5px;">*** ${docTitle} ***</div>
+    </div>
+    <div style="border-top:1px dashed #000;border-bottom:1px dashed #000;padding:5px 0;margin-bottom:6px;font-size:11.5px;">
+      <div style="display:flex;justify-content:space-between;"><span>Ref #:</span><span style="font-weight:bold;">${escapeHtml(data.invoiceNo)}</span></div>
+      <div style="display:flex;justify-content:space-between;"><span>Date:</span><span>${escapeHtml(data.date)}</span></div>
+      ${data.cashier ? `<div style="display:flex;justify-content:space-between;"><span>Cashier:</span><span>${escapeHtml(data.cashier)}</span></div>` : ''}
+      ${data.customer ? `<div style="display:flex;justify-content:space-between;"><span>Customer:</span><span style="font-weight:600;">${escapeHtml(data.customer.name)}</span></div>${data.customer.phone ? `<div style="display:flex;justify-content:space-between;"><span>Phone:</span><span>${escapeHtml(data.customer.phone)}</span></div>` : ''}` : ''}
+    </div>
+    <div style="font-size:11px;font-weight:bold;margin-bottom:2px;border-bottom:1px solid #000;">${isPureReturn ? 'RETURNED ITEMS' : 'A. RETURNED MERCHANDISE (Credit)'}</div>
+    ${tblHead}${_exchangeItemRows(data.returnedItems, true)}</tbody></table>
+    <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:bold;margin-bottom:6px;"><span>${isPureReturn ? 'Total Return Value:' : 'Return Credit:'}</span><span>Rs ${data.returnedCredit.toLocaleString()}</span></div>
+    ${!isPureReturn ? `
+    <div style="font-size:11px;font-weight:bold;margin-bottom:2px;border-bottom:1px solid #000;">B. REPLACEMENT MERCHANDISE (Debit)</div>
+    ${tblHead}${_exchangeItemRows(data.replacementItems, true)}</tbody></table>
+    <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:bold;margin-bottom:6px;"><span>Replacement Value:</span><span>Rs ${data.replacementValue.toLocaleString()}</span></div>
+    <div style="font-size:11px;font-weight:bold;margin-bottom:2px;border-bottom:1px solid #000;">C. SETTLEMENT</div>
+    <div style="font-size:11.5px;margin-bottom:2px;">
+      <div style="display:flex;justify-content:space-between;"><span>Return Credit:</span><span>Rs ${data.returnedCredit.toLocaleString()}</span></div>
+      <div style="display:flex;justify-content:space-between;"><span>Replacement Value:</span><span>Rs ${data.replacementValue.toLocaleString()}</span></div>
+      <div style="display:flex;justify-content:space-between;margin-top:2px;"><span>Net Difference:</span><span style="font-weight:bold;">Rs ${Math.abs(data.replacementValue - data.returnedCredit).toLocaleString()} ${data.replacementValue > data.returnedCredit ? '(Cust. owes)' : data.replacementValue < data.returnedCredit ? '(We owe)' : ''}</span></div>
+    </div>` : `
+    <div style="font-size:11px;font-weight:bold;margin-bottom:2px;border-bottom:1px solid #000;">SETTLEMENT SUMMARY</div>`}
+    ${_exchangeSettlementLine(data, true)}
+    <div style="text-align:center;margin-top:10px;font-size:10.5px;border-top:1px dashed #000;padding-top:5px;">
+      <div style="font-weight:bold;">${rtlSpan(data.shop.footerText || 'Thank you for shopping with us!')}</div>
+      <div style="font-size:9px;color:#555;margin-top:4px;">Powered by Niazi Mobile Mart</div>
+    </div>
+  </div>`;
+};
+
+const _formatExchangeA4 = (data: ExchangeReceiptData, settings: PrinterSettings): string => {
+  const isPureReturn = !data.replacementItems || data.replacementItems.length === 0;
+  const docTitle = isPureReturn ? 'Sales Return / Credit Note' : 'Exchange Receipt';
+  const fontFamily = settings.font?.family === 'monospace' ? 'Courier, monospace' : 'Arial, Helvetica, sans-serif';
+  const fs = settings.font?.size || 12;
+  const tblWrap = (rows: string) => `<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-size:${fs}px;"><thead><tr style="border-bottom:2px solid #000;background:#f9f9f9;"><th style="text-align:left;padding:6px;">Item</th><th style="text-align:center;padding:6px;width:60px;">Qty</th><th style="text-align:right;padding:6px;width:100px;">Rate (Rs)</th><th style="text-align:right;padding:6px;width:110px;">Amount (Rs)</th></tr></thead><tbody>${rows}</tbody></table>`;
+
+  return `<div style="font-family:${fontFamily};font-size:${fs}px;padding:25px;max-width:800px;margin:0 auto;color:#000;background:#fff;">
+    <style>@media print{body{background:#fff !important;color:#000 !important;}}</style>
+    <div style="text-align:center;margin-bottom:20px;">
+      ${settings.invoice?.showLogo && data.shop.logoUrl ? `<img src="${escapeHtml(data.shop.logoUrl)}" style="max-height:70px;margin-bottom:5px;" />` : ''}
+      ${settings.invoice?.showShopInfo !== false ? `<h1 style="margin:4px 0;font-size:22px;font-weight:bold;">${rtlSpan(data.shop.name)}</h1>${data.shop.address ? `<p style="margin:2px 0;white-space:pre-wrap;${hasUrdu(data.shop.address) ? 'direction:rtl;text-align:right;font-family:' + RTL_FONT_STACK : ''}">${escapeHtml(data.shop.address)}</p>` : ''}${data.shop.phone ? `<p style="margin:2px 0;">Phone: ${escapeHtml(data.shop.phone)}</p>` : ''}${data.shop.taxNumber ? `<p style="margin:2px 0;">NTN / Tax #: ${escapeHtml(data.shop.taxNumber)}</p>` : ''}` : ''}
+      <h2 style="margin:10px 0;border:1px solid #000;display:inline-block;padding:4px 14px;border-radius:4px;font-size:14px;text-transform:uppercase;">${docTitle}</h2>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-bottom:20px;border-bottom:1px solid #000;padding-bottom:10px;font-size:12px;">
+      <div><p style="margin:2px 0;"><strong>Ref #:</strong> ${escapeHtml(data.invoiceNo)}</p><p style="margin:2px 0;"><strong>Date:</strong> ${escapeHtml(data.date)}</p>${data.cashier ? `<p style="margin:2px 0;"><strong>Cashier:</strong> ${escapeHtml(data.cashier)}</p>` : ''}</div>
+      ${data.customer ? `<div style="text-align:right;"><p style="margin:2px 0;"><strong>Customer:</strong> ${escapeHtml(data.customer.name)}</p>${data.customer.phone ? `<p style="margin:2px 0;"><strong>Phone:</strong> ${escapeHtml(data.customer.phone)}</p>` : ''}</div>` : ''}
+    </div>
+    <h3 style="font-size:13px;border-bottom:1px solid #000;padding-bottom:4px;margin-bottom:8px;">${isPureReturn ? 'Returned Items' : 'A. Returned Merchandise (Credit)'}</h3>
+    ${tblWrap(_exchangeItemRows(data.returnedItems, false))}
+    <div style="text-align:right;font-weight:bold;font-size:13px;margin-bottom:16px;">${isPureReturn ? 'Total Return Value:' : 'Return Credit:'} Rs ${data.returnedCredit.toLocaleString()}</div>
+    ${!isPureReturn ? `
+    <h3 style="font-size:13px;border-bottom:1px solid #000;padding-bottom:4px;margin-bottom:8px;">B. Replacement Merchandise (Debit)</h3>
+    ${tblWrap(_exchangeItemRows(data.replacementItems, false))}
+    <div style="text-align:right;font-weight:bold;font-size:13px;margin-bottom:16px;">Replacement Value: Rs ${data.replacementValue.toLocaleString()}</div>
+    <h3 style="font-size:13px;border-bottom:1px solid #000;padding-bottom:4px;margin-bottom:8px;">C. Settlement Summary</h3>
+    <div style="width:320px;float:right;font-size:12px;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span>Return Credit:</span><span>Rs ${data.returnedCredit.toLocaleString()}</span></div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span>Replacement Value:</span><span>Rs ${data.replacementValue.toLocaleString()}</span></div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;border-top:1px solid #000;padding-top:4px;"><span><strong>Net Difference:</strong></span><span><strong>Rs ${Math.abs(data.replacementValue - data.returnedCredit).toLocaleString()} ${data.replacementValue > data.returnedCredit ? '(Customer owes)' : data.replacementValue < data.returnedCredit ? '(We owe customer)' : '(Balanced)'}</strong></span></div>
+    </div>` : `
+    <h3 style="font-size:13px;border-bottom:1px solid #000;padding-bottom:4px;margin-bottom:8px;">Settlement Summary</h3>`}
+    <div style="clear:both;">${_exchangeSettlementLine(data, false)}</div>
+    <div style="clear:both;margin-top:50px;text-align:center;font-size:11px;">
+      <p style="white-space:pre-wrap;margin:0;">${rtlSpan(data.shop.footerText || 'Thank you for your business!')}</p>
+      <p style="font-size:9px;color:#888;margin-top:6px;">Powered by Niazi Mobile Mart</p>
+    </div>
+  </div>`;
+};
+

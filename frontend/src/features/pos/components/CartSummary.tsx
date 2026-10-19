@@ -19,6 +19,7 @@ import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 import { CashSessionOpenModal } from '@/features/cash';
 import { ExchangeSettlementModal } from './modals/ExchangeSettlementModal';
+import { ExchangeResultSummaryModal } from './modals/ExchangeResultSummaryModal';
 
 export const CartSummary: React.FC = () => {
   const [mounted, setMounted] = useState(false);
@@ -240,6 +241,9 @@ export const CartSummary: React.FC = () => {
   // GAP-03: Called by ExchangeSettlementModal onConfirm.
   // Routes to atomic exchange backend endpoint (returns + replacement sale in 1 transaction)
   const processExchange = usePosStore((s) => s.processExchange);
+  // F-04: server-authoritative exchange result
+  const lastExchangeResult = usePosStore((s) => s.lastExchangeResult);
+  const clearLastExchangeResult = usePosStore((s) => s.clearLastExchangeResult);
   const handleExchangeConfirm = async (options?: { refundMethod?: 'CASH' | 'CREDIT' }) => {
     setExchangeModalOpen(false);
 
@@ -726,6 +730,14 @@ export const CartSummary: React.FC = () => {
             setExchangeModalOpen(false);
             window.dispatchEvent(new CustomEvent('pos:open-invoice-lookup', { detail: { heading: 'Select Original Invoice for Exchange' } }));
           }}
+        />
+      )}
+
+      {/* F-04: Show server-confirmed exchange result after successful exchange */}
+      {lastExchangeResult && (
+        <ExchangeResultSummaryModal
+          result={lastExchangeResult}
+          onClose={clearLastExchangeResult}
         />
       )}
 

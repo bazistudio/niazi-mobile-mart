@@ -7,8 +7,9 @@ import { SalesReturnModal } from '@/features/returns/SalesReturnModal';
 import { PurchaseReturnModal } from '@/features/returns/PurchaseReturnModal';
 import { usePrintStore } from '@/lib/printer';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
-import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
+import { printFormatter, formatExchangeReceipt, ExchangeReceiptData } from '@/features/settings/printer/utils/printFormatter';
 import { salesApi } from '@/services/sales.api';
+import { tauriClient } from '@/lib/tauri/tauriClient';
 import { purchaseApi } from '@/services/purchase.api';
 import { toast } from 'react-hot-toast';
 
@@ -92,6 +93,51 @@ export const HistoryRowActions: React.FC<Props> = ({ item }) => {
     } else if (item.type === 'payment') {
       html = printFormatter.formatPaymentReceipt({ ...item, transactionId: item.referenceId, amount: item.amount, debitAccount: 'cash' }, settings, shopHeader);
       docType = 'PaymentReceipt';
+    } else if (item.type === 'return') {
+      // Task 5.3: fetch the sales return detail and render a dedicated exchange receipt.
+      // Falls back to generic receipt if the fetch fails.
+      try {
+        const detail = await tauriClient.salesReturnGet(item.id);
+        const sr = detail.sales_return;
+        const exchangeData: ExchangeReceiptData = {
+          invoiceNo: sr.return_number || item.referenceId,
+          date: new Date(sr.created_at || item.createdAt).toLocaleString(),
+          customer: sr.customer_name_snapshot
+            ? { name: sr.customer_name_snapshot }
+            : item.party?.name ? { name: item.party.name } : undefined,
+          shop: shopHeader,
+          returnedItems: (detail.lines || []).map((l: any) => ({
+            name: l.product_name_snapshot || 'Item',
+            qty: l.quantity,
+            unitPrice: l.unit_price,
+            total: l.return_amount ?? (l.quantity * l.unit_price),
+            imei: l.imei_snapshot || undefined,
+          })),
+          returnedCredit: sr.total_amount ?? item.amount,
+          // A pure return has no replacement; replacement fields are left empty.
+          replacementItems: [],
+          replacementValue: 0,
+          // A simple sales return is always a refund (negative collection).
+          settlementType: 'NEGATIVE_REFUND',
+          cashRefunded: sr.refund_method === 'CREDIT' ? 0 : (sr.total_amount ?? item.amount),
+          refundMethod: sr.refund_method || undefined,
+          customerBalanceAfter: undefined, // not available in SalesReturnDetailDto
+        };
+        html = formatExchangeReceipt(exchangeData, settings);
+        docType = exchangeData.replacementItems && exchangeData.replacementItems.length > 0
+          ? 'ExchangeReceipt'
+          : 'ReturnReceipt';
+      } catch {
+        // Fallback to generic receipt on fetch failure
+        html = printFormatter.format({
+          invoiceNo: item.referenceId,
+          date: new Date(item.createdAt).toLocaleString(),
+          customer: { name: item.party.name },
+          items: [{ name: 'Return / Exchange', qty: 1, price: item.amount, total: item.amount }],
+          subtotal: item.amount, discount: 0, tax: 0, total: item.amount, paymentMethod: 'return', shop: shopHeader
+        }, settings);
+        docType = 'ReturnReceipt';
+      }
     } else {
       html = printFormatter.format({
         invoiceNo: item.referenceId,

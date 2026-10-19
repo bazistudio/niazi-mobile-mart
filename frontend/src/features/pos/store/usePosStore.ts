@@ -8,10 +8,12 @@ import { shopApi } from '@/services/shop.api';
 import { ledgerApi } from '@/services/ledger.api';
 import { platformAdapter } from '@/lib/platformAdapter';
 import { InvoiceDocument } from '../services/document/document.service';
+import type { ExchangeResultDto } from '@/lib/tauri/tauriClient';
 import { getQueryClient } from '@/components/providers/ReactQueryProvider';
 import { queryKeys } from '@/lib/react-query/queryKeys';
 import {
   createCashReturnForInvoice,
+  createReturnForInvoice,
   allocateReturnLines,
   WALK_IN_RETURN_BLOCKED_MESSAGE,
   EXCHANGE_BLOCKED_MESSAGE,
@@ -152,6 +154,11 @@ interface PosStore {
   }) => Promise<any>;
   setLastInvoice: (invoice: InvoiceDocument | null) => void;
 
+  // Transient exchange result — set after processExchange() succeeds,
+  // cleared when operator dismisses the summary or starts a new session.
+  lastExchangeResult: ExchangeResultDto | null;
+  clearLastExchangeResult: () => void;
+
   // Status Message
   lastActionMessage: string | null;
   setLastActionMessage: (msg: string | null) => void;
@@ -207,6 +214,7 @@ export const usePosStore = create<PosStore>()(
       lastInvoice: null,
       lastActionMessage: null,
       returnOverflowState: null,
+      lastExchangeResult: null,
       
       setLastActionMessage: (msg) => set({ lastActionMessage: msg }),
       setReturnOverflowState: (state) => set({ returnOverflowState: state }),
@@ -773,64 +781,60 @@ export const usePosStore = create<PosStore>()(
 
         // ─── Proceed with Return Invoice ──────────────────────────────────────
         try {
-          const idempotencyKey = `pos_txn_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-          // Send negative quantity for return
-          const payload = {
-            items: session.cart.map(item => ({
-              productId: item.productId,
-              quantity: -Math.abs(item.quantity),
-              price: item.unitPrice
-            })),
-            customerId: session.customer?.id === 'walk-in' ? undefined : session.customer?.id,
-            // Automatically credit if customer is known, otherwise cash
-            paymentMethod: session.customer?.id && session.customer.id !== 'walk-in' ? 'credit' : 'cash',
-            transactionType: 'invoice_return',
-            taxRate: 0,
-            discount: -(session.invoiceDiscountValue || 0),
-            linkedInvoiceId: session.linkedInvoiceId,
-            idempotencyKey,
-          };
+          // Determine refund method: credit for known customers, cash for walk-in
+          // If forceCashRefund is set (overflow modal chose cash payout), use CASH.
+          const isWalkIn = !session.customer?.id || session.customer.id === 'walk-in';
+          const refundMethod: 'CASH' | 'CREDIT' =
+            forceCashRefund || isWalkIn ? 'CASH' : 'CREDIT';
 
-          let result;
+          // Use dedicated returns endpoint (F-02 fix).
+          // createReturnForInvoice fetches returnable info, allocates quantities to
+          // original sale lines, and POSTs to POST /api/returns — the correct domain.
+          let result: Awaited<ReturnType<typeof createReturnForInvoice>>;
           try {
-            result = await salesApi.createOrder(payload);
+            result = await createReturnForInvoice(
+              session.linkedInvoiceId,
+              session.cart.map(item => ({
+                productId: item.productId,
+                productName: item.productName,
+                quantity: item.quantity,
+              })),
+              refundMethod,
+              'POS Invoice Return',
+            );
           } catch (apiError: any) {
-            const errorMessage = apiError.response?.data?.message || apiError.message || "Unknown API error";
+            const errorMessage = apiError.message || "Unknown API error";
             toast.error("Invoice Return failed: " + errorMessage);
             throw apiError;
           }
 
-          if (!result.success) throw new Error(result.message);
-
-          // ─── Dual Action: Refund Cash Payout if requested ───────────────────
-          if (forceCashRefund && session.customer?.id && session.customer.id !== 'walk-in') {
-             try {
-                // Fetch latest balance to exactly determine the payout amount needed to bring it to 0
-                // We assume it's the exact overflow amount calculated earlier.
-                const overflowAmount = finalRefund - (get().returnOverflowState?.currentBalance || 0);
-                
-                await ledgerApi.recordPayout({
-                  partyId: session.customer.id,
-                  partyType: 'CUSTOMER',
-                  amount: overflowAmount,
-                  method: 'cash',
-                  notes: `Cash Refund for Return Overflow on ${session.linkedInvoiceId}`
-                });
-                toast.success(`Refunded Rs ${overflowAmount} in Cash.`);
-             } catch (payoutError: any) {
-                const msg = payoutError.response?.data?.message || payoutError.message || "Cash Payout Failed";
-                toast.error(`Return processed, but ${msg}. Balance left as Credit.`);
-             }
+          // ─── F-01 fix: cash-out is fully handled inside createSalesReturn (CASH refund_method).
+          // The backend atomically inserts a cash_movements RETURN_REFUND/OUT row covering the
+          // complete refund amount. The previous ledgerApi.recordPayout() call was removed because
+          // (a) the cash movement is already recorded by the backend, and (b) recordPayout() is
+          // an alias that hardcodes partyType:'SUPPLIER', making it semantically wrong for a
+          // customer cash refund. No duplicate accounting call is needed here.
+          if (forceCashRefund) {
+            toast.success("Cash refund recorded. Drawer balance updated.");
           } else {
-             toast.success("Invoice Return processed successfully.");
+            toast.success("Invoice Return processed successfully.");
           }
 
-          set(state => ({
-            transactions: [...state.transactions, result.order as any]
-          }));
           get().clearCart();
-          
           platformAdapter.emitEvent('inventory-updated');
+
+          // Invalidate caches so return history and inventory reflect the change
+          try {
+            const qc = getQueryClient();
+            qc.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+            qc.invalidateQueries({ queryKey: ['sales'] });
+            qc.invalidateQueries({ queryKey: ['products'] });
+            qc.invalidateQueries({ queryKey: queryKeys.customers.all });
+            qc.invalidateQueries({ queryKey: ['cash'] });
+            qc.invalidateQueries({ queryKey: ['returns'] });
+          } catch (qcErr) {
+            console.warn('Query cache invalidation failed (invoice return):', qcErr);
+          }
 
           return result;
         } catch (error: any) {
@@ -912,13 +916,34 @@ export const usePosStore = create<PosStore>()(
             throw new Error(res.message || 'Exchange failed');
           }
 
+          // Store server-authoritative exchange result for operator display (F-04 fix)
           set((state) => ({
             transactions: [...state.transactions, res.order as any],
+            lastExchangeResult: res.exchangeResult ?? null,
           }));
 
           // Clear cart and reset idempotency key on success
           get().clearCart();
           platformAdapter.emitEvent('inventory-updated');
+
+          // Invalidate React Query caches so affected views refresh
+          // without requiring a full application reload (F-01 fix)
+          try {
+            const qc = getQueryClient();
+            qc.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+            qc.invalidateQueries({ queryKey: ['sales'] });
+            qc.invalidateQueries({ queryKey: ['products'] });
+            qc.invalidateQueries({ queryKey: queryKeys.customers.all });
+            qc.invalidateQueries({ queryKey: ['cash'] });
+            qc.invalidateQueries({ queryKey: ['returns'] });
+            // F-03 fix: invalidate customer ledger queries so the ledger view reflects
+            // the exchange settlement immediately. Actual key prefix is ['ledger'] per
+            // queryKeys.ledger factory — the authorization doc said ['customer-ledger']
+            // but that prefix does not exist in this codebase.
+            qc.invalidateQueries({ queryKey: ['ledger'] });
+          } catch (qcErr) {
+            console.warn('Query cache invalidation failed (exchange):', qcErr);
+          }
 
           return res;
         } catch (error: any) {
@@ -927,7 +952,8 @@ export const usePosStore = create<PosStore>()(
         }
       },
 
-      setLastInvoice: (invoice) => set({ lastInvoice: invoice })
+      setLastInvoice: (invoice) => set({ lastInvoice: invoice }),
+      clearLastExchangeResult: () => set({ lastExchangeResult: null })
     }),
     {
       name: 'niazi-pos',

@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Search, X, Receipt, ArrowRight, Loader2, Calendar, User, ShoppingBag } from 'lucide-react';
 import { usePosStore } from '../../store/usePosStore';
 import { salesApi } from '@/services/sales.api';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 
 interface InvoiceLookupModalProps {
   isOpen: boolean;
@@ -20,6 +21,8 @@ export const InvoiceLookupModal: React.FC<InvoiceLookupModalProps> = ({ isOpen, 
   const inputRef = useRef<HTMLInputElement>(null);
 
   const loadInvoice = usePosStore((s) => s.loadInvoice);
+  // Restrict invoice lookup to the operator's active branch (F-03 fix)
+  const activeBranchId = useOrganizationStore((s) => s.activeShopId);
 
   // Auto-focus on open
   useEffect(() => {
@@ -48,7 +51,9 @@ export const InvoiceLookupModal: React.FC<InvoiceLookupModalProps> = ({ isOpen, 
     const fetchInvoices = async () => {
       setIsLoading(true);
       try {
-        const response = await salesApi.getOrders({ orderNumber: debouncedTerm.trim(), limit: 10 });
+        // Pass activeBranchId so the list path is scoped to the operator's branch.
+        // For the exact-match path, the backend independently enforces canAccessBranch.
+        const response = await salesApi.getOrders({ orderNumber: debouncedTerm.trim(), branchId: activeBranchId, limit: 10 });
         if (response.success && response.data) {
           setResults(response.data);
         }

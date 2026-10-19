@@ -56,17 +56,21 @@ export function createReportsRouter(pool: Pool): Router {
       const startDate = (req.query['start_date'] as string) || undefined;
       const endDate = (req.query['end_date'] as string) || undefined;
       const requestedBranchId = (req.query['branch_id'] as string) || undefined;
+      // Normalise the 'all' sentinel to undefined (org-wide unscoped) for org admins.
+      // 'all' is not a real branch UUID; leaving it through would produce a literal
+      // SQL WHERE branch_id = 'all' that matches nothing.
+      const normalizedBranchId = requestedBranchId === 'all' ? undefined : requestedBranchId;
 
       let branchId: string | undefined;
 
       if (callerIsOrgAdmin) {
         // Org admin: validate the requested branch belongs to this org, then allow.
-        // If no branch requested, org-wide unscoped query is intentionally permitted.
-        if (requestedBranchId && !canAccessBranch(identity, requestedBranchId)) {
+        // If no branch requested (or 'all' normalised to undefined), org-wide is permitted.
+        if (normalizedBranchId && !canAccessBranch(identity, normalizedBranchId)) {
           res.status(403).json({ error: 'Access denied: You do not have permission to view reports for this branch' });
           return;
         }
-        branchId = requestedBranchId || undefined;
+        branchId = normalizedBranchId;
       } else {
         // Branch-scoped admin: must have a branch assignment; cannot override via query param.
         if (!identity.branch_id) {
@@ -104,15 +108,17 @@ export function createReportsRouter(pool: Pool): Router {
 
     try {
       const requestedBranchId = (req.query['branch_id'] as string) || undefined;
+      // Normalise the 'all' sentinel to undefined (org-wide unscoped) for org admins.
+      const normalizedBranchId = requestedBranchId === 'all' ? undefined : requestedBranchId;
 
       let branchId: string | undefined;
 
       if (callerIsOrgAdmin) {
-        if (requestedBranchId && !canAccessBranch(identity, requestedBranchId)) {
+        if (normalizedBranchId && !canAccessBranch(identity, normalizedBranchId)) {
           res.status(403).json({ error: 'Access denied: You do not have permission to view reports for this branch' });
           return;
         }
-        branchId = requestedBranchId || undefined;
+        branchId = normalizedBranchId;
       } else {
         if (!identity.branch_id) {
           res.status(403).json({ error: 'Access denied: No branch assigned to your account' });

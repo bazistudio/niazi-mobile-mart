@@ -20,10 +20,9 @@ export const PrinterSelector: React.FC = () => {
         Printer Mode
       </h3>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {[
           { id: 'THERMAL_80MM', label: '80mm Thermal', desc: 'Standard POS Receipt' },
-          { id: 'THERMAL_58MM', label: '58mm Thermal', desc: 'Compact Receipt' },
           { id: 'A4', label: 'A4 / Letter', desc: 'Office Printer' },
           { id: 'PDF_ONLY', label: 'PDF Only', desc: 'Digital Export' }
         ].map(mode => (

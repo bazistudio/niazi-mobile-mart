@@ -188,121 +188,6 @@ export async function httpFetch<T>(path: string, options: RequestInit = {}): Pro
   return JSON.parse(text) as T;
 }
 
-const WEB_PRODUCTS_STORAGE_KEY = 'niazi_web_products';
-const WEB_STOCK_STORAGE_KEY = 'niazi_web_stock_map';
-
-function getStoredWebProducts(): Product[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem(WEB_PRODUCTS_STORAGE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
-}
-
-function saveStoredWebProducts(products: Product[]): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(WEB_PRODUCTS_STORAGE_KEY, JSON.stringify(products));
-  } catch (e) {
-    console.warn('Failed to save web products to localStorage:', e);
-  }
-}
-
-function getStoredWebStockMap(): Record<string, number> {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = localStorage.getItem(WEB_STOCK_STORAGE_KEY);
-    if (!raw) return {};
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
-
-function saveStoredWebStockMap(map: Record<string, number>): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(WEB_STOCK_STORAGE_KEY, JSON.stringify(map));
-  } catch (e) {
-    console.warn('Failed to save web stock map to localStorage:', e);
-  }
-}
-
-const WEB_CUSTOMERS_STORAGE_KEY = 'niazi_web_customers';
-
-function getStoredWebCustomers(): Customer[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem(WEB_CUSTOMERS_STORAGE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
-}
-
-function saveStoredWebCustomers(customers: Customer[]): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(WEB_CUSTOMERS_STORAGE_KEY, JSON.stringify(customers));
-  } catch (e) {
-    console.warn('Failed to save web customers to localStorage:', e);
-  }
-}
-
-const WEB_SUPPLIERS_STORAGE_KEY = 'niazi_web_suppliers';
-
-function getStoredWebSuppliers(): Supplier[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem(WEB_SUPPLIERS_STORAGE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
-}
-
-function saveStoredWebSuppliers(suppliers: Supplier[]): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(WEB_SUPPLIERS_STORAGE_KEY, JSON.stringify(suppliers));
-  } catch (e) {
-    console.warn('Failed to save web suppliers to localStorage:', e);
-  }
-}
-
-const WEB_SALES_STORAGE_KEY = 'niazi_web_sales';
-
-interface StoredWebSale {
-  sale: Sale;
-  lines: SaleLine[];
-  payments: SalePayment[];
-}
-
-function getStoredWebSales(): StoredWebSale[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem(WEB_SALES_STORAGE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
-}
-
-function saveStoredWebSales(sales: StoredWebSale[]): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(WEB_SALES_STORAGE_KEY, JSON.stringify(sales));
-  } catch (e) {
-    console.warn('Failed to save web sales to localStorage:', e);
-  }
-}
-
 export const tauriClient = {
   isTauri: isTauriEnvironment,
 
@@ -1058,86 +943,25 @@ export const tauriClient = {
   },
 
   async productUpdate(id: string, dto: UpdateProductDto): Promise<Product> {
-    try {
-      return await httpFetch<Product>(`/api/products/${encodeURIComponent(id)}`, {
-        method: 'PUT',
-        body: JSON.stringify(dto),
-      });
-    } catch (err) {
-      console.warn('HTTP productUpdate failed, fallback to local', err);
-      const products = getStoredWebProducts();
-      const idx = products.findIndex((p) => p.id === id);
-      if (idx === -1) {
-        throw new Error(`Product not found: ${id}`);
-      }
-      const existing = products[idx];
-      const updated: Product = {
-        ...existing,
-        name: dto.name ?? existing.name,
-        sku: dto.sku ?? existing.sku,
-        barcode: dto.barcode !== undefined ? dto.barcode : existing.barcode,
-        category_id: dto.category_id ?? existing.category_id,
-        brand_id: dto.brand_id !== undefined ? dto.brand_id : existing.brand_id,
-        company_id: dto.company_id !== undefined ? dto.company_id : existing.company_id,
-        color_id: dto.color_id !== undefined ? dto.color_id : existing.color_id,
-        quality_id: dto.quality_id !== undefined ? dto.quality_id : existing.quality_id,
-        unit_id: dto.unit_id !== undefined ? dto.unit_id : existing.unit_id,
-        purchase_price:
-          dto.purchase_price !== undefined && dto.purchase_price !== null
-            ? Math.round(Number(dto.purchase_price))
-            : existing.purchase_price,
-        average_cost:
-          dto.average_cost !== undefined && dto.average_cost !== null
-            ? Math.round(Number(dto.average_cost))
-            : existing.average_cost,
-        sale_price:
-          dto.sale_price !== undefined && dto.sale_price !== null
-            ? Math.round(Number(dto.sale_price))
-            : existing.sale_price,
-        low_stock_threshold:
-          dto.low_stock_threshold !== undefined && dto.low_stock_threshold !== null
-            ? Number(dto.low_stock_threshold)
-            : existing.low_stock_threshold,
-        is_active: dto.is_active !== undefined && dto.is_active !== null ? dto.is_active : existing.is_active,
-        description: dto.description !== undefined ? dto.description : existing.description,
-        updated_at: new Date().toISOString(),
-      };
-      products[idx] = updated;
-      saveStoredWebProducts(products);
-      return updated;
-    }
+    return await httpFetch<Product>(`/api/products/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(dto),
+    });
   },
 
   async productGet(id: string): Promise<Product> {
-    try {
-      return await httpFetch<Product>(`/api/products/${encodeURIComponent(id)}`);
-    } catch {
-      const products = getStoredWebProducts();
-      const found = products.find((p) => p.id === id);
-      if (!found) throw new Error(`Product not found: ${id}`);
-      return found;
-    }
+    return await httpFetch<Product>(`/api/products/${encodeURIComponent(id)}`);
   },
 
   async productGetBySku(sku: string): Promise<Product> {
-    try {
-      const products = await httpFetch<Product[]>(`/api/products?search=${encodeURIComponent(sku)}`);
-      const found = products.find((p) => p.sku.toLowerCase() === sku.toLowerCase());
-      if (found) return found;
-    } catch {}
-    const products = getStoredWebProducts();
+    const products = await httpFetch<Product[]>(`/api/products?search=${encodeURIComponent(sku)}`);
     const found = products.find((p) => p.sku.toLowerCase() === sku.toLowerCase());
     if (!found) throw new Error(`Product not found with SKU: ${sku}`);
     return found;
   },
 
   async productGetByBarcode(barcode: string): Promise<Product> {
-    try {
-      const products = await httpFetch<Product[]>(`/api/products?search=${encodeURIComponent(barcode)}`);
-      const found = products.find((p) => p.barcode && p.barcode.toLowerCase() === barcode.toLowerCase());
-      if (found) return found;
-    } catch {}
-    const products = getStoredWebProducts();
+    const products = await httpFetch<Product[]>(`/api/products?search=${encodeURIComponent(barcode)}`);
     const found = products.find((p) => p.barcode && p.barcode.toLowerCase() === barcode.toLowerCase());
     if (!found) throw new Error(`Product not found with Barcode: ${barcode}`);
     return found;
@@ -1164,21 +988,9 @@ export const tauriClient = {
   },
 
   async productDeactivate(id: string): Promise<void> {
-    try {
-      await httpFetch<void>(`/api/products/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-      });
-      return;
-    } catch (err) {
-      console.warn('HTTP productDeactivate failed, fallback to local', err);
-      const products = getStoredWebProducts();
-      const idx = products.findIndex((p) => p.id === id);
-      if (idx !== -1) {
-        products[idx].is_active = false;
-        products[idx].updated_at = new Date().toISOString();
-        saveStoredWebProducts(products);
-      }
-    }
+    await httpFetch<void>(`/api/products/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
   },
 
   // â”€â”€ Inventory Foundation Domain (Phase 7: all paths redirect to TypeScript Express) â”€â”€
@@ -1317,25 +1129,7 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Customer>('storage_customer_create', { dto });
     }
-    const customers = getStoredWebCustomers();
-    const now = new Date().toISOString();
-    const newCust: Customer = {
-      id: `cust_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      customer_code: `CUST-${Math.floor(1000 + Math.random() * 9000)}`,
-      name: dto.name,
-      phone: dto.phone,
-      alternate_phone: dto.alternate_phone || null,
-      email: dto.email || null,
-      address: dto.address || null,
-      notes: dto.notes || null,
-      credit_limit: dto.credit_limit ?? 100000,
-      is_active: true,
-      created_at: now,
-      updated_at: now,
-    };
-    customers.unshift(newCust);
-    saveStoredWebCustomers(customers);
-    return newCust;
+    throw new Error('API endpoint required');
   },
 
   async customerUpdate(id: string, dto: UpdateCustomerDto): Promise<Customer> {
@@ -1349,25 +1143,7 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Customer>('storage_customer_update', { id, dto });
     }
-    const customers = getStoredWebCustomers();
-    const idx = customers.findIndex((c) => c.id === id);
-    if (idx === -1) throw new Error(`Customer not found: ${id}`);
-    const existing = customers[idx];
-    const updated: Customer = {
-      ...existing,
-      name: dto.name ?? existing.name,
-      phone: dto.phone ?? existing.phone,
-      alternate_phone: dto.alternate_phone !== undefined ? dto.alternate_phone : existing.alternate_phone,
-      email: dto.email !== undefined ? dto.email : existing.email,
-      address: dto.address !== undefined ? dto.address : existing.address,
-      notes: dto.notes !== undefined ? dto.notes : existing.notes,
-      credit_limit: dto.credit_limit !== undefined && dto.credit_limit !== null ? dto.credit_limit : existing.credit_limit,
-      is_active: dto.is_active !== undefined && dto.is_active !== null ? dto.is_active : existing.is_active,
-      updated_at: new Date().toISOString(),
-    };
-    customers[idx] = updated;
-    saveStoredWebCustomers(customers);
-    return updated;
+    throw new Error('API endpoint required');
   },
 
   async customerGetById(id: string): Promise<Customer> {
@@ -1378,10 +1154,7 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Customer>('storage_customer_get_by_id', { id });
     }
-    const customers = getStoredWebCustomers();
-    const found = customers.find((c) => c.id === id);
-    if (!found) throw new Error(`Customer not found: ${id}`);
-    return found;
+    throw new Error('API endpoint required');
   },
 
   async customerGetDetail(id: string): Promise<CustomerDetailDto> {
@@ -1416,27 +1189,7 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<CustomerSummaryDto[]>('storage_customer_list', { filter });
     }
-    const customers = getStoredWebCustomers();
-    let filtered = customers.filter((c) => c.is_active);
-    if (filter?.search) {
-      const q = filter.search.toLowerCase();
-      filtered = filtered.filter(
-        (c) =>
-          c.name.toLowerCase().includes(q) ||
-          c.phone.includes(q) ||
-          c.customer_code.toLowerCase().includes(q)
-      );
-    }
-    return filtered.map((c) => ({
-      id: c.id,
-      customer_code: c.customer_code,
-      name: c.name,
-      phone: c.phone,
-      credit_limit: c.credit_limit,
-      outstanding_balance: 0,
-      is_active: c.is_active,
-      created_at: c.created_at,
-    }));
+    throw new Error('API endpoint required');
   },
 
   async customerSearch(query: string): Promise<CustomerSummaryDto[]> {
@@ -1447,26 +1200,7 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<CustomerSummaryDto[]>('storage_customer_search', { query });
     }
-    const customers = getStoredWebCustomers();
-    const q = (query || '').toLowerCase();
-    return customers
-      .filter(
-        (c) =>
-          c.is_active &&
-          (c.name.toLowerCase().includes(q) ||
-            c.phone.includes(q) ||
-            c.customer_code.toLowerCase().includes(q))
-      )
-      .map((c) => ({
-        id: c.id,
-        customer_code: c.customer_code,
-        name: c.name,
-        phone: c.phone,
-        credit_limit: c.credit_limit,
-        outstanding_balance: 0,
-        is_active: c.is_active,
-        created_at: c.created_at,
-      }));
+    throw new Error('API endpoint required');
   },
 
   async customerGetLedger(
@@ -1532,25 +1266,7 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Supplier>('storage_supplier_create', { dto });
     }
-    const suppliers = getStoredWebSuppliers();
-    const now = new Date().toISOString();
-    const newSupp: Supplier = {
-      id: `supp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      supplier_code: `SUPP-${Math.floor(1000 + Math.random() * 9000)}`,
-      name: dto.name,
-      phone: dto.phone,
-      alternate_phone: dto.alternate_phone || null,
-      email: dto.email || null,
-      address: dto.address || null,
-      notes: dto.notes || null,
-      credit_limit: dto.credit_limit ?? 0,
-      is_active: true,
-      created_at: now,
-      updated_at: now,
-    };
-    suppliers.unshift(newSupp);
-    saveStoredWebSuppliers(suppliers);
-    return newSupp;
+    throw new Error('API endpoint required');
   },
 
   async supplierUpdate(id: string, dto: UpdateSupplierDto): Promise<Supplier> {
@@ -1558,25 +1274,7 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Supplier>('storage_supplier_update', { id, dto });
     }
-    const suppliers = getStoredWebSuppliers();
-    const idx = suppliers.findIndex((s) => s.id === id);
-    if (idx === -1) throw new Error(`Supplier not found: ${id}`);
-    const existing = suppliers[idx];
-    const updated: Supplier = {
-      ...existing,
-      name: dto.name ?? existing.name,
-      phone: dto.phone ?? existing.phone,
-      alternate_phone: dto.alternate_phone !== undefined ? dto.alternate_phone : existing.alternate_phone,
-      email: dto.email !== undefined ? dto.email : existing.email,
-      address: dto.address !== undefined ? dto.address : existing.address,
-      notes: dto.notes !== undefined ? dto.notes : existing.notes,
-      credit_limit: dto.credit_limit !== undefined && dto.credit_limit !== null ? dto.credit_limit : existing.credit_limit,
-      is_active: dto.is_active !== undefined && dto.is_active !== null ? dto.is_active : existing.is_active,
-      updated_at: new Date().toISOString(),
-    };
-    suppliers[idx] = updated;
-    saveStoredWebSuppliers(suppliers);
-    return updated;
+    throw new Error('API endpoint required');
   },
 
   async supplierGetById(id: string): Promise<Supplier | null> {
@@ -1584,8 +1282,7 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Supplier | null>('storage_supplier_get_by_id', { id });
     }
-    const suppliers = getStoredWebSuppliers();
-    return suppliers.find((s) => s.id === id) || null;
+    throw new Error('API endpoint required');
   },
 
   async supplierGetDetail(id: string): Promise<SupplierDetailDto> {
@@ -1593,14 +1290,7 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<SupplierDetailDto>('storage_supplier_get_detail', { id });
     }
-    const supplier = await this.supplierGetById(id);
-    if (!supplier) throw new Error(`Supplier not found: ${id}`);
-    return {
-      supplier,
-      outstanding_balance: 0,
-      recent_purchases: [],
-      recent_payments: [],
-    };
+    throw new Error('API endpoint required');
   },
 
   async supplierList(filter?: SupplierFilter): Promise<SupplierSummaryDto[]> {
@@ -1608,26 +1298,7 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<SupplierSummaryDto[]>('storage_supplier_list', { filter });
     }
-    const suppliers = getStoredWebSuppliers();
-    let filtered = suppliers.filter((s) => s.is_active);
-    if (filter?.search) {
-      const q = filter.search.toLowerCase();
-      filtered = filtered.filter(
-        (s) =>
-          s.name.toLowerCase().includes(q) ||
-          s.phone.includes(q) ||
-          s.supplier_code.toLowerCase().includes(q)
-      );
-    }
-    return filtered.map((s) => ({
-      id: s.id,
-      supplier_code: s.supplier_code,
-      name: s.name,
-      phone: s.phone,
-      credit_limit: s.credit_limit,
-      outstanding_balance: 0,
-      is_active: s.is_active,
-    }));
+    throw new Error('API endpoint required');
   },
 
   async supplierSearch(query: string): Promise<SupplierSummaryDto[]> {
@@ -1635,25 +1306,7 @@ export const tauriClient = {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<SupplierSummaryDto[]>('storage_supplier_search', { query });
     }
-    const suppliers = getStoredWebSuppliers();
-    const q = (query || '').toLowerCase();
-    return suppliers
-      .filter(
-        (s) =>
-          s.is_active &&
-          (s.name.toLowerCase().includes(q) ||
-            s.phone.includes(q) ||
-            s.supplier_code.toLowerCase().includes(q))
-      )
-      .map((s) => ({
-        id: s.id,
-        supplier_code: s.supplier_code,
-        name: s.name,
-        phone: s.phone,
-        credit_limit: s.credit_limit,
-        outstanding_balance: 0,
-        is_active: s.is_active,
-      }));
+    throw new Error('API endpoint required');
   },
 
   async supplierGetBalance(supplierId: string): Promise<number> {
@@ -1708,13 +1361,7 @@ export const tauriClient = {
       await invoke('storage_supplier_deactivate', { id });
       return;
     }
-    const suppliers = getStoredWebSuppliers();
-    const idx = suppliers.findIndex((s) => s.id === id);
-    if (idx !== -1) {
-      suppliers[idx].is_active = false;
-      suppliers[idx].updated_at = new Date().toISOString();
-      saveStoredWebSuppliers(suppliers);
-    }
+    throw new Error('API endpoint required');
   },
 
 

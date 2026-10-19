@@ -5,6 +5,29 @@ All notable changes to Niazi Mobile Mart will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.43] - 2026-10-19
+
+### Added
+- **POS Exchange Server-Authoritative Result Display**: Added `ExchangeResultSummaryModal.tsx` to display server-confirmed exchange breakdowns (`ExchangeResultDto`), ensuring operators view authoritative backend amounts without duplicate submit paths.
+- **Dedicated Exchange & Return Receipt Formatting**: Added `formatExchangeReceipt()` to `printFormatter.ts` supporting 80mm thermal and A4 layouts with distinct sections for returned items (credit), replacement items (debit), and settlement summary. Wired return receipt reprint via `HistoryRowActions.tsx`.
+
+### Changed
+- **Branch-Isolation & Sentinel Normalization**:
+  - `history.repo.ts`: Normalized the branch_id sentinel `'all'` and empty strings to `null` before building WHERE clauses, guaranteeing consistent un-scoped queries across all UNION ALL query arms for org admins while maintaining strict branch isolation.
+  - `reports.routes.ts`: Normalized the `'all'` query parameter sentinel to `undefined` for org admins on `/summary` and `/profit` routes, preventing spurious `WHERE branch_id = 'all'` empty result sets.
+  - `InvoiceLookupModal.tsx`: Scoped invoice search queries to the operator's active branch (`activeBranchId`), enforcing branch isolation during return lookups.
+- **POS Return & Exchange Workflow Consolidation**:
+  - `posReturn.service.ts`: Added `createReturnForInvoice()` supporting `'CASH'` and `'CREDIT'` refund methods via `POST /api/returns`.
+  - `usePosStore.ts`: Re-routed POS invoice returns through `createReturnForInvoice()`, removed erroneous duplicate `recordPayout()` accounting calls for customer cash refunds, wired server-authoritative exchange results (`lastExchangeResult`), and broadened React Query cache invalidation to include customers, cash, products, returns, and ledger.
+- **Printer Mode Options**: Updated `PrinterSelector.tsx` to streamline supported printer layouts (80mm Thermal, A4 / Letter, and PDF Only).
+- **Tauri Client Security & Architecture**:
+  - `tauriClient.ts`: Cleaned up unpersisted in-memory web storage fallbacks for customers and suppliers, enforcing authoritative backend API and Tauri IPC execution.
+  - `backend/package.json`: Preserved test runner script targeting integration test suites.
+
+### Deferred / Known Limitations
+- **Return Receipt Wording Defect**: In `HistoryRowActions.tsx`, `refund_method === 'EXCHANGE'` currently falls back into the cash refund calculation ternary (`sr.refund_method === 'CREDIT' ? 0 : ...`). Exchange offsets must not be represented as "Cash Refunded"; exchange offsets must remain distinct from actual cash refunds and credit entries. This cosmetic receipt wording defect is explicitly deferred to v1.3.44.
+- **Atomic Exchange Test Suite Baseline**: The automated atomic exchange test suite (`exchange-atomic.test.ts`) baseline remains documented as 12 passed, 0 failed. Tests were not re-executed against the protected environment during this release cycle.
+
 ## [1.3.42] - 2026-10-18
 
 ### Fixed

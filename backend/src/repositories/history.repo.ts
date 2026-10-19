@@ -51,6 +51,19 @@ export class HistoryRepoError extends Error {
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// Helper: normalise a raw branch_id query parameter so that the sentinel
+// value 'all' (used by the org-admin dashboard to request an organisation-
+// wide unscoped view) and an empty string are both treated identically to
+// null/unscoped.  This must be applied before any WHERE-fragment building so
+// every arm of the UNION ALL query is consistent.
+// ---------------------------------------------------------------------------
+function normalizeBranchId(raw: string | null | undefined): string | null {
+  if (!raw || raw === 'all') return null;
+  return raw;
+}
+
 // ---------------------------------------------------------------------------
 // Helper: build a WHERE fragment for a given branch/date/search set of params.
 // Returns { clause, params } where clause starts with "AND " (caller prepends
@@ -98,6 +111,12 @@ export async function listHistoryItems(
   const limit = Math.min(filter?.limit ?? 50, 500);
   const page = Math.max(filter?.page ?? 1, 1);
   const offset = (page - 1) * limit;
+
+  // Normalise the branch_id sentinel 'all' (and empty string) to null/unscoped
+  // BEFORE any WHERE-fragment building so all UNION ALL arms are consistent.
+  if (filter && filter.branch_id !== undefined) {
+    filter = { ...filter, branch_id: normalizeBranchId(filter.branch_id) };
+  }
 
   // Determine which type(s) to include
   const typeFilter = filter?.type?.toLowerCase();
@@ -393,6 +412,9 @@ export async function getHistoryStats(
   pool: Pool,
   branchId?: string | null
 ): Promise<HistoryStats> {
+  // Normalise the branch_id sentinel 'all' (and empty string) to null/unscoped.
+  branchId = normalizeBranchId(branchId);
+
   let salesWhere = "WHERE sale_status != 'VOIDED'";
   const params: unknown[] = [];
 

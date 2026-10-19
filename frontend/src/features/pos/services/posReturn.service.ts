@@ -95,3 +95,26 @@ export async function createCashReturnForInvoice(
     notes: null,
   });
 }
+
+/**
+ * Creates a sales return against the linked invoice with the specified refund method.
+ * Supports 'CASH' (physical refund) and 'CREDIT' (customer ledger credit).
+ * The backend computes refund amounts from original sale lines and enforces
+ * remaining returnable quantities.
+ */
+export async function createReturnForInvoice(
+  saleId: string,
+  cartItems: ReturnCartItem[],
+  refundMethod: 'CASH' | 'CREDIT',
+  reason = 'POS Invoice Return',
+) {
+  const info = await returnsApi.getSaleReturnableInfo(saleId);
+  const lines = allocateReturnLines(cartItems, info.lines);
+  return returnsApi.createSalesReturn({
+    sale_id: info.sale_id,
+    lines,
+    refund_method: refundMethod,
+    reason,
+    notes: null,
+  });
+}
