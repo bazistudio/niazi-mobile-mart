@@ -58,6 +58,7 @@ import { buildSyncRouter } from './routes/sync.routes';
 import { buildRepairRouter } from './routes/repair.routes';
 import { createSettingsRouter } from './routes/settings.routes';
 import { buildRolesRouter } from './routes/roles.routes'; // DEF-08
+import { buildMobileRouter } from './routes/mobile.routes';
 import { BranchRepo } from './repositories/branch.repo';
 import {
   listBrands,
@@ -289,6 +290,13 @@ async function main(): Promise<void> {
   const rolesRouter = buildRolesRouter(pool);
   app.use('/api/roles', rolesRouter);
   app.use('/api/v1/roles', rolesRouter);
+
+  // -------------------------------------------------------------------------
+  // Mobile Inventory routes — TypeScript Online Authority
+  // -------------------------------------------------------------------------
+  const mobileRouter = buildMobileRouter(pool);
+  app.use('/api/mobiles', mobileRouter);
+  app.use('/api/v1/mobiles', mobileRouter);
 
   // DEF-SALE-10: Protect org balances endpoint — was unauthenticated, exposed to any caller.
   // Now requires a valid JWT and organization-admin role.

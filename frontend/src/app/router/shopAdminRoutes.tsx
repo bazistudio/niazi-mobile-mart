@@ -9,6 +9,8 @@ import { InventoryWorkspaceLayout } from '@/features/inventory/components/Invent
 import { InventoryProductsPage } from '@/pages/dashboard/shop-admin/inventory/InventoryProductsPage';
 import { InventoryStockPage } from '@/pages/dashboard/shop-admin/inventory/InventoryStockPage';
 import { InventoryImportPage } from '@/pages/dashboard/shop-admin/inventory/InventoryImportPage';
+import { MobileInventoryPage } from '@/pages/dashboard/shop-admin/MobileInventoryPage';
+import { AddMobilePage } from '@/pages/dashboard/shop-admin/AddMobilePage';
 import { StockPage } from '@/pages/dashboard/shop-admin/StockPage';
 import { ImportPage } from '@/pages/dashboard/shop-admin/ImportPage';
 import { SalesPage } from '@/pages/dashboard/shop-admin/SalesPage';
@@ -61,6 +63,24 @@ export const shopAdminCoreRoutes = (
       <Route path="stock" element={<InventoryStockPage />} />
       <Route path="import" element={<InventoryImportPage />} />
     </Route>
+
+    {/* Dedicated Mobile Inventory & Serialized Asset Management */}
+    <Route
+      path="mobiles"
+      element={
+        <PermissionGuard requiredPermission={PERMISSIONS.INVENTORY_VIEW} fallbackPath="/dashboard/shop-admin">
+          <MobileInventoryPage />
+        </PermissionGuard>
+      }
+    />
+    <Route
+      path="mobiles/add"
+      element={
+        <PermissionGuard requiredPermission={PERMISSIONS.INVENTORY_VIEW} fallbackPath="/dashboard/shop-admin">
+          <AddMobilePage />
+        </PermissionGuard>
+      }
+    />
 
     {/* Standalone Inventory Legacy Route Wrappers */}
     <Route

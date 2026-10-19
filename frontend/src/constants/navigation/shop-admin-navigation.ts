@@ -16,6 +16,7 @@ import {
   Megaphone,
   Coins,
   Building2,
+  Smartphone,
 } from 'lucide-react';
 import { NavigationGroup } from '../../types/navigation';
 import { PERMISSIONS } from '../permissions';
@@ -37,6 +38,7 @@ export const shopAdminNavigation: NavigationGroup[] = [
   {
     label: 'Inventory',
     items: [
+      { name: 'Mobile Inventory', href: '/dashboard/shop-admin/mobiles', icon: Smartphone, permission: PERMISSIONS.PRODUCTS_VIEW },
       { name: 'Products & Stock', href: '/dashboard/shop-admin/inventory', icon: Tags, permission: PERMISSIONS.PRODUCTS_VIEW },
     ],
   },
