@@ -5,6 +5,20 @@ All notable changes to Niazi Mobile Mart will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.44] - 2026-10-20
+
+### Added
+- **Repair Booking & Finish Job Transaction Pipeline**:
+  - Implemented transactional repair job creation, live stock deduction upon adding spare parts, and compensating stock restoration upon removing parts.
+  - Implemented delivery and finish job pipeline with invoice counter allocation (`REP-XXXXX`), status transition to `'Delivered'`, and support for full CASH settlement, advance payments, and customer CREDIT without unverified ledger mutation.
+  - Added PostgreSQL migration `038_repair_transaction_pipeline.sql` extending `cash_movements.movement_type` (`REPAIR_ADVANCE`, `REPAIR_SETTLEMENT`), `repair_jobs`, `repair_payments`, `repair_parts`, and introducing `repair_invoice_counters`.
+- **Automated Repair Acceptance Suite (T1–T7)**: Added `repair-pipeline.test.ts` verifying full cash settlement (T1), credit settlement with zero ledger mutation (T2), walk-in repair delivery (T3), open cash session enforcement (T4), advance payment deduction (T5), atomic stock deduction/restoration (T6), and conflict rejection on already delivered jobs (T7).
+
+### Changed
+- **Polymorphic Repair Query & Schema Compatibility**:
+  - `repair.repo.ts`: Explicitly cast `id::text` in polymorphic queries comparing against both UUID and human-readable `job_id`, preventing PostgreSQL operator mismatch errors.
+  - `repair.repo.ts`: Aligned `stock_movements` append-only audit log inserts with canonical schema (`reference_id` / `reason`).
+
 ## [1.3.43] - 2026-10-19
 
 ### Added

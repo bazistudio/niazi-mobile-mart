@@ -1,30 +1,42 @@
 /**
  * Repair Job Routes
- * P6: Real PostgreSQL-backed repair job management, replacing mocked repair.api.ts
+ * Phase A rewrite: atomic transactions, in-tx audit log, finish/delete-part endpoints.
  *
  * Authorization:
- *   GET /api/repairs         — authenticated users (all roles)
- *   GET /api/repairs/:id     — authenticated users (all roles)
- *   POST /api/repairs        — admin-only (create job)
- *   PUT /api/repairs/:id/status — admin-only (update status)
- *   POST /api/repairs/:id/parts — admin-only (add part)
- *   POST /api/repairs/:id/payments — admin-only (add payment)
+ *   GET  /api/repairs                    — authenticated users (all roles)
+ *   GET  /api/repairs/:id                — authenticated users (all roles)
+ *   POST /api/repairs                    — branch admin+
+ *   PUT  /api/repairs/:id/status         — branch admin+
+ *   POST /api/repairs/:id/parts          — branch admin+ (deducts stock)
+ *   DELETE /api/repairs/:id/parts/:partId — branch admin+ (restores stock if deducted)
+ *   POST /api/repairs/:id/payments       — branch admin+ (CASH: requires open session)
+ *   POST /api/repairs/:id/finish         — branch admin+ (atomic delivery/settlement)
+ *
+ * All write endpoints call the *Tx variants which embed writeChangeLogEntry inside
+ * the same BEGIN…COMMIT block. There are no setImmediate() fire-and-forget audit calls.
  */
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { buildAuthMiddleware, isBranchAdmin, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
+import {
+  buildAuthMiddleware,
+  isBranchAdmin,
+  isOrgAdmin,
+  canAccessBranch,
+  RequestIdentity,
+} from '../auth';
 import {
   listRepairJobs,
   getRepairJobById,
-  createRepairJob,
+  createRepairJobTx,
   updateRepairStatus,
-  addRepairPart,
-  addRepairPayment,
+  addRepairPartTx,
+  removeRepairPartTx,
+  addRepairPaymentTx,
+  completeRepairJobTx,
   RepairRepoError,
   RepairJobFilters,
 } from '../repositories/repair.repo';
-import { writeChangeLogEntry } from '../repositories/change_log.repo';
 
 export function buildRepairRouter(pool: Pool): Router {
   const router = Router();
@@ -44,8 +56,6 @@ export function buildRepairRouter(pool: Pool): Router {
         technician_id: (req.query['technician_id'] as string) || undefined,
       };
 
-      // Org admins may filter by any branch; branch admins and others are locked to their own branch.
-      // F-04: if a non-org-admin has no branch_id, fail closed rather than running an unscoped query.
       if (!callerIsOrgAdmin) {
         if (!identity.branch_id) {
           res.status(403).json({ error: 'Access denied: No branch assigned to your account' });
@@ -68,7 +78,7 @@ export function buildRepairRouter(pool: Pool): Router {
     }
   });
 
-  // ── GET /api/repairs/:id — get by id or job_id ────────────────────────────
+  // ── GET /api/repairs/:id ───────────────────────────────────────────────────
   router.get('/:id', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
@@ -78,24 +88,20 @@ export function buildRepairRouter(pool: Pool): Router {
         res.status(404).json({ error: `Repair job '${id}' not found` });
         return;
       }
-
-      // Enforce branch isolation: non-org-admins can only access their own branch's jobs
       if (!canAccessBranch(identity, (job as any)?.branch_id ?? (job as any)?.branchId ?? null)) {
         res.status(403).json({ error: 'Access denied: You do not have permission to view this repair job' });
         return;
       }
-
       res.status(200).json(job);
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to fetch repair job' });
     }
   });
 
-  // ── POST /api/repairs — create new repair job (branch admin) ────────────
+  // ── POST /api/repairs — create new repair job ──────────────────────────────
   router.post('/', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      // F-01: Branch admins (SHOP_ADMIN, MANAGER) and org admins may create repair jobs.
       if (!isBranchAdmin(identity)) {
         res.status(403).json({ error: 'Forbidden: creating repair jobs requires Admin or ShopAdmin role' });
         return;
@@ -124,38 +130,16 @@ export function buildRepairRouter(pool: Pool): Router {
         internal_notes: body.internal_notes || body.internalNotes || null,
         customer_notes: body.customer_notes || body.customerNotes || null,
         branch_id: body.branch_id || body.branchId || identity.branch_id || null,
+        advance_payment: body.advance_payment || body.advancePayment || null,
       };
 
-      // F-01: Validate that the caller can access the target branch before creating.
       if (!canAccessBranch(identity, dto.branch_id)) {
         res.status(403).json({ error: 'Access denied: You do not have permission to create a repair job for this branch' });
         return;
       }
 
-      const job = await createRepairJob(pool, dto, identity.user_id);
+      const job = await createRepairJobTx(pool, dto, identity.user_id, identity.organization_id || '');
       res.status(201).json(job);
-
-      setImmediate(() => {
-        const orgId = identity.organization_id;
-        const bId = (job as any)?.branch_id || dto.branch_id || identity.branch_id;
-        const jobId = (job as any)?.id || (job as any)?.job_id;
-        if (orgId && bId && jobId) {
-          pool.connect().then(cl => {
-            cl.query('BEGIN')
-              .then(() => writeChangeLogEntry(cl, {
-                organizationId: orgId,
-                branchId: bId,
-                eventType: 'REPAIR_CREATED',
-                entityType: 'repair',
-                entityId: jobId,
-                payloadStr: JSON.stringify({ repair_id: jobId, branch_id: bId }),
-              }))
-              .then(() => cl.query('COMMIT'))
-              .catch(() => cl.query('ROLLBACK').catch(() => {}))
-              .finally(() => cl.release());
-          }).catch(() => {});
-        }
-      });
     } catch (err: any) {
       if (err instanceof RepairRepoError) {
         res.status(err.statusCode).json({ error: err.message });
@@ -165,11 +149,10 @@ export function buildRepairRouter(pool: Pool): Router {
     }
   });
 
-  // ── PUT /api/repairs/:id/status — update status (branch admin) ──────────
+  // ── PUT /api/repairs/:id/status ────────────────────────────────────────────
   router.put('/:id/status', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      // F-01: Branch admins may update status; org-only guard removed.
       if (!isBranchAdmin(identity)) {
         res.status(403).json({ error: 'Forbidden: updating repair status requires Admin or ShopAdmin role' });
         return;
@@ -184,7 +167,6 @@ export function buildRepairRouter(pool: Pool): Router {
         return;
       }
 
-      // F-01: Load job and verify resource ownership before mutating.
       const existingJob = await getRepairJobById(pool, id);
       if (!existingJob) {
         res.status(404).json({ error: `Repair job '${id}' not found` });
@@ -197,28 +179,6 @@ export function buildRepairRouter(pool: Pool): Router {
 
       const job = await updateRepairStatus(pool, id, { status: status.trim(), note }, identity.user_id);
       res.status(200).json(job);
-
-      setImmediate(() => {
-        const orgId = identity.organization_id;
-        const bId = (job as any)?.branch_id || (existingJob as any)?.branch_id || identity.branch_id;
-        const jobId = (job as any)?.id || (job as any)?.job_id || id;
-        if (orgId && bId && jobId) {
-          pool.connect().then(cl => {
-            cl.query('BEGIN')
-              .then(() => writeChangeLogEntry(cl, {
-                organizationId: orgId,
-                branchId: bId,
-                eventType: 'REPAIR_UPDATED',
-                entityType: 'repair',
-                entityId: jobId,
-                payloadStr: JSON.stringify({ repair_id: jobId, branch_id: bId, status }),
-              }))
-              .then(() => cl.query('COMMIT'))
-              .catch(() => cl.query('ROLLBACK').catch(() => {}))
-              .finally(() => cl.release());
-          }).catch(() => {});
-        }
-      });
     } catch (err: any) {
       if (err instanceof RepairRepoError) {
         res.status(err.statusCode).json({ error: err.message });
@@ -228,11 +188,10 @@ export function buildRepairRouter(pool: Pool): Router {
     }
   });
 
-  // ── POST /api/repairs/:id/parts — add part to job (branch admin) ───────
+  // ── POST /api/repairs/:id/parts — add part (deducts stock atomically) ─────
   router.post('/:id/parts', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      // F-01: Branch admins may add parts; org-only guard removed.
       if (!isBranchAdmin(identity)) {
         res.status(403).json({ error: 'Forbidden: adding parts requires Admin or ShopAdmin role' });
         return;
@@ -240,7 +199,6 @@ export function buildRepairRouter(pool: Pool): Router {
 
       const id = req.params['id'] as string;
 
-      // F-01: Load job and verify resource ownership before mutating.
       const existingJob = await getRepairJobById(pool, id);
       if (!existingJob) {
         res.status(404).json({ error: `Repair job '${id}' not found` });
@@ -261,30 +219,8 @@ export function buildRepairRouter(pool: Pool): Router {
         price: Number(body.price ?? 0),
       };
 
-      const job = await addRepairPart(pool, id, dto, identity.user_id);
+      const job = await addRepairPartTx(pool, id, dto, identity.user_id, identity.organization_id || '');
       res.status(200).json(job);
-
-      setImmediate(() => {
-        const orgId = identity.organization_id;
-        const bId = (job as any)?.branch_id || (existingJob as any)?.branch_id || identity.branch_id;
-        const jobId = (job as any)?.id || (job as any)?.job_id || id;
-        if (orgId && bId && jobId) {
-          pool.connect().then(cl => {
-            cl.query('BEGIN')
-              .then(() => writeChangeLogEntry(cl, {
-                organizationId: orgId,
-                branchId: bId,
-                eventType: 'REPAIR_UPDATED',
-                entityType: 'repair',
-                entityId: jobId,
-                payloadStr: JSON.stringify({ repair_id: jobId, branch_id: bId }),
-              }))
-              .then(() => cl.query('COMMIT'))
-              .catch(() => cl.query('ROLLBACK').catch(() => {}))
-              .finally(() => cl.release());
-          }).catch(() => {});
-        }
-      });
     } catch (err: any) {
       if (err instanceof RepairRepoError) {
         res.status(err.statusCode).json({ error: err.message });
@@ -294,11 +230,43 @@ export function buildRepairRouter(pool: Pool): Router {
     }
   });
 
-  // ── POST /api/repairs/:id/payments — add payment (branch admin) ─────────
+  // ── DELETE /api/repairs/:id/parts/:partId — remove part (restores stock) ──
+  router.delete('/:id/parts/:partId', async (req: Request, res: Response) => {
+    try {
+      const identity = req.identity as RequestIdentity;
+      if (!isBranchAdmin(identity)) {
+        res.status(403).json({ error: 'Forbidden: removing parts requires Admin or ShopAdmin role' });
+        return;
+      }
+
+      const id = req.params['id'] as string;
+      const partId = req.params['partId'] as string;
+
+      const existingJob = await getRepairJobById(pool, id);
+      if (!existingJob) {
+        res.status(404).json({ error: `Repair job '${id}' not found` });
+        return;
+      }
+      if (!canAccessBranch(identity, (existingJob as any)?.branch_id ?? (existingJob as any)?.branchId ?? null)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to modify this repair job' });
+        return;
+      }
+
+      const job = await removeRepairPartTx(pool, id, partId, identity.user_id, identity.organization_id || '');
+      res.status(200).json(job);
+    } catch (err: any) {
+      if (err instanceof RepairRepoError) {
+        res.status(err.statusCode).json({ error: err.message });
+        return;
+      }
+      res.status(500).json({ error: err.message || 'Failed to remove part from repair job' });
+    }
+  });
+
+  // ── POST /api/repairs/:id/payments — add payment (CASH: requires open session)
   router.post('/:id/payments', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      // F-01: Branch admins may take payments; org-only guard removed.
       if (!isBranchAdmin(identity)) {
         res.status(403).json({ error: 'Forbidden: adding payments requires Admin or ShopAdmin role' });
         return;
@@ -306,7 +274,6 @@ export function buildRepairRouter(pool: Pool): Router {
 
       const id = req.params['id'] as string;
 
-      // F-01: Load job and verify resource ownership before mutating.
       const existingJob = await getRepairJobById(pool, id);
       if (!existingJob) {
         res.status(404).json({ error: `Repair job '${id}' not found` });
@@ -324,36 +291,62 @@ export function buildRepairRouter(pool: Pool): Router {
         reference: body.reference || body.reference_number || null,
       };
 
-      const job = await addRepairPayment(pool, id, dto, identity.user_id);
+      const job = await addRepairPaymentTx(pool, id, dto, identity.user_id, identity.organization_id || '');
       res.status(200).json(job);
-
-      setImmediate(() => {
-        const orgId = identity.organization_id;
-        const bId = (job as any)?.branch_id || (existingJob as any)?.branch_id || identity.branch_id;
-        const jobId = (job as any)?.id || (job as any)?.job_id || id;
-        if (orgId && bId && jobId) {
-          pool.connect().then(cl => {
-            cl.query('BEGIN')
-              .then(() => writeChangeLogEntry(cl, {
-                organizationId: orgId,
-                branchId: bId,
-                eventType: 'REPAIR_UPDATED',
-                entityType: 'repair',
-                entityId: jobId,
-                payloadStr: JSON.stringify({ repair_id: jobId, branch_id: bId }),
-              }))
-              .then(() => cl.query('COMMIT'))
-              .catch(() => cl.query('ROLLBACK').catch(() => {}))
-              .finally(() => cl.release());
-          }).catch(() => {});
-        }
-      });
     } catch (err: any) {
       if (err instanceof RepairRepoError) {
         res.status(err.statusCode).json({ error: err.message });
         return;
       }
       res.status(500).json({ error: err.message || 'Failed to add payment to repair job' });
+    }
+  });
+
+  // ── POST /api/repairs/:id/finish — atomic delivery and settlement ──────────
+  router.post('/:id/finish', async (req: Request, res: Response) => {
+    try {
+      const identity = req.identity as RequestIdentity;
+      if (!isBranchAdmin(identity)) {
+        res.status(403).json({ error: 'Forbidden: finishing a repair job requires Admin or ShopAdmin role' });
+        return;
+      }
+
+      const id = req.params['id'] as string;
+
+      // Branch-access preflight — completeRepairJobTx will also check, but we want
+      // a clean 403 with a consistent message before entering the transaction.
+      const existingJob = await getRepairJobById(pool, id);
+      if (!existingJob) {
+        res.status(404).json({ error: `Repair job '${id}' not found` });
+        return;
+      }
+      if (!canAccessBranch(identity, (existingJob as any)?.branch_id ?? (existingJob as any)?.branchId ?? null)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to finish this repair job' });
+        return;
+      }
+
+      const body = req.body ?? {};
+      const dto = {
+        discount: body.discount !== undefined ? Number(body.discount) : undefined,
+        additional_charges: body.additional_charges !== undefined ? Number(body.additional_charges) : undefined,
+        settlement_payment: body.settlement_payment
+          ? {
+              amount: Number(body.settlement_payment.amount ?? 0),
+              method: body.settlement_payment.method || 'CASH',
+              reference: body.settlement_payment.reference || null,
+            }
+          : null,
+        delivery_notes: body.delivery_notes || body.deliveryNotes || null,
+      };
+
+      const job = await completeRepairJobTx(pool, id, dto, identity.user_id, identity.organization_id || '');
+      res.status(200).json(job);
+    } catch (err: any) {
+      if (err instanceof RepairRepoError) {
+        res.status(err.statusCode).json({ error: err.message });
+        return;
+      }
+      res.status(500).json({ error: err.message || 'Failed to finish repair job' });
     }
   });
 

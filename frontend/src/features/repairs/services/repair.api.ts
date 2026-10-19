@@ -7,7 +7,7 @@
  */
 
 import { httpClient } from '@/lib/http/httpClient';
-import { RepairJob } from '../types/repair.types';
+import { RepairJob, FinishRepairPayload } from '../types/repair.types';
 
 export interface RepairJobListResult {
   data: RepairJob[];
@@ -134,5 +134,27 @@ export const repairApi = {
       method: paymentData.method,
       reference: paymentData.reference ?? null,
     });
+  },
+
+  /**
+   * Remove a part from a repair job. Compensating stock IN is handled server-side.
+   * Admin-only.
+   */
+  removePart: async (id: string, partId: string): Promise<RepairJob> => {
+    return httpClient.delete<RepairJob>(
+      `/api/repairs/${encodeURIComponent(id)}/parts/${encodeURIComponent(partId)}`
+    );
+  },
+
+  /**
+   * Finish and deliver a repair job.
+   * Allocates invoice number, records settlement payment (if any), sets status=Delivered.
+   * Uses POST /api/repairs/:id/finish — NOT the generic status endpoint.
+   * If settlement_payment is omitted or amount is 0 and a balance remains,
+   * the job is delivered with settlement_status='CREDIT' (balance on job only,
+   * not posted to customer ledger).
+   */
+  finishRepair: async (id: string, payload: FinishRepairPayload): Promise<RepairJob> => {
+    return httpClient.post<RepairJob>(`/api/repairs/${encodeURIComponent(id)}/finish`, payload);
   },
 };

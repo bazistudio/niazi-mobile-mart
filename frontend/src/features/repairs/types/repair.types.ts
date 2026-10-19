@@ -36,10 +36,12 @@ export interface PartUsed {
     currentStock: number;
     cost: number;
     price: number;
-  };
+  } | null;
   qty: number;
   cost: number;
   price: number;
+  stockDeducted: boolean;
+  stockMovementId: string | null;
   addedAt: string;
 }
 
@@ -55,6 +57,8 @@ export interface RepairPayment {
   method: string;
   timestamp: string;
   reference?: string;
+  sessionId: string | null;
+  cashMovementId: string | null;
 }
 
 export interface DeviceInfo {
@@ -76,12 +80,31 @@ export interface Accessories {
   other?: string;
 }
 
+export type RepairSettlementStatus = 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' | 'CREDIT';
+
+export interface FinishRepairPayload {
+  discount?: number;
+  additional_charges?: number;
+  settlement_payment?: {
+    amount: number;
+    method: string;
+    reference?: string | null;
+  } | null;
+  delivery_notes?: string | null;
+}
+
 export interface RepairJob {
   id: string; // mapped from _id
   _id: string;
   jobId: string;
+  invoiceNumber: string | null;
+  settlementStatus: RepairSettlementStatus;
+  deliveredAt: string | null;
+  deliveredBy: string | null;
+  branch_id: string | null;
+  branchId: string | null;
   customerId: any; // Populated Customer
-  customerModel: 'Customer';
+  customerModel: 'Party';
   device: DeviceInfo;
   accessories: Accessories;
   problemDescription: string;
