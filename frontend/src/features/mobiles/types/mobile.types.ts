@@ -83,6 +83,8 @@ export interface MobileInventoryItem {
   salePrice: number;
   ptaStatus: PtaStatus;
   branch: string;
+  branchName?: string;
+  branchCode?: string;
   status: 'IN_STOCK' | 'SOLD' | 'INSPECTION';
   sellerName?: string;
   voucherNo?: string;

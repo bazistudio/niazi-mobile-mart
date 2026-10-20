@@ -10,6 +10,8 @@ import { ShopUsageCard } from '@/features/organization/components/dashboard/Shop
 import { SalesSummaryCard } from '@/features/organization/components/dashboard/SalesSummaryCard';
 import { InventoryAlertCard, RecentActivity } from '@/features/organization/components/dashboard/OverviewCards';
 import { ReceivablesCard, PayablesCard, CashDrawerCard } from '@/features/organization/components/dashboard/FinancialCards';
+import { MobileInventoryCard } from '@/features/organization/components/dashboard/MobileInventoryCard';
+import { mobileApi, type MobileOrganizationSummary } from '@/features/mobiles/services/mobile.api';
 import { httpClient } from '@/lib/http/httpClient';
 import { Loader2, Store } from 'lucide-react';
 
@@ -28,6 +30,7 @@ export function OrganizationDashboardPage() {
   const [stats, setStats] = useState<OrganizationDashboardStats | null>(null);
   const [balances, setBalances] = useState<DashboardBalancesDto | null>(null);
   const [profitSummary, setProfitSummary] = useState<any>(null);
+  const [mobileSummary, setMobileSummary] = useState<MobileOrganizationSummary | null>(null);
   const [cashSummary, setCashSummary] = useState<DailyCashSummary | null>(null);
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,16 +42,18 @@ export function OrganizationDashboardPage() {
       setError(null);
 
       // Branch-scoped queries when a specific branch is selected; org-wide when null
-      const [dashboardStats, dashboardBalances, profitData, historyResult] = await Promise.all([
+      const [dashboardStats, dashboardBalances, profitData, historyResult, mobileData] = await Promise.all([
         tauriClient.organizationGetDashboardStats().catch(() => null),
         tauriClient.organizationGetDashboardBalances().catch(() => null),
         tauriClient.profitGetDashboardSummary(activeShopId).catch(() => null),
         historyApi.getHistory({ branch_id: activeShopId, page: 1, limit: 5 }).catch(() => ({ data: [], total: 0 })),
+        mobileApi.getOrganizationSummary().then((r) => r.summary).catch(() => null),
       ]);
 
       setStats(dashboardStats);
       setBalances(dashboardBalances);
       setProfitSummary(profitData);
+      setMobileSummary(mobileData);
 
       // Transform history items into RecentActivity format
       const recent = (historyResult?.data || []).map((h) => ({
@@ -160,6 +165,7 @@ export function OrganizationDashboardPage() {
         <SubscriptionCard />
         <ShopUsageCard shops={data.shops} employees={data.employees} />
         <SalesSummaryCard sales={data.sales} />
+        <MobileInventoryCard summary={mobileSummary} loading={loading} />
         <InventoryAlertCard inventory={data.inventory} />
         <ReceivablesCard amount={data.balances.customer_receivables} scopeLabel="Global Organization Receivables" />
         <PayablesCard amount={data.balances.supplier_payables} scopeLabel="Global Organization Payables" />

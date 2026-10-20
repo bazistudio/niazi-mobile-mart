@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Smartphone,
@@ -14,74 +14,52 @@ import {
   Eye,
   CheckCircle2,
   AlertTriangle,
+  Loader2,
+  RefreshCw,
+  AlertCircle,
 } from 'lucide-react';
 import { Button, Badge, Card } from '@/components/ui';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
+import { mobileApi, mapDeviceRowToItem } from '../services/mobile.api';
 import type { MobileInventoryItem, MobileCondition } from '../types/mobile.types';
-
-// Visual design prototype items demonstrating both New and Used mobile records
-const PROTOTYPE_MOBILES: MobileInventoryItem[] = [
-  {
-    id: 'mob-001',
-    brand: 'Apple',
-    model: 'iPhone 15 Pro Max',
-    condition: 'USED',
-    storage: '256GB',
-    ram: '8GB',
-    color: 'Natural Titanium',
-    imei1: '354892110482910',
-    purchaseCost: 285000,
-    salePrice: 315000,
-    ptaStatus: 'PTA_APPROVED',
-    branch: 'Main Branch',
-    status: 'IN_STOCK',
-    sellerName: 'Muhammad Usman',
-    voucherNo: '1001',
-    createdAt: '2026-10-18T11:30:00Z',
-  },
-  {
-    id: 'mob-002',
-    brand: 'Samsung',
-    model: 'Galaxy S24 Ultra',
-    condition: 'NEW',
-    storage: '512GB',
-    ram: '12GB',
-    color: 'Titanium Gray',
-    imei1: '358204918204812',
-    purchaseCost: 340000,
-    salePrice: 375000,
-    ptaStatus: 'PTA_APPROVED',
-    branch: 'Main Branch',
-    status: 'IN_STOCK',
-    createdAt: '2026-10-19T09:15:00Z',
-  },
-  {
-    id: 'mob-003',
-    brand: 'Xiaomi',
-    model: 'Redmi Note 13 Pro+',
-    condition: 'USED',
-    storage: '256GB',
-    ram: '8GB',
-    color: 'Midnight Black',
-    imei1: '864201938501832',
-    purchaseCost: 72000,
-    salePrice: 84000,
-    ptaStatus: 'PTA_APPROVED',
-    branch: 'Shop 02 Rawalpindi',
-    status: 'IN_STOCK',
-    sellerName: 'Hamza Tariq',
-    voucherNo: '1002',
-    createdAt: '2026-10-17T16:45:00Z',
-  },
-];
 
 export const MobileInventoryDashboard: React.FC = () => {
   const navigate = useNavigate();
+  const activeShop = useOrganizationStore((s) => s.activeShop);
+  const activeShopId = useOrganizationStore((s) => s.activeShopId);
+  const branchId = activeShopId || activeShop?._id || activeShop?.id || undefined;
+
+  const [items, setItems] = useState<MobileInventoryItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'ALL' | MobileCondition>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [ptaFilter, setPtaFilter] = useState<string>('ALL');
 
+  const fetchMobiles = useCallback(async () => {
+    setIsLoading(true);
+    setFetchError(null);
+    try {
+      const res = await mobileApi.getMobiles({
+        branch_id: branchId,
+        limit: 200,
+      });
+      const mapped = (res.devices || []).map(mapDeviceRowToItem);
+      setItems(mapped);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load mobile inventory';
+      setFetchError(msg);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [branchId]);
+
+  useEffect(() => {
+    fetchMobiles();
+  }, [fetchMobiles]);
+
   // Filter items based on active tab and search
-  const filteredItems = PROTOTYPE_MOBILES.filter((item) => {
+  const filteredItems = items.filter((item) => {
     // Condition tab filter
     if (activeTab !== 'ALL' && item.condition !== activeTab) {
       return false;
@@ -103,9 +81,9 @@ export const MobileInventoryDashboard: React.FC = () => {
     return true;
   });
 
-  const allCount = PROTOTYPE_MOBILES.length;
-  const newCount = PROTOTYPE_MOBILES.filter((m) => m.condition === 'NEW').length;
-  const usedCount = PROTOTYPE_MOBILES.filter((m) => m.condition === 'USED').length;
+  const allCount = items.length;
+  const newCount = items.filter((m) => m.condition === 'NEW').length;
+  const usedCount = items.filter((m) => m.condition === 'USED').length;
 
   return (
     <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto pb-16 px-4 sm:px-6">
@@ -127,8 +105,20 @@ export const MobileInventoryDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Primary Action Button */}
-        <div className="flex items-center gap-3">
+        {/* Primary Action Buttons */}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="md"
+            leftIcon={<RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />}
+            onClick={fetchMobiles}
+            disabled={isLoading}
+            className="shadow-xs cursor-pointer"
+            title="Refresh Inventory"
+          >
+            Refresh
+          </Button>
+
           <Button
             variant="primary"
             size="md"
@@ -140,6 +130,19 @@ export const MobileInventoryDashboard: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {/* Error Banner if API call fails */}
+      {fetchError && (
+        <div className="p-4 bg-danger/10 border border-danger/20 rounded-lg flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 text-sm text-danger">
+            <AlertCircle className="w-5 h-5 shrink-0" />
+            <span>{fetchError}</span>
+          </div>
+          <Button variant="outline" size="sm" onClick={fetchMobiles}>
+            Retry
+          </Button>
+        </div>
+      )}
 
       {/* Tabs & Search Filter Bar */}
       <Card variant="default" padding="sm" className="bg-surface border-border">
@@ -321,7 +324,11 @@ export const MobileInventoryDashboard: React.FC = () => {
                     <td className="py-3.5 px-4 text-right whitespace-nowrap">
                       <button
                         type="button"
-                        onClick={() => alert(`Mobile details for ${item.brand} ${item.model} (IMEI: ${item.imei1}). Backend integration is slated for Phase 2.`)}
+                        onClick={() =>
+                          alert(
+                            `Device: ${item.brand} ${item.model}\nCondition: ${item.condition}\nIMEI: ${item.imei1}\nPTA Status: ${item.ptaStatus}\nPurchase Cost: Rs. ${item.purchaseCost.toLocaleString()}\nExpected Sale: Rs. ${item.salePrice.toLocaleString()}\nStatus: ${item.status}`
+                          )
+                        }
                         className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/10 rounded transition-colors cursor-pointer"
                         title="View details"
                       >
@@ -338,7 +345,7 @@ export const MobileInventoryDashboard: React.FC = () => {
           {/* Directory Footer Info */}
           <div className="px-4 py-3 bg-surface-hover/40 border-t border-border flex flex-col sm:flex-row items-center justify-between text-xs text-text-muted gap-2">
             <span>
-              Showing {filteredItems.length} of {PROTOTYPE_MOBILES.length} mobile records
+              Showing {filteredItems.length} of {items.length} mobile records
             </span>
             <span className="text-text-secondary">
               Serialized device records are decoupled from regular spare parts inventory.

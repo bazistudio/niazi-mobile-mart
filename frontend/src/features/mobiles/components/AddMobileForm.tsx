@@ -19,8 +19,12 @@ import {
   Check,
   Plus,
   X,
+  Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 import { Button, Card, Badge } from '@/components/ui';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
+import { mobileApi, transformFormDataToApiPayload } from '../services/mobile.api';
 import type {
   MobileCondition,
   PtaStatus,
@@ -103,8 +107,18 @@ const RAM_CUSTOM_KEY = 'niazi_custom_mobile_ram_options';
 export const AddMobileForm: React.FC = () => {
   const navigate = useNavigate();
   const formId = useId();
+  const activeShop = useOrganizationStore((s) => s.activeShop);
+  const activeShopId = useOrganizationStore((s) => s.activeShopId);
+  const branchId = activeShopId || activeShop?._id || activeShop?.id || undefined;
+
   const [formData, setFormData] = useState<MobileFormData>(INITIAL_FORM_DATA);
-  const [isNoticeOpen, setIsNoticeOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+
+  // Real-time IMEI check state
+  const [imeiCheckStatus, setImeiCheckStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
+  const [imeiCheckMessage, setImeiCheckMessage] = useState<string | null>(null);
 
   // Storage and RAM state initialized with defaults + custom persisted items from localStorage
   const [storageOptions, setStorageOptions] = useState<string[]>(() => {
@@ -232,9 +246,118 @@ export const AddMobileForm: React.FC = () => {
   const margin = sale > 0 && cost > 0 ? sale - cost : 0;
   const marginPercent = cost > 0 && margin !== 0 ? Math.round((margin / cost) * 100) : 0;
 
-  const handleSaveAttempt = (e: React.FormEvent) => {
+  // Real-time IMEI verification
+  const handleImei1Change = async (val: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      specs: { ...prev.specs, imei1: val },
+    }));
+
+    if (val.length === 15) {
+      setImeiCheckStatus('checking');
+      setImeiCheckMessage(null);
+      try {
+        const res = await mobileApi.checkImeiAvailability(val);
+        if (res.available) {
+          setImeiCheckStatus('available');
+          setImeiCheckMessage('IMEI is available for registration');
+        } else {
+          setImeiCheckStatus('taken');
+          setImeiCheckMessage('IMEI is already registered in the system');
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Could not check IMEI availability';
+        setImeiCheckStatus('idle');
+        setImeiCheckMessage(msg);
+      }
+    } else {
+      setImeiCheckStatus('idle');
+      setImeiCheckMessage(null);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsNoticeOpen(true);
+    setSubmitError(null);
+    setSubmitSuccess(null);
+
+    // Basic client validations
+    if (!formData.specs.brand.trim()) {
+      setSubmitError('Brand name is required');
+      return;
+    }
+    if (!formData.specs.model.trim()) {
+      setSubmitError('Model name is required');
+      return;
+    }
+    if (!formData.specs.imei1 || formData.specs.imei1.length !== 15) {
+      setSubmitError('Primary IMEI must be exactly 15 numeric digits');
+      return;
+    }
+    if (formData.specs.imei2 && formData.specs.imei2.length !== 15) {
+      setSubmitError('Secondary IMEI must be exactly 15 numeric digits when provided');
+      return;
+    }
+    if (formData.specs.imei2 && formData.specs.imei1 === formData.specs.imei2) {
+      setSubmitError('Primary and Secondary IMEIs must be different');
+      return;
+    }
+
+    const costVal = isUsed ? formData.paperwork.purchasePrice : formData.specs.costPrice;
+    if (!costVal || costVal <= 0) {
+      setSubmitError('Purchase / Cost price must be greater than zero');
+      return;
+    }
+
+    if (isUsed) {
+      if (!formData.paperwork.voucherNo.trim()) {
+        setSubmitError('Purchase Slip Voucher Number is required for used mobiles');
+        return;
+      }
+      if (!formData.paperwork.sellerName.trim()) {
+        setSubmitError('Seller full name is required');
+        return;
+      }
+      if (!formData.paperwork.fatherName.trim()) {
+        setSubmitError("Seller's father name is required");
+        return;
+      }
+      if (!formData.paperwork.sellerCnic.trim() || formData.paperwork.sellerCnic.length !== 15) {
+        setSubmitError('Seller CNIC must be 13 digits in format XXXXX-XXXXXXX-X');
+        return;
+      }
+      if (!formData.paperwork.sellerPhone.trim()) {
+        setSubmitError('Seller mobile number is required');
+        return;
+      }
+      if (!formData.paperwork.sellerAddress.trim()) {
+        setSubmitError('Seller physical address is required');
+        return;
+      }
+      if (!formData.paperwork.ownershipDeclarationAcknowledged) {
+        setSubmitError('You must acknowledge the Solemn Declaration of Ownership');
+        return;
+      }
+      if (!formData.paperwork.physicalAffidavitAcknowledged) {
+        setSubmitError('You must verify that physical affidavit paperwork & thumb impressions were obtained');
+        return;
+      }
+    }
+
+    setIsSubmitting(true);
+    try {
+      const payload = transformFormDataToApiPayload(formData, branchId);
+      const res = await mobileApi.createMobile(payload);
+      setSubmitSuccess(`Mobile registered successfully! Device ID: ${res.device_id.slice(0, 8)}...`);
+      setTimeout(() => {
+        navigate('/dashboard/shop-admin/mobiles');
+      }, 700);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to register mobile device. Please try again.';
+      setSubmitError(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -250,8 +373,8 @@ export const AddMobileForm: React.FC = () => {
           <span>Back to Mobile Inventory</span>
         </button>
 
-        <Badge variant="neutral" size="sm">
-          UI Phase 1 — Form Prototype
+        <Badge variant="primary" size="sm">
+          Live System — Serialized Inventory
         </Badge>
       </div>
 
@@ -265,27 +388,36 @@ export const AddMobileForm: React.FC = () => {
         </p>
       </div>
 
-      {/* Prototype Notice Modal / Banner when Save is clicked */}
-      {isNoticeOpen && (
-        <div className="p-4 bg-primary/10 border border-primary/20 rounded-lg flex items-start gap-3">
-          <Info className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+      {/* Error Alert Banner */}
+      {submitError && (
+        <div className="p-4 bg-danger/10 border border-danger/20 rounded-lg flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-danger shrink-0 mt-0.5" />
           <div className="flex-1 text-sm text-text-primary">
-            <div className="font-semibold text-primary">UI Prototype Validated</div>
-            <p className="text-xs text-text-secondary mt-0.5">
-              All form fields, IMEI checks, and paperwork validations are functioning in local state. Per Phase 1 requirements, backend persistence and database migrations will be connected in Phase 2.
-            </p>
+            <div className="font-semibold text-danger">Registration Error</div>
+            <p className="text-xs text-text-secondary mt-0.5">{submitError}</p>
           </div>
           <button
             type="button"
-            onClick={() => setIsNoticeOpen(false)}
-            className="text-xs font-semibold text-primary hover:underline cursor-pointer"
+            onClick={() => setSubmitError(null)}
+            className="text-xs font-semibold text-danger hover:underline cursor-pointer"
           >
             Dismiss
           </button>
         </div>
       )}
 
-      <form onSubmit={handleSaveAttempt} className="flex flex-col gap-8">
+      {/* Success Alert Banner */}
+      {submitSuccess && (
+        <div className="p-4 bg-success/10 border border-success/20 rounded-lg flex items-start gap-3">
+          <CheckCircle2 className="w-5 h-5 text-success shrink-0 mt-0.5" />
+          <div className="flex-1 text-sm text-text-primary">
+            <div className="font-semibold text-success">Saved Successfully</div>
+            <p className="text-xs text-text-secondary mt-0.5">{submitSuccess}</p>
+          </div>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="flex flex-col gap-8">
         {/* 1. PRIMARY CONDITION SELECTOR (NEW vs USED) */}
         <Card variant="default" padding="md" className="bg-surface border-border">
           <div className="flex flex-col gap-3">
@@ -640,7 +772,27 @@ export const AddMobileForm: React.FC = () => {
                 <label htmlFor={`${formId}-imei1`} className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
                   Primary IMEI (IMEI 1) *
                 </label>
-                <span className="text-[11px] text-text-muted">15 numeric digits</span>
+                <div className="flex items-center gap-2">
+                  {imeiCheckStatus === 'checking' && (
+                    <span className="text-xs text-primary flex items-center gap-1 font-medium">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Checking IMEI...
+                    </span>
+                  )}
+                  {imeiCheckStatus === 'available' && (
+                    <span className="text-xs text-success flex items-center gap-1 font-medium">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Available
+                    </span>
+                  )}
+                  {imeiCheckStatus === 'taken' && (
+                    <span className="text-xs text-danger flex items-center gap-1 font-semibold">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      Already Registered!
+                    </span>
+                  )}
+                  <span className="text-[11px] text-text-muted">15 numeric digits</span>
+                </div>
               </div>
               <input
                 id={`${formId}-imei1`}
@@ -651,13 +803,29 @@ export const AddMobileForm: React.FC = () => {
                 value={formData.specs.imei1}
                 onChange={(e) => {
                   const val = e.target.value.replace(/\D/g, '').slice(0, 15);
-                  setFormData((prev) => ({
-                    ...prev,
-                    specs: { ...prev.specs, imei1: val },
-                  }))
+                  handleImei1Change(val);
                 }}
-                className="w-full px-3 py-2 text-sm font-mono bg-surface text-text-primary border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                className={`w-full px-3 py-2 text-sm font-mono bg-surface text-text-primary border rounded-md focus:outline-none focus:ring-2 ${
+                  imeiCheckStatus === 'taken'
+                    ? 'border-danger focus:ring-danger'
+                    : imeiCheckStatus === 'available'
+                    ? 'border-success focus:ring-success'
+                    : 'border-border focus:ring-focus-ring'
+                }`}
               />
+              {imeiCheckMessage && (
+                <div
+                  className={`text-xs mt-0.5 ${
+                    imeiCheckStatus === 'taken'
+                      ? 'text-danger font-medium'
+                      : imeiCheckStatus === 'available'
+                      ? 'text-success'
+                      : 'text-text-muted'
+                  }`}
+                >
+                  {imeiCheckMessage}
+                </div>
+              )}
             </div>
 
             {/* Secondary IMEI 2 (Optional) */}
@@ -1271,7 +1439,7 @@ export const AddMobileForm: React.FC = () => {
         {/* 6. FORM ACTIONS */}
         <div className="flex flex-col-reverse sm:flex-row items-center justify-between gap-4 pt-4 border-t border-border">
           <div className="text-xs text-text-muted">
-            <span className="font-semibold text-text-secondary">Note:</span> This is Phase 1 (UI prototype). Clicking Save Mobile will validate required fields; backend persistence is scheduled for Phase 2.
+            <span className="font-semibold text-text-secondary">Note:</span> Serialized mobile devices will be saved directly to inventory and tracked by unique IMEI.
           </div>
 
           <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -1280,6 +1448,7 @@ export const AddMobileForm: React.FC = () => {
               variant="outline"
               size="md"
               onClick={() => navigate('/dashboard/shop-admin/mobiles')}
+              disabled={isSubmitting}
               className="w-full sm:w-auto"
             >
               Cancel
@@ -1289,9 +1458,17 @@ export const AddMobileForm: React.FC = () => {
               type="submit"
               variant="primary"
               size="md"
+              disabled={isSubmitting || imeiCheckStatus === 'taken'}
               className="w-full sm:w-auto font-semibold shadow-sm"
             >
-              Save Mobile (Phase 1 UI)
+              {isSubmitting ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Saving Mobile...</span>
+                </span>
+              ) : (
+                'Save Mobile'
+              )}
             </Button>
           </div>
         </div>

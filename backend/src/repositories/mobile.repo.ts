@@ -165,6 +165,8 @@ export interface MobileDeviceRow {
   created_at: string;
   updated_at: string;
   imeis?: Array<{ id: string; imei: string; slot: MobileSlot }>;
+  branch_name?: string | null;
+  branch_code?: string | null;
 }
 
 /** Paperwork row — includes sensitive fields; only the paperwork endpoint returns this. */
@@ -236,12 +238,36 @@ export interface MobileMovementRow {
 /** List filter parameters for GET /. */
 export interface ListMobileDevicesFilter {
   organization_id: string;
-  branch_id: string;
+  branch_id?: string | null;
   condition?: MobileCondition;
   status?: MobileStatus;
   brand?: string;
   limit?: number;
   offset?: number;
+}
+
+export interface MobileBranchSummaryItem {
+  branch_id: string;
+  branch_name: string;
+  branch_code: string;
+  total_devices: number;
+  in_stock_count: number;
+  inspection_count: number;
+  sold_count: number;
+  new_count: number;
+  used_count: number;
+  total_valuation: number;
+}
+
+export interface MobileOrganizationSummary {
+  total_devices: number;
+  new_count: number;
+  used_count: number;
+  in_stock_count: number;
+  inspection_count: number;
+  sold_count: number;
+  total_valuation: number;
+  branches: MobileBranchSummaryItem[];
 }
 
 /** Input for PATCH /:id. */
@@ -666,9 +692,14 @@ export class MobileRepo {
     const limit  = filter.limit  ?? 50;
     const offset = filter.offset ?? 0;
 
-    const params: unknown[] = [filter.organization_id, filter.branch_id];
-    let where = `d.organization_id = $1 AND d.branch_id = $2`;
-    let paramIdx = 3;
+    const params: unknown[] = [filter.organization_id];
+    let where = `d.organization_id = $1`;
+    let paramIdx = 2;
+
+    if (filter.branch_id && filter.branch_id !== 'all') {
+      where += ` AND d.branch_id = $${paramIdx++}`;
+      params.push(filter.branch_id);
+    }
 
     if (filter.condition) {
       where += ` AND d.condition = $${paramIdx++}`;
@@ -698,11 +729,14 @@ export class MobileRepo {
          d.cost_price, d.expected_sale_price,
          d.supplier_id, d.sale_id, d.notes,
          d.created_by, d.updated_by, d.created_at, d.updated_at,
+         b.name AS branch_name,
+         b.code AS branch_code,
          (SELECT imei FROM mobile_imei_identifiers
           WHERE device_id = d.id AND slot = 'IMEI1' LIMIT 1) AS imei1,
          (SELECT imei FROM mobile_imei_identifiers
           WHERE device_id = d.id AND slot = 'IMEI2' LIMIT 1) AS imei2
        FROM mobile_devices d
+       LEFT JOIN branches b ON b.id = d.branch_id
        WHERE ${where}
        ORDER BY d.created_at DESC
        LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
@@ -978,6 +1012,90 @@ export class MobileRepo {
   ): Promise<{ available: boolean; imei: string }> {
     const taken = await this.isImeiTaken(organizationId, imei);
     return { available: !taken, imei };
+  }
+
+  /**
+   * Returns organization-wide consolidated mobile inventory summary and per-branch breakdown.
+   * Scoped strictly to the authenticated organization.
+   */
+  async getMobileOrganizationSummary(organizationId: string): Promise<MobileOrganizationSummary> {
+    const orgTotalsResult = await this.pool.query<{
+      total_devices: string;
+      new_count: string;
+      used_count: string;
+      in_stock_count: string;
+      inspection_count: string;
+      sold_count: string;
+      total_valuation: string;
+    }>(
+      `SELECT
+         COUNT(*)::int AS total_devices,
+         COUNT(*) FILTER (WHERE condition = 'NEW')::int AS new_count,
+         COUNT(*) FILTER (WHERE condition = 'USED')::int AS used_count,
+         COUNT(*) FILTER (WHERE status = 'IN_STOCK')::int AS in_stock_count,
+         COUNT(*) FILTER (WHERE status = 'INSPECTION')::int AS inspection_count,
+         COUNT(*) FILTER (WHERE status = 'SOLD')::int AS sold_count,
+         COALESCE(SUM(cost_price) FILTER (WHERE status = 'IN_STOCK'), 0)::numeric(12,2) AS total_valuation
+       FROM mobile_devices
+       WHERE organization_id = $1`,
+      [organizationId]
+    );
+
+    const branchBreakdownResult = await this.pool.query<{
+      branch_id: string;
+      branch_name: string;
+      branch_code: string;
+      total_devices: string;
+      in_stock_count: string;
+      inspection_count: string;
+      sold_count: string;
+      new_count: string;
+      used_count: string;
+      total_valuation: string;
+    }>(
+      `SELECT
+         b.id AS branch_id,
+         b.name AS branch_name,
+         b.code AS branch_code,
+         COUNT(d.id)::int AS total_devices,
+         COUNT(d.id) FILTER (WHERE d.status = 'IN_STOCK')::int AS in_stock_count,
+         COUNT(d.id) FILTER (WHERE d.status = 'INSPECTION')::int AS inspection_count,
+         COUNT(d.id) FILTER (WHERE d.status = 'SOLD')::int AS sold_count,
+         COUNT(d.id) FILTER (WHERE d.condition = 'NEW')::int AS new_count,
+         COUNT(d.id) FILTER (WHERE d.condition = 'USED')::int AS used_count,
+         COALESCE(SUM(d.cost_price) FILTER (WHERE d.status = 'IN_STOCK'), 0)::numeric(12,2) AS total_valuation
+       FROM branches b
+       LEFT JOIN mobile_devices d ON d.branch_id = b.id AND d.organization_id = b.organization_id
+       WHERE b.organization_id = $1
+       GROUP BY b.id, b.name, b.code
+       ORDER BY b.name ASC`,
+      [organizationId]
+    );
+
+    const orgRow = orgTotalsResult.rows[0];
+    const branches: MobileBranchSummaryItem[] = branchBreakdownResult.rows.map((r) => ({
+      branch_id: r.branch_id,
+      branch_name: r.branch_name,
+      branch_code: r.branch_code,
+      total_devices: parseInt(r.total_devices || '0', 10),
+      in_stock_count: parseInt(r.in_stock_count || '0', 10),
+      inspection_count: parseInt(r.inspection_count || '0', 10),
+      sold_count: parseInt(r.sold_count || '0', 10),
+      new_count: parseInt(r.new_count || '0', 10),
+      used_count: parseInt(r.used_count || '0', 10),
+      total_valuation: parseFloat(r.total_valuation || '0'),
+    }));
+
+    return {
+      total_devices: parseInt(orgRow?.total_devices || '0', 10),
+      new_count: parseInt(orgRow?.new_count || '0', 10),
+      used_count: parseInt(orgRow?.used_count || '0', 10),
+      in_stock_count: parseInt(orgRow?.in_stock_count || '0', 10),
+      inspection_count: parseInt(orgRow?.inspection_count || '0', 10),
+      sold_count: parseInt(orgRow?.sold_count || '0', 10),
+      total_valuation: parseFloat(orgRow?.total_valuation || '0'),
+      branches,
+    };
   }
 
   /**

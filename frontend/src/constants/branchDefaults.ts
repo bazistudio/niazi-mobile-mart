@@ -41,6 +41,7 @@ export const NON_MAIN_BRANCH_DEFAULT_HREFS: ReadonlySet<string> = new Set([
   '/dashboard/shop-admin',              // Dashboard
   '/dashboard/shop-admin/pos',          // POS / Sales
   '/dashboard/shop-admin/sales',        // Sales Analytics
+  '/dashboard/shop-admin/mobiles',      // Mobile Inventory (available across all branches)
   '/dashboard/shop-admin/inventory',    // Products & Stock
   '/dashboard/shop-admin/stock',        // Stock
   '/dashboard/shop-admin/history',      // Sales History (backend already enforces branch scope)
@@ -52,10 +53,27 @@ export const NON_MAIN_BRANCH_DEFAULT_HREFS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Returns true when the given branch ID is the canonical Main Branch.
- * Safely handles null, undefined, and empty string.
+ * Returns true when the given branch ID or Shop object is the canonical Main Branch.
+ * Safely handles null, undefined, empty string, and Shop object.
  */
-export function isMainBranch(branchId: string | null | undefined): boolean {
-  if (!branchId || typeof branchId !== 'string') return false;
-  return branchId.trim() === MAIN_BRANCH_ID;
+export function isMainBranch(
+  branchIdOrShop: string | { _id?: string; id?: string; name?: string; code?: string } | null | undefined
+): boolean {
+  if (!branchIdOrShop) return false;
+  if (typeof branchIdOrShop === 'object') {
+    const id = branchIdOrShop._id || branchIdOrShop.id;
+    if (id && id.trim() === MAIN_BRANCH_ID) return true;
+    if (branchIdOrShop.name && branchIdOrShop.name.trim().toLowerCase() === 'main branch') return true;
+    if (branchIdOrShop.code && branchIdOrShop.code.trim().toUpperCase() === 'MAIN') return true;
+    return false;
+  }
+  if (typeof branchIdOrShop === 'string') {
+    const trimmed = branchIdOrShop.trim();
+    return (
+      trimmed === MAIN_BRANCH_ID ||
+      trimmed.toLowerCase() === 'main branch' ||
+      trimmed.toUpperCase() === 'MAIN'
+    );
+  }
+  return false;
 }

@@ -5,6 +5,28 @@ All notable changes to Niazi Mobile Mart will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.45] - 2026-10-20
+
+### Added
+- **Dedicated Organization Admin Mobile Inventory Page**:
+  - Implemented `/dashboard/organization/mobile-inventory` under `organizationRoutes.tsx` with `RoleGuard` restriction, providing organization administrators with a centralized serialized device management console.
+  - Added organization overview metric cards for Total Units, Condition Split (NEW vs USED), Stock Status (In-Stock, Inspection, Sold), and cost-based asset valuation in PKR.
+  - Added Branch-by-Branch Allocation breakdown cards including zero-device branches (`Branch Beta`, `Central Warehouse`) with interactive branch drilldown filtering.
+  - Added consolidated inventory table displaying device model, masked primary IMEI, PTA status, condition, purchase cost, and owning branch badges (`[MAIN]`, `[BRA]`).
+  - Added `MobileInventoryCard.tsx` to the main Organization Dashboard linking directly to the dedicated page.
+- **Automated Regression Suite (Section 14)**: Added focused unit tests in `mobile-inventory.test.ts` verifying zero-device branch representation, branch ownership metadata on device rows, and summary-to-table total reconciliations.
+
+### Changed
+- **Multi-Branch Mobile Inventory Scope & Ownership Metadata**:
+  - `mobile.repo.ts`: Extended `listMobileDevices` query with `LEFT JOIN branches b ON b.id = d.branch_id` to include `branch_name` and `branch_code` on all retrieved records.
+  - `mobile.routes.ts`: Enforced strict default-deny authorization on `GET /api/mobiles/summary` for non-organization administrators (HTTP 403), while permitting consolidated organization querying on `GET /api/mobiles`.
+  - `mobile.routes.ts`: Expanded query limit validation ceiling from 200 to 500 (`limit must be an integer between 1 and 500`).
+  - `OrganizationMobileInventoryPage.tsx`: Aligned request limit to `limit=200` for consistent compatibility.
+  - `organization-navigation.ts`: Updated Organization Admin navigation href to `/dashboard/organization/mobile-inventory`.
+
+### Fixed
+- **Expense Repository User Full Name Column Mapping**: Preserved correction in `expense.repo.ts` mapping `u.name AS performed_by_name` (resolving PostgreSQL error 42703).
+
 ## [1.3.44] - 2026-10-20
 
 ### Added

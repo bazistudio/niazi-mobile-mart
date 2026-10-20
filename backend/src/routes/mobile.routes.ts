@@ -184,32 +184,35 @@ export function buildMobileRouter(pool: Pool): Router {
   /**
    * Resolves and validates the branch_id for a read operation.
    * Org-admin can pass branch_id as a query param (verified to belong to authenticated org);
+   * If allowAll is true and branch_id is omitted or 'all', returns null (consolidated org view).
    * SHOP_ADMIN is locked to JWT claim.
    *
-   * Returns the resolved branch_id string, or sends 400/403 and returns null.
+   * Returns the resolved branch_id string (or null if all branches allowed), or sends 400/403 and returns undefined.
    */
   async function resolveReadBranchId(
     identity: RequestIdentity,
     queryBranchId: unknown,
-    res: Response
-  ): Promise<string | null> {
+    res: Response,
+    allowAll = false
+  ): Promise<string | null | undefined> {
     if (isOrgAdmin(identity)) {
-      if (!isNonBlankString(queryBranchId)) {
+      if (!isNonBlankString(queryBranchId) || queryBranchId === 'all' || queryBranchId === '*') {
+        if (allowAll) return null; // Consolidated all branches
         res.status(400).json({ error: 'branch_id query parameter is required for organization administrators' });
-        return null;
+        return undefined;
       }
       const branchId = (queryBranchId as string).trim();
       const belongs = await repo.isBranchInOrganization(identity.organization_id, branchId);
       if (!belongs) {
         res.status(403).json({ error: 'FORBIDDEN', message: 'Target branch does not belong to your organization' });
-        return null;
+        return undefined;
       }
       return branchId;
     }
     const branchId = identity.branch_id;
     if (!branchId) {
       res.status(403).json({ error: 'FORBIDDEN', message: 'No branch assigned to this account' });
-      return null;
+      return undefined;
     }
     return branchId;
   }
@@ -254,6 +257,38 @@ export function buildMobileRouter(pool: Pool): Router {
       res.status(200).json(result);
     } catch (err) {
       handleMobileError(res, err, 'imei-check');
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /summary — organization-wide consolidated summary (Org Admin only)
+  // Must be defined BEFORE /:id to avoid route shadowing.
+  // -------------------------------------------------------------------------
+
+  /**
+   * GET /summary
+   *
+   * Returns organization-wide consolidated mobile inventory summary and per-branch breakdown.
+   * Restricted strictly to Organization Administrators (role = ADMIN).
+   * Requires INVENTORY_VIEW.
+   */
+  router.get('/summary', async (req: Request, res: Response) => {
+    if (!requireInventoryView(req, res)) return;
+
+    const identity = req.identity!;
+    if (!isOrgAdmin(identity)) {
+      res.status(403).json({
+        error: 'FORBIDDEN',
+        message: 'Consolidated mobile inventory summary is restricted to organization administrators',
+      });
+      return;
+    }
+
+    try {
+      const summary = await repo.getMobileOrganizationSummary(identity.organization_id);
+      res.status(200).json({ summary });
+    } catch (err) {
+      handleMobileError(res, err, 'org-summary');
     }
   });
 
@@ -540,14 +575,14 @@ export function buildMobileRouter(pool: Pool): Router {
     if (!requireInventoryView(req, res)) return;
 
     const identity = req.identity!;
-    const branchId = await resolveReadBranchId(identity, req.query.branch_id, res);
-    if (!branchId) return;
+    const branchId = await resolveReadBranchId(identity, req.query.branch_id, res, true);
+    if (branchId === undefined) return;
 
     const limit  = parseInt(String(req.query.limit  ?? '50'), 10);
     const offset = parseInt(String(req.query.offset ?? '0'),  10);
 
-    if (isNaN(limit) || limit < 1 || limit > 200) {
-      res.status(400).json({ error: 'limit must be an integer between 1 and 200' });
+    if (isNaN(limit) || limit < 1 || limit > 500) {
+      res.status(400).json({ error: 'limit must be an integer between 1 and 500' });
       return;
     }
     if (isNaN(offset) || offset < 0) {

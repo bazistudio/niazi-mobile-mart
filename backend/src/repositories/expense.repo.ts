@@ -307,7 +307,7 @@ export class ExpenseRepo {
               ec.name AS category_name,
               e.branch_id, e.amount, e.payment_method, e.description,
               e.notes, e.expense_date, e.status, e.performed_by,
-              u.full_name AS performed_by_name,
+              u.name AS performed_by_name,
               e.created_at, e.updated_at
        FROM expenses e
        LEFT JOIN expense_categories ec ON ec.id = e.category_id
@@ -367,7 +367,7 @@ export class ExpenseRepo {
               ec.name AS category_name,
               e.branch_id, e.amount, e.payment_method, e.description,
               e.notes, e.expense_date, e.status, e.performed_by,
-              u.full_name AS performed_by_name,
+              u.name AS performed_by_name,
               e.created_at, e.updated_at
        FROM expenses e
        LEFT JOIN expense_categories ec ON ec.id = e.category_id
@@ -398,7 +398,7 @@ export class ExpenseRepo {
                 ec.name AS category_name,
                 e.branch_id, e.amount, e.payment_method, e.description,
                 e.notes, e.expense_date, e.status, e.performed_by,
-                u.full_name AS performed_by_name,
+                u.name AS performed_by_name,
                 e.created_at, e.updated_at
          FROM expenses e
          LEFT JOIN expense_categories ec ON ec.id = e.category_id
@@ -474,7 +474,7 @@ export class ExpenseRepo {
               ec.name AS category_name,
               e.branch_id, e.amount, e.payment_method, e.description,
               e.notes, e.expense_date, e.status, e.performed_by,
-              u.full_name AS performed_by_name,
+              u.name AS performed_by_name,
               e.created_at, e.updated_at
        FROM expenses e
        LEFT JOIN expense_categories ec ON ec.id = e.category_id

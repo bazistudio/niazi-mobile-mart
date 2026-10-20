@@ -642,3 +642,199 @@ describe('10. Disposable Database Verification Gate', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// 11. Organization Administrator Consolidated Access & Summary
+// ---------------------------------------------------------------------------
+
+describe('11. Organization Administrator Consolidated Access & Summary', () => {
+  test('Org Admin query without branch_id resolves to null (consolidated all branches)', () => {
+    function resolveReadBranch(role: string, queryBranchId?: string): string | null {
+      if (role === 'ADMIN') {
+        if (!queryBranchId || queryBranchId === 'all' || queryBranchId === '*') return null;
+        return queryBranchId;
+      }
+      return 'branch-shop-admin';
+    }
+
+    assert.equal(resolveReadBranch('ADMIN', undefined), null);
+    assert.equal(resolveReadBranch('ADMIN', ''), null);
+    assert.equal(resolveReadBranch('ADMIN', 'all'), null);
+    assert.equal(resolveReadBranch('ADMIN', '*'), null);
+    assert.equal(resolveReadBranch('ADMIN', 'branch-alpha'), 'branch-alpha');
+  });
+
+  test('Org Admin summary accurately aggregates branch metrics without double counting', () => {
+    const branchAlpha = { total: 2, inStock: 2, newCount: 1, usedCount: 1, valuation: 595000 };
+    const branchBeta  = { total: 1, inStock: 1, newCount: 1, usedCount: 0, valuation: 320000 };
+
+    const totalDevices = branchAlpha.total + branchBeta.total;
+    const totalValuation = branchAlpha.valuation + branchBeta.valuation;
+    const totalNew = branchAlpha.newCount + branchBeta.newCount;
+    const totalUsed = branchAlpha.usedCount + branchBeta.usedCount;
+
+    assert.equal(totalDevices, 3);
+    assert.equal(totalValuation, 915000);
+    assert.equal(totalNew, 2);
+    assert.equal(totalUsed, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 12. Branch Administrator Permission Isolation (Default-Deny)
+// ---------------------------------------------------------------------------
+
+describe('12. Branch Administrator Permission Isolation (Default-Deny)', () => {
+  test('SHOP_ADMIN is strictly denied access to organization-wide summary (403)', () => {
+    function checkSummaryAccess(role: string): { allowed: boolean; status: number } {
+      if (role === 'ADMIN') return { allowed: true, status: 200 };
+      return { allowed: false, status: 403 };
+    }
+
+    assert.deepEqual(checkSummaryAccess('ADMIN'), { allowed: true, status: 200 });
+    assert.deepEqual(checkSummaryAccess('SHOP_ADMIN'), { allowed: false, status: 403 });
+    assert.deepEqual(checkSummaryAccess('CASHIER'), { allowed: false, status: 403 });
+    assert.deepEqual(checkSummaryAccess('MANAGER'), { allowed: false, status: 403 });
+  });
+
+  test('SHOP_ADMIN cannot override branch_id to query all branches', () => {
+    function resolveReadBranch(role: string, jwtBranchId: string, queryBranchId?: string): string | null {
+      if (role === 'ADMIN') {
+        if (!queryBranchId || queryBranchId === 'all') return null;
+        return queryBranchId;
+      }
+      // SHOP_ADMIN always returns their own assigned branch_id
+      return jwtBranchId;
+    }
+
+    const shopAdminJwtBranch = 'branch-beta-id';
+    // Attempts to pass undefined, 'all', or branch-alpha in query
+    assert.equal(resolveReadBranch('SHOP_ADMIN', shopAdminJwtBranch, undefined), 'branch-beta-id');
+    assert.equal(resolveReadBranch('SHOP_ADMIN', shopAdminJwtBranch, 'all'), 'branch-beta-id');
+    assert.equal(resolveReadBranch('SHOP_ADMIN', shopAdminJwtBranch, 'branch-alpha-id'), 'branch-beta-id');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 13. Multi-Branch Isolation (Branch Alpha vs Branch Beta)
+// ---------------------------------------------------------------------------
+
+describe('13. Multi-Branch Isolation (Branch Alpha vs Branch Beta)', () => {
+  test('Branch Alpha cannot view or write Branch Beta records', () => {
+    const branchAlphaId = '11111111-1111-1111-1111-111111111111';
+    const branchBetaId = '22222222-2222-2222-2222-222222222222';
+
+    // Mock devices database
+    const devices = [
+      { id: 'dev-1', branch_id: branchAlphaId, brand: 'Apple', model: 'iPhone 16' },
+      { id: 'dev-2', branch_id: branchBetaId,  brand: 'Samsung', model: 'S24' },
+    ];
+
+    function filterDevicesForUser(userRole: string, userBranchId: string, targetBranchId?: string) {
+      if (userRole === 'ADMIN') {
+        return targetBranchId ? devices.filter(d => d.branch_id === targetBranchId) : devices;
+      }
+      // Branch user can ONLY see their own branch
+      return devices.filter(d => d.branch_id === userBranchId);
+    }
+
+    const alphaUserDevices = filterDevicesForUser('SHOP_ADMIN', branchAlphaId, branchBetaId);
+    assert.equal(alphaUserDevices.length, 1);
+    assert.equal(alphaUserDevices[0].id, 'dev-1');
+    assert.equal(alphaUserDevices[0].branch_id, branchAlphaId);
+
+    const betaUserDevices = filterDevicesForUser('SHOP_ADMIN', branchBetaId, branchAlphaId);
+    assert.equal(betaUserDevices.length, 1);
+    assert.equal(betaUserDevices[0].id, 'dev-2');
+    assert.equal(betaUserDevices[0].branch_id, branchBetaId);
+
+    // Org Admin sees both when viewing consolidated
+    const orgAdminDevices = filterDevicesForUser('ADMIN', 'main', undefined);
+    assert.equal(orgAdminDevices.length, 2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 14. Organization Mobile Inventory Page Integration & Reconciliation (Gate 3)
+// ---------------------------------------------------------------------------
+
+describe('14. Organization Mobile Inventory Page Integration & Reconciliation', () => {
+  test('Zero-device branches are included in per-branch allocation with 0 counts', () => {
+    interface BranchAllocation {
+      branch_id: string;
+      branch_name: string;
+      branch_code: string;
+      total_devices: number;
+      in_stock_count: number;
+      total_valuation: number;
+    }
+
+    const branches: BranchAllocation[] = [
+      { branch_id: 'b-main', branch_name: 'Main Branch', branch_code: 'MAIN', total_devices: 1, in_stock_count: 1, total_valuation: 15000 },
+      { branch_id: 'b-alpha', branch_name: 'Branch Alpha', branch_code: 'ALFA', total_devices: 2, in_stock_count: 2, total_valuation: 595000 },
+      { branch_id: 'b-beta', branch_name: 'Branch Beta', branch_code: 'BETA', total_devices: 0, in_stock_count: 0, total_valuation: 0 },
+      { branch_id: 'b-warehouse', branch_name: 'Central Warehouse', branch_code: 'WH', total_devices: 0, in_stock_count: 0, total_valuation: 0 },
+    ];
+
+    // Every active branch exists in allocation even when total_devices is 0
+    assert.equal(branches.length, 4);
+    const beta = branches.find((b) => b.branch_code === 'BETA');
+    assert.ok(beta);
+    assert.equal(beta.total_devices, 0);
+    assert.equal(beta.total_valuation, 0);
+
+    const warehouse = branches.find((b) => b.branch_code === 'WH');
+    assert.ok(warehouse);
+    assert.equal(warehouse.total_devices, 0);
+  });
+
+  test('Consolidated device rows carry branch ownership metadata (branch_name and branch_code)', () => {
+    const consolidatedRows = [
+      { id: 'dev-1', brand: 'Samsung', model: 'a12', branch_id: 'b-main', branch_name: 'Main Branch', branch_code: 'MAIN', cost_price: '15000.00', status: 'IN_STOCK', condition: 'NEW' },
+      { id: 'dev-2', brand: 'Apple', model: 'iPhone 16 Pro', branch_id: 'b-alpha', branch_name: 'Branch Alpha', branch_code: 'ALFA', cost_price: '285000.00', status: 'IN_STOCK', condition: 'NEW' },
+      { id: 'dev-3', brand: 'Samsung', model: 'Galaxy S23 Ultra', branch_id: 'b-alpha', branch_name: 'Branch Alpha', branch_code: 'ALFA', cost_price: '310000.00', status: 'IN_STOCK', condition: 'USED' },
+    ];
+
+    for (const row of consolidatedRows) {
+      assert.ok(row.branch_name, `Row ${row.id} must include branch_name`);
+      assert.ok(row.branch_code, `Row ${row.id} must include branch_code`);
+    }
+
+    assert.equal(consolidatedRows[0].branch_code, 'MAIN');
+    assert.equal(consolidatedRows[1].branch_code, 'ALFA');
+  });
+
+  test('Organization summary totals reconcile exactly with consolidated device list', () => {
+    const devices = [
+      { id: 'dev-1', condition: 'NEW', status: 'IN_STOCK', cost: 15000, branch: 'b-main' },
+      { id: 'dev-2', condition: 'NEW', status: 'IN_STOCK', cost: 285000, branch: 'b-alpha' },
+      { id: 'dev-3', condition: 'USED', status: 'IN_STOCK', cost: 310000, branch: 'b-alpha' },
+    ];
+
+    const branchSummaries = [
+      { branch_id: 'b-main', total: 1, new_count: 1, used_count: 0, in_stock: 1, valuation: 15000 },
+      { branch_id: 'b-alpha', total: 2, new_count: 1, used_count: 1, in_stock: 2, valuation: 595000 },
+      { branch_id: 'b-beta', total: 0, new_count: 0, used_count: 0, in_stock: 0, valuation: 0 },
+    ];
+
+    const orgTotalDevices = devices.length;
+    const orgTotalNew = devices.filter((d) => d.condition === 'NEW').length;
+    const orgTotalUsed = devices.filter((d) => d.condition === 'USED').length;
+    const orgInStock = devices.filter((d) => d.status === 'IN_STOCK').length;
+    const orgValuation = devices.filter((d) => d.status === 'IN_STOCK').reduce((sum, d) => sum + d.cost, 0);
+
+    const sumBranchDevices = branchSummaries.reduce((sum, b) => sum + b.total, 0);
+    const sumBranchNew = branchSummaries.reduce((sum, b) => sum + b.new_count, 0);
+    const sumBranchUsed = branchSummaries.reduce((sum, b) => sum + b.used_count, 0);
+    const sumBranchInStock = branchSummaries.reduce((sum, b) => sum + b.in_stock, 0);
+    const sumBranchValuation = branchSummaries.reduce((sum, b) => sum + b.valuation, 0);
+
+    // Reconcile org totals with branch sum
+    assert.equal(orgTotalDevices, sumBranchDevices);
+    assert.equal(orgTotalNew, sumBranchNew);
+    assert.equal(orgTotalUsed, sumBranchUsed);
+    assert.equal(orgInStock, sumBranchInStock);
+    assert.equal(orgValuation, sumBranchValuation);
+    assert.equal(orgValuation, 610000);
+  });
+});

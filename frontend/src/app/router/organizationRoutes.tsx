@@ -15,6 +15,7 @@ import { OrganizationLedgerPage } from '@/pages/dashboard/organization/Organizat
 import { OrganizationAnalyticsPage } from '@/pages/dashboard/organization/OrganizationAnalyticsPage';
 import { OrganizationSocialPage } from '@/pages/dashboard/organization/OrganizationSocialPage';
 import { OrganizationProductsPage } from '@/pages/dashboard/organization/OrganizationProductsPage';
+import { OrganizationMobileInventoryPage } from '@/pages/dashboard/organization/OrganizationMobileInventoryPage';
 import { OrganizationCustomersPage } from '@/pages/dashboard/organization/OrganizationCustomersPage';
 import { OrganizationSuppliersPage } from '@/pages/dashboard/organization/OrganizationSuppliersPage';
 import { OrganizationProfilePage } from '@/pages/dashboard/organization/OrganizationProfilePage';
@@ -65,6 +66,9 @@ export const organizationRoutes = (
       
       {/* 13. Products */}
       <Route path="products" element={<OrganizationProductsPage />} />
+
+      {/* Mobile Inventory */}
+      <Route path="mobile-inventory" element={<OrganizationMobileInventoryPage />} />
       
       {/* 14. Customers */}
       <Route path="customers" element={<OrganizationCustomersPage />} />
