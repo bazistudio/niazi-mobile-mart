@@ -363,6 +363,7 @@ export interface UpdateSellerInput {
   seller_id: string;
   organization_id: string;      // from JWT
   updated_by: string;           // from JWT
+  branch_id?: string | null;    // active branch for audit attribution
   phone?: string;
   alternate_phone?: string | null;
   address?: string;
@@ -1625,21 +1626,37 @@ export class MobileRepo {
         ]
       );
 
-      // Audit trail via change_logs
-      await writeChangeLogEntry(client, {
-        organizationId: input.organization_id,
-        branchId:       '',
-        eventType:      'MOBILE_SELLER_UPDATED',
-        entityType:     'mobile_seller',
-        entityId:       input.seller_id,
-        payloadStr:     JSON.stringify({
-          seller_id:           input.seller_id,
-          updated_by:          input.updated_by,
-          verification_status: newVerifStatus,
-          is_active:           newIsActive,
-          // phone, address, city omitted — sensitive
-        }),
-      });
+      // Audit trail via change_logs (branch-attributed when active branch provided)
+      const auditBranchId = typeof input.branch_id === 'string' ? input.branch_id.trim() : null;
+      if (auditBranchId) {
+        // Enforce tenant boundary: branch must belong to caller's organization
+        const branchCheck = await client.query<{ exists: boolean }>(
+          `SELECT EXISTS(
+             SELECT 1 FROM branches
+             WHERE id = $1 AND organization_id = $2
+           ) AS exists`,
+          [auditBranchId, input.organization_id]
+        );
+        if (!branchCheck.rows[0]?.exists) {
+          await client.query('ROLLBACK');
+          throw new MobileRepoError('Target branch does not belong to your organization', 403);
+        }
+
+        await writeChangeLogEntry(client, {
+          organizationId: input.organization_id,
+          branchId:       auditBranchId,
+          eventType:      'MOBILE_SELLER_UPDATED',
+          entityType:     'mobile_seller',
+          entityId:       input.seller_id,
+          payloadStr:     JSON.stringify({
+            seller_id:           input.seller_id,
+            updated_by:          input.updated_by,
+            verification_status: newVerifStatus,
+            is_active:           newIsActive,
+            // phone, address, city omitted — sensitive
+          }),
+        });
+      }
 
       await client.query('COMMIT');
       return this.getSellerById(input.seller_id, input.organization_id);

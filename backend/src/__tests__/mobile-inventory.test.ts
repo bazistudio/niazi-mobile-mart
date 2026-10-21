@@ -10,8 +10,13 @@
  */
 
 import { strict as assert } from 'node:assert';
-import { test, describe } from 'node:test';
+import { test, describe, before, after } from 'node:test';
 import type { Pool, PoolClient } from 'pg';
+import express from 'express';
+import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   parseExactPaisa,
   isNonNegativePrice,
@@ -37,8 +42,35 @@ import {
   RegisterMobileDeviceInput,
   PatchMobileDeviceInput,
 } from '../repositories/mobile.repo';
-import { handleMobileError } from '../routes/mobile.routes';
-import type { RequestIdentity, UserRole } from '../auth';
+import { handleMobileError, buildMobileRouter } from '../routes/mobile.routes';
+import { type RequestIdentity, type UserRole, NIAZI_ORGANIZATION_ID } from '../auth';
+import { issueToken } from '../services/jwt.service';
+
+// Ensure JWT keys from disk are loaded if not already in process.env
+const privCandidates = [
+  path.join(process.cwd(), 'jwt_private_key.pem'),
+  path.join(process.cwd(), 'jwt_private.pem'),
+  path.join(process.cwd(), 'backend', 'jwt_private_key.pem'),
+  path.join(process.cwd(), 'backend', 'jwt_private.pem'),
+];
+for (const p of privCandidates) {
+  if (fs.existsSync(p)) {
+    process.env['JWT_PRIVATE_KEY'] = fs.readFileSync(p, 'utf8');
+    break;
+  }
+}
+const pubCandidates = [
+  path.join(process.cwd(), 'jwt_pub2.pem'),
+  path.join(process.cwd(), 'jwt_pub.pem'),
+  path.join(process.cwd(), 'backend', 'jwt_pub2.pem'),
+  path.join(process.cwd(), 'backend', 'jwt_pub.pem'),
+];
+for (const p of pubCandidates) {
+  if (fs.existsSync(p)) {
+    process.env['JWT_PUBLIC_KEY'] = fs.readFileSync(p, 'utf8');
+    break;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // 1. Monetary Validation and Normalization
@@ -836,5 +868,458 @@ describe('14. Organization Mobile Inventory Page Integration & Reconciliation', 
     assert.equal(orgInStock, sumBranchInStock);
     assert.equal(orgValuation, sumBranchValuation);
     assert.equal(orgValuation, 610000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 15. Seller Update Audit & Failure Atomicity
+// ---------------------------------------------------------------------------
+
+describe('15. Seller Update Audit & Failure Atomicity', () => {
+  test('updateSeller rolls back and releases client when audit log write fails', async () => {
+    const queryLog: string[] = [];
+    let released = false;
+
+    const mockClient = {
+      query: async (sql: string) => {
+        const trimmed = sql.trim();
+        queryLog.push(trimmed.slice(0, 30));
+
+        if (trimmed.includes('SELECT * FROM mobile_sellers')) {
+          return {
+            rows: [
+              {
+                id: 'seller-1',
+                organization_id: 'org-1',
+                name: 'Test Seller',
+                phone: '03001234567',
+                alternate_phone: null,
+                address: 'Bazar',
+                city: null,
+                verification_status: 'UNVERIFIED',
+                is_active: 1,
+                notes: null,
+              },
+            ],
+          };
+        }
+
+        if (trimmed.includes('SELECT EXISTS') && trimmed.includes('branches')) {
+          return { rows: [{ exists: true }] };
+        }
+
+        if (trimmed.includes('UPDATE mobile_sellers')) {
+          return { rows: [] };
+        }
+
+        if (trimmed.includes('INSERT INTO change_log')) {
+          throw new Error('Audit write failed: simulated disk full');
+        }
+
+        return { rows: [] };
+      },
+      release: () => {
+        released = true;
+      },
+    } as unknown as PoolClient;
+
+    const mockPool = {
+      connect: async () => mockClient,
+    } as unknown as Pool;
+
+    const repo = new MobileRepo(mockPool);
+
+    await assert.rejects(
+      async () => {
+        await repo.updateSeller({
+          seller_id: 'seller-1',
+          organization_id: 'org-1',
+          branch_id: 'branch-1',
+          updated_by: 'user-1',
+          phone: '03009999999',
+        });
+      },
+      /Audit write failed: simulated disk full/
+    );
+
+    assert.ok(queryLog.some((q) => q.startsWith('BEGIN')));
+    assert.ok(queryLog.some((q) => q.startsWith('ROLLBACK')));
+    assert.equal(queryLog.some((q) => q.startsWith('COMMIT')), false);
+    assert.equal(released, true);
+  });
+
+  test('updateSeller rejects foreign branch inside transaction and rolls back before writing change_log', async () => {
+    const queryLog: string[] = [];
+    let released = false;
+
+    const mockClient = {
+      query: async (sql: string) => {
+        const trimmed = sql.trim();
+        queryLog.push(trimmed.slice(0, 30));
+
+        if (trimmed.includes('SELECT * FROM mobile_sellers')) {
+          return {
+            rows: [
+              {
+                id: 'seller-1',
+                organization_id: 'org-1',
+                name: 'Test Seller',
+                phone: '03001234567',
+                alternate_phone: null,
+                address: 'Bazar',
+                city: null,
+                verification_status: 'UNVERIFIED',
+                is_active: 1,
+                notes: null,
+              },
+            ],
+          };
+        }
+
+        if (trimmed.includes('SELECT EXISTS') && trimmed.includes('branches')) {
+          return { rows: [{ exists: false }] }; // Foreign branch
+        }
+
+        if (trimmed.includes('UPDATE mobile_sellers')) {
+          return { rows: [] };
+        }
+
+        return { rows: [] };
+      },
+      release: () => {
+        released = true;
+      },
+    } as unknown as PoolClient;
+
+    const mockPool = {
+      connect: async () => mockClient,
+    } as unknown as Pool;
+
+    const repo = new MobileRepo(mockPool);
+
+    await assert.rejects(
+      async () => {
+        await repo.updateSeller({
+          seller_id: 'seller-1',
+          organization_id: 'org-1',
+          branch_id: 'foreign-branch-99',
+          updated_by: 'user-1',
+        });
+      },
+      (err) => {
+        assert.ok(err instanceof MobileRepoError);
+        assert.equal(err.statusCode, 403);
+        assert.match(err.message, /Target branch does not belong to your organization/);
+        return true;
+      }
+    );
+
+    assert.ok(queryLog.some((q) => q.startsWith('BEGIN')));
+    assert.ok(queryLog.some((q) => q.startsWith('ROLLBACK')));
+    assert.equal(queryLog.some((q) => q.startsWith('COMMIT')), false);
+    assert.equal(queryLog.some((q) => q.includes('change_log')), false);
+    assert.equal(released, true);
+  });
+
+  test('updateSeller without branch_id commits cleanly without writing to change_log', async () => {
+    const queryLog: string[] = [];
+    let released = false;
+
+    const mockClient = {
+      query: async (sql: string) => {
+        const trimmed = sql.trim();
+        queryLog.push(trimmed.slice(0, 30));
+
+        if (trimmed.includes('SELECT * FROM mobile_sellers')) {
+          return {
+            rows: [
+              {
+                id: 'seller-1',
+                organization_id: 'org-1',
+                name: 'Test Seller',
+                phone: '03001234567',
+                alternate_phone: null,
+                address: 'Bazar',
+                city: null,
+                verification_status: 'UNVERIFIED',
+                is_active: 1,
+                notes: null,
+              },
+            ],
+          };
+        }
+
+        if (trimmed.includes('UPDATE mobile_sellers')) {
+          return { rows: [] };
+        }
+
+        return { rows: [] };
+      },
+      release: () => {
+        released = true;
+      },
+    } as unknown as PoolClient;
+
+    const mockPool = {
+      connect: async () => mockClient,
+      query: async (sql: string) => {
+        if (sql.includes('FROM mobile_sellers')) {
+          return {
+            rows: [
+              {
+                id: 'seller-1',
+                organization_id: 'org-1',
+                name: 'Test Seller',
+                phone: '03009999999',
+                verification_status: 'UNVERIFIED',
+                is_active: 1,
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      },
+    } as unknown as Pool;
+
+    const repo = new MobileRepo(mockPool);
+
+    const updated = await repo.updateSeller({
+      seller_id: 'seller-1',
+      organization_id: 'org-1',
+      updated_by: 'user-1',
+      phone: '03009999999',
+    });
+
+    assert.ok(updated);
+    assert.ok(queryLog.some((q) => q.startsWith('BEGIN')));
+    assert.ok(queryLog.some((q) => q.startsWith('COMMIT')));
+    assert.equal(queryLog.some((q) => q.startsWith('ROLLBACK')), false);
+    assert.equal(queryLog.some((q) => q.includes('change_log')), false);
+    assert.equal(released, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 16. Seller Update HTTP Route Integration (PATCH /sellers/:sellerId)
+// ---------------------------------------------------------------------------
+
+describe('16. Seller Update HTTP Route Integration (PATCH /sellers/:sellerId)', () => {
+  let appServer: Server;
+  let serverBaseUrl: string;
+  let activeUserRole: string = 'SHOP_ADMIN';
+  let candidateBranchBelongs = true;
+  let lastCapturedInput: any = null;
+  const originalUpdateSeller = MobileRepo.prototype.updateSeller;
+
+  let tokenShopAdminBranchMain: string;
+  let tokenOrgAdminNullBranch: string;
+
+  const mockClient = {
+    query: async () => ({ rows: [] }),
+    release: () => {},
+  } as unknown as PoolClient;
+
+  const mockPool = {
+    connect: async () => mockClient,
+    query: async (sql: string) => {
+      const trimmed = sql.trim();
+      if (trimmed.includes('FROM users')) {
+        return {
+          rows: [
+            {
+              is_active: 1,
+              status: 'ACTIVE',
+              role: activeUserRole,
+            },
+          ],
+        };
+      }
+      if (trimmed.includes('SELECT EXISTS') && trimmed.includes('branches')) {
+        return { rows: [{ exists: candidateBranchBelongs }] };
+      }
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+
+  before(async () => {
+    // Generate valid RS256 JWT tokens for each test persona
+    tokenShopAdminBranchMain = issueToken({
+      userId: 'user-shop-admin-1',
+      username: 'shopadmin1',
+      role: 'SHOP_ADMIN',
+      branchId: 'branch-main-pos',
+      accessProfile: { allowed_pages: ['*'], allowed_actions: ['*'], limits: DEFAULT_LIMITS },
+    });
+
+    tokenOrgAdminNullBranch = issueToken({
+      userId: 'user-org-admin-1',
+      username: 'orgadmin1',
+      role: 'ADMIN',
+      branchId: null,
+      accessProfile: { allowed_pages: ['*'], allowed_actions: ['*'], limits: DEFAULT_LIMITS },
+    });
+
+    // Intercept updateSeller to capture inputs and return mock profile
+    MobileRepo.prototype.updateSeller = async function (input: any) {
+      lastCapturedInput = input;
+      return {
+        id: input.seller_id,
+        organization_id: input.organization_id,
+        name: 'Haseeb Test Seller',
+        father_name: 'Muneeb Test',
+        cnic: '38403-1234567-1',
+        phone: input.phone ?? '03001234567',
+        alternate_phone: input.alternate_phone ?? null,
+        address: input.address ?? 'Main Bazar, Sargodha',
+        city: input.city ?? 'Sargodha',
+        verification_status: input.verification_status ?? 'UNVERIFIED',
+        is_active: input.is_active ?? 1,
+        notes: input.notes ?? null,
+        created_by: 'user-creator',
+        updated_by: input.updated_by,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+    };
+
+    const app = express();
+    app.use(express.json());
+    app.use(buildMobileRouter(mockPool));
+
+    await new Promise<void>((resolve) => {
+      appServer = app.listen(0, '127.0.0.1', () => {
+        const addr = appServer.address() as AddressInfo;
+        serverBaseUrl = `http://127.0.0.1:${addr.port}`;
+        resolve();
+      });
+    });
+  });
+
+  after(async () => {
+    MobileRepo.prototype.updateSeller = originalUpdateSeller;
+    if (appServer) {
+      await new Promise<void>((resolve) => appServer.close(() => resolve()));
+    }
+  });
+
+  test('PATCH /sellers/:sellerId: SHOP_ADMIN branch is attributed when request omits branch_id', async () => {
+    activeUserRole = 'SHOP_ADMIN';
+    candidateBranchBelongs = true;
+    lastCapturedInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/sellers/seller-101`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenShopAdminBranchMain}`,
+      },
+      body: JSON.stringify({ phone: '0300-8888888', notes: 'Shop update' }),
+    });
+
+    assert.equal(res.status, 200);
+    const data = await res.json() as { seller?: { id: string } };
+    assert.ok(data.seller);
+    assert.equal(lastCapturedInput.seller_id, 'seller-101');
+    assert.equal(lastCapturedInput.branch_id, 'branch-main-pos');
+    assert.equal(lastCapturedInput.organization_id, NIAZI_ORGANIZATION_ID);
+    assert.equal(lastCapturedInput.updated_by, 'user-shop-admin-1');
+  });
+
+  test('PATCH /sellers/:sellerId: branchless update succeeds when identity has no branch (Org Admin)', async () => {
+    activeUserRole = 'ADMIN';
+    candidateBranchBelongs = true;
+    lastCapturedInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/sellers/seller-102`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenOrgAdminNullBranch}`,
+      },
+      body: JSON.stringify({ notes: 'HQ admin note without branch' }),
+    });
+
+    assert.equal(res.status, 200);
+    assert.equal(lastCapturedInput.seller_id, 'seller-102');
+    assert.equal(lastCapturedInput.branch_id, undefined);
+    assert.equal(lastCapturedInput.organization_id, NIAZI_ORGANIZATION_ID);
+    assert.equal(lastCapturedInput.updated_by, 'user-org-admin-1');
+  });
+
+  test('PATCH /sellers/:sellerId: foreign-organization branch returns HTTP 403', async () => {
+    activeUserRole = 'ADMIN';
+    candidateBranchBelongs = false; // Branch does not belong to caller's org
+    lastCapturedInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/sellers/seller-103`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenOrgAdminNullBranch}`,
+      },
+      body: JSON.stringify({ branch_id: 'foreign-branch-99', notes: 'Should fail' }),
+    });
+
+    assert.equal(res.status, 403);
+    const data = await res.json() as { error?: string; message?: string };
+    assert.equal(data.error, 'FORBIDDEN');
+    assert.match(data.message || '', /Target branch does not belong to your organization/);
+    assert.equal(lastCapturedInput, null); // updateSeller was not invoked
+  });
+
+  test('PATCH /sellers/:sellerId: Org Admin passing validated branch_id attributes that branch', async () => {
+    activeUserRole = 'ADMIN';
+    candidateBranchBelongs = true;
+    lastCapturedInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/sellers/seller-104`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenOrgAdminNullBranch}`,
+      },
+      body: JSON.stringify({ branch_id: 'branch-warehouse-1', notes: 'Warehouse attribution' }),
+    });
+
+    assert.equal(res.status, 200);
+    assert.equal(lastCapturedInput.branch_id, 'branch-warehouse-1');
+    assert.equal(lastCapturedInput.organization_id, NIAZI_ORGANIZATION_ID);
+  });
+
+  test('PATCH /sellers/:sellerId: ignores request body attempts to override organization_id or updated_by', async () => {
+    activeUserRole = 'SHOP_ADMIN';
+    candidateBranchBelongs = true;
+    lastCapturedInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/sellers/seller-105`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenShopAdminBranchMain}`,
+      },
+      body: JSON.stringify({
+        organization_id: 'org-malicious-override',
+        updated_by: 'user-malicious-override',
+        phone: '0300-7777777',
+      }),
+    });
+
+    assert.equal(res.status, 200);
+    assert.equal(lastCapturedInput.organization_id, NIAZI_ORGANIZATION_ID);
+    assert.equal(lastCapturedInput.updated_by, 'user-shop-admin-1');
+  });
+
+
+  test('PATCH /sellers/:sellerId: unauthenticated request is rejected with 401', async () => {
+    lastCapturedInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/sellers/seller-107`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notes: 'Unauthenticated' }),
+    });
+
+    assert.equal(res.status, 401);
+    assert.equal(lastCapturedInput, null);
   });
 });

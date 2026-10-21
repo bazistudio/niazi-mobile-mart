@@ -1017,10 +1017,31 @@ export function buildMobileRouter(pool: Pool): Router {
       return;
     }
 
+    // Resolve optional branch attribution for change_log audit trail:
+    // If body.branch_id is explicitly supplied, validate tenant boundary (must belong to caller's org).
+    // Otherwise, fall back to operator's assigned identity.branch_id if present.
+    let branchId: string | null = null;
+    if (body.branch_id !== undefined) {
+      if (!isNonBlankString(body.branch_id)) {
+        res.status(400).json({ error: 'BAD_REQUEST', message: 'branch_id must not be blank if provided' });
+        return;
+      }
+      const candidateBranchId = String(body.branch_id).trim();
+      const belongs = await repo.isBranchInOrganization(identity.organization_id, candidateBranchId);
+      if (!belongs) {
+        res.status(403).json({ error: 'FORBIDDEN', message: 'Target branch does not belong to your organization' });
+        return;
+      }
+      branchId = candidateBranchId;
+    } else if (identity.branch_id) {
+      branchId = identity.branch_id;
+    }
+
     const input: UpdateSellerInput = {
       seller_id:           sellerId,
       organization_id:     identity.organization_id,
       updated_by:          identity.user_id,
+      branch_id:           branchId ?? undefined,
       phone:               body.phone               !== undefined ? String(body.phone).trim()    : undefined,
       alternate_phone:     body.alternate_phone      !== undefined
                              ? (isNonBlankString(body.alternate_phone) ? String(body.alternate_phone).trim() : null)
