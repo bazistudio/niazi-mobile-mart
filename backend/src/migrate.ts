@@ -76,23 +76,209 @@ function getMigrationVersion(filename: string): number {
 }
 
 /**
- * Execute pending migrations sequentially inside a transaction lock.
+ * Configuration options for runMigrations.
  */
-export async function runMigrations(pool: Pool): Promise<void> {
-  const migrationsDir = resolveMigrationsDir();
-  console.log(`[migrate] Discovering PostgreSQL migrations from: ${migrationsDir}`);
+export interface MigrationOptions {
+  /** Maximum migration version to apply (inclusive). Migrations with version > targetVersion are skipped. */
+  targetVersion?: number;
+}
 
-  const files = fs
-    .readdirSync(migrationsDir)
+export interface MigrationCliArgs {
+  targetVersion?: number;
+  databaseUrl?: ValidatedTestDatabaseTarget;
+}
+
+/**
+ * Strict CLI argument parser for --target-version and --database-url.
+ *
+ * Rules:
+ * - If no --target-version argument is passed, targetVersion is undefined (unrestricted).
+ * - Supported target-version forms: `--target-version=<int>` or `--target-version <int>`.
+ * - Supported database-url forms: `--database-url=<URI>` or `--database-url <URI>`.
+ * - Rejects malformed values (non-integers, negative numbers, floats, empty values).
+ * - Rejects duplicate arguments.
+ * - Rejects unknown options starting with `--`.
+ * - Validates --database-url strictly before returning:
+ *   - Protocol must be postgresql: or postgres:
+ *   - Host must be exactly 127.0.0.1 or localhost
+ *   - Port must be 5432 (explicit or default)
+ *   - Database name must be exactly niazi_local_test
+ *   - Explicitly rejects niazi_mobile_mart_local or any other database
+ *   - Rejects any query parameter other than an unambiguous valid sslmode
+ */
+export function parseMigrationCliArgs(argv: string[]): MigrationCliArgs {
+  let targetVersion: number | undefined = undefined;
+  let databaseUrl: ValidatedTestDatabaseTarget | undefined = undefined;
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg.startsWith('--target-version=')) {
+      if (targetVersion !== undefined) {
+        throw new Error('[migrate] Duplicate --target-version argument detected.');
+      }
+      const rawVal = arg.slice('--target-version='.length).trim();
+      targetVersion = parseVersionNumber(rawVal);
+    } else if (arg === '--target-version') {
+      if (targetVersion !== undefined) {
+        throw new Error('[migrate] Duplicate --target-version argument detected.');
+      }
+      if (i + 1 >= argv.length || argv[i + 1].startsWith('--')) {
+        throw new Error('[migrate] Missing value for --target-version.');
+      }
+      const rawVal = argv[++i].trim();
+      targetVersion = parseVersionNumber(rawVal);
+    } else if (arg.startsWith('--database-url=')) {
+      if (databaseUrl !== undefined) {
+        throw new Error('[migrate] Duplicate --database-url argument detected.');
+      }
+      const rawUrl = arg.slice('--database-url='.length).trim();
+      if (!rawUrl) {
+        throw new Error('[migrate] Empty value for --database-url.');
+      }
+      databaseUrl = validateExplicitDatabaseUrl(rawUrl);
+    } else if (arg === '--database-url') {
+      if (databaseUrl !== undefined) {
+        throw new Error('[migrate] Duplicate --database-url argument detected.');
+      }
+      if (i + 1 >= argv.length || argv[i + 1].startsWith('--')) {
+        throw new Error('[migrate] Missing value for --database-url.');
+      }
+      const rawUrl = argv[++i].trim();
+      databaseUrl = validateExplicitDatabaseUrl(rawUrl);
+    } else if (arg.startsWith('--')) {
+      throw new Error(`[migrate] Unsupported argument: "${arg}". Only --target-version=<N> and --database-url=<URI> are supported.`);
+    }
+  }
+
+  return { targetVersion, databaseUrl };
+}
+
+/** Backward-compatible export for cutoff parser */
+export function parseMigrationCutoff(argv: string[]): number | undefined {
+  return parseMigrationCliArgs(argv).targetVersion;
+}
+
+function parseVersionNumber(raw: string): number {
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`[migrate] Invalid target-version "${raw}". Must be a non-negative integer.`);
+  }
+  const val = parseInt(raw, 10);
+  if (!Number.isSafeInteger(val) || val < 0) {
+    throw new Error(`[migrate] Invalid target-version "${raw}". Out of valid integer range.`);
+  }
+  return val;
+}
+
+export interface ValidatedTestDatabaseTarget {
+  connectionString: string;
+  ssl: false | { rejectUnauthorized: false };
+}
+
+/**
+ * Strict validator for explicit database connection URI.
+ * Accepts only loopback host (127.0.0.1 or localhost), port 5432, and database 'niazi_local_test'.
+ * Strictly rejects 'niazi_mobile_mart_local', any remote host, or other databases.
+ * Rejects any query parameter other than an unambiguous, valid 'sslmode'.
+ */
+export function validateExplicitDatabaseUrl(rawUrl: string): ValidatedTestDatabaseTarget {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error('[migrate] Malformed --database-url URI.');
+  }
+
+  const protocol = parsed.protocol.toLowerCase();
+  if (protocol !== 'postgres:' && protocol !== 'postgresql:') {
+    throw new Error(`[migrate] Unsupported protocol "${protocol}". Must be postgres: or postgresql:`);
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname !== '127.0.0.1' && hostname !== 'localhost') {
+    throw new Error(`[migrate] Rejected non-loopback host "${hostname}". Only 127.0.0.1 or localhost is permitted.`);
+  }
+
+  const port = parsed.port ? parseInt(parsed.port, 10) : 5432;
+  if (port !== 5432) {
+    throw new Error(`[migrate] Rejected port "${port}". Only port 5432 is permitted for local test target.`);
+  }
+
+  const dbName = parsed.pathname.replace(/^\//, '').split('?')[0];
+  if (dbName === 'niazi_mobile_mart_local') {
+    throw new Error('[migrate] SECURITY REJECTION: Explicit connection cannot target production/shared database "niazi_mobile_mart_local".');
+  }
+
+  if (dbName !== 'niazi_local_test') {
+    throw new Error(`[migrate] SECURITY REJECTION: Database "${dbName}" is not the authorized test target "niazi_local_test".`);
+  }
+
+  // Inspect all query parameters strictly after decoding
+  let sslmode: string | undefined = undefined;
+  for (const [rawKey, rawVal] of parsed.searchParams.entries()) {
+    const key = decodeURIComponent(rawKey).trim().toLowerCase();
+    if (key !== 'sslmode') {
+      throw new Error(`[migrate] SECURITY REJECTION: Unauthorized query parameter "${rawKey}". Only 'sslmode' is permitted.`);
+    }
+    if (sslmode !== undefined) {
+      throw new Error('[migrate] SECURITY REJECTION: Duplicate "sslmode" query parameter detected.');
+    }
+    sslmode = decodeURIComponent(rawVal).trim().toLowerCase();
+  }
+
+  let ssl: false | { rejectUnauthorized: false } = { rejectUnauthorized: false };
+  if (sslmode !== undefined) {
+    if (sslmode === 'disable') {
+      ssl = false;
+    } else if (sslmode === 'require' || sslmode === 'prefer' || sslmode === 'verify-ca' || sslmode === 'verify-full') {
+      ssl = { rejectUnauthorized: false };
+    } else {
+      throw new Error(`[migrate] SECURITY REJECTION: Unsupported sslmode "${sslmode}".`);
+    }
+  }
+
+  return { connectionString: rawUrl, ssl };
+}
+
+/**
+ * Filter and sort migration files based on optional targetVersion cutoff.
+ */
+export function filterMigrationFiles(files: string[], targetVersion?: number): string[] {
+  const sorted = [...files]
     .filter((f) => f.endsWith('.sql'))
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 
+  if (targetVersion === undefined) {
+    return sorted;
+  }
+
+  return sorted.filter((f) => {
+    const v = getMigrationVersion(f);
+    return v <= targetVersion;
+  });
+}
+
+/**
+ * Execute pending migrations sequentially inside a transaction lock.
+ */
+export async function runMigrations(pool: Pool, options?: MigrationOptions): Promise<void> {
+  const migrationsDir = resolveMigrationsDir();
+  console.log(`[migrate] Discovering PostgreSQL migrations from: ${migrationsDir}`);
+
+  const rawFiles = fs.readdirSync(migrationsDir);
+  const files = filterMigrationFiles(rawFiles, options?.targetVersion);
+
   if (files.length === 0) {
-    console.warn('[migrate] No .sql migration files found in directory.');
+    console.warn('[migrate] No eligible .sql migration files found.');
     return;
   }
 
-  console.log(`[migrate] Discovered ${files.length} migration file(s) (001 through ${files[files.length - 1]}).`);
+  if (options?.targetVersion !== undefined) {
+    console.log(
+      `[migrate] Discovered ${files.length} eligible migration file(s) capped at target-version ${options.targetVersion} (001 through ${files[files.length - 1]}).`
+    );
+  } else {
+    console.log(`[migrate] Discovered ${files.length} migration file(s) (001 through ${files[files.length - 1]}).`);
+  }
 
   const client = await pool.connect();
   try {
@@ -179,16 +365,39 @@ function loadEnv(): void {
 
 // Allow direct CLI execution via `node dist/migrate.js` or `ts-node src/migrate.ts`
 if (require.main === module) {
-  loadEnv();
-  const { getPool } = require('./db');
-  const pool = getPool();
-  runMigrations(pool)
-    .then(() => {
-      console.log('[migrate] CLI migration runner completed successfully.');
-      process.exit(0);
-    })
-    .catch((err: unknown) => {
-      console.error('[migrate] CLI migration runner fatal error:', err);
-      process.exit(1);
-    });
+  try {
+    const { targetVersion, databaseUrl } = parseMigrationCliArgs(process.argv.slice(2));
+    
+    let pool: Pool;
+    if (databaseUrl) {
+      console.log('[migrate] Connecting explicitly to verified loopback target database: niazi_local_test');
+      pool = new Pool({ connectionString: databaseUrl.connectionString, ssl: databaseUrl.ssl });
+      pool.on('error', (err) => {
+        console.error('[migrate] Test pool error:', err.message);
+      });
+    } else {
+      loadEnv();
+      const { getPool } = require('./db');
+      pool = getPool();
+    }
+
+    runMigrations(pool, { targetVersion })
+      .then(async () => {
+        console.log('[migrate] CLI migration runner completed successfully.');
+        if (databaseUrl) {
+          await pool.end();
+        }
+        process.exit(0);
+      })
+      .catch(async (err: unknown) => {
+        console.error('[migrate] CLI migration runner fatal error:', err);
+        if (databaseUrl) {
+          await pool.end().catch(() => {});
+        }
+        process.exit(1);
+      });
+  } catch (err: unknown) {
+    console.error('[migrate] CLI argument validation error:', (err as Error).message);
+    process.exit(1);
+  }
 }

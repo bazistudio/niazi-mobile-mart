@@ -59,6 +59,8 @@ export interface MobileBranchSummaryItem {
   new_count: number;
   used_count: number;
   total_valuation: number;
+  new_valuation: number;
+  used_valuation: number;
 }
 
 export interface MobileOrganizationSummary {
@@ -69,7 +71,52 @@ export interface MobileOrganizationSummary {
   inspection_count: number;
   sold_count: number;
   total_valuation: number;
+  new_valuation: number;
+  used_valuation: number;
   branches: MobileBranchSummaryItem[];
+}
+
+export interface SellerSearchResult {
+  seller_id?: string | null;
+  seller_name: string;
+  father_name: string;
+  seller_cnic: string;
+  seller_phone: string;
+  seller_address: string;
+}
+
+// ── Phase 2: Permanent Seller Registry types ────────────────────────────────
+
+export type SellerVerificationStatus = 'UNVERIFIED' | 'IDENTITY_RECORDED' | 'FLAGGED';
+
+export interface SellerSummaryRow {
+  id: string;
+  name: string;
+  cnic_masked: string | null;
+  phone: string;
+  city: string | null;
+  verification_status: SellerVerificationStatus;
+  is_active: number;
+}
+
+export interface CreateSellerPayload {
+  name: string;
+  father_name?: string | null;
+  cnic?: string | null;
+  phone: string;
+  alternate_phone?: string | null;
+  address: string;
+  city?: string | null;
+  notes?: string | null;
+}
+
+export interface BranchInvestmentSummary {
+  total_investment: number;
+  new_investment: number;
+  used_investment: number;
+  total_in_stock: number;
+  new_in_stock: number;
+  used_in_stock: number;
 }
 
 export interface ListMobilesResult {
@@ -128,6 +175,7 @@ export interface CreateMobilePayload {
     seller_cnic: string;
     seller_phone: string;
     seller_address: string;
+    seller_id?: string | null;
     ownership_declaration_acknowledged: boolean;
     physical_affidavit_acknowledged: boolean;
   };
@@ -147,7 +195,8 @@ export interface ListMobilesParams {
  */
 export function transformFormDataToApiPayload(
   formData: MobileFormData,
-  branchId?: string | null
+  branchId?: string | null,
+  supplierId?: string | null
 ): CreateMobilePayload {
   const isUsed = formData.condition === 'USED';
   const effectiveCost = isUsed
@@ -166,7 +215,7 @@ export function transformFormDataToApiPayload(
     condition: formData.condition,
     cost_price: effectiveCost,
     expected_sale_price: formData.specs.expectedSalePrice > 0 ? Number(formData.specs.expectedSalePrice) : undefined,
-    supplier_id: isUsed ? null : undefined,
+    supplier_id: isUsed ? null : (supplierId || null),
     notes: formData.specs.notes?.trim() || undefined,
     imei1: formData.specs.imei1.trim(),
     imei2: formData.specs.imei2?.trim() || undefined,
@@ -227,6 +276,7 @@ export function transformFormDataToApiPayload(
       seller_cnic: formData.paperwork.sellerCnic.trim(),
       seller_phone: formData.paperwork.sellerPhone.trim(),
       seller_address: formData.paperwork.sellerAddress.trim(),
+      seller_id: formData.paperwork.sellerId ?? null,   // Phase 2: optional registry link
       ownership_declaration_acknowledged: formData.paperwork.ownershipDeclarationAcknowledged,
       physical_affidavit_acknowledged: formData.paperwork.physicalAffidavitAcknowledged,
     };
@@ -310,6 +360,71 @@ export const mobileApi = {
   getMobilePaperwork: async (id: string, branchId?: string): Promise<{ paperwork: unknown }> => {
     const qs = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : '';
     return httpClient.get<{ paperwork: unknown }>(`/api/mobiles/${encodeURIComponent(id)}/paperwork${qs}`);
+  },
+
+  /**
+   * Search previously recorded used-mobile sellers by name, CNIC, or phone.
+   * Results are deduplicated and limited. Empty query returns nothing.
+   */
+  searchSellers: async (
+    q: string,
+    limit: number = 10
+  ): Promise<{ success: boolean; sellers: SellerSearchResult[] }> => {
+    const params = new URLSearchParams({ q: q.trim(), limit: String(limit) });
+    const data = await httpClient.get<{ sellers: SellerSearchResult[] }>(
+      `/api/mobiles/sellers/search?${params.toString()}`
+    );
+    return { success: true, sellers: data.sellers ?? [] };
+  },
+
+  /**
+   * Create a new seller in the permanent registry.
+   * Returns a safe summary (CNIC masked). Use getSellerById for the full profile.
+   */
+  createSeller: async (
+    payload: CreateSellerPayload
+  ): Promise<{ success: boolean; seller: SellerSummaryRow; error?: string }> => {
+    try {
+      const data = await httpClient.post<{ seller: SellerSummaryRow }>(
+        '/api/mobiles/sellers',
+        payload
+      );
+      return { success: true, seller: data.seller };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to create seller';
+      return { success: false, seller: {} as SellerSummaryRow, error: msg };
+    }
+  },
+
+  /**
+   * Retrieve a seller profile by ID.
+   * Returns full profile including full CNIC and address (authorized access).
+   */
+  getSellerById: async (
+    sellerId: string
+  ): Promise<{ success: boolean; seller?: unknown; error?: string }> => {
+    try {
+      const data = await httpClient.get<{ seller: unknown }>(
+        `/api/mobiles/sellers/${encodeURIComponent(sellerId)}`
+      );
+      return { success: true, seller: data.seller };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to fetch seller';
+      return { success: false, error: msg };
+    }
+  },
+
+  /**
+   * Retrieve branch-scoped investment summary (IN_STOCK devices only).
+   * Respects ALL/NEW/USED filter semantics via returned fields.
+   */
+  getBranchInvestmentSummary: async (
+    branchId?: string
+  ): Promise<{ summary: BranchInvestmentSummary }> => {
+    const qs = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+    return httpClient.get<{ summary: BranchInvestmentSummary }>(
+      `/api/mobiles/branch-summary${qs}`
+    );
   },
 
   /**

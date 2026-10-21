@@ -35,6 +35,7 @@ export interface UsedMobilePaperwork {
   sellerCnic: string; // Formatted 13-digit Pakistani CNIC: XXXXX-XXXXXXX-X
   sellerPhone: string;
   sellerAddress: string;
+  sellerId?: string | null;
   ownershipDeclarationAcknowledged: boolean;
   physicalAffidavitAcknowledged: boolean;
 }

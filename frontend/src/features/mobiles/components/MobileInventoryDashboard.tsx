@@ -17,10 +17,13 @@ import {
   Loader2,
   RefreshCw,
   AlertCircle,
+  TrendingUp,
+  Package,
 } from 'lucide-react';
 import { Button, Badge, Card } from '@/components/ui';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { mobileApi, mapDeviceRowToItem } from '../services/mobile.api';
+import type { BranchInvestmentSummary } from '../services/mobile.api';
 import type { MobileInventoryItem, MobileCondition } from '../types/mobile.types';
 
 export const MobileInventoryDashboard: React.FC = () => {
@@ -33,6 +36,9 @@ export const MobileInventoryDashboard: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'ALL' | MobileCondition>('ALL');
+  const [investmentSummary, setInvestmentSummary] = useState<BranchInvestmentSummary | null>(null);
+  const [investmentLoading, setInvestmentLoading] = useState(false);
+  const [investmentError, setInvestmentError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [ptaFilter, setPtaFilter] = useState<string>('ALL');
 
@@ -54,9 +60,27 @@ export const MobileInventoryDashboard: React.FC = () => {
     }
   }, [branchId]);
 
+  const fetchInvestment = useCallback(async () => {
+    setInvestmentLoading(true);
+    setInvestmentError(null);
+    try {
+      const res = await mobileApi.getBranchInvestmentSummary(branchId);
+      setInvestmentSummary(res.summary);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load investment summary';
+      setInvestmentError(msg);
+    } finally {
+      setInvestmentLoading(false);
+    }
+  }, [branchId]);
+
   useEffect(() => {
     fetchMobiles();
   }, [fetchMobiles]);
+
+  useEffect(() => {
+    fetchInvestment();
+  }, [fetchInvestment]);
 
   // Filter items based on active tab and search
   const filteredItems = items.filter((item) => {
@@ -143,6 +167,89 @@ export const MobileInventoryDashboard: React.FC = () => {
           </Button>
         </div>
       )}
+
+      {/* Investment Summary Card */}
+      {(() => {
+        const inv = investmentSummary;
+        const displayValue = !inv ? 0
+          : activeTab === 'NEW'  ? inv.new_investment
+          : activeTab === 'USED' ? inv.used_investment
+          : inv.total_investment;
+        const displayCount = !inv ? 0
+          : activeTab === 'NEW'  ? inv.new_in_stock
+          : activeTab === 'USED' ? inv.used_in_stock
+          : inv.total_in_stock;
+        const labelSuffix = activeTab === 'NEW' ? ' (New)' : activeTab === 'USED' ? ' (Used)' : '';
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Total Investment */}
+            <Card variant="default" padding="md" className="bg-surface border-border col-span-1 sm:col-span-2">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1">
+                    Current Investment{labelSuffix}
+                  </p>
+                  {investmentLoading ? (
+                    <div className="flex items-center gap-2 text-text-muted">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span className="text-sm">Loading…</span>
+                    </div>
+                  ) : investmentError ? (
+                    <span className="text-sm text-danger">{investmentError}</span>
+                  ) : (
+                    <p className="text-2xl font-bold text-text-primary">
+                      Rs.&nbsp;{displayValue.toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </p>
+                  )}
+                  {!investmentLoading && !investmentError && inv && (
+                    <p className="text-xs text-text-muted mt-1">
+                      {displayCount} in-stock device{displayCount !== 1 ? 's' : ''} &mdash; acquisition cost only, sold excluded
+                    </p>
+                  )}
+                </div>
+                <div className="p-2 bg-primary/10 rounded-lg text-primary shrink-0">
+                  <TrendingUp className="w-5 h-5" />
+                </div>
+              </div>
+              {/* New / Used breakdown (only shown in ALL tab) */}
+              {activeTab === 'ALL' && !investmentLoading && !investmentError && inv && (
+                <div className="mt-3 pt-3 border-t border-border flex items-center gap-6 text-xs">
+                  <span className="text-text-secondary">
+                    <span className="font-semibold text-success">New:</span>{' '}
+                    Rs.&nbsp;{inv.new_investment.toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    <span className="text-text-muted ml-1">({inv.new_in_stock} units)</span>
+                  </span>
+                  <span className="text-text-secondary">
+                    <span className="font-semibold text-warning">Used:</span>{' '}
+                    Rs.&nbsp;{inv.used_investment.toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    <span className="text-text-muted ml-1">({inv.used_in_stock} units)</span>
+                  </span>
+                </div>
+              )}
+            </Card>
+
+            {/* In-Stock Count */}
+            <Card variant="default" padding="md" className="bg-surface border-border">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1">
+                    In Stock{labelSuffix}
+                  </p>
+                  {investmentLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-text-muted" />
+                  ) : (
+                    <p className="text-2xl font-bold text-text-primary">{displayCount}</p>
+                  )}
+                  <p className="text-xs text-text-muted mt-1">devices ready for sale</p>
+                </div>
+                <div className="p-2 bg-success/10 rounded-lg text-success shrink-0">
+                  <Package className="w-5 h-5" />
+                </div>
+              </div>
+            </Card>
+          </div>
+        );
+      })()}
 
       {/* Tabs & Search Filter Bar */}
       <Card variant="default" padding="sm" className="bg-surface border-border">

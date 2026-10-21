@@ -38,7 +38,7 @@ export const shopAdminNavigation: NavigationGroup[] = [
   {
     label: 'Inventory',
     items: [
-      { name: 'Mobile Inventory', href: '/dashboard/shop-admin/mobiles', icon: Smartphone, permission: PERMISSIONS.PRODUCTS_VIEW },
+      { name: 'Mobile Inventory', href: '/dashboard/shop-admin/mobiles', icon: Smartphone, permission: PERMISSIONS.INVENTORY_VIEW },
       { name: 'Products & Stock', href: '/dashboard/shop-admin/inventory', icon: Tags, permission: PERMISSIONS.PRODUCTS_VIEW },
     ],
   },
@@ -47,7 +47,8 @@ export const shopAdminNavigation: NavigationGroup[] = [
     items: [
       { name: 'Cash Management', href: '/dashboard/shop-admin/cash', icon: Coins, permission: PERMISSIONS.FINANCE_VIEW },
       { name: 'Expenses', href: '/dashboard/shop-admin/expenses', icon: Receipt, permission: PERMISSIONS.EXPENSES_VIEW },
-      { name: 'Marketing & Broadcasts', href: '/dashboard/shop-admin/marketing', icon: Megaphone, permission: PERMISSIONS.REPORTS_VIEW },
+      // Temporarily hidden from branch dashboards (Step 02) — route & implementation preserved
+      // { name: 'Marketing & Broadcasts', href: '/dashboard/shop-admin/marketing', icon: Megaphone, permission: PERMISSIONS.REPORTS_VIEW },
       { name: 'Repairs', href: '/dashboard/shop-admin/repairs', icon: Wrench, permission: PERMISSIONS.REPAIRS_VIEW },
     ],
   },

@@ -31,7 +31,8 @@ export const organizationNavigation: NavigationGroup[] = [
       { name: 'Business', href: '/dashboard/organization/business', icon: Briefcase },
       { name: 'Ledger', href: '/dashboard/organization/ledger', icon: BookOpen },
       { name: 'Analytics', href: '/dashboard/organization/analytics', icon: LineChart },
-      { name: 'Social', href: '/dashboard/organization/social', icon: Share2 },
+      // Temporarily hidden from admin dashboard (Step 02) — route & implementation preserved
+      // { name: 'Social', href: '/dashboard/organization/social', icon: Share2 },
       { name: 'Products', href: '/dashboard/organization/products', icon: Package },
       { name: 'Mobile Inventory', href: '/dashboard/organization/mobile-inventory', icon: Smartphone },
       { name: 'Customers', href: '/dashboard/organization/customers', icon: UserCheck },

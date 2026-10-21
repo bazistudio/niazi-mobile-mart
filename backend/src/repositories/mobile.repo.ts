@@ -114,6 +114,7 @@ export interface RegisterPaperworkInput {
   seller_address: string;       // sensitive
   ownership_declaration_acknowledged: boolean;
   physical_affidavit_acknowledged: boolean;
+  seller_id?: string | null;    // Phase 2: optional FK to mobile_sellers.id (same org, validated in tx)
 }
 
 export interface RegisterMobileDeviceInput {
@@ -257,6 +258,8 @@ export interface MobileBranchSummaryItem {
   new_count: number;
   used_count: number;
   total_valuation: number;
+  new_valuation: number;
+  used_valuation: number;
 }
 
 export interface MobileOrganizationSummary {
@@ -267,7 +270,116 @@ export interface MobileOrganizationSummary {
   inspection_count: number;
   sold_count: number;
   total_valuation: number;
+  new_valuation: number;
+  used_valuation: number;
   branches: MobileBranchSummaryItem[];
+}
+
+/** Seller search result — fields needed for autofill. Sensitive: must not be surfaced on list/detail endpoints. */
+export interface SellerSearchResult {
+  seller_id?: string | null;
+  seller_name: string;
+  father_name: string;
+  seller_cnic: string;
+  seller_phone: string;
+  seller_address: string;
+}
+
+// ---------------------------------------------------------------------------
+// Seller Registry — Types (Phase 2)
+// ---------------------------------------------------------------------------
+
+export type SellerVerificationStatus = 'UNVERIFIED' | 'IDENTITY_RECORDED' | 'FLAGGED';
+
+/** Full seller profile row (sensitive — only returned on explicit profile access). */
+export interface SellerRow {
+  id: string;
+  organization_id: string;
+  name: string;
+  father_name: string | null;
+  cnic: string | null;          // sensitive — full CNIC, never in broad list results
+  phone: string;                // sensitive
+  alternate_phone: string | null;
+  address: string;              // sensitive
+  city: string | null;
+  verification_status: SellerVerificationStatus;
+  is_active: number;
+  notes: string | null;
+  created_by: string;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Safe seller summary row for search/list — CNIC is masked. */
+export interface SellerSummaryRow {
+  id: string;
+  name: string;
+  cnic_masked: string | null;   // e.g. "35201-*******-1"
+  phone: string;
+  city: string | null;
+  verification_status: SellerVerificationStatus;
+  is_active: number;
+}
+
+/** Device-history item returned by getSellerDevices. */
+export interface SellerDeviceHistoryRow {
+  paperwork_id: string;
+  voucher_no: string;
+  purchase_date: string;
+  purchase_price: string;
+  // Snapshot fields (from paperwork — historical, may differ from current profile)
+  snapshot_seller_name: string;
+  snapshot_seller_cnic_masked: string | null; // masked for safety (null if unrecorded)
+  // Device fields
+  device_id: string;
+  brand: string;
+  model: string;
+  storage: string;
+  condition: MobileCondition;
+  status: MobileStatus;
+  branch_id: string;
+  branch_name: string | null;
+  // IMEIs — only included when caller requests them (inventory-write scope)
+  imeis?: Array<{ imei: string; slot: MobileSlot }>;
+}
+
+/** Input for createSeller. */
+export interface CreateSellerInput {
+  organization_id: string;      // from JWT — never client-supplied
+  created_by: string;           // from JWT — never client-supplied
+  name: string;
+  father_name?: string | null;
+  cnic?: string | null;         // optional; if provided must pass CNIC regex
+  phone: string;
+  alternate_phone?: string | null;
+  address: string;
+  city?: string | null;
+  notes?: string | null;
+}
+
+/** Input for updateSeller (PATCH). */
+export interface UpdateSellerInput {
+  seller_id: string;
+  organization_id: string;      // from JWT
+  updated_by: string;           // from JWT
+  phone?: string;
+  alternate_phone?: string | null;
+  address?: string;
+  city?: string | null;
+  verification_status?: SellerVerificationStatus;
+  is_active?: number;
+  notes?: string | null;
+}
+
+/** Branch-scoped investment summary (NEW + USED breakdown, IN_STOCK only). */
+export interface BranchInvestmentSummary {
+  total_investment: number;
+  new_investment: number;
+  used_investment: number;
+  total_in_stock: number;
+  new_in_stock: number;
+  used_in_stock: number;
 }
 
 /** Input for PATCH /:id. */
@@ -514,19 +626,43 @@ export class MobileRepo {
       if (input.condition === 'USED' && input.paperwork) {
         const pw = input.paperwork;
         const pwId = this.newId();
+
+        // Phase 2: if a seller_id is provided, validate it belongs to this org
+        // and is active inside the same transaction (consistent read, no independent connection).
+        if (pw.seller_id) {
+          const sellerCheck = await client.query<{ id: string; is_active: number }>(
+            `SELECT id, is_active FROM mobile_sellers WHERE id = $1 AND organization_id = $2`,
+            [pw.seller_id, orgId]
+          );
+          if (sellerCheck.rows.length === 0) {
+            throw new MobileRepoError(
+              `SELLER_NOT_FOUND: seller_id "${pw.seller_id}" not found in this organization`,
+              422
+            );
+          }
+          if (sellerCheck.rows[0].is_active !== 1) {
+            throw new MobileRepoError(
+              `SELLER_INACTIVE: seller_id "${pw.seller_id}" is inactive and cannot be linked to new purchases`,
+              422
+            );
+          }
+        }
+
         await client.query(
           `INSERT INTO mobile_purchase_paperwork (
              id, device_id, organization_id, branch_id,
              voucher_no, purchase_date, purchase_price,
              seller_name, father_name, seller_cnic, seller_phone, seller_address,
              ownership_declaration_acknowledged, physical_affidavit_acknowledged,
+             seller_id,
              recorded_by, created_at, updated_at
            ) VALUES (
              $1,  $2,  $3,  $4,
              $5,  $6,  $7,
              $8,  $9,  $10, $11, $12,
              $13, $14,
-             $15, $16, $16
+             $15,
+             $16, $17, $17
            )`,
           [
             pwId, deviceId, orgId, input.branch_id,
@@ -535,6 +671,7 @@ export class MobileRepo {
             pw.seller_phone, pw.seller_address,
             pw.ownership_declaration_acknowledged,
             pw.physical_affidavit_acknowledged,
+            pw.seller_id ?? null,
             input.created_by, now,
           ]
         );
@@ -1018,6 +1155,538 @@ export class MobileRepo {
    * Returns organization-wide consolidated mobile inventory summary and per-branch breakdown.
    * Scoped strictly to the authenticated organization.
    */
+  /**
+   * Searches historical mobile_purchase_paperwork for reusable seller details.
+   *
+   * Deduplicates by normalized CNIC (keeping the most recent record per CNIC).
+   * Falls back to deduplication by seller_name when CNIC is absent.
+   * Matches against seller_name, seller_cnic, or seller_phone (case-insensitive).
+   *
+   * Branch visibility:
+   *   - SHOP_ADMIN: restricted to their own branch (branchId required).
+   *   - Org-admin: all branches within the organization (branchId may be null).
+   *
+   * SECURITY: seller CNIC, phone, address, and father_name are included here
+   * for autofill only. This method must NEVER be called from list/detail endpoints.
+   */
+  async searchSellers(
+    organizationId: string,
+    branchId: string | null,
+    q: string,
+    limit: number = 10
+  ): Promise<SellerSearchResult[]> {
+    const pattern = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
+
+    // Phase 2: query mobile_sellers registry first, then fall back to historical
+    // paperwork for sellers not yet linked (seller_id IS NULL). Results are merged
+    // and de-duplicated by CNIC (registry wins when CNIC matches).
+
+    // --- Registry query (mobile_sellers) -----------------------------------
+    const registryResult = await this.pool.query<{
+      id: string;
+      seller_name: string;
+      father_name: string | null;
+      seller_cnic: string | null;
+      seller_phone: string;
+      seller_address: string;
+    }>(
+      `SELECT
+         id,
+         name        AS seller_name,
+         father_name,
+         cnic        AS seller_cnic,
+         phone       AS seller_phone,
+         address     AS seller_address
+       FROM mobile_sellers
+       WHERE organization_id = $1
+         AND is_active = 1
+         AND (
+           name  ILIKE $2
+           OR cnic   ILIKE $2
+           OR phone  ILIKE $2
+         )
+       ORDER BY name ASC
+       LIMIT $3`,
+      [organizationId, pattern, limit]
+    );
+
+    // --- Historical query (paperwork rows not yet linked to registry) -------
+    const params: (string | number)[] = [organizationId, pattern, pattern, pattern, limit];
+    const branchClause = branchId ? `AND d.branch_id = $6` : '';
+    if (branchId) params.push(branchId);
+
+    const historicalResult = await this.pool.query<{
+      seller_name: string;
+      father_name: string;
+      seller_cnic: string;
+      seller_phone: string;
+      seller_address: string;
+    }>(
+      `SELECT DISTINCT ON (COALESCE(NULLIF(TRIM(p.seller_cnic), ''), p.seller_name))
+         p.seller_name,
+         p.father_name,
+         p.seller_cnic,
+         p.seller_phone,
+         p.seller_address
+       FROM mobile_purchase_paperwork p
+       INNER JOIN mobile_devices d ON d.id = p.device_id
+       WHERE d.organization_id = $1
+         AND p.seller_id IS NULL
+         ${branchClause}
+         AND (
+           p.seller_name   ILIKE $2
+           OR p.seller_cnic  ILIKE $3
+           OR p.seller_phone ILIKE $4
+         )
+       ORDER BY COALESCE(NULLIF(TRIM(p.seller_cnic), ''), p.seller_name), p.created_at DESC
+       LIMIT $5`,
+      params
+    );
+
+    // --- Merge: registry results take precedence; deduplicate by CNIC ------
+    const seen = new Set<string>();
+    const merged: SellerSearchResult[] = [];
+
+    for (const r of registryResult.rows) {
+      const key = r.seller_cnic ? r.seller_cnic.trim() : `name:${r.seller_name}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push({
+          seller_id:      r.id,
+          seller_name:    r.seller_name,
+          father_name:    r.father_name ?? '',
+          seller_cnic:    r.seller_cnic ?? '',
+          seller_phone:   r.seller_phone,
+          seller_address: r.seller_address,
+        });
+      }
+    }
+
+    for (const r of historicalResult.rows) {
+      const key = r.seller_cnic ? r.seller_cnic.trim() : `name:${r.seller_name}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push({
+          seller_id:      null,
+          seller_name:    r.seller_name,
+          father_name:    r.father_name,
+          seller_cnic:    r.seller_cnic,
+          seller_phone:   r.seller_phone,
+          seller_address: r.seller_address,
+        });
+      }
+    }
+
+    return merged.slice(0, limit);
+  }
+
+  // -------------------------------------------------------------------------
+  // Seller Registry — Phase 2 CRUD methods
+  // -------------------------------------------------------------------------
+
+  /**
+   * Masks the middle segment of a CNIC for safe display in list results.
+   * "35201-1234567-8" → "35201-*******-8"
+   */
+  private maskCnic(cnic: string | null | undefined): string | null {
+    if (!cnic) return null;
+    const match = cnic.match(/^(\d{5})-(\d{7})-(\d)$/);
+    if (!match) return cnic.replace(/\d/g, '*');
+    return `${match[1]}-${'*'.repeat(7)}-${match[3]}`;
+  }
+
+  /**
+   * Creates a new seller in the permanent registry.
+   *
+   * Organization scope is enforced: organization_id must come from the JWT,
+   * never from the client body. If a non-null CNIC is provided, the partial
+   * unique index (idx_mobile_sellers_org_cnic WHERE cnic IS NOT NULL) prevents
+   * duplicates; the PG 23505 error is mapped to a 409 MobileRepoError.
+   *
+   * Returns the new seller row (full profile — the handler must not forward
+   * CNIC to the client; return only the id and masked fields).
+   */
+  async createSeller(input: CreateSellerInput): Promise<SellerRow> {
+    const now = this.nowIso();
+    const id  = this.newId();
+
+    try {
+      const result = await this.pool.query<SellerRow>(
+        `INSERT INTO mobile_sellers (
+           id, organization_id,
+           name, father_name, cnic, phone, alternate_phone,
+           address, city, verification_status,
+           is_active, notes,
+           created_by, updated_by, created_at, updated_at
+         ) VALUES (
+           $1,  $2,
+           $3,  $4,  $5,  $6,  $7,
+           $8,  $9,  'UNVERIFIED',
+           1,   $10,
+           $11, NULL, $12, $12
+         )
+         RETURNING *`,
+        [
+          id, input.organization_id,
+          input.name,
+          input.father_name   ?? null,
+          input.cnic          ?? null,
+          input.phone,
+          input.alternate_phone ?? null,
+          input.address,
+          input.city          ?? null,
+          input.notes         ?? null,
+          input.created_by,
+          now,
+        ]
+      );
+      return result.rows[0];
+    } catch (err: unknown) {
+      const pgErr = err as { code?: string; constraint?: string };
+      if (pgErr?.code === '23505' && pgErr.constraint === 'idx_mobile_sellers_org_cnic') {
+        throw new MobileRepoError(
+          'SELLER_CNIC_DUPLICATE: A seller with this CNIC already exists in your organization',
+          409
+        );
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Searches the mobile_sellers registry (org-scoped).
+   *
+   * Returns masked seller summaries suitable for selection dropdowns.
+   * Full CNIC, address, and father_name are NOT included — callers must
+   * use getSellerById for the full profile.
+   */
+  async searchSellerRegistry(
+    organizationId: string,
+    q: string,
+    limit: number = 20,
+    offset: number = 0
+  ): Promise<{ sellers: SellerSummaryRow[]; total: number }> {
+    const safeLimit  = Math.min(Math.max(1, limit), 50);
+    const safeOffset = Math.max(0, offset);
+    const pattern    = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
+
+    const countResult = await this.pool.query<{ count: string }>(
+      `SELECT COUNT(*)::int AS count
+       FROM mobile_sellers
+       WHERE organization_id = $1
+         AND is_active = 1
+         AND (
+           name  ILIKE $2
+           OR cnic   ILIKE $2
+           OR phone  ILIKE $2
+         )`,
+      [organizationId, pattern]
+    );
+    const total = parseInt(countResult.rows[0]?.count ?? '0', 10);
+
+    const rows = await this.pool.query<{
+      id: string;
+      name: string;
+      cnic: string | null;
+      phone: string;
+      city: string | null;
+      verification_status: SellerVerificationStatus;
+      is_active: number;
+    }>(
+      `SELECT id, name, cnic, phone, city, verification_status, is_active
+       FROM mobile_sellers
+       WHERE organization_id = $1
+         AND is_active = 1
+         AND (
+           name  ILIKE $2
+           OR cnic   ILIKE $2
+           OR phone  ILIKE $2
+         )
+       ORDER BY name ASC
+       LIMIT $3 OFFSET $4`,
+      [organizationId, pattern, safeLimit, safeOffset]
+    );
+
+    const sellers: SellerSummaryRow[] = rows.rows.map((r) => ({
+      id:                  r.id,
+      name:                r.name,
+      cnic_masked:         this.maskCnic(r.cnic),
+      phone:               r.phone,
+      city:                r.city,
+      verification_status: r.verification_status,
+      is_active:           r.is_active,
+    }));
+
+    return { sellers, total };
+  }
+
+  /**
+   * Returns the full seller profile for a given ID.
+   *
+   * Organization scope is enforced: returns null if the seller does not
+   * belong to the authenticated organization.
+   */
+  async getSellerById(
+    sellerId: string,
+    organizationId: string
+  ): Promise<SellerRow | null> {
+    const result = await this.pool.query<SellerRow>(
+      `SELECT
+         id, organization_id,
+         name, father_name, cnic, phone, alternate_phone,
+         address, city, verification_status,
+         is_active, notes,
+         created_by, updated_by, created_at, updated_at
+       FROM mobile_sellers
+       WHERE id = $1 AND organization_id = $2`,
+      [sellerId, organizationId]
+    );
+    return result.rows[0] ?? null;
+  }
+
+  /**
+   * Returns the purchase/device history for a seller.
+   *
+   * Organization scope is enforced. If branchId is supplied, only paperwork
+   * from that branch is returned (SHOP_ADMIN branch restriction). Org-admins
+   * pass null to see all branches.
+   *
+   * IMEIs are included when includeImeis is true (callers must verify that
+   * the authenticated user has inventory-write permission before passing true).
+   */
+  async getSellerDevices(
+    sellerId: string,
+    organizationId: string,
+    branchId: string | null,
+    includeImeis: boolean = false,
+    limit: number = 20,
+    offset: number = 0
+  ): Promise<{ history: SellerDeviceHistoryRow[]; total: number }> {
+    const safeLimit  = Math.min(Math.max(1, limit), 50);
+    const safeOffset = Math.max(0, offset);
+
+    const params: unknown[] = [sellerId, organizationId];
+    let branchClause = '';
+    if (branchId) {
+      branchClause = `AND p.branch_id = $${params.length + 1}`;
+      params.push(branchId);
+    }
+
+    const countResult = await this.pool.query<{ count: string }>(
+      `SELECT COUNT(*)::int AS count
+       FROM mobile_purchase_paperwork p
+       WHERE p.seller_id = $1
+         AND p.organization_id = $2
+         ${branchClause}`,
+      params
+    );
+    const total = parseInt(countResult.rows[0]?.count ?? '0', 10);
+
+    const listParams = [...params, safeLimit, safeOffset];
+    const rows = await this.pool.query<{
+      paperwork_id: string;
+      voucher_no: string;
+      purchase_date: string;
+      purchase_price: string;
+      snapshot_seller_name: string;
+      snapshot_seller_cnic: string;
+      device_id: string;
+      brand: string;
+      model: string;
+      storage: string;
+      condition: MobileCondition;
+      status: MobileStatus;
+      branch_id: string;
+      branch_name: string | null;
+    }>(
+      `SELECT
+         p.id            AS paperwork_id,
+         p.voucher_no,
+         p.purchase_date,
+         p.purchase_price,
+         p.seller_name   AS snapshot_seller_name,
+         p.seller_cnic   AS snapshot_seller_cnic,
+         d.id            AS device_id,
+         d.brand,
+         d.model,
+         d.storage,
+         d.condition,
+         d.status,
+         p.branch_id,
+         b.name          AS branch_name
+       FROM mobile_purchase_paperwork p
+       INNER JOIN mobile_devices d ON d.id = p.device_id
+       LEFT  JOIN branches b      ON b.id  = p.branch_id
+       WHERE p.seller_id = $1
+         AND p.organization_id = $2
+         ${branchClause}
+       ORDER BY p.purchase_date DESC, p.created_at DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      listParams
+    );
+
+    // F-03: Batch-fetch all IMEIs in a single parameterized query instead of N+1 loop queries
+    const imeiMap = new Map<string, Array<{ imei: string; slot: MobileSlot }>>();
+    if (includeImeis && rows.rows.length > 0) {
+      const deviceIds = rows.rows.map((r) => r.device_id);
+      const imeiResult = await this.pool.query<{ device_id: string; imei: string; slot: MobileSlot }>(
+        `SELECT device_id, imei, slot
+         FROM mobile_imei_identifiers
+         WHERE device_id = ANY($1::text[]) AND organization_id = $2
+         ORDER BY slot`,
+        [deviceIds, organizationId]
+      );
+      for (const imeiRow of imeiResult.rows) {
+        let list = imeiMap.get(imeiRow.device_id);
+        if (!list) {
+          list = [];
+          imeiMap.set(imeiRow.device_id, list);
+        }
+        list.push({ imei: imeiRow.imei, slot: imeiRow.slot });
+      }
+    }
+
+    const history: SellerDeviceHistoryRow[] = rows.rows.map((row) => ({
+      paperwork_id:                row.paperwork_id,
+      voucher_no:                  row.voucher_no,
+      purchase_date:               row.purchase_date,
+      purchase_price:              row.purchase_price,
+      snapshot_seller_name:        row.snapshot_seller_name,
+      snapshot_seller_cnic_masked: this.maskCnic(row.snapshot_seller_cnic),
+      device_id:                   row.device_id,
+      brand:                       row.brand,
+      model:                       row.model,
+      storage:                     row.storage,
+      condition:                   row.condition,
+      status:                      row.status,
+      branch_id:                   row.branch_id,
+      branch_name:                 row.branch_name,
+      ...(includeImeis ? { imeis: imeiMap.get(row.device_id) ?? [] } : {}),
+    }));
+
+    return { history, total };
+  }
+
+  /**
+   * Updates editable fields on a seller profile.
+   *
+   * Only phone, alternate_phone, address, city, verification_status, is_active,
+   * and notes may be updated. CNIC and name changes are intentionally blocked
+   * to prevent silent identity substitution.
+   *
+   * Records the update in change_logs (seller entity audit trail).
+   * Returns the updated full seller row, or null if not found / wrong org.
+   */
+  async updateSeller(input: UpdateSellerInput): Promise<SellerRow | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const current = await client.query<SellerRow>(
+        `SELECT * FROM mobile_sellers
+         WHERE id = $1 AND organization_id = $2
+         FOR UPDATE`,
+        [input.seller_id, input.organization_id]
+      );
+
+      if (current.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+
+      const s   = current.rows[0];
+      const now = this.nowIso();
+
+      const newPhone       = input.phone               !== undefined ? input.phone               : s.phone;
+      const newAltPhone    = input.alternate_phone      !== undefined ? input.alternate_phone      : s.alternate_phone;
+      const newAddress     = input.address             !== undefined ? input.address             : s.address;
+      const newCity        = input.city                !== undefined ? input.city                : s.city;
+      const newVerifStatus = input.verification_status !== undefined ? input.verification_status : s.verification_status;
+      const newIsActive    = input.is_active           !== undefined ? input.is_active           : s.is_active;
+      const newNotes       = input.notes               !== undefined ? input.notes               : s.notes;
+
+      await client.query(
+        `UPDATE mobile_sellers
+         SET phone               = $1,
+             alternate_phone     = $2,
+             address             = $3,
+             city                = $4,
+             verification_status = $5,
+             is_active           = $6,
+             notes               = $7,
+             updated_by          = $8,
+             updated_at          = $9
+         WHERE id = $10`,
+        [
+          newPhone, newAltPhone, newAddress, newCity,
+          newVerifStatus, newIsActive, newNotes,
+          input.updated_by, now,
+          input.seller_id,
+        ]
+      );
+
+      // Audit trail via change_logs
+      await writeChangeLogEntry(client, {
+        organizationId: input.organization_id,
+        branchId:       '',
+        eventType:      'MOBILE_SELLER_UPDATED',
+        entityType:     'mobile_seller',
+        entityId:       input.seller_id,
+        payloadStr:     JSON.stringify({
+          seller_id:           input.seller_id,
+          updated_by:          input.updated_by,
+          verification_status: newVerifStatus,
+          is_active:           newIsActive,
+          // phone, address, city omitted — sensitive
+        }),
+      });
+
+      await client.query('COMMIT');
+      return this.getSellerById(input.seller_id, input.organization_id);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getBranchInvestmentSummary(
+    organizationId: string,
+    branchId: string
+  ): Promise<BranchInvestmentSummary> {
+    const result = await this.pool.query<{
+      total_investment: string;
+      new_investment: string;
+      used_investment: string;
+      total_in_stock: string;
+      new_in_stock: string;
+      used_in_stock: string;
+    }>(
+      `SELECT
+         COALESCE(SUM(cost_price) FILTER (WHERE status = 'IN_STOCK'), 0)::numeric(12,2)                          AS total_investment,
+         COALESCE(SUM(cost_price) FILTER (WHERE status = 'IN_STOCK' AND condition = 'NEW'), 0)::numeric(12,2)    AS new_investment,
+         COALESCE(SUM(cost_price) FILTER (WHERE status = 'IN_STOCK' AND condition = 'USED'), 0)::numeric(12,2)   AS used_investment,
+         COUNT(*)        FILTER (WHERE status = 'IN_STOCK')::int                                                 AS total_in_stock,
+         COUNT(*)        FILTER (WHERE status = 'IN_STOCK' AND condition = 'NEW')::int                           AS new_in_stock,
+         COUNT(*)        FILTER (WHERE status = 'IN_STOCK' AND condition = 'USED')::int                          AS used_in_stock
+       FROM mobile_devices
+       WHERE organization_id = $1
+         AND branch_id = $2`,
+      [organizationId, branchId]
+    );
+
+    const row = result.rows[0];
+    return {
+      total_investment: parseFloat(row?.total_investment || '0'),
+      new_investment:   parseFloat(row?.new_investment   || '0'),
+      used_investment:  parseFloat(row?.used_investment  || '0'),
+      total_in_stock:   parseInt(row?.total_in_stock     || '0', 10),
+      new_in_stock:     parseInt(row?.new_in_stock       || '0', 10),
+      used_in_stock:    parseInt(row?.used_in_stock      || '0', 10),
+    };
+  }
+
   async getMobileOrganizationSummary(organizationId: string): Promise<MobileOrganizationSummary> {
     const orgTotalsResult = await this.pool.query<{
       total_devices: string;
@@ -1027,6 +1696,8 @@ export class MobileRepo {
       inspection_count: string;
       sold_count: string;
       total_valuation: string;
+      new_valuation: string;
+      used_valuation: string;
     }>(
       `SELECT
          COUNT(*)::int AS total_devices,
@@ -1035,7 +1706,9 @@ export class MobileRepo {
          COUNT(*) FILTER (WHERE status = 'IN_STOCK')::int AS in_stock_count,
          COUNT(*) FILTER (WHERE status = 'INSPECTION')::int AS inspection_count,
          COUNT(*) FILTER (WHERE status = 'SOLD')::int AS sold_count,
-         COALESCE(SUM(cost_price) FILTER (WHERE status = 'IN_STOCK'), 0)::numeric(12,2) AS total_valuation
+         COALESCE(SUM(cost_price) FILTER (WHERE status = 'IN_STOCK'), 0)::numeric(12,2)                        AS total_valuation,
+         COALESCE(SUM(cost_price) FILTER (WHERE status = 'IN_STOCK' AND condition = 'NEW'), 0)::numeric(12,2)  AS new_valuation,
+         COALESCE(SUM(cost_price) FILTER (WHERE status = 'IN_STOCK' AND condition = 'USED'), 0)::numeric(12,2) AS used_valuation
        FROM mobile_devices
        WHERE organization_id = $1`,
       [organizationId]
@@ -1052,6 +1725,8 @@ export class MobileRepo {
       new_count: string;
       used_count: string;
       total_valuation: string;
+      new_valuation: string;
+      used_valuation: string;
     }>(
       `SELECT
          b.id AS branch_id,
@@ -1063,7 +1738,9 @@ export class MobileRepo {
          COUNT(d.id) FILTER (WHERE d.status = 'SOLD')::int AS sold_count,
          COUNT(d.id) FILTER (WHERE d.condition = 'NEW')::int AS new_count,
          COUNT(d.id) FILTER (WHERE d.condition = 'USED')::int AS used_count,
-         COALESCE(SUM(d.cost_price) FILTER (WHERE d.status = 'IN_STOCK'), 0)::numeric(12,2) AS total_valuation
+         COALESCE(SUM(d.cost_price) FILTER (WHERE d.status = 'IN_STOCK'), 0)::numeric(12,2)                        AS total_valuation,
+         COALESCE(SUM(d.cost_price) FILTER (WHERE d.status = 'IN_STOCK' AND d.condition = 'NEW'), 0)::numeric(12,2) AS new_valuation,
+         COALESCE(SUM(d.cost_price) FILTER (WHERE d.status = 'IN_STOCK' AND d.condition = 'USED'), 0)::numeric(12,2) AS used_valuation
        FROM branches b
        LEFT JOIN mobile_devices d ON d.branch_id = b.id AND d.organization_id = b.organization_id
        WHERE b.organization_id = $1
@@ -1084,6 +1761,8 @@ export class MobileRepo {
       new_count: parseInt(r.new_count || '0', 10),
       used_count: parseInt(r.used_count || '0', 10),
       total_valuation: parseFloat(r.total_valuation || '0'),
+      new_valuation: parseFloat(r.new_valuation || '0'),
+      used_valuation: parseFloat(r.used_valuation || '0'),
     }));
 
     return {
@@ -1094,6 +1773,8 @@ export class MobileRepo {
       inspection_count: parseInt(orgRow?.inspection_count || '0', 10),
       sold_count: parseInt(orgRow?.sold_count || '0', 10),
       total_valuation: parseFloat(orgRow?.total_valuation || '0'),
+      new_valuation: parseFloat(orgRow?.new_valuation || '0'),
+      used_valuation: parseFloat(orgRow?.used_valuation || '0'),
       branches,
     };
   }

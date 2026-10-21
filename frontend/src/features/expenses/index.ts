@@ -1,9 +1,11 @@
 export * from './components/ExpenseStatsCards';
 export * from './components/ExpensesTable';
 export * from './components/ExpenseCreateModal';
+export * from './components/GlobalAddExpenseModal';
 export * from './components/ExpenseFilters';
 export * from './components/ExpenseDetailModal';
 export * from './components/CashFlowSummaryCard';
 export * from './store/expenses.store';
 export * from './types/expenses.types';
 export * from './services/expenses.api';
+

@@ -5,6 +5,13 @@
  *   POST   /                  — register a NEW or USED phone
  *   GET    /                  — list devices (branch-scoped)
  *   GET    /imei-check        — IMEI availability probe
+ *   POST   /sellers           — create a permanent seller (Phase 2)
+ *   GET    /sellers           — search/list sellers in registry (Phase 2)
+ *   GET    /sellers/search    — used-phone seller autofill (must be before /:id)
+ *   GET    /sellers/:sellerId — seller profile (Phase 2, must be before /:id)
+ *   GET    /sellers/:sellerId/devices — seller purchase history (Phase 2)
+ *   PATCH  /sellers/:sellerId — update seller profile (Phase 2)
+ *   GET    /branch-summary    — branch-scoped investment summary (must be before /:id)
  *   GET    /:id               — single device detail
  *   GET    /:id/paperwork     — USED-phone paperwork (fail-closed transactional audit)
  *   PATCH  /:id               — restricted update (status / notes / expected_sale_price / pta_status)
@@ -44,6 +51,13 @@ import {
 import {
   MobileRepo,
   MobileRepoError,
+  SellerSearchResult,
+  SellerVerificationStatus,
+  SellerRow,
+  SellerSummaryRow,
+  CreateSellerInput,
+  UpdateSellerInput,
+  BranchInvestmentSummary,
   RegisterMobileDeviceInput,
   RegisterImeiInput,
   RegisterInspectionInput,
@@ -293,6 +307,99 @@ export function buildMobileRouter(pool: Pool): Router {
   });
 
   // -------------------------------------------------------------------------
+  // GET /sellers/search — used-phone seller autofill (must be before /:id)
+  // -------------------------------------------------------------------------
+
+  /**
+   * GET /sellers/search?q=<term>
+   *
+   * Searches historical mobile_purchase_paperwork for previously recorded sellers.
+   * Returns deduplicated seller details (by CNIC) for autofill in the AddMobileForm.
+   *
+   * Security:
+   *   - Requires INVENTORY_VIEW permission.
+   *   - SHOP_ADMIN: restricted to their own branch only.
+   *   - Org-admin: searches across all branches in their organization.
+   *   - Response fields are limited to autofill-necessary fields only.
+   *     Seller CNIC, phone, address are intentionally included for autofill
+   *     but MUST NOT be exposed through normal device list/detail endpoints.
+   *
+   * Query params:
+   *   q    — search term (min 2, max 100 chars); required
+   *   limit — max results (1–20, default 10)
+   */
+  router.get('/sellers/search', async (req: Request, res: Response) => {
+    if (!requireInventoryView(req, res)) return;
+    const identity = req.identity!;
+
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (!q || q.length < 2) {
+      res.status(400).json({ error: 'BAD_REQUEST', message: 'Query parameter q must be at least 2 characters' });
+      return;
+    }
+    if (q.length > 100) {
+      res.status(400).json({ error: 'BAD_REQUEST', message: 'Query parameter q must not exceed 100 characters' });
+      return;
+    }
+
+    const rawLimit = parseInt(String(req.query.limit || '10'), 10);
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 20) : 10;
+
+    // Branch resolution: SHOP_ADMIN is restricted to their own branch; org-admin searches all
+    const branchId: string | null = isBranchAdmin(identity) && !isOrgAdmin(identity)
+      ? (identity.branch_id ?? null)
+      : null;
+
+    try {
+      const sellers: SellerSearchResult[] = await repo.searchSellers(
+        identity.organization_id,
+        branchId,
+        q,
+        limit
+      );
+      res.status(200).json({ sellers });
+    } catch (err) {
+      handleMobileError(res, err, 'sellers-search');
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /branch-summary — branch-scoped investment summary (must be before /:id)
+  // -------------------------------------------------------------------------
+
+  /**
+   * GET /branch-summary?branch_id=<uuid>
+   *
+   * Returns branch-scoped investment totals broken down by condition (NEW/USED).
+   * Only IN_STOCK devices are included.
+   *
+   * Branch resolution follows the same rules as the device list:
+   *   - Org-admin: must supply branch_id query param (validated membership).
+   *   - SHOP_ADMIN: branch_id is taken from their JWT identity (param ignored).
+   *
+   * Responds to the active filter: the caller passes the desired condition
+   * in the UI but the endpoint always returns all three totals
+   * (total, new, used) and the UI selects the appropriate value.
+   */
+  router.get('/branch-summary', async (req: Request, res: Response) => {
+    if (!requireInventoryView(req, res)) return;
+    const identity = req.identity!;
+
+    try {
+      const branchId = await resolveReadBranchId(identity, req.query.branch_id, res);
+      if (!branchId) return;
+
+      const summary: BranchInvestmentSummary = await repo.getBranchInvestmentSummary(
+        identity.organization_id,
+        branchId
+      );
+      res.status(200).json({ summary });
+    } catch (err) {
+      handleMobileError(res, err, 'branch-summary');
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // POST / — register a NEW or USED mobile device
   // -------------------------------------------------------------------------
 
@@ -510,9 +617,14 @@ export function buildMobileRouter(pool: Pool): Router {
         res.status(400).json({ error: 'paperwork.ownership_declaration_acknowledged must be true' });
         return;
       }
-      if (pw.physical_affidavit_acknowledged !== true) {
-        res.status(400).json({ error: 'paperwork.physical_affidavit_acknowledged must be true' });
-        return;
+      // F-01: Validate and forward optional seller_id if present
+      let validSellerId: string | undefined = undefined;
+      if (pw.seller_id !== undefined && pw.seller_id !== null) {
+        if (!isNonBlankString(pw.seller_id)) {
+          res.status(400).json({ error: 'paperwork.seller_id must not be blank when provided' });
+          return;
+        }
+        validSellerId = String(pw.seller_id).trim();
       }
 
       paperworkInput = {
@@ -524,6 +636,7 @@ export function buildMobileRouter(pool: Pool): Router {
         seller_cnic:                         pw.seller_cnic,
         seller_phone:                        pw.seller_phone,
         seller_address:                      pw.seller_address,
+        seller_id:                           validSellerId,
         ownership_declaration_acknowledged:  true,
         physical_affidavit_acknowledged:     true,
       };
@@ -619,6 +732,324 @@ export function buildMobileRouter(pool: Pool): Router {
   });
 
   // -------------------------------------------------------------------------
+  // =========================================================================
+  // Seller Registry — Phase 2 (must be before /:id to avoid route collision)
+  // =========================================================================
+
+  /**
+   * POST /sellers
+   *
+   * Creates a new seller in the permanent registry.
+   *
+   * Security:
+   *   - Requires inventory-write permission.
+   *   - organization_id and created_by are derived from the JWT (never client-supplied).
+   *   - CNIC must be in DDDDD-DDDDDDD-D format when provided.
+   *   - Duplicate CNIC within the org → 409 with SELLER_CNIC_DUPLICATE error code.
+   *
+   * Body: { name, father_name?, cnic?, phone, alternate_phone?, address, city?, notes? }
+   * Returns: { seller: { id, name, cnic_masked, phone, city, verification_status } }
+   */
+  router.post('/sellers', async (req: Request, res: Response) => {
+    if (!requireInventoryWrite(req, res)) return;
+    const identity = req.identity!;
+
+    const body = req.body as Partial<CreateSellerInput & Record<string, unknown>>;
+
+    // Validate required fields
+    if (!isNonBlankString(body.name)) {
+      res.status(400).json({ error: 'BAD_REQUEST', message: 'name is required' });
+      return;
+    }
+    if (!isNonBlankString(body.phone)) {
+      res.status(400).json({ error: 'BAD_REQUEST', message: 'phone is required' });
+      return;
+    }
+    if (!isNonBlankString(body.address)) {
+      res.status(400).json({ error: 'BAD_REQUEST', message: 'address is required' });
+      return;
+    }
+    // CNIC: optional, but if provided must be valid format
+    const rawCnic = typeof body.cnic === 'string' && body.cnic.trim() ? body.cnic.trim() : null;
+    if (rawCnic !== null && !isValidCnic(rawCnic)) {
+      res.status(400).json({ error: 'BAD_REQUEST', message: 'cnic must be in format DDDDD-DDDDDDD-D' });
+      return;
+    }
+
+    const input: CreateSellerInput = {
+      organization_id:  identity.organization_id,
+      created_by:       identity.user_id,
+      name:             String(body.name).trim(),
+      father_name:      isNonBlankString(body.father_name) ? String(body.father_name).trim() : null,
+      cnic:             rawCnic,
+      phone:            String(body.phone).trim(),
+      alternate_phone:  isNonBlankString(body.alternate_phone) ? String(body.alternate_phone).trim() : null,
+      address:          String(body.address).trim(),
+      city:             isNonBlankString(body.city) ? String(body.city).trim() : null,
+      notes:            isNonBlankString(body.notes) ? String(body.notes).trim() : null,
+    };
+
+    try {
+      const seller: SellerRow = await repo.createSeller(input);
+      // Return safe summary (never expose full CNIC or address in response)
+      res.status(201).json({
+        seller: {
+          id:                  seller.id,
+          name:                seller.name,
+          cnic_masked:         seller.cnic
+                                 ? seller.cnic.replace(/^(\d{5})-(\d{7})-(\d)$/, '$1-*******-$3')
+                                 : null,
+          phone:               seller.phone,
+          city:                seller.city,
+          verification_status: seller.verification_status,
+          is_active:           seller.is_active,
+        },
+      });
+    } catch (err) {
+      handleMobileError(res, err, 'sellers-create');
+    }
+  });
+
+  /**
+   * GET /sellers?q=...&limit=...&offset=...
+   *
+   * Searches the mobile_sellers registry (org-scoped).
+   *
+   * Security:
+   *   - Requires INVENTORY_VIEW permission.
+   *   - CNIC is masked in all results.
+   *   - Full address/notes are never returned in list results.
+   *
+   * Query params:
+   *   q       — search term (min 2, max 100 chars); required
+   *   limit   — max results (1–50, default 20)
+   *   offset  — pagination offset (default 0)
+   *
+   * Returns: { sellers: SellerSummaryRow[], total: number }
+   */
+  router.get('/sellers', async (req: Request, res: Response) => {
+    if (!requireInventoryView(req, res)) return;
+    const identity = req.identity!;
+
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (!q || q.length < 2) {
+      res.status(400).json({ error: 'BAD_REQUEST', message: 'Query parameter q must be at least 2 characters' });
+      return;
+    }
+    if (q.length > 100) {
+      res.status(400).json({ error: 'BAD_REQUEST', message: 'Query parameter q must not exceed 100 characters' });
+      return;
+    }
+
+    const rawLimit  = parseInt(String(req.query.limit  || '20'), 10);
+    const rawOffset = parseInt(String(req.query.offset || '0'),  10);
+    const limit  = Number.isFinite(rawLimit)  ? Math.min(Math.max(rawLimit, 1), 50) : 20;
+    const offset = Number.isFinite(rawOffset) ? Math.max(rawOffset, 0) : 0;
+
+    try {
+      const { sellers, total } = await repo.searchSellerRegistry(
+        identity.organization_id,
+        q,
+        limit,
+        offset
+      );
+      res.status(200).json({ sellers, total });
+    } catch (err) {
+      handleMobileError(res, err, 'sellers-list');
+    }
+  });
+
+  /**
+   * GET /sellers/:sellerId
+   *
+   * Returns the full profile for a single seller.
+   *
+   * Security:
+   *   - Requires INVENTORY_VIEW permission.
+   *   - Organization scope is enforced by the repository.
+   *   - Full CNIC and address are included (authorized profile access).
+   *
+   * Returns: { seller: SellerRow } or 404 if not found / wrong org.
+   */
+  router.get('/sellers/:sellerId', async (req: Request, res: Response) => {
+    if (!requireInventoryView(req, res)) return;
+    const identity = req.identity!;
+
+    const sellerId = typeof req.params.sellerId === 'string'
+      ? req.params.sellerId.trim()
+      : '';
+    if (!sellerId) {
+      res.status(400).json({ error: 'BAD_REQUEST', message: 'sellerId is required' });
+      return;
+    }
+
+    try {
+      const seller: SellerRow | null = await repo.getSellerById(
+        sellerId,
+        identity.organization_id
+      );
+      if (!seller) {
+        res.status(404).json({ error: 'NOT_FOUND', message: 'Seller not found' });
+        return;
+      }
+      res.status(200).json({ seller });
+    } catch (err) {
+      handleMobileError(res, err, 'sellers-get');
+    }
+  });
+
+  /**
+   * GET /sellers/:sellerId/devices?limit=...&offset=...
+   *
+   * Returns the purchase/device history for a seller.
+   *
+   * Security:
+   *   - Requires INVENTORY_VIEW permission.
+   *   - SHOP_ADMIN: scoped to their branch only.
+   *   - Org-admin: sees all branches.
+   *   - IMEIs are included only when the caller also has inventory-write permission.
+   *   - CNIC snapshot is masked.
+   *
+   * Returns: { history: SellerDeviceHistoryRow[], total: number }
+   */
+  router.get('/sellers/:sellerId/devices', async (req: Request, res: Response) => {
+    if (!requireInventoryView(req, res)) return;
+    const identity = req.identity!;
+
+    const sellerId = typeof req.params.sellerId === 'string'
+      ? req.params.sellerId.trim()
+      : '';
+    if (!sellerId) {
+      res.status(400).json({ error: 'BAD_REQUEST', message: 'sellerId is required' });
+      return;
+    }
+
+    const rawLimit  = parseInt(String(req.query.limit  || '20'), 10);
+    const rawOffset = parseInt(String(req.query.offset || '0'),  10);
+    const limit  = Number.isFinite(rawLimit)  ? Math.min(Math.max(rawLimit, 1), 50) : 20;
+    const offset = Number.isFinite(rawOffset) ? Math.max(rawOffset, 0) : 0;
+
+    // Branch restriction: SHOP_ADMIN sees only their own branch
+    const branchId: string | null = isBranchAdmin(identity) && !isOrgAdmin(identity)
+      ? (identity.branch_id ?? null)
+      : null;
+
+    // IMEIs included only for users with write permission (hides sensitive IMEI data from view-only)
+    const profile = identity.access_profile;
+    const includeImeis =
+      isBranchAdmin(identity) ||
+      (Array.isArray(profile?.allowed_actions) &&
+        profile.allowed_actions.length > 0 &&
+        profile.allowed_actions.some((a: string) => a === '*' || a === 'inventory:edit'));
+
+    try {
+      const { history, total } = await repo.getSellerDevices(
+        sellerId,
+        identity.organization_id,
+        branchId,
+        includeImeis,
+        limit,
+        offset
+      );
+      res.status(200).json({ history, total });
+    } catch (err) {
+      handleMobileError(res, err, 'sellers-devices');
+    }
+  });
+
+  /**
+   * PATCH /sellers/:sellerId
+   *
+   * Updates editable fields on a seller profile.
+   *
+   * Security:
+   *   - Requires inventory-write permission.
+   *   - Organization scope enforced by repository.
+   *   - CNIC and name updates are intentionally blocked.
+   *
+   * Body (all optional): { phone?, alternate_phone?, address?, city?,
+   *                        verification_status?, is_active?, notes? }
+   * Returns: { seller: SellerRow } (full profile of updated seller)
+   */
+  router.patch('/sellers/:sellerId', async (req: Request, res: Response) => {
+    if (!requireInventoryWrite(req, res)) return;
+    const identity = req.identity!;
+
+    const sellerId = typeof req.params.sellerId === 'string'
+      ? req.params.sellerId.trim()
+      : '';
+    if (!sellerId) {
+      res.status(400).json({ error: 'BAD_REQUEST', message: 'sellerId is required' });
+      return;
+    }
+
+    const body = req.body as Partial<UpdateSellerInput & Record<string, unknown>>;
+
+    // Validate optional fields that are present
+    if (body.phone !== undefined && !isNonBlankString(body.phone)) {
+      res.status(400).json({ error: 'BAD_REQUEST', message: 'phone must not be blank' });
+      return;
+    }
+    if (body.address !== undefined && !isNonBlankString(body.address)) {
+      res.status(400).json({ error: 'BAD_REQUEST', message: 'address must not be blank' });
+      return;
+    }
+    const VALID_VERIFICATION_STATUSES: SellerVerificationStatus[] = ['UNVERIFIED', 'IDENTITY_RECORDED', 'FLAGGED'];
+    if (body.verification_status !== undefined) {
+      // F-04: Restrict changing verification_status (especially FLAGGED) to Organization Admin / ADMIN
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({
+          error: 'FORBIDDEN',
+          message: 'Only organization administrators can update seller verification status',
+        });
+        return;
+      }
+      if (!VALID_VERIFICATION_STATUSES.includes(body.verification_status as SellerVerificationStatus)) {
+        res.status(400).json({
+          error: 'BAD_REQUEST',
+          message: `verification_status must be one of: ${VALID_VERIFICATION_STATUSES.join(', ')}`,
+        });
+        return;
+      }
+    }
+    if (body.is_active !== undefined && body.is_active !== 0 && body.is_active !== 1) {
+      res.status(400).json({ error: 'BAD_REQUEST', message: 'is_active must be 0 or 1' });
+      return;
+    }
+
+    const input: UpdateSellerInput = {
+      seller_id:           sellerId,
+      organization_id:     identity.organization_id,
+      updated_by:          identity.user_id,
+      phone:               body.phone               !== undefined ? String(body.phone).trim()    : undefined,
+      alternate_phone:     body.alternate_phone      !== undefined
+                             ? (isNonBlankString(body.alternate_phone) ? String(body.alternate_phone).trim() : null)
+                             : undefined,
+      address:             body.address             !== undefined ? String(body.address).trim()  : undefined,
+      city:                body.city                !== undefined
+                             ? (isNonBlankString(body.city) ? String(body.city).trim() : null)
+                             : undefined,
+      verification_status: body.verification_status !== undefined
+                             ? (body.verification_status as SellerVerificationStatus)
+                             : undefined,
+      is_active:           body.is_active           !== undefined ? Number(body.is_active)       : undefined,
+      notes:               body.notes               !== undefined
+                             ? (isNonBlankString(body.notes) ? String(body.notes).trim() : null)
+                             : undefined,
+    };
+
+    try {
+      const seller: SellerRow | null = await repo.updateSeller(input);
+      if (!seller) {
+        res.status(404).json({ error: 'NOT_FOUND', message: 'Seller not found' });
+        return;
+      }
+      res.status(200).json({ seller });
+    } catch (err) {
+      handleMobileError(res, err, 'sellers-update');
+    }
+  });
+
   // GET /:id — single device detail
   // -------------------------------------------------------------------------
 

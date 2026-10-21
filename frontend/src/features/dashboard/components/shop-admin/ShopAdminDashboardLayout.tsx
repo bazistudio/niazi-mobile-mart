@@ -6,6 +6,7 @@ import { DashboardShell } from '@/components/layout/DashboardShell';
 import { LockScreenOverlay } from '@/components/layout/LockScreenOverlay';
 import { GlobalFooter } from '@/components/layout/GlobalFooter';
 import { GlobalAddProductDrawer } from '@/features/inventory/components/GlobalAddProductDrawer';
+import { GlobalAddExpenseModal } from '@/features/expenses';
 import { useSyncEngine } from '@/features/realtime-sync/hooks/useSyncEngine';
 import { useDashboardShortcuts } from '@/hooks/useDashboardShortcuts';
 
@@ -48,6 +49,9 @@ export const ShopAdminDashboardLayout = ({ children }: ShopAdminDashboardLayoutP
 
         {/* Global Add Product Drawer Overlay */}
         <GlobalAddProductDrawer />
+
+        {/* Global Add Expense Modal (Accessible via Topbar Receipt Icon & F-Keys) */}
+        <GlobalAddExpenseModal />
       </div>
     </div>
   );

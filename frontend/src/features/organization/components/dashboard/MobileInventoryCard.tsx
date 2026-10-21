@@ -65,7 +65,11 @@ export const MobileInventoryCard: React.FC<MobileInventoryCardProps> = ({ summar
             <p className="text-2xl font-bold text-teal-700 dark:text-teal-400 mt-1">
               Rs. {valuation.toLocaleString('en-PK')}
             </p>
-            <p className="text-xs text-gray-400 mt-0.5">Cost-based asset value</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              <span className="text-green-600 dark:text-green-400">N: Rs.&nbsp;{(summary?.new_valuation ?? 0).toLocaleString('en-PK')}</span>
+              {' '}·{' '}
+              <span className="text-amber-600 dark:text-amber-400">U: Rs.&nbsp;{(summary?.used_valuation ?? 0).toLocaleString('en-PK')}</span>
+            </p>
           </div>
         </div>
 
@@ -97,12 +101,16 @@ export const MobileInventoryCard: React.FC<MobileInventoryCardProps> = ({ summar
                   <span className="font-medium text-gray-700 dark:text-gray-300 truncate max-w-[150px]">
                     {b.branch_name}
                   </span>
-                  <div className="flex items-center gap-2 text-right">
+                  <div className="flex flex-col items-end gap-0.5 text-right">
                     <span className="font-bold text-gray-900 dark:text-white">
-                      {b.total_devices} {b.total_devices === 1 ? 'unit' : 'units'}
+                      {b.in_stock_count} in-stock / {b.total_devices} total
                     </span>
                     <span className="text-gray-400 text-[11px]">
-                      (Rs. {b.total_valuation.toLocaleString('en-PK')})
+                      Rs.&nbsp;{(b.total_valuation || 0).toLocaleString('en-PK')}
+                      {' '}—{' '}
+                      <span className="text-green-600 dark:text-green-400">{b.new_count}N</span>
+                      {' / '}
+                      <span className="text-amber-600 dark:text-amber-400">{b.used_count}U</span>
                     </span>
                   </div>
                 </div>

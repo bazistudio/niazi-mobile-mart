@@ -124,6 +124,8 @@ export function OrganizationMobileInventoryPage() {
   const inspectionCount = summary?.inspection_count ?? 0;
   const soldCount = summary?.sold_count ?? 0;
   const totalValuation = summary?.total_valuation ?? 0;
+  const newValuation = summary?.new_valuation ?? 0;
+  const usedValuation = summary?.used_valuation ?? 0;
   const branches = summary?.branches ?? [];
 
   // Filtered list valuation
@@ -249,6 +251,13 @@ export function OrganizationMobileInventoryPage() {
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
               Cost-based asset value across branches
             </p>
+            {!isLoading && (
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                <span className="text-green-600 dark:text-green-400">New: Rs.&nbsp;{newValuation.toLocaleString('en-PK')}</span>
+                {' · '}
+                <span className="text-amber-600 dark:text-amber-400">Used: Rs.&nbsp;{usedValuation.toLocaleString('en-PK')}</span>
+              </p>
+            )}
           </div>
         </div>
 
@@ -323,6 +332,11 @@ export function OrganizationMobileInventoryPage() {
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
               {newCount} New • {usedCount} Used • {inStockCount} In Stock
             </p>
+            <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
+              <span className="text-green-600 dark:text-green-400">N: Rs.&nbsp;{newValuation.toLocaleString('en-PK')}</span>
+              {' · '}
+              <span className="text-amber-600 dark:text-amber-400">U: Rs.&nbsp;{usedValuation.toLocaleString('en-PK')}</span>
+            </p>
           </button>
 
           {/* Individual branch cards */}
@@ -352,13 +366,18 @@ export function OrganizationMobileInventoryPage() {
                     {b.total_devices} {b.total_devices === 1 ? 'unit' : 'units'}
                   </span>
                   <span className="text-xs font-semibold text-teal-700 dark:text-teal-400">
-                    Rs. {b.total_valuation.toLocaleString('en-PK')}
+                    Rs. {(b.total_valuation || 0).toLocaleString('en-PK')}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400 mt-1">
                   <span>{b.new_count} New • {b.used_count} Used</span>
                   <span>{b.in_stock_count} In Stock</span>
                 </div>
+                <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
+                  <span className="text-green-600 dark:text-green-400">N: Rs.&nbsp;{(b.new_valuation || 0).toLocaleString('en-PK')}</span>
+                  {' · '}
+                  <span className="text-amber-600 dark:text-amber-400">U: Rs.&nbsp;{(b.used_valuation || 0).toLocaleString('en-PK')}</span>
+                </p>
               </button>
             );
           })}

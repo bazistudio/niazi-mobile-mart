@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useId } from 'react';
+import React, { useState, useCallback, useEffect, useId, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Smartphone,
@@ -21,10 +21,15 @@ import {
   X,
   Loader2,
   AlertTriangle,
+  Search,
+  Store,
 } from 'lucide-react';
 import { Button, Card, Badge } from '@/components/ui';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { mobileApi, transformFormDataToApiPayload } from '../services/mobile.api';
+import type { SellerSearchResult } from '../services/mobile.api';
+import { supplierApi } from '@/services/supplier.api';
+import type { FrontendSupplier } from '@/services/supplier.api';
 import type {
   MobileCondition,
   PtaStatus,
@@ -58,6 +63,7 @@ const INITIAL_FORM_DATA: MobileFormData = {
     sellerCnic: '',
     sellerPhone: '',
     sellerAddress: '',
+    sellerId: null as string | null,   // Phase 2: optional registry link
     ownershipDeclarationAcknowledged: false,
     physicalAffidavitAcknowledged: false,
   },
@@ -155,6 +161,27 @@ export const AddMobileForm: React.FC = () => {
   const [customStorageInput, setCustomStorageInput] = useState('');
   const [isAddingRam, setIsAddingRam] = useState(false);
   const [customRamInput, setCustomRamInput] = useState('');
+
+  // Supplier selection state (NEW mobiles only)
+  const [selectedSupplier, setSelectedSupplier] = useState<FrontendSupplier | null>(null);
+  const [supplierSearch, setSupplierSearch] = useState('');
+  const [supplierResults, setSupplierResults] = useState<FrontendSupplier[]>([]);
+  const [isSearchingSupplier, setIsSearchingSupplier] = useState(false);
+  const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
+  const [isQuickAddingSupplier, setIsQuickAddingSupplier] = useState(false);
+  const [quickAddName, setQuickAddName] = useState('');
+  const [quickAddPhone, setQuickAddPhone] = useState('');
+  const [supplierAddError, setSupplierAddError] = useState<string | null>(null);
+  const supplierSearchRef = useRef<HTMLDivElement>(null);
+
+  // Used-seller search state (USED mobiles only)
+  const [sellerQuery, setSellerQuery] = useState('');
+  const [sellerSuggestions, setSellerSuggestions] = useState<SellerSearchResult[]>([]);
+  const [isSearchingSellers, setIsSearchingSellers] = useState(false);
+  const [showSellerDropdown, setShowSellerDropdown] = useState(false);
+  const [isRegisteringSeller, setIsRegisteringSeller] = useState(false);
+  const [registerSellerError, setRegisterSellerError] = useState<string | null>(null);
+  const sellerSearchRef = useRef<HTMLDivElement>(null);
 
   // Save new custom internal storage spec
   const handleSaveCustomStorage = () => {
@@ -276,6 +303,194 @@ export const AddMobileForm: React.FC = () => {
     }
   };
 
+  // Supplier search handler (debounced via useEffect)
+  const handleSupplierSearch = useCallback(async (query: string) => {
+    if (!query.trim() || query.trim().length < 2) {
+      setSupplierResults([]);
+      return;
+    }
+    setIsSearchingSupplier(true);
+    try {
+      const res = await supplierApi.searchSuppliers(query.trim());
+      if (res.success && Array.isArray(res.data)) {
+        setSupplierResults(res.data.filter((s) => s.is_active));
+      } else {
+        setSupplierResults([]);
+      }
+    } catch {
+      setSupplierResults([]);
+    } finally {
+      setIsSearchingSupplier(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      handleSupplierSearch(supplierSearch);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [supplierSearch, handleSupplierSearch]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (supplierSearchRef.current && !supplierSearchRef.current.contains(e.target as Node)) {
+        setShowSupplierDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Seller search for USED mobiles
+  const handleSellerSearch = useCallback(async (query: string) => {
+    if (!query.trim() || query.trim().length < 2) {
+      setSellerSuggestions([]);
+      return;
+    }
+    setIsSearchingSellers(true);
+    try {
+      const res = await mobileApi.searchSellers(query.trim());
+      if (res.success && Array.isArray(res.sellers)) {
+        setSellerSuggestions(res.sellers);
+      } else {
+        setSellerSuggestions([]);
+      }
+    } catch {
+      setSellerSuggestions([]);
+    } finally {
+      setIsSearchingSellers(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      handleSellerSearch(sellerQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [sellerQuery, handleSellerSearch]);
+
+  // Close seller dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutsideSeller = (e: MouseEvent) => {
+      if (sellerSearchRef.current && !sellerSearchRef.current.contains(e.target as Node)) {
+        setShowSellerDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutsideSeller);
+    return () => document.removeEventListener('mousedown', handleClickOutsideSeller);
+  }, []);
+
+  const handleAutofillSeller = (s: SellerSearchResult) => {
+    setFormData((prev) => ({
+      ...prev,
+      paperwork: {
+        ...prev.paperwork,
+        sellerName: s.seller_name,
+        fatherName: s.father_name,
+        sellerCnic: s.seller_cnic,
+        sellerPhone: s.seller_phone,
+        sellerAddress: s.seller_address,
+        // F-02: If selected from permanent registry, link sellerId; if unlinked legacy record, keep null
+        sellerId: s.seller_id ?? null,
+      },
+    }));
+    setSellerQuery(s.seller_name);
+    setShowSellerDropdown(false);
+    setSellerSuggestions([]);
+  };
+
+  const handleRegisterPermanentSeller = async () => {
+    setRegisterSellerError(null);
+    const pw = formData.paperwork;
+    if (!pw.sellerName.trim()) {
+      setRegisterSellerError('Seller full name is required');
+      return;
+    }
+    if (!pw.sellerPhone.trim()) {
+      setRegisterSellerError('Seller phone is required');
+      return;
+    }
+    if (!pw.sellerAddress.trim()) {
+      setRegisterSellerError('Seller address is required');
+      return;
+    }
+    const cleanCnic = pw.sellerCnic.trim();
+    if (cleanCnic && !/^\d{5}-\d{7}-\d$/.test(cleanCnic)) {
+      setRegisterSellerError('Seller CNIC must be in format XXXXX-XXXXXXX-X');
+      return;
+    }
+
+    setIsRegisteringSeller(true);
+    try {
+      const res = await mobileApi.createSeller({
+        name: pw.sellerName.trim(),
+        father_name: pw.fatherName.trim() || null,
+        cnic: cleanCnic || null,
+        phone: pw.sellerPhone.trim(),
+        address: pw.sellerAddress.trim(),
+      });
+      if (res.success && res.seller?.id) {
+        setFormData((prev) => ({
+          ...prev,
+          paperwork: {
+            ...prev.paperwork,
+            sellerId: res.seller.id,
+          },
+        }));
+      } else {
+        setRegisterSellerError(res.error || 'Failed to register seller');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to register seller in permanent registry';
+      setRegisterSellerError(msg);
+    } finally {
+      setIsRegisteringSeller(false);
+    }
+  };
+
+  const handleSelectSupplier = (supplier: FrontendSupplier) => {
+    setSelectedSupplier(supplier);
+    setSupplierSearch(supplier.name);
+    setShowSupplierDropdown(false);
+    setSupplierResults([]);
+  };
+
+  const handleClearSupplier = () => {
+    setSelectedSupplier(null);
+    setSupplierSearch('');
+    setSupplierResults([]);
+    setShowSupplierDropdown(false);
+  };
+
+  const handleQuickAddSupplier = async () => {
+    const name = quickAddName.trim();
+    const phone = quickAddPhone.trim();
+    if (!name) {
+      setSupplierAddError('Supplier name is required');
+      return;
+    }
+    setSupplierAddError(null);
+    setIsQuickAddingSupplier(true);
+    try {
+      const res = await supplierApi.addSupplier({ name, phone: phone || undefined });
+      if (res.success && res.data) {
+        setSelectedSupplier(res.data);
+        setSupplierSearch(res.data.name);
+        setQuickAddName('');
+        setQuickAddPhone('');
+        setIsQuickAddingSupplier(false);
+        setShowSupplierDropdown(false);
+      } else {
+        setSupplierAddError(res.message || 'Failed to add supplier');
+        setIsQuickAddingSupplier(false);
+      }
+    } catch (err: unknown) {
+      setSupplierAddError(err instanceof Error ? err.message : 'Failed to add supplier');
+      setIsQuickAddingSupplier(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
@@ -346,7 +561,7 @@ export const AddMobileForm: React.FC = () => {
 
     setIsSubmitting(true);
     try {
-      const payload = transformFormDataToApiPayload(formData, branchId);
+      const payload = transformFormDataToApiPayload(formData, branchId, selectedSupplier?.id || null);
       const res = await mobileApi.createMobile(payload);
       setSubmitSuccess(`Mobile registered successfully! Device ID: ${res.device_id.slice(0, 8)}...`);
       setTimeout(() => {
@@ -852,7 +1067,172 @@ export const AddMobileForm: React.FC = () => {
           </div>
         </Card>
 
-        {/* 3. USED MOBILE PURCHASE PAPERWORK (CONDITION = USED ONLY) */}
+        {/* 3. SUPPLIER SELECTION (CONDITION = NEW ONLY) */}
+        {!isUsed && (
+          <Card variant="default" padding="lg" className="bg-surface border-border">
+            <div className="flex items-center gap-2.5 pb-4 border-b border-border mb-6">
+              <div className="p-1.5 bg-primary/10 rounded text-primary">
+                <Store className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-text-primary">Supplier <span className="text-text-muted font-normal text-sm">(Optional)</span></h2>
+                <p className="text-xs text-text-muted">
+                  Link this purchase to an existing supplier or quickly add a new one.
+                </p>
+              </div>
+            </div>
+
+            <div className="relative" ref={supplierSearchRef}>
+              {/* Selected supplier chip */}
+              {selectedSupplier ? (
+                <div className="flex items-center gap-2 px-3 py-2.5 bg-primary/5 border border-primary/30 rounded-md">
+                  <div className="p-1 bg-primary/10 rounded">
+                    <Store className="w-3.5 h-3.5 text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-semibold text-text-primary truncate">{selectedSupplier.name}</span>
+                    {selectedSupplier.phone && (
+                      <span className="text-xs text-text-muted ml-2">{selectedSupplier.phone}</span>
+                    )}
+                  </div>
+                  <Badge variant="success" size="sm">Selected</Badge>
+                  <button
+                    type="button"
+                    onClick={handleClearSupplier}
+                    className="p-1 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors"
+                    aria-label="Clear supplier"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {/* Search input */}
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted pointer-events-none" />
+                    <input
+                      type="text"
+                      placeholder="Search supplier by name…"
+                      value={supplierSearch}
+                      onChange={(e) => {
+                        setSupplierSearch(e.target.value);
+                        setShowSupplierDropdown(true);
+                      }}
+                      onFocus={() => { if (supplierSearch.length >= 2) setShowSupplierDropdown(true); }}
+                      className="w-full pl-9 pr-9 py-2 text-sm bg-surface text-text-primary border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                    />
+                    {isSearchingSupplier && (
+                      <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted animate-spin" />
+                    )}
+                    {supplierSearch && !isSearchingSupplier && (
+                      <button
+                        type="button"
+                        onClick={handleClearSupplier}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-text-primary"
+                        aria-label="Clear search"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Dropdown results */}
+                  {showSupplierDropdown && (supplierResults.length > 0 || (supplierSearch.trim().length >= 2 && !isSearchingSupplier)) && (
+                    <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-surface border border-border rounded-md shadow-lg max-h-56 overflow-y-auto">
+                      {supplierResults.length > 0 ? (
+                        supplierResults.map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => handleSelectSupplier(s)}
+                            className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-surface-hover transition-colors border-b border-border last:border-b-0"
+                          >
+                            <div className="p-1 bg-primary/10 rounded shrink-0">
+                              <Store className="w-3 h-3 text-primary" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium text-text-primary truncate">{s.name}</div>
+                              {s.phone && <div className="text-xs text-text-muted">{s.phone}</div>}
+                            </div>
+                            {s.supplier_code && (
+                              <span className="text-xs text-text-muted font-mono shrink-0">{s.supplier_code}</span>
+                            )}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2.5 text-sm text-text-muted text-center">No suppliers found</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Quick-add supplier inline panel */}
+              {!selectedSupplier && (
+                <div className="mt-3">
+                  {!isQuickAddingSupplier ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsQuickAddingSupplier(true)}
+                      className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-medium transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Add new supplier
+                    </button>
+                  ) : (
+                    <div className="flex flex-col gap-2 p-3 bg-surface-hover border border-border rounded-md mt-1">
+                      <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider">New Supplier</p>
+                      {supplierAddError && (
+                        <p className="text-xs text-red-500">{supplierAddError}</p>
+                      )}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          placeholder="Supplier name *"
+                          value={quickAddName}
+                          onChange={(e) => setQuickAddName(e.target.value)}
+                          className="px-3 py-2 text-sm bg-surface text-text-primary border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Phone (optional)"
+                          value={quickAddPhone}
+                          onChange={(e) => setQuickAddPhone(e.target.value)}
+                          className="px-3 py-2 text-sm bg-surface text-text-primary border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          onClick={handleQuickAddSupplier}
+                          disabled={isQuickAddingSupplier || !quickAddName.trim()}
+                        >
+                          {isQuickAddingSupplier ? (
+                            <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />Adding…</>
+                          ) : (
+                            <><Check className="w-3.5 h-3.5 mr-1" />Add Supplier</>
+                          )}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => { setIsQuickAddingSupplier(false); setQuickAddName(''); setQuickAddPhone(''); setSupplierAddError(null); }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
+
+        {/* 4. USED MOBILE PURCHASE PAPERWORK (CONDITION = USED ONLY) */}
         {isUsed && (
           <Card variant="default" padding="lg" className="bg-surface border-border">
             {/* Urdu Header Callout from Physical Slip */}
@@ -890,6 +1270,108 @@ export const AddMobileForm: React.FC = () => {
                 />
               </div>
             </div>
+
+            {/* Seller autofill search — find a previously recorded seller */}
+            <div className="relative mb-2" ref={sellerSearchRef}>
+              <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">
+                Find Previous Seller
+                <span className="ml-1 text-text-muted font-normal normal-case">(optional — autofills fields below)</span>
+              </p>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search by name, CNIC, or phone…"
+                  value={sellerQuery}
+                  onChange={(e) => {
+                    setSellerQuery(e.target.value);
+                    setShowSellerDropdown(true);
+                  }}
+                  onFocus={() => { if (sellerQuery.length >= 2) setShowSellerDropdown(true); }}
+                  className="w-full pl-9 pr-9 py-2 text-sm bg-surface text-text-primary border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                />
+                {isSearchingSellers && (
+                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted animate-spin" />
+                )}
+                {sellerQuery && !isSearchingSellers && (
+                  <button
+                    type="button"
+                    onClick={() => { setSellerQuery(''); setSellerSuggestions([]); setShowSellerDropdown(false); }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-text-primary"
+                    aria-label="Clear seller search"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              {showSellerDropdown && (sellerSuggestions.length > 0 || (sellerQuery.trim().length >= 2 && !isSearchingSellers)) && (
+                <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-surface border border-border rounded-md shadow-lg max-h-56 overflow-y-auto">
+                  {sellerSuggestions.length > 0 ? (
+                    sellerSuggestions.map((s, idx) => (
+                      <button
+                        key={`${s.seller_cnic || s.seller_name}-${idx}`}
+                        type="button"
+                        onClick={() => handleAutofillSeller(s)}
+                        className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-surface-hover transition-colors border-b border-border last:border-b-0 cursor-pointer"
+                      >
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-sm font-medium text-text-primary truncate">{s.seller_name}</span>
+                          <span className="text-xs text-text-muted">{s.seller_cnic} {s.seller_phone ? `· ${s.seller_phone}` : ''}</span>
+                        </div>
+                        {s.seller_id ? (
+                          <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0 ml-2">
+                            Permanent
+                          </span>
+                        ) : (
+                          <span className="text-[10px] uppercase font-medium px-1.5 py-0.5 rounded bg-surface text-text-muted border border-border shrink-0 ml-2">
+                            Legacy
+                          </span>
+                        )}
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-3 py-2.5 text-sm text-text-muted text-center">No previous sellers found</div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Permanent Seller Registry Status Banner */}
+            <div className="flex items-center justify-between p-2.5 bg-surface-hover border border-border rounded-md mb-2">
+              <div className="flex items-center gap-2">
+                <Store className="w-4 h-4 text-primary" />
+                <span className="text-xs text-text-secondary">
+                  Seller Registry Status:
+                </span>
+                {formData.paperwork.sellerId ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                    <Check className="w-3.5 h-3.5" />
+                    Linked to Permanent Registry
+                  </span>
+                ) : (
+                  <span className="text-xs text-text-muted">
+                    Not linked to permanent registry
+                  </span>
+                )}
+              </div>
+              {!formData.paperwork.sellerId && (
+                <button
+                  type="button"
+                  onClick={handleRegisterPermanentSeller}
+                  disabled={isRegisteringSeller || !formData.paperwork.sellerName.trim() || !formData.paperwork.sellerPhone.trim() || !formData.paperwork.sellerAddress.trim()}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-primary hover:text-white hover:bg-primary border border-primary/40 rounded transition-colors disabled:opacity-disabled cursor-pointer"
+                >
+                  {isRegisteringSeller ? (
+                    <><Loader2 className="w-3 h-3 animate-spin" /> Saving…</>
+                  ) : (
+                    <><Plus className="w-3 h-3" /> Save to Registry</>
+                  )}
+                </button>
+              )}
+            </div>
+            {registerSellerError && (
+              <p className="text-xs text-danger mb-2 font-medium">{registerSellerError}</p>
+            )}
 
             {/* Seller Contact & Legal Details Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">

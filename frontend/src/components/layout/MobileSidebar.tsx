@@ -154,6 +154,8 @@ export const MobileSidebar = ({ isOpen, setIsOpen }: MobileSidebarProps) => {
                 const permittedItems = (group.items || []).filter((item) => {
                   // Existing permission check — always enforced
                   if (item.permission && !hasPermission(item.permission as any)) return false;
+                  // Mobile Inventory is a branch/org management capability — restrict to branch admin/management roles
+                  if (item.href === '/dashboard/shop-admin/mobiles' && !BRANCH_ADMIN_ROLES.has(userRole)) return false;
                   // Branch default filter: hide items not in the default set for non-Main branches
                   if (applyDefaultFilter && !NON_MAIN_BRANCH_DEFAULT_HREFS.has(item.href)) return false;
                   return true;
