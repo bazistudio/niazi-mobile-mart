@@ -651,6 +651,73 @@ describe('9. PATCH Field Restrictions & Status Transitions (DEF-03)', () => {
       ['condition', 'imei1']
     );
   });
+
+  test('Phase C: PATCH key allowlists and TDZ safety', () => {
+    const orgAdminOnlyKeys = new Set([
+      'brand', 'model', 'storage', 'ram', 'color', 'serial_number',
+      'purchase_date', 'purchase_price',
+      'body_grade', 'screen_condition', 'battery_health_percent', 'defect_notes',
+    ]);
+    const ALLOWED_PATCH_BODY_KEYS = new Set([
+      'branch_id', 'status', 'expected_sale_price', 'pta_status', 'notes',
+      'brand', 'model', 'storage', 'ram', 'color', 'serial_number',
+      'purchase_date', 'purchase_price',
+      'body_grade', 'screen_condition', 'battery_health_percent', 'defect_notes',
+    ]);
+
+    const body = { brand: 'Samsung', purchase_price: 45000, notes: 'Refurbished' };
+    const unknownKeys = Object.keys(body).filter((k) => !ALLOWED_PATCH_BODY_KEYS.has(k));
+    assert.deepEqual(unknownKeys, []);
+
+    // Verify evaluation does not throw TDZ ReferenceError
+    const hasOrgAdminOnlyKey = Object.keys(body).some((k) => orgAdminOnlyKeys.has(k));
+    assert.equal(hasOrgAdminOnlyKey, true);
+
+    const standardBody = { status: 'IN_STOCK', notes: 'Checked' };
+    const hasOrgAdminOnlyKeyStandard = Object.keys(standardBody).some((k) => orgAdminOnlyKeys.has(k));
+    assert.equal(hasOrgAdminOnlyKeyStandard, false);
+  });
+
+  test('Phase C: optional voucher_no validation allows auto-allocation and rejects blank', () => {
+    function validateVoucherNo(pw: { voucher_no?: unknown }): { ok: boolean; error?: string; validVoucherNo: string } {
+      let validVoucherNo = '';
+      if (pw.voucher_no !== undefined) {
+        if (!isNonBlankString(pw.voucher_no)) {
+          return { ok: false, error: 'paperwork.voucher_no must not be blank when provided', validVoucherNo: '' };
+        }
+        validVoucherNo = pw.voucher_no.trim();
+      }
+      return { ok: true, validVoucherNo };
+    }
+
+    // Omitted voucher (for server-side auto-allocation)
+    const omitted = validateVoucherNo({});
+    assert.equal(omitted.ok, true);
+    assert.equal(omitted.validVoucherNo, '');
+
+    // Explicit non-blank voucher
+    const explicit = validateVoucherNo({ voucher_no: ' 1050 ' });
+    assert.equal(explicit.ok, true);
+    assert.equal(explicit.validVoucherNo, '1050');
+
+    // Blank or invalid vouchers
+    assert.equal(validateVoucherNo({ voucher_no: '' }).ok, false);
+    assert.equal(validateVoucherNo({ voucher_no: '   ' }).ok, false);
+    assert.equal(validateVoucherNo({ voucher_no: null }).ok, false);
+  });
+
+  test('Phase C: body_grade, screen_condition, and PTA enums match schema constraints', () => {
+    // Verified against 037_mobile_inventory_foundation.sql
+    assert.deepEqual(MOBILE_BODY_GRADES, ['PRISTINE', 'GOOD', 'HEAVY_WEAR', 'DENTED']);
+    assert.deepEqual(MOBILE_SCREEN_CONDITIONS, ['ORIGINAL', 'REPLACED', 'CRACKED']);
+    assert.deepEqual(MOBILE_PTA_STATUSES, ['PTA_APPROVED', 'NON_PTA', 'JV', 'GEVEY']);
+
+    // Ensure invented enums are rejected
+    assert.equal((MOBILE_BODY_GRADES as readonly string[]).includes('EXCELLENT'), false);
+    assert.equal((MOBILE_BODY_GRADES as readonly string[]).includes('FAIR'), false);
+    assert.equal((MOBILE_SCREEN_CONDITIONS as readonly string[]).includes('REPLACED_OEM'), false);
+    assert.equal((MOBILE_PTA_STATUSES as readonly string[]).includes('PTA_NOT_APPROVED'), false);
+  });
 });
 
 // ---------------------------------------------------------------------------

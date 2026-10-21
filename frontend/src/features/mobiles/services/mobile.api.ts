@@ -167,7 +167,7 @@ export interface CreateMobilePayload {
     defect_notes?: string | null;
   };
   paperwork?: {
-    voucher_no: string;
+    voucher_no?: string;        // Optional — backend auto-allocates when omitted
     purchase_date: string;
     purchase_price: number;
     seller_name: string;
@@ -268,7 +268,7 @@ export function transformFormDataToApiPayload(
 
   if (isUsed) {
     payload.paperwork = {
-      voucher_no: formData.paperwork.voucherNo.trim(),
+      ...(formData.paperwork.voucherNo.trim() ? { voucher_no: formData.paperwork.voucherNo.trim() } : {}),
       purchase_date: formData.paperwork.purchaseDate || new Date().toISOString().split('T')[0],
       purchase_price: effectiveCost,
       seller_name: formData.paperwork.sellerName.trim(),
@@ -312,6 +312,85 @@ export function mapDeviceRowToItem(row: MobileDeviceRow): MobileInventoryItem {
     status: row.status,
     createdAt: row.created_at,
   };
+}
+
+
+// ── Phase 3: Full Profile types ─────────────────────────────────────────────
+
+export interface FullProfileSellerInfo {
+  seller_id: string | null;
+  seller_name: string;
+  father_name: string;
+  seller_cnic_masked: string | null;
+  seller_phone: string;
+  seller_address: string;
+  ownership_declaration_acknowledged: boolean;
+  physical_affidavit_acknowledged: boolean;
+}
+
+export interface MobileInspectionRecord {
+  id: string;
+  device_id: string;
+  organization_id: string;
+  body_grade: string;
+  screen_condition: string;
+  battery_health_percent: number | null;
+  touch_working: boolean | null;
+  battery_backup_ok: boolean | null;
+  front_camera_ok: boolean | null;
+  back_camera_ok: boolean | null;
+  speaker_ok: boolean | null;
+  microphone_ok: boolean | null;
+  charging_port_ok: boolean | null;
+  buttons_ok: boolean | null;
+  biometrics_ok: boolean | null;
+  wifi_bluetooth_ok: boolean | null;
+  sim_network_ok: boolean | null;
+  accessories_box: boolean | null;
+  accessories_original_charger: boolean | null;
+  accessories_cable: boolean | null;
+  accessories_handsfree: boolean | null;
+  defect_notes: string | null;
+  inspected_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MobileFullProfile {
+  device: MobileDeviceRow;
+  paperwork: {
+    id: string;
+    voucher_no: string;
+    purchase_date: string;
+    purchase_price: string;
+    recorded_by: string;
+    created_at: string;
+    seller: FullProfileSellerInfo;
+  } | null;
+  inspection: MobileInspectionRecord | null;
+  branch_name: string | null;
+  branch_code: string | null;
+}
+
+export interface PatchMobilePayload {
+  branch_id: string;
+  status?: 'IN_STOCK' | 'INSPECTION' | 'SOLD';
+  expected_sale_price?: number | null;
+  pta_status?: string;
+  notes?: string | null;
+  // Org-Admin-only USED-device fields:
+  brand?: string;
+  model?: string;
+  storage?: string;
+  ram?: string | null;
+  color?: string | null;
+  serial_number?: string | null;
+  purchase_date?: string;
+  purchase_price?: number;
+  body_grade?: string;
+  screen_condition?: string;
+  battery_health_percent?: number | null;
+  defect_notes?: string | null;
 }
 
 export const mobileApi = {
@@ -434,4 +513,44 @@ export const mobileApi = {
   getOrganizationSummary: async (): Promise<{ summary: MobileOrganizationSummary }> => {
     return httpClient.get<{ summary: MobileOrganizationSummary }>('/api/mobiles/summary');
   },
+  /**
+   * Retrieve the complete full profile for a single device.
+   * Includes device, IMEIs, paperwork, seller, and inspection.
+   * Seller sensitive fields are redacted for non-Org-Admin roles by the backend.
+   */
+  getMobileFullProfile: async (
+    deviceId: string,
+    branchId?: string
+  ): Promise<{ profile: MobileFullProfile }> => {
+    const qs = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+    return httpClient.get<{ profile: MobileFullProfile }>(
+      `/api/mobiles/${encodeURIComponent(deviceId)}/full-profile${qs}`
+    );
+  },
+
+  /**
+   * Preview the next sequential Sr No for a branch.
+   * Advisory only — actual number is assigned at registration time.
+   */
+  getNextSrNo: async (branchId: string): Promise<{ next_sr_no: string; branch_id: string }> => {
+    return httpClient.get<{ next_sr_no: string; branch_id: string }>(
+      `/api/mobiles/next-sr-no?branch_id=${encodeURIComponent(branchId)}`
+    );
+  },
+
+  /**
+   * Patch a mobile device record.
+   * Org-Admin-only fields (brand, model, etc.) are enforced server-side.
+   */
+  patchMobile: async (
+    deviceId: string,
+    payload: PatchMobilePayload
+  ): Promise<{ device: MobileDeviceRow }> => {
+    return httpClient.patch<{ device: MobileDeviceRow }>(
+      `/api/mobiles/${encodeURIComponent(deviceId)}`,
+      payload
+    );
+  },
+
+
 };

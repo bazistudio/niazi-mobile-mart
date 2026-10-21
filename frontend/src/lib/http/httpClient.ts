@@ -13,4 +13,9 @@ export const httpClient = {
     body: JSON.stringify(data),
   }),
   delete: <T>(url: string) => httpFetch<T>(url, { method: 'DELETE' }),
+  patch: <T>(url: string, data: any) => httpFetch<T>(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }),
 };

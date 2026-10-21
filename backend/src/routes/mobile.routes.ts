@@ -63,6 +63,8 @@ import {
   RegisterInspectionInput,
   RegisterPaperworkInput,
   PatchMobileDeviceInput,
+  MobileFullProfile,
+  FullProfileSellerInfo,
 } from '../repositories/mobile.repo';
 import {
   MOBILE_CONDITIONS,
@@ -446,6 +448,63 @@ export function buildMobileRouter(pool: Pool): Router {
    * Requires INVENTORY_EDIT (F-02 strict check).
    * Returns 201 { device_id } on success.
    */
+  // -------------------------------------------------------------------------
+  // GET /next-sr-no -- preview next voucher number for a branch
+  // Must be defined BEFORE /:id to avoid route shadowing.
+  // -------------------------------------------------------------------------
+
+  /**
+   * GET /next-sr-no?branch_id=<uuid>
+   *
+   * Returns the anticipated next sequential voucher/Sr No for the given branch.
+   * This is a PREVIEW ONLY -- it does NOT reserve the number. The actual
+   * allocation happens inside registerMobileDeviceTx via getNextVoucherNumber().
+   *
+   * Security:
+   *   - Requires authenticated session and INVENTORY_VIEW permission.
+   *   - Validates branch ownership via resolveReadBranchId (prevents
+   *     probing another branch's sequence by changing query param).
+   *
+   * Response: { next_sr_no: string, branch_id: string }
+   */
+  router.get('/next-sr-no', async (req: Request, res: Response) => {
+    if (!requireInventoryView(req, res)) return;
+
+    const identity = req.identity!;
+
+    const branchId = await resolveReadBranchId(identity, req.query.branch_id, res);
+    if (branchId === undefined) return;
+    if (!branchId) {
+      res.status(400).json({ error: 'branch_id query parameter is required' });
+      return;
+    }
+
+    try {
+      // Preview query -- does NOT lock the branch row (no FOR UPDATE).
+      // The advisory nature is intentional: the registration transaction
+      // allocates the authoritative number with a branch row lock.
+      const result = await pool.query<{ next_no: string }>(
+        `SELECT (
+           COALESCE(
+             MAX(
+               CASE WHEN voucher_no ~ '^[0-9]+$'
+               THEN voucher_no::BIGINT
+               ELSE 0 END
+             ),
+             1000
+           ) + 1
+         )::TEXT AS next_no
+         FROM mobile_purchase_paperwork
+         WHERE branch_id = $1`,
+        [branchId]
+      );
+      const next_sr_no = result.rows[0]?.next_no ?? '1001';
+      res.status(200).json({ next_sr_no, branch_id: branchId });
+    } catch (err) {
+      handleMobileError(res, err, 'next-sr-no');
+    }
+  });
+
   router.post('/', async (req: Request, res: Response) => {
     if (!requireInventoryWrite(req, res)) return;
 
@@ -574,9 +633,13 @@ export function buildMobileRouter(pool: Pool): Router {
         res.status(400).json({ error: 'paperwork is required for USED devices' });
         return;
       }
-      if (!isNonBlankString(pw.voucher_no)) {
-        res.status(400).json({ error: 'paperwork.voucher_no is required and must not be blank' });
-        return;
+      let validVoucherNo = '';
+      if (pw.voucher_no !== undefined) {
+        if (!isNonBlankString(pw.voucher_no)) {
+          res.status(400).json({ error: 'paperwork.voucher_no must not be blank when provided' });
+          return;
+        }
+        validVoucherNo = pw.voucher_no.trim();
       }
       if (!isNonBlankString(pw.purchase_date)) {
         res.status(400).json({ error: 'paperwork.purchase_date is required' });
@@ -628,7 +691,7 @@ export function buildMobileRouter(pool: Pool): Router {
       }
 
       paperworkInput = {
-        voucher_no:                          pw.voucher_no.trim(),
+        voucher_no:                          validVoucherNo,
         purchase_date:                       pw.purchase_date,
         purchase_price:                      Number(pw.purchase_price),
         seller_name:                         pw.seller_name,
@@ -1161,6 +1224,84 @@ export function buildMobileRouter(pool: Pool): Router {
    * Requires INVENTORY_EDIT (F-02 strict check).
    * Returns 200 { device: MobileDeviceRow } on success.
    */
+  // -------------------------------------------------------------------------
+  // GET /:id/full-profile -- complete device detail (device + paperwork + inspection)
+  // Must be before PATCH /:id (both match /:id param)
+  // -------------------------------------------------------------------------
+
+  /**
+   * GET /:id/full-profile?branch_id=<uuid>
+   *
+   * Returns a complete mobile record including:
+   *   - Device specs, IMEIs, branch info
+   *   - Purchase paperwork and seller details (USED only, fail-closed audit)
+   *   - Inspection data
+   *
+   * Role-based field visibility:
+   *   - Org Admin (ADMIN): full seller details (phone, address, father_name)
+   *   - SHOP_ADMIN / branch users: CNIC is masked; phone and address are
+   *     redacted from the response to protect seller privacy.
+   *
+   * Requires INVENTORY_VIEW.
+   * Returns 404 if device not found in org/branch scope.
+   */
+  router.get('/:id/full-profile', async (req: Request, res: Response) => {
+    if (!requireInventoryView(req, res)) return;
+
+    const identity = req.identity!;
+    const deviceId = typeof req.params.id === 'string' ? req.params.id : String(req.params.id ?? '');
+
+    let branchId: string | null = null;
+    if (isOrgAdmin(identity) && (!req.query.branch_id || !isNonBlankString(req.query.branch_id))) {
+      const devCheck = await pool.query<{ branch_id: string }>(
+        `SELECT branch_id FROM mobile_devices WHERE id = $1 AND organization_id = $2`,
+        [deviceId, identity.organization_id]
+      );
+      if (devCheck.rows.length === 0) {
+        res.status(404).json({ error: 'Device not found' });
+        return;
+      }
+      branchId = devCheck.rows[0].branch_id;
+    } else {
+      const resolved = await resolveReadBranchId(identity, req.query.branch_id, res);
+      if (resolved === undefined) return;
+      if (!resolved) {
+        res.status(400).json({ error: 'branch_id query parameter is required' });
+        return;
+      }
+      branchId = resolved;
+    }
+
+    try {
+      const profile: MobileFullProfile | null = await repo.getMobileFullProfile(
+        deviceId,
+        identity.organization_id,
+        branchId,
+        identity.user_id
+      );
+
+      if (!profile) {
+        res.status(404).json({ error: 'Device not found' });
+        return;
+      }
+
+      // Role-based seller field visibility:
+      // Non-org-admin roles see CNIC masked and phone/address redacted.
+      if (profile.paperwork?.seller && !isOrgAdmin(identity)) {
+        profile.paperwork.seller = {
+          ...profile.paperwork.seller,
+          father_name:    '[REDACTED]',
+          seller_phone:   '[REDACTED]',
+          seller_address: '[REDACTED]',
+        };
+      }
+
+      res.status(200).json({ profile });
+    } catch (err) {
+      handleMobileError(res, err, 'full-profile');
+    }
+  });
+
   router.patch('/:id', async (req: Request, res: Response) => {
     if (!requireInventoryWrite(req, res)) return;
 
@@ -1171,12 +1312,46 @@ export function buildMobileRouter(pool: Pool): Router {
     const branchId = await resolveWriteBranchId(identity, body.branch_id, res);
     if (!branchId) return;
 
+    // SECURITY: USED-device records may only be edited by Org Admin.
+    // SHOP_ADMIN and all other non-ADMIN roles must receive 403.
+    // We check condition from the actual device (not trust body), but we do
+    // this check BEFORE loading the device to fast-fail unauthorized attempts.
+    // The repo patchMobileDevice also enforces branch/org ownership.
+    //
+    // For NEW devices we keep the existing SHOP_ADMIN write flow unchanged.
+    // We determine condition after validating the request shape, but we need
+    // to enforce on the actual device -- so we add a pre-load check below
+    // after the field validation and before the repo call.
+
+    // Define allowed keys before evaluating request body (prevents TDZ ReferenceError)
+    const orgAdminOnlyKeys = new Set([
+      'brand', 'model', 'storage', 'ram', 'color', 'serial_number',
+      'purchase_date', 'purchase_price',
+      'body_grade', 'screen_condition', 'battery_health_percent', 'defect_notes',
+    ]);
+    const ALLOWED_PATCH_BODY_KEYS = new Set([
+      'branch_id', 'status', 'expected_sale_price', 'pta_status', 'notes',
+      // Org-admin USED-device fields:
+      'brand', 'model', 'storage', 'ram', 'color', 'serial_number',
+      'purchase_date', 'purchase_price',
+      'body_grade', 'screen_condition', 'battery_health_percent', 'defect_notes',
+    ]);
+
     // Reject unknown / immutable fields (DEF-03)
-    const ALLOWED_PATCH_BODY_KEYS = new Set(['branch_id', 'status', 'expected_sale_price', 'pta_status', 'notes']);
     const unknownKeys = Object.keys(body).filter((k) => !ALLOWED_PATCH_BODY_KEYS.has(k));
     if (unknownKeys.length > 0) {
       res.status(400).json({
         error: `Disallowed or unknown field(s) in PATCH request: ${unknownKeys.join(', ')}`,
+      });
+      return;
+    }
+
+    // Reject org-admin-only keys if caller is not org-admin
+    const hasOrgAdminOnlyKey = Object.keys(body).some((k) => orgAdminOnlyKeys.has(k));
+    if (hasOrgAdminOnlyKey && !isOrgAdmin(identity)) {
+      res.status(403).json({
+        error: 'FORBIDDEN',
+        message: 'Only organization administrators may update device specifications, paperwork, or inspection fields',
       });
       return;
     }
@@ -1207,6 +1382,52 @@ export function buildMobileRouter(pool: Pool): Router {
       }
     }
 
+    if (body.body_grade !== undefined) {
+      if (!MOBILE_BODY_GRADES.includes(body.body_grade)) {
+        res.status(400).json({ error: `body_grade must be one of: ${MOBILE_BODY_GRADES.join(', ')}` });
+        return;
+      }
+    }
+
+    if (body.screen_condition !== undefined) {
+      if (!MOBILE_SCREEN_CONDITIONS.includes(body.screen_condition)) {
+        res.status(400).json({ error: `screen_condition must be one of: ${MOBILE_SCREEN_CONDITIONS.join(', ')}` });
+        return;
+      }
+    }
+
+    if (body.battery_health_percent !== undefined && body.battery_health_percent !== null) {
+      if (!isValidBatteryHealth(body.battery_health_percent)) {
+        res.status(400).json({ error: 'battery_health_percent must be an integer between 1 and 100 when provided' });
+        return;
+      }
+    }
+
+    if (body.purchase_price !== undefined) {
+      if (!isPositivePrice(body.purchase_price)) {
+        res.status(400).json({ error: 'purchase_price must be a positive number when provided' });
+        return;
+      }
+    }
+
+    // SECURITY: Load device to check condition before allowing USED-device edit.
+    // If the device is USED and caller is not Org Admin -> 403.
+    // This check runs in the DB so it cannot be bypassed via client body.
+    if (!isOrgAdmin(identity)) {
+      const existing = await repo.getMobileDevice(deviceId, identity.organization_id, branchId);
+      if (!existing) {
+        res.status(404).json({ error: 'Device not found' });
+        return;
+      }
+      if (existing.condition === 'USED') {
+        res.status(403).json({
+          error: 'FORBIDDEN',
+          message: 'Only organization administrators may edit USED mobile records',
+        });
+        return;
+      }
+    }
+
     const patchInput: PatchMobileDeviceInput = {
       device_id:           deviceId,
       organization_id:     identity.organization_id,
@@ -1218,6 +1439,21 @@ export function buildMobileRouter(pool: Pool): Router {
         : undefined,
       pta_status:          body.pta_status,
       notes:               body.notes !== undefined ? (body.notes ?? null) : undefined,
+      // Org-admin USED-device fields (undefined when not provided = unchanged)
+      brand:          body.brand   !== undefined ? String(body.brand).trim()   : undefined,
+      model:          body.model   !== undefined ? String(body.model).trim()   : undefined,
+      storage:        body.storage !== undefined ? String(body.storage).trim() : undefined,
+      ram:            body.ram     !== undefined ? (body.ram ?? null)           : undefined,
+      color:          body.color   !== undefined ? (body.color ?? null)         : undefined,
+      serial_number:  body.serial_number !== undefined ? (body.serial_number ?? null) : undefined,
+      purchase_date:  body.purchase_date  !== undefined ? String(body.purchase_date).trim()  : undefined,
+      purchase_price: body.purchase_price !== undefined ? Number(body.purchase_price)        : undefined,
+      body_grade:          body.body_grade          !== undefined ? body.body_grade          : undefined,
+      screen_condition:    body.screen_condition    !== undefined ? body.screen_condition    : undefined,
+      battery_health_percent: body.battery_health_percent !== undefined
+        ? (body.battery_health_percent !== null ? Number(body.battery_health_percent) : null)
+        : undefined,
+      defect_notes:        body.defect_notes !== undefined ? (body.defect_notes ?? null) : undefined,
     };
 
     try {

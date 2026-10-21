@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { X, LayoutGrid } from 'lucide-react';
 import { shopAdminNavigation } from '../../constants/navigation/shop-admin-navigation';
 import { organizationNavigation } from '../../constants/navigation/organization-navigation';
@@ -31,12 +31,16 @@ const BRANCH_ADMIN_ROLES = new Set([
 
 export const MobileSidebar = ({ isOpen, setIsOpen }: MobileSidebarProps) => {
   // Mobile drawer navigation (supports all 17 Organization pages)
+  const navigate = useNavigate();
   const { pathname } = useLocation();
   const { hasPermission } = usePermissions();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // Branch-aware navigation filtering state
   const activeShop = useOrganizationStore((s) => s.activeShop);
+  const activeOrganizationId = useOrganizationStore((s) => s.activeOrganizationId);
+  const setActiveContext = useOrganizationStore((s) => s.setActiveContext);
+  const setActiveShop = useOrganizationStore((s) => s.setActiveShop);
   const user = useAuthStore((s) => s.user);
   const [showAllPages, setShowAllPages] = useState(false);
 
@@ -63,6 +67,23 @@ export const MobileSidebar = ({ isOpen, setIsOpen }: MobileSidebarProps) => {
   // Whether the current user may reveal extra pages via the toggle
   const userRole = (user?.role || '').toUpperCase();
   const canViewAllPages = BRANCH_ADMIN_ROLES.has(userRole);
+  const isOrgAdmin =
+    userRole === 'OWNER' ||
+    userRole === 'SUPER_ADMIN' ||
+    userRole === 'MULTI_ADMIN' ||
+    userRole === 'ADMIN';
+
+  const handleAdminDashboardClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsOpen(false);
+    if (isOrgAdmin) {
+      setActiveContext(activeOrganizationId || '00000000-0000-0000-0000-000000000001', null);
+      setActiveShop(null);
+      navigate('/dashboard/organization');
+    } else {
+      navigate('/dashboard/shop-admin');
+    }
+  };
 
   // Whether the filter is active (non-Main branch, shop-admin context)
   const filterActive =
@@ -135,14 +156,34 @@ export const MobileSidebar = ({ isOpen, setIsOpen }: MobileSidebarProps) => {
 
           {/* Sidebar content */}
           <div className="flex grow flex-col overflow-y-auto bg-surface shadow-modal custom-scrollbar">
-            {/* Logo */}
-            <div className="flex h-12 shrink-0 items-center gap-2.5 px-5 border-b border-border sticky top-0 bg-surface z-10">
-              <span className="w-7 h-7 rounded-md bg-primary text-white flex items-center justify-center font-black text-sm shadow-sm flex-shrink-0">
-                N
-              </span>
-              <span className="text-base font-bold text-primary tracking-tight">
-                Niazi Mobile Mart
-              </span>
+            {/* Logo / Instant Admin Switch */}
+            <div className="flex h-14 shrink-0 items-center justify-between px-4 border-b border-border sticky top-0 bg-surface z-10">
+              <button
+                type="button"
+                onClick={handleAdminDashboardClick}
+                className="flex items-center gap-2.5 rounded-lg p-1 hover:bg-primary/10 transition-colors text-left flex-1 min-w-0"
+                title={isOrgAdmin ? "Switch to Admin Organization Dashboard" : "Go to Dashboard"}
+              >
+                <img
+                  src="/logo-circle.png"
+                  alt="Niazi Mobile Mart"
+                  className="w-8 h-8 rounded-full object-cover shadow-sm flex-shrink-0"
+                />
+                <div className="flex flex-col min-w-0 leading-tight">
+                  <span className="text-sm font-bold text-primary tracking-tight truncate">
+                    Niazi Mobile Mart
+                  </span>
+                  {isOrgAdmin ? (
+                    <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+                      Admin Dashboard <span className="text-[9px]">↗</span>
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-text-muted">
+                      Point of Sale & ERP
+                    </span>
+                  )}
+                </div>
+              </button>
             </div>
 
             {/* Navigation links */}
@@ -156,8 +197,14 @@ export const MobileSidebar = ({ isOpen, setIsOpen }: MobileSidebarProps) => {
                   if (item.permission && !hasPermission(item.permission as any)) return false;
                   // Mobile Inventory is a branch/org management capability — restrict to branch admin/management roles
                   if (item.href === '/dashboard/shop-admin/mobiles' && !BRANCH_ADMIN_ROLES.has(userRole)) return false;
-                  // Branch default filter: hide items not in the default set for non-Main branches
-                  if (applyDefaultFilter && !NON_MAIN_BRANCH_DEFAULT_HREFS.has(item.href)) return false;
+                  // Branch default filter: hide items not in the default set for non-Main branches (except Organization Control for org admins)
+                  if (applyDefaultFilter && !NON_MAIN_BRANCH_DEFAULT_HREFS.has(item.href)) {
+                    if (item.href === '/dashboard/organization' && isOrgAdmin) {
+                      // Keep Organization Control visible for admins
+                    } else {
+                      return false;
+                    }
+                  }
                   return true;
                 });
 
@@ -178,7 +225,13 @@ export const MobileSidebar = ({ isOpen, setIsOpen }: MobileSidebarProps) => {
                         <Link
                           key={item.name}
                           to={item.href}
-                          onClick={() => setIsOpen(false)}
+                          onClick={() => {
+                            setIsOpen(false);
+                            if (item.href === '/dashboard/organization' && isOrgAdmin) {
+                              setActiveContext(activeOrganizationId || '00000000-0000-0000-0000-000000000001', null);
+                              setActiveShop(null);
+                            }
+                          }}
                           aria-current={isActive ? 'page' : undefined}
                           className={`group relative flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-md transition-all duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
                             isActive

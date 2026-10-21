@@ -12,6 +12,7 @@
     "dialog:allow-message",
     "dialog:allow-open",
     "dialog:allow-save",
+    "core:window:allow-maximize",
     "updater:default"
   ]
 }

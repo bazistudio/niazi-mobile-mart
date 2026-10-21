@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { shopAdminNavigation } from '../../constants/navigation/shop-admin-navigation';
 import { organizationNavigation } from '../../constants/navigation/organization-navigation';
 import { validateRoute } from '../../lib/navigation/route-validator';
@@ -28,12 +28,16 @@ const BRANCH_ADMIN_ROLES = new Set([
 
 export const Sidebar = () => {
   // Active route & permission-based sidebar navigation (supports all 17 Organization pages)
+  const navigate = useNavigate();
   const { pathname } = useLocation();
   const { hasPermission } = usePermissions();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   // Branch-aware navigation filtering state
   const activeShop = useOrganizationStore((s) => s.activeShop);
+  const activeOrganizationId = useOrganizationStore((s) => s.activeOrganizationId);
+  const setActiveContext = useOrganizationStore((s) => s.setActiveContext);
+  const setActiveShop = useOrganizationStore((s) => s.setActiveShop);
   const user = useAuthStore((s) => s.user);
   const [showAllPages, setShowAllPages] = useState(false);
 
@@ -60,6 +64,22 @@ export const Sidebar = () => {
   // Whether the current user may reveal extra pages via the toggle
   const userRole = (user?.role || '').toUpperCase();
   const canViewAllPages = BRANCH_ADMIN_ROLES.has(userRole);
+  const isOrgAdmin =
+    userRole === 'OWNER' ||
+    userRole === 'SUPER_ADMIN' ||
+    userRole === 'MULTI_ADMIN' ||
+    userRole === 'ADMIN';
+
+  const handleAdminDashboardClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (isOrgAdmin) {
+      setActiveContext(activeOrganizationId || '00000000-0000-0000-0000-000000000001', null);
+      setActiveShop(null);
+      navigate('/dashboard/organization');
+    } else {
+      navigate('/dashboard/shop-admin');
+    }
+  };
 
   // Whether the filter is active (non-Main branch and toggle not expanded)
   const filterActive =
@@ -71,37 +91,75 @@ export const Sidebar = () => {
         isCollapsed ? 'w-[60px]' : 'w-64'
       }`}
     >
-      {/* Logo / Header */}
+      {/* Logo / Header with Instant Admin Dashboard Switch */}
       <div
-        className={`flex items-center h-12 flex-shrink-0 border-b border-border sticky top-0 bg-surface z-10 transition-all duration-normal ${
-          isCollapsed ? 'justify-center px-0' : 'justify-between px-4'
+        className={`flex items-center h-14 flex-shrink-0 border-b border-border sticky top-0 bg-surface z-10 transition-all duration-normal ${
+          isCollapsed ? 'flex-col justify-center px-0 py-2 h-auto gap-1' : 'justify-between px-3'
         }`}
       >
-        <div
-          className={`flex items-center gap-2 overflow-hidden transition-all duration-normal ${
-            isCollapsed ? 'opacity-0 w-0 pointer-events-none' : 'opacity-100 w-auto'
-          }`}
-          aria-hidden={isCollapsed}
-        >
-          <span className="w-7 h-7 rounded-md bg-primary text-white flex items-center justify-center font-black flex-shrink-0 text-sm shadow-sm">
-            N
-          </span>
-          <span className="text-base font-bold text-primary whitespace-nowrap tracking-tight">
-            Niazi Mobile Mart
-          </span>
-        </div>
+        {isCollapsed ? (
+          <>
+            <button
+              type="button"
+              onClick={handleAdminDashboardClick}
+              title={isOrgAdmin ? "Switch to Admin Organization Dashboard" : "Go to Dashboard"}
+              className="p-1 rounded-full hover:bg-primary/10 cursor-pointer transition-all hover:scale-105"
+            >
+              <img
+                src="/logo-circle.png"
+                alt="Niazi Mobile Mart"
+                className="w-7 h-7 rounded-full object-cover shadow-sm"
+              />
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsCollapsed(false)}
+              className="p-1.5 rounded-md text-text-muted hover:bg-surface-hover hover:text-text-primary transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-none"
+              aria-label="Expand sidebar"
+            >
+              <Menu className="h-4 w-4" />
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={handleAdminDashboardClick}
+              title={isOrgAdmin ? "Instant Switch: Admin Organization Dashboard" : "Niazi Mobile Mart Dashboard"}
+              className="flex items-center gap-2.5 overflow-hidden transition-all duration-normal group hover:bg-primary/10 rounded-lg p-1.5 cursor-pointer text-left border border-transparent hover:border-primary/20 flex-1 min-w-0 mr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              aria-label={isOrgAdmin ? "Switch to Admin Organization Dashboard" : "Go to Dashboard"}
+            >
+              <img
+                src="/logo-circle.png"
+                alt="Niazi Mobile Mart"
+                className="w-8 h-8 rounded-full object-cover flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform"
+              />
+              <div className="flex flex-col min-w-0 leading-tight">
+                <span className="text-sm font-bold text-primary whitespace-nowrap tracking-tight group-hover:text-primary-hover transition-colors truncate">
+                  Niazi Mobile Mart
+                </span>
+                {isOrgAdmin ? (
+                  <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 tracking-wide">
+                    Admin Dashboard <span className="text-[9px]">↗</span>
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-text-muted">
+                    Point of Sale & ERP
+                  </span>
+                )}
+              </div>
+            </button>
 
-        <button
-          onClick={() => setIsCollapsed(!isCollapsed)}
-          className="p-1.5 rounded-md text-text-muted hover:bg-surface-hover hover:text-text-primary transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-none"
-          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          {isCollapsed ? (
-            <Menu className="h-4 w-4" />
-          ) : (
-            <ChevronLeft className="h-4 w-4" />
-          )}
-        </button>
+            <button
+              type="button"
+              onClick={() => setIsCollapsed(true)}
+              className="p-1.5 rounded-md text-text-muted hover:bg-surface-hover hover:text-text-primary transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-none flex-shrink-0"
+              aria-label="Collapse sidebar"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+          </>
+        )}
       </div>
 
       {/* Navigation */}
@@ -112,8 +170,14 @@ export const Sidebar = () => {
             if (item.permission && !hasPermission(item.permission as any)) return false;
             // Mobile Inventory is a branch/org management capability — restrict to branch admin/management roles
             if (item.href === '/dashboard/shop-admin/mobiles' && !BRANCH_ADMIN_ROLES.has(userRole)) return false;
-            // Branch default filter: hide items not in the default set for non-Main branches
-            if (applyDefaultFilter && !NON_MAIN_BRANCH_DEFAULT_HREFS.has(item.href)) return false;
+            // Branch default filter: hide items not in the default set for non-Main branches (except Organization Control for org admins)
+            if (applyDefaultFilter && !NON_MAIN_BRANCH_DEFAULT_HREFS.has(item.href)) {
+              if (item.href === '/dashboard/organization' && isOrgAdmin) {
+                // Keep Organization Control visible for admins
+              } else {
+                return false;
+              }
+            }
             return true;
           });
 
@@ -134,6 +198,12 @@ export const Sidebar = () => {
                   <Link
                     key={item.name}
                     to={item.href}
+                    onClick={() => {
+                      if (item.href === '/dashboard/organization' && isOrgAdmin) {
+                        setActiveContext(activeOrganizationId || '00000000-0000-0000-0000-000000000001', null);
+                        setActiveShop(null);
+                      }
+                    }}
                     title={isCollapsed ? item.name : undefined}
                     aria-current={isActive ? 'page' : undefined}
                     className={`group relative flex items-center py-2 text-sm font-medium rounded-md transition-all duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${

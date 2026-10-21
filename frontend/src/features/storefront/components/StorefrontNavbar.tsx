@@ -75,11 +75,11 @@ export const StorefrontNavbar: React.FC = () => {
         <div className="flex items-center justify-between h-20 gap-4">
           {/* Brand Logo */}
           <Link to="/" className="flex items-center gap-3.5 group flex-shrink-0">
-            <div className="relative w-12 h-12 rounded-xl overflow-hidden shadow-md group-hover:shadow-lg transition-all duration-300 border border-[#00b4bb]/30 bg-[#00474c] p-0.5">
+            <div className="relative w-12 h-12 rounded-full overflow-hidden shadow-md group-hover:shadow-lg transition-all duration-300 border border-[#00b4bb]/30 bg-black/40 p-0.5">
               <img 
-                src="/logo.png" 
+                src="/logo-circle.png" 
                 alt="Niazi Mobile Mart" 
-                className="w-full h-full object-cover rounded-lg group-hover:scale-105 transition-transform duration-300"
+                className="w-full h-full object-cover rounded-full group-hover:scale-105 transition-transform duration-300"
                 onError={(e) => {
                   (e.currentTarget as HTMLImageElement).src = '/logo.svg';
                 }}

@@ -19,6 +19,7 @@ import {
   Boxes,
   ArrowUpDown,
   SlidersHorizontal,
+  Eye,
 } from 'lucide-react';
 import { Button, Badge, Card } from '@/components/ui';
 import {
@@ -28,6 +29,11 @@ import {
   type MobileBranchSummaryItem,
 } from '@/features/mobiles/services/mobile.api';
 import type { MobileInventoryItem, MobileCondition } from '@/features/mobiles/types/mobile.types';
+import { MobileDetailModal } from '@/features/mobiles/components/MobileDetailModal';
+import { EditMobileModal } from '@/features/mobiles/components/EditMobileModal';
+import { buildUsedMobileA4Html, buildUsedMobilePdfFilename } from '@/features/mobiles/templates/usedMobileA4Template';
+import { usePrintStore } from '@/lib/printer/print.store';
+import { downloadHtmlAsPdf } from '@/lib/printer/pdfExport';
 
 export function OrganizationMobileInventoryPage() {
   const navigate = useNavigate();
@@ -43,6 +49,31 @@ export function OrganizationMobileInventoryPage() {
   const [conditionFilter, setConditionFilter] = useState<'ALL' | MobileCondition>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  const [editDeviceId, setEditDeviceId] = useState<string | null>(null);
+  const openPrintPreview = usePrintStore((s) => s.openPreview);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
+  const handlePrint = useCallback((profile: Parameters<typeof buildUsedMobileA4Html>[0]) => {
+    const html = buildUsedMobileA4Html(profile);
+    openPrintPreview({
+      html,
+      documentType: 'Generic',
+      referenceId: profile.device.id,
+      title: `Purchase Receipt — Sr No ${profile.paperwork?.voucher_no ?? profile.device.id.slice(0, 8)}`,
+    });
+  }, [openPrintPreview]);
+
+  const handleDownloadPdf = useCallback(async (profile: Parameters<typeof buildUsedMobileA4Html>[0]) => {
+    setPdfError(null);
+    try {
+      const html = buildUsedMobileA4Html(profile);
+      const filename = buildUsedMobilePdfFilename(profile);
+      await downloadHtmlAsPdf(html, filename);
+    } catch (err) {
+      setPdfError(err instanceof Error ? err.message : 'PDF generation failed');
+    }
+  }, []);
 
   // Fetch summary and consolidated devices
   const loadInventoryData = useCallback(async () => {
@@ -136,6 +167,7 @@ export function OrganizationMobileInventoryPage() {
   }, [filteredDevices]);
 
   return (
+    <>
     <OrganizationPageShell
       title="Mobile Inventory"
       description="Consolidated serialized smartphone inventory, branch breakdown, and valuation across all organization locations."
@@ -488,12 +520,13 @@ export function OrganizationMobileInventoryPage() {
                 <th className="py-3 px-4 text-right">Cost Price</th>
                 <th className="py-3 px-4 text-right">Expected Sale</th>
                 <th className="py-3 px-4 text-right">Added On</th>
+                <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800 bg-white dark:bg-gray-900">
               {isLoading ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-gray-400">
+                  <td colSpan={10} className="py-12 text-center text-gray-400">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <RefreshCw className="w-5 h-5 animate-spin text-teal-600 dark:text-teal-400" />
                       <p className="font-medium text-xs">Loading consolidated inventory...</p>
@@ -502,7 +535,7 @@ export function OrganizationMobileInventoryPage() {
                 </tr>
               ) : filteredDevices.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-gray-500 dark:text-gray-400">
+                  <td colSpan={10} className="py-12 text-center text-gray-500 dark:text-gray-400">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <Smartphone className="w-8 h-8 text-gray-300 dark:text-gray-700" />
                       <p className="font-semibold text-sm text-gray-700 dark:text-gray-300">No Mobile Devices Found</p>
@@ -621,6 +654,19 @@ export function OrganizationMobileInventoryPage() {
                       <td className="py-3 px-4 text-right text-gray-400 text-[11px]">
                         {device.createdAt ? new Date(device.createdAt).toLocaleDateString() : '—'}
                       </td>
+
+                      {/* Actions */}
+                      <td className="py-3 px-4 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDeviceId(device.id)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 rounded-lg border border-teal-200 dark:border-teal-800 transition-colors"
+                          title="View full details"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          Details
+                        </button>
+                      </td>
                     </tr>
                   );
                 })
@@ -647,6 +693,34 @@ export function OrganizationMobileInventoryPage() {
         </div>
       </div>
     </OrganizationPageShell>
+
+      {/* Mobile detail modal */}
+      {selectedDeviceId && (
+        <MobileDetailModal
+          deviceId={selectedDeviceId}
+          branchId={devices.find((d) => d.id === selectedDeviceId)?.branch}
+          onClose={() => setSelectedDeviceId(null)}
+          onEdit={(id) => { setSelectedDeviceId(null); setEditDeviceId(id); }}
+          onPrint={handlePrint}
+          onDownloadPdf={(p) => { void handleDownloadPdf(p); }}
+        />
+      )}
+      {/* Edit modal — org-admin only */}
+      {editDeviceId && (
+        <EditMobileModal
+          deviceId={editDeviceId}
+          branchId={devices.find((d) => d.id === editDeviceId)?.branch}
+          onClose={() => setEditDeviceId(null)}
+          onSaved={() => { setEditDeviceId(null); void loadInventoryData(); }}
+        />
+      )}
+      {pdfError && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[200] px-4 py-2 bg-red-600 text-white rounded-lg text-sm shadow-lg" role="alert">
+          PDF error: {pdfError}
+          <button type="button" onClick={() => setPdfError(null)} className="ml-3 underline text-xs">Dismiss</button>
+        </div>
+      )}
+    </>
   );
 }
 

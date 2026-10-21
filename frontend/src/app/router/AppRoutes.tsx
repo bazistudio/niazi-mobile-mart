@@ -25,12 +25,12 @@ const isDesktop = isTauriEnvironment() || import.meta.env.VITE_APP_SURFACE === '
 export const AppRoutes: React.FC = () => {
   return (
     <Routes>
-      {/* Root Route Boundary: In Desktop / Tauri mode, default directly to /auth/login or /dashboard */}
+      {/* Root Route Boundary: In Desktop / Tauri mode, default directly to /dashboard */}
       <Route
         path="/"
         element={
           isDesktop ? (
-            <Navigate to="/auth/login" replace />
+            <Navigate to="/dashboard" replace />
           ) : (
             <Suspense fallback={<div className="min-h-screen bg-[#00383c]" />}>
               <StorefrontLayout>

@@ -67,11 +67,11 @@ export const StorefrontFooter: React.FC = () => {
           {/* Brand Info */}
           <div className="lg:col-span-2 space-y-4">
             <Link to="/" className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl overflow-hidden shadow-md border border-[#00b4bb]/40 bg-[#00474c] p-0.5">
+              <div className="w-10 h-10 rounded-full overflow-hidden shadow-md border border-[#00b4bb]/40 bg-black/40 p-0.5">
                 <img 
-                  src="/logo.png" 
+                  src="/logo-circle.png" 
                   alt="Niazi Mobile Mart" 
-                  className="w-full h-full object-cover rounded-lg"
+                  className="w-full h-full object-cover rounded-full"
                   onError={(e) => {
                     (e.currentTarget as HTMLImageElement).src = '/logo.svg';
                   }}

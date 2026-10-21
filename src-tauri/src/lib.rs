@@ -179,6 +179,7 @@ pub fn run() {
             }
 
             if let Some(window) = app.get_webview_window("main") {
+                let _ = window.maximize();
                 #[cfg(debug_assertions)]
                 window.open_devtools();
             }

@@ -122,6 +122,10 @@ export const AddMobileForm: React.FC = () => {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
 
+  // Auto Sr No preview state
+  const [nextSrNo, setNextSrNo] = useState<string | null>(null);
+  const [srNoLoading, setSrNoLoading] = useState(false);
+
   // Real-time IMEI check state
   const [imeiCheckStatus, setImeiCheckStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
   const [imeiCheckMessage, setImeiCheckMessage] = useState<string | null>(null);
@@ -381,6 +385,31 @@ export const AddMobileForm: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutsideSeller);
   }, []);
 
+  // Auto-fetch next Sr No when branch or condition changes (USED only)
+  useEffect(() => {
+    if (!isUsed || !branchId) {
+      setNextSrNo(null);
+      return;
+    }
+    // Stale-response guard: capture current branchId in closure
+    const requestedBranch = branchId;
+    setSrNoLoading(true);
+    void (async () => {
+      try {
+        const res = await mobileApi.getNextSrNo(requestedBranch);
+        // Discard if branch changed while request was in flight
+        if (res.branch_id === requestedBranch) {
+          setNextSrNo(res.next_sr_no);
+        }
+      } catch {
+        setNextSrNo(null);
+      } finally {
+        setSrNoLoading(false);
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchId, isUsed]);
+
   const handleAutofillSeller = (s: SellerSearchResult) => {
     setFormData((prev) => ({
       ...prev,
@@ -525,10 +554,6 @@ export const AddMobileForm: React.FC = () => {
     }
 
     if (isUsed) {
-      if (!formData.paperwork.voucherNo.trim()) {
-        setSubmitError('Purchase Slip Voucher Number is required for used mobiles');
-        return;
-      }
       if (!formData.paperwork.sellerName.trim()) {
         setSubmitError('Seller full name is required');
         return;
@@ -563,7 +588,10 @@ export const AddMobileForm: React.FC = () => {
     try {
       const payload = transformFormDataToApiPayload(formData, branchId, selectedSupplier?.id || null);
       const res = await mobileApi.createMobile(payload);
-      setSubmitSuccess(`Mobile registered successfully! Device ID: ${res.device_id.slice(0, 8)}...`);
+      const voucherLabel = (res as { voucher_no?: string }).voucher_no
+        ? ` — Sr No: ${(res as { voucher_no?: string }).voucher_no}`
+        : '';
+      setSubmitSuccess(`Mobile registered successfully${voucherLabel}! Device ID: ${res.device_id.slice(0, 8)}...`);
       setTimeout(() => {
         navigate('/dashboard/shop-admin/mobiles');
       }, 700);
@@ -1256,18 +1284,24 @@ export const AddMobileForm: React.FC = () => {
 
               <div className="flex items-center gap-2 self-start sm:self-auto">
                 <span className="text-xs font-semibold text-text-secondary">Sr No:</span>
-                <input
-                  type="text"
-                  placeholder="e.g. 1001"
-                  value={formData.paperwork.voucherNo}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      paperwork: { ...prev.paperwork, voucherNo: e.target.value },
-                    }))
-                  }
-                  className="w-24 px-2.5 py-1 text-xs font-bold text-primary bg-surface border border-border rounded focus:outline-none focus:ring-2 focus:ring-focus-ring"
-                />
+                {srNoLoading ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-bold bg-primary/10 text-primary border border-primary/20">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Loading…</span>
+                  </span>
+                ) : nextSrNo ? (
+                  <span
+                    title="Auto-assigned by server on save"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-bold bg-primary text-white border border-primary/40 cursor-default select-none"
+                  >
+                    <span>{nextSrNo}</span>
+                    <span className="text-[10px] font-normal opacity-70">(auto)</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-surface text-text-muted border border-border">
+                    {branchId ? 'Unavailable' : 'Select branch'}
+                  </span>
+                )}
               </div>
             </div>
 

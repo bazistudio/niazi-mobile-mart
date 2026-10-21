@@ -23,6 +23,11 @@ import {
 import { Button, Badge, Card } from '@/components/ui';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { mobileApi, mapDeviceRowToItem } from '../services/mobile.api';
+import { MobileDetailModal } from './MobileDetailModal';
+import { EditMobileModal } from './EditMobileModal';
+import { buildUsedMobileA4Html, buildUsedMobilePdfFilename } from '../templates/usedMobileA4Template';
+import { usePrintStore } from '@/lib/printer/print.store';
+import { downloadHtmlAsPdf } from '@/lib/printer/pdfExport';
 import type { BranchInvestmentSummary } from '../services/mobile.api';
 import type { MobileInventoryItem, MobileCondition } from '../types/mobile.types';
 
@@ -41,6 +46,31 @@ export const MobileInventoryDashboard: React.FC = () => {
   const [investmentError, setInvestmentError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [ptaFilter, setPtaFilter] = useState<string>('ALL');
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  const [editDeviceId, setEditDeviceId] = useState<string | null>(null);
+  const openPrintPreview = usePrintStore((s) => s.openPreview);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
+  const handlePrint = useCallback((profile: Parameters<typeof buildUsedMobileA4Html>[0]) => {
+    const html = buildUsedMobileA4Html(profile);
+    openPrintPreview({
+      html,
+      documentType: 'Generic',
+      referenceId: profile.device.id,
+      title: `Purchase Receipt — Sr No ${profile.paperwork?.voucher_no ?? profile.device.id.slice(0, 8)}`,
+    });
+  }, [openPrintPreview]);
+
+  const handleDownloadPdf = useCallback(async (profile: Parameters<typeof buildUsedMobileA4Html>[0]) => {
+    setPdfError(null);
+    try {
+      const html = buildUsedMobileA4Html(profile);
+      const filename = buildUsedMobilePdfFilename(profile);
+      await downloadHtmlAsPdf(html, filename);
+    } catch (err) {
+      setPdfError(err instanceof Error ? err.message : 'PDF generation failed');
+    }
+  }, []);
 
   const fetchMobiles = useCallback(async () => {
     setIsLoading(true);
@@ -110,6 +140,7 @@ export const MobileInventoryDashboard: React.FC = () => {
   const usedCount = items.filter((m) => m.condition === 'USED').length;
 
   return (
+    <>
     <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto pb-16 px-4 sm:px-6">
       {/* Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pt-4 border-b border-border pb-5">
@@ -431,11 +462,7 @@ export const MobileInventoryDashboard: React.FC = () => {
                     <td className="py-3.5 px-4 text-right whitespace-nowrap">
                       <button
                         type="button"
-                        onClick={() =>
-                          alert(
-                            `Device: ${item.brand} ${item.model}\nCondition: ${item.condition}\nIMEI: ${item.imei1}\nPTA Status: ${item.ptaStatus}\nPurchase Cost: Rs. ${item.purchaseCost.toLocaleString()}\nExpected Sale: Rs. ${item.salePrice.toLocaleString()}\nStatus: ${item.status}`
-                          )
-                        }
+                        onClick={() => setSelectedDeviceId(item.id)}
                         className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/10 rounded transition-colors cursor-pointer"
                         title="View details"
                       >
@@ -499,5 +526,32 @@ export const MobileInventoryDashboard: React.FC = () => {
         </Card>
       )}
     </div>
+
+      {/* Mobile detail modal */}
+      {selectedDeviceId && (
+        <MobileDetailModal
+          deviceId={selectedDeviceId}
+          branchId={branchId}
+          onClose={() => setSelectedDeviceId(null)}
+          onEdit={(id) => { setSelectedDeviceId(null); setEditDeviceId(id); }}
+          onPrint={handlePrint}
+          onDownloadPdf={(p) => { void handleDownloadPdf(p); }}
+        />
+      )}
+      {editDeviceId && (
+        <EditMobileModal
+          deviceId={editDeviceId}
+          branchId={branchId}
+          onClose={() => setEditDeviceId(null)}
+          onSaved={() => { setEditDeviceId(null); void fetchMobiles(); }}
+        />
+      )}
+      {pdfError && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[200] px-4 py-2 bg-red-600 text-white rounded-lg text-sm shadow-lg" role="alert">
+          PDF error: {pdfError}
+          <button type="button" onClick={() => setPdfError(null)} className="ml-3 underline text-xs">Dismiss</button>
+        </div>
+      )}
+    </>
   );
 };

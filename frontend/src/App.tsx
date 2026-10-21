@@ -9,8 +9,18 @@ import { UpdateModal } from '@/components/updater/UpdateModal';
 import { AutoUpdaterBanner } from '@/components/updater/AutoUpdaterBanner';
 import { UpdaterProvider } from '@/context/UpdaterContext';
 import { AppRoutes } from '@/app/router/AppRoutes';
+import { isTauriEnvironment } from '@/lib/tauri/tauriClient';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 export default function App() {
+  React.useEffect(() => {
+    if (isTauriEnvironment()) {
+      try {
+        getCurrentWindow().maximize().catch(() => {});
+      } catch {}
+    }
+  }, []);
+
   return (
     <ReactQueryProvider>
       <ThemeProvider>

@@ -104,7 +104,7 @@ export interface RegisterInspectionInput {
 
 /** Paperwork supplied at USED-device registration time. */
 export interface RegisterPaperworkInput {
-  voucher_no: string;
+  voucher_no?: string;          // Optional — omit to auto-allocate next sequential number for the branch
   purchase_date: string;        // ISO date string
   purchase_price: number;       // Must equal cost_price
   seller_name: string;
@@ -393,6 +393,58 @@ export interface PatchMobileDeviceInput {
   expected_sale_price?: number | null;
   pta_status?: MobilePtaStatus;
   notes?: string | null;
+  // Org-Admin-only USED-device edit fields (ignored for NEW devices):
+  brand?: string;
+  model?: string;
+  storage?: string;
+  ram?: string | null;
+  color?: string | null;
+  serial_number?: string | null;
+  // Paperwork edits (USED only, Org Admin only):
+  purchase_date?: string;
+  purchase_price?: number;
+  // Inspection update fields:
+  body_grade?: MobileBodyGrade;
+  screen_condition?: MobileScreenCondition;
+  battery_health_percent?: number | null;
+  defect_notes?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Full-profile response type (Phase 2 — for MobileDetailModal)
+// ---------------------------------------------------------------------------
+
+/** Seller details surfaced in a full-profile response (CNIC masked for non-admin roles). */
+export interface FullProfileSellerInfo {
+  seller_id: string | null;
+  seller_name: string;
+  father_name: string;           // sensitive — only for org-admin
+  seller_cnic_masked: string | null;    // masked: "35201-*******-8", or null if CNIC unrecorded
+  seller_phone: string;          // sensitive — only for org-admin
+  seller_address: string;        // sensitive — only for org-admin
+  ownership_declaration_acknowledged: boolean;
+  physical_affidavit_acknowledged: boolean;
+}
+
+/** Complete device record including device, paperwork, seller and inspection data. */
+export interface MobileFullProfile {
+  // Device
+  device: MobileDeviceRow;
+  // Paperwork — null for NEW devices
+  paperwork: {
+    id: string;
+    voucher_no: string;
+    purchase_date: string;
+    purchase_price: string;
+    recorded_by: string;
+    created_at: string;
+    seller: FullProfileSellerInfo;
+  } | null;
+  // Inspection
+  inspection: MobileInspectionRow | null;
+  // Branch
+  branch_name: string | null;
+  branch_code: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -545,16 +597,25 @@ export class MobileRepo {
         if (!input.paperwork) {
           throw new MobileRepoError('Paperwork is required for USED devices', 422);
         }
-        const voucherTaken = await this.isVoucherTaken(
-          input.branch_id,
-          input.paperwork.voucher_no,
-          client
-        );
-        if (voucherTaken) {
-          throw new MobileRepoError(
-            `VOUCHER_ALREADY_REGISTERED: voucher number "${input.paperwork.voucher_no}" is already used in this branch`,
-            409
+        // Auto-allocate voucher number when client omits it or submits an empty value.
+        // Branch row is locked inside getNextVoucherNumber — allocation and all subsequent
+        // INSERTs share the same client and transaction, guaranteeing no duplicates.
+        if (!input.paperwork.voucher_no || input.paperwork.voucher_no.trim() === '') {
+          input.paperwork.voucher_no = await this.getNextVoucherNumber(input.branch_id, client);
+        } else {
+          // Explicit voucher supplied — validate uniqueness as before.
+          const voucherTaken = await this.isVoucherTaken(
+            input.branch_id,
+            input.paperwork.voucher_no.trim(),
+            client
           );
+          if (voucherTaken) {
+            throw new MobileRepoError(
+              `VOUCHER_ALREADY_REGISTERED: voucher number "${input.paperwork.voucher_no}" is already used in this branch`,
+              409
+            );
+          }
+          input.paperwork.voucher_no = input.paperwork.voucher_no.trim();
         }
       }
 
@@ -1065,21 +1126,111 @@ export class MobileRepo {
       const newPtaStatus        = input.pta_status ?? device.pta_status;
       const newNotes            = input.notes !== undefined ? input.notes : device.notes;
 
+      // Org-Admin USED-device fields (undefined = unchanged)
+      const newBrand         = input.brand          !== undefined ? input.brand          : device.brand;
+      const newModel         = input.model          !== undefined ? input.model          : device.model;
+      const newStorage       = input.storage        !== undefined ? input.storage        : device.storage;
+      const newRam           = input.ram            !== undefined ? input.ram            : device.ram;
+      const newColor         = input.color          !== undefined ? input.color          : device.color;
+      const newSerialNumber  = input.serial_number  !== undefined ? input.serial_number  : device.serial_number;
+
       await client.query(
         `UPDATE mobile_devices
          SET status              = $1,
              expected_sale_price = $2,
              pta_status          = $3,
              notes               = $4,
-             updated_by          = $5,
-             updated_at          = $6
-         WHERE id = $7`,
+             brand               = $5,
+             model               = $6,
+             storage             = $7,
+             ram                 = $8,
+             color               = $9,
+             serial_number       = $10,
+             updated_by          = $11,
+             updated_at          = $12
+         WHERE id = $13`,
         [
           newStatus, newExpectedSalePrice, newPtaStatus,
-          newNotes, input.updated_by, now,
+          newNotes,
+          newBrand, newModel, newStorage, newRam, newColor, newSerialNumber,
+          input.updated_by, now,
           input.device_id,
         ]
       );
+
+      // USED-device paperwork fields (only update when supplied and device is USED)
+      if (device.condition === 'USED' && (input.purchase_date !== undefined || input.purchase_price !== undefined)) {
+        const pwCurrent = await client.query<{ purchase_date: string; purchase_price: string }>(
+          `SELECT purchase_date, purchase_price FROM mobile_purchase_paperwork
+           WHERE device_id = $1 AND branch_id = $2
+           FOR UPDATE`,
+          [input.device_id, input.branch_id]
+        );
+        if (pwCurrent.rows.length > 0) {
+          const pw = pwCurrent.rows[0];
+          const newPurchaseDate  = input.purchase_date  !== undefined ? input.purchase_date  : pw.purchase_date;
+          const newPurchasePrice = input.purchase_price !== undefined ? String(input.purchase_price) : pw.purchase_price;
+          await client.query(
+            `UPDATE mobile_purchase_paperwork
+             SET purchase_date  = $1,
+                 purchase_price = $2,
+                 updated_at     = $3
+             WHERE device_id = $4 AND branch_id = $5`,
+            [newPurchaseDate, newPurchasePrice, now, input.device_id, input.branch_id]
+          );
+
+          // Maintain accounting consistency between mobile_devices.cost_price and mobile_purchase_paperwork.purchase_price
+          if (input.purchase_price !== undefined) {
+            await client.query(
+              `UPDATE mobile_devices
+               SET cost_price = $1,
+                   updated_at = $2
+               WHERE id = $3`,
+              [newPurchasePrice, now, input.device_id]
+            );
+          }
+        }
+      }
+
+      // USED-device inspection update (only when supplied)
+      const hasInspectionUpdate = input.body_grade !== undefined
+        || input.screen_condition !== undefined
+        || input.battery_health_percent !== undefined
+        || input.defect_notes !== undefined;
+      if (device.condition === 'USED' && hasInspectionUpdate) {
+        // Build dynamic SET clause only for supplied fields
+        const inspUpdates: string[] = [];
+        const inspParams: unknown[] = [];
+        let pidx = 1;
+        if (input.body_grade !== undefined) {
+          inspUpdates.push(`body_grade = $${pidx++}`);
+          inspParams.push(input.body_grade);
+        }
+        if (input.screen_condition !== undefined) {
+          inspUpdates.push(`screen_condition = $${pidx++}`);
+          inspParams.push(input.screen_condition);
+        }
+        if (input.battery_health_percent !== undefined) {
+          inspUpdates.push(`battery_health_percent = $${pidx++}`);
+          inspParams.push(input.battery_health_percent);
+        }
+        if (input.defect_notes !== undefined) {
+          inspUpdates.push(`defect_notes = $${pidx++}`);
+          inspParams.push(input.defect_notes);
+        }
+        inspUpdates.push(`updated_by = $${pidx++}`);
+        inspParams.push(input.updated_by);
+        inspUpdates.push(`updated_at = $${pidx++}`);
+        inspParams.push(now);
+        inspParams.push(input.device_id);
+        inspParams.push(input.organization_id);
+        await client.query(
+          `UPDATE mobile_inspection_records
+           SET ${inspUpdates.join(', ')}
+           WHERE device_id = $${pidx++} AND organization_id = $${pidx}`,
+          inspParams
+        );
+      }
 
       // Status change → movement record
       if (input.status !== undefined && input.status !== device.status) {
@@ -1121,6 +1272,13 @@ export class MobileRepo {
           status_to:           newStatus,
           expected_sale_price: newExpectedSalePrice,
           pta_status:          newPtaStatus,
+          // Include org-admin field changes in audit (no sensitive seller data)
+          brand_changed:       input.brand    !== undefined,
+          model_changed:       input.model    !== undefined,
+          storage_changed:     input.storage  !== undefined,
+          paperwork_updated:   input.purchase_date !== undefined || input.purchase_price !== undefined,
+          inspection_updated:  input.body_grade !== undefined || input.screen_condition !== undefined
+                               || input.battery_health_percent !== undefined || input.defect_notes !== undefined,
         },
       });
 
@@ -1809,4 +1967,220 @@ export class MobileRepo {
     );
     return result.rows[0]?.exists === true;
   }
+  // -------------------------------------------------------------------------
+  // Phase 2 — getNextVoucherNumber (branch-locked sequential allocation)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Allocates and returns the next sequential voucher number for a branch.
+   *
+   * MUST be called inside an existing open transaction with the same client.
+   * Locks the branch row (`FOR UPDATE`) so concurrent registrations for the
+   * same branch serialize correctly — each receives a distinct number.
+   *
+   * Sequence starts at 1001 when no numeric voucher exists for the branch.
+   * Non-numeric legacy values are skipped safely via the `~ '^[0-9]+$'` guard.
+   * Returns the allocated number as a string (e.g. "1001").
+   */
+  async getNextVoucherNumber(branchId: string, client: PoolClient): Promise<string> {
+    // Lock the branch row to serialize concurrent same-branch allocations.
+    // Different branches lock different rows and proceed in parallel.
+    await client.query(
+      `SELECT id FROM branches WHERE id = $1 FOR UPDATE`,
+      [branchId]
+    );
+
+    // MAX over numeric-only vouchers; defaults to 1000 so first allocation = 1001.
+    const result = await client.query<{ next_no: string }>(
+      `SELECT (
+         COALESCE(
+           MAX(
+             CASE WHEN voucher_no ~ '^[0-9]+$'
+             THEN voucher_no::BIGINT
+             ELSE 0 END
+           ),
+           1000
+         ) + 1
+       )::TEXT AS next_no
+       FROM mobile_purchase_paperwork
+       WHERE branch_id = $1`,
+      [branchId]
+    );
+
+    const nextNo = result.rows[0]?.next_no ?? '1001';
+    return nextNo;
+  }
+
+  // -------------------------------------------------------------------------
+  // Phase 2 — getMobileFullProfile (complete detail for MobileDetailModal)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Returns a complete device profile including device specs, IMEIs, paperwork,
+   * seller details, and inspection data in a single efficient call.
+   *
+   * Authorization: caller must have already verified organization ownership
+   * and branch visibility. This method enforces organization_id and branch_id
+   * scoping but does NOT enforce role-based field visibility — the route
+   * handler is responsible for filtering sensitive seller fields per role.
+   *
+   * Follows the fail-closed audit pattern: paperwork access is audited inside
+   * the same transaction; data is returned only after the audit commits.
+   *
+   * Returns null when the device is not found in the given org/branch scope.
+   */
+  async getMobileFullProfile(
+    deviceId: string,
+    organizationId: string,
+    branchId: string,
+    accessedBy: string
+  ): Promise<MobileFullProfile | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // ── Device + IMEIs ───────────────────────────────────────────────────
+      const deviceResult = await client.query<MobileDeviceRow>(
+        `SELECT
+           d.id, d.organization_id, d.branch_id,
+           d.brand, d.model, d.storage, d.ram, d.color, d.serial_number,
+           d.pta_status, d.condition, d.status,
+           d.cost_price, d.expected_sale_price,
+           d.supplier_id, d.sale_id, d.notes,
+           d.created_by, d.updated_by, d.created_at, d.updated_at,
+           b.name AS branch_name,
+           b.code AS branch_code
+         FROM mobile_devices d
+         LEFT JOIN branches b ON b.id = d.branch_id
+         WHERE d.id = $1 AND d.organization_id = $2 AND d.branch_id = $3`,
+        [deviceId, organizationId, branchId]
+      );
+
+      if (deviceResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+
+      const deviceRow = deviceResult.rows[0];
+      const branchName = (deviceRow as MobileDeviceRow & { branch_name?: string | null }).branch_name ?? null;
+      const branchCode = (deviceRow as MobileDeviceRow & { branch_code?: string | null }).branch_code ?? null;
+
+      const imeiResult = await client.query<{ id: string; imei: string; slot: MobileSlot }>(
+        `SELECT id, imei, slot FROM mobile_imei_identifiers
+         WHERE device_id = $1 AND organization_id = $2
+         ORDER BY slot`,
+        [deviceId, organizationId]
+      );
+      deviceRow.imeis = imeiResult.rows;
+
+      // ── Paperwork + Seller (USED devices only) ───────────────────────────
+      let paperwork: MobileFullProfile['paperwork'] = null;
+
+      if (deviceRow.condition === 'USED') {
+        const pwResult = await client.query<{
+          id: string;
+          voucher_no: string;
+          purchase_date: string;
+          purchase_price: string;
+          seller_name: string;
+          father_name: string;
+          seller_cnic: string;
+          seller_phone: string;
+          seller_address: string;
+          ownership_declaration_acknowledged: boolean;
+          physical_affidavit_acknowledged: boolean;
+          seller_id: string | null;
+          recorded_by: string;
+          created_at: string;
+        }>(
+          `SELECT
+             id, voucher_no, purchase_date, purchase_price,
+             seller_name, father_name, seller_cnic, seller_phone, seller_address,
+             ownership_declaration_acknowledged, physical_affidavit_acknowledged,
+             seller_id, recorded_by, created_at
+           FROM mobile_purchase_paperwork
+           WHERE device_id = $1 AND organization_id = $2 AND branch_id = $3`,
+          [deviceId, organizationId, branchId]
+        );
+
+        if (pwResult.rows.length > 0) {
+          const pw = pwResult.rows[0];
+
+          // Fail-closed audit — paperwork access is logged before data is returned
+          await this.writeAuditEntry(client, {
+            organizationId,
+            branchId,
+            eventType: 'MOBILE_PAPERWORK_ACCESSED',
+            entityId: deviceId,
+            eventPayload: {
+              device_id:   deviceId,
+              branch_id:   branchId,
+              voucher_no:  pw.voucher_no,
+              accessed_by: accessedBy,
+              source:      'full_profile',
+              // seller_cnic, father_name, seller_phone, seller_address excluded
+            },
+          });
+
+          paperwork = {
+            id:            pw.id,
+            voucher_no:    pw.voucher_no,
+            purchase_date: pw.purchase_date,
+            purchase_price: pw.purchase_price,
+            recorded_by:   pw.recorded_by,
+            created_at:    pw.created_at,
+            seller: {
+              seller_id:       pw.seller_id ?? null,
+              seller_name:     pw.seller_name,
+              father_name:     pw.father_name,
+              seller_cnic_masked: this.maskCnic(pw.seller_cnic),
+              // Full phone/address returned here — route handler strips for non-admin roles
+              seller_phone:    pw.seller_phone,
+              seller_address:  pw.seller_address,
+              ownership_declaration_acknowledged: pw.ownership_declaration_acknowledged,
+              physical_affidavit_acknowledged:    pw.physical_affidavit_acknowledged,
+            },
+          };
+        }
+      }
+
+      // ── Inspection ───────────────────────────────────────────────────────
+      const inspResult = await client.query<MobileInspectionRow>(
+        `SELECT
+           id, device_id, organization_id,
+           body_grade, screen_condition, battery_health_percent,
+           touch_working, battery_backup_ok,
+           front_camera_ok, back_camera_ok,
+           speaker_ok, microphone_ok, charging_port_ok,
+           buttons_ok, biometrics_ok,
+           wifi_bluetooth_ok, sim_network_ok,
+           accessories_box, accessories_original_charger,
+           accessories_cable, accessories_handsfree,
+           defect_notes,
+           inspected_by, updated_by, created_at, updated_at
+         FROM mobile_inspection_records
+         WHERE device_id = $1 AND organization_id = $2`,
+        [deviceId, organizationId]
+      );
+
+      const inspection = inspResult.rows[0] ?? null;
+
+      await client.query('COMMIT');
+
+      return {
+        device:      deviceRow,
+        paperwork,
+        inspection,
+        branch_name: branchName,
+        branch_code: branchCode,
+      };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+
 }
