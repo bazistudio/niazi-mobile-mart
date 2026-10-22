@@ -73,6 +73,12 @@ export interface InventoryProduct {
   image?: string;
   updatedAt?: string;
   version?: number;
+  /** Compatible phone/device model names for this product. */
+  compatibleModels?: string[];
+  /** Stock in the Central Warehouse. Present on org-wide catalog views. */
+  warehouseStock?: number;
+  /** Total organization-wide stock across all branches and warehouse. */
+  totalOrgStock?: number;
 }
 
 export interface InventoryStats {

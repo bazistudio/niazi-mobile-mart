@@ -43,8 +43,13 @@ export const inventoryApi = {
     }
 
     const products: ProductDTO[] = items.map((p) => {
+      // P0-1 fix: in org scope, preserve warehouse_stock and total org stock separately.
+      // Do NOT map org-wide total (p.quantity) to the quantity field that the UI
+      // presents as warehouse stock. Branch-scoped views use the branch stock map.
+      const warehouseStock = isOrgScope ? (p.warehouse_stock ?? 0) : undefined;
+      const totalOrgStock = isOrgScope ? (p.quantity ?? 0) : undefined;
       const quantity = isOrgScope
-        ? (p.quantity ?? 0)
+        ? (p.warehouse_stock ?? 0)           // org catalog: show warehouse stock
         : (branchId ? (stockMap[p.id] ?? 0) : (p.quantity ?? 0));
 
       return {
@@ -59,6 +64,9 @@ export const inventoryApi = {
         averageCost: p.average_cost,
         lastPurchaseCost: p.purchase_price,
         quantity,
+        warehouseStock,
+        totalOrgStock,
+        compatibleModels: Array.isArray(p.compatible_models) ? p.compatible_models : [],
         lowStockThreshold: p.low_stock_threshold,
         description: p.description || undefined,
         status: 'active',
@@ -227,6 +235,7 @@ export const inventoryApi = {
     let purchasePrice: number | undefined;
     let lowStockThreshold: number | undefined;
     let description: string | undefined;
+    let compatibleModels: string[] | undefined;
 
     if (data instanceof FormData) {
       name = data.get('name') ? (data.get('name') as string) : undefined;
@@ -241,6 +250,11 @@ export const inventoryApi = {
       purchasePrice = data.get('purchasePrice') || data.get('purchase_price') ? Math.round(Number(data.get('purchasePrice') || data.get('purchase_price'))) : undefined;
       lowStockThreshold = data.get('lowStockThreshold') || data.get('minStockThreshold') || data.get('low_stock_threshold') ? Number(data.get('lowStockThreshold') || data.get('minStockThreshold') || data.get('low_stock_threshold')) : undefined;
       description = data.get('description') ? (data.get('description') as string) : undefined;
+      // compatible_models in FormData: multiple entries under 'compatible_models' key
+      const rawModels = data.getAll('compatible_models');
+      if (rawModels.length > 0) {
+        compatibleModels = rawModels.map((m) => String(m)).filter((m) => m.length > 0);
+      }
     } else {
       const d = data as any;
       name = d.name;
@@ -255,6 +269,12 @@ export const inventoryApi = {
       purchasePrice = d.purchasePrice !== undefined ? Math.round(Number(d.purchasePrice)) : d.purchase_price !== undefined ? Math.round(Number(d.purchase_price)) : undefined;
       lowStockThreshold = d.minStockThreshold !== undefined ? Number(d.minStockThreshold) : d.lowStockThreshold !== undefined ? Number(d.lowStockThreshold) : d.low_stock_threshold !== undefined ? Number(d.low_stock_threshold) : undefined;
       description = d.description;
+      // compatible_models: honour omit-preserves / empty-clears contract (matches primary service)
+      if (d.compatible_models !== undefined) {
+        compatibleModels = Array.isArray(d.compatible_models) ? d.compatible_models : [];
+      } else if (d.compatibleModels !== undefined) {
+        compatibleModels = Array.isArray(d.compatibleModels) ? d.compatibleModels : [];
+      }
     }
 
     const payload = {
@@ -270,6 +290,7 @@ export const inventoryApi = {
       purchase_price: purchasePrice,
       low_stock_threshold: lowStockThreshold,
       description,
+      compatible_models: compatibleModels,
     };
 
     const res = await httpClient.put<{ data?: any, product?: any }>(`/api/v1/products/${id}`, payload);

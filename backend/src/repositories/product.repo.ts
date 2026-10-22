@@ -43,6 +43,8 @@ export interface Product {
   warehouse_stock?: number;
   /** Stock currently held at Main Branch (id=...0002). Populated on org-wide catalog queries. */
   main_branch_stock?: number;
+  /** Compatible phone/device model names. Populated when queried with compatible_models join. */
+  compatible_models?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -64,6 +66,7 @@ export interface CreateProductDto {
   description?: string | null;
   initial_quantity?: number | null;
   branch_id?: string | null;
+  compatible_models?: string[] | null;
 }
 
 export interface UpdateProductDto {
@@ -82,6 +85,7 @@ export interface UpdateProductDto {
   low_stock_threshold?: number | null;
   description?: string | null;
   is_active?: boolean | null;
+  compatible_models?: string[] | null;
 }
 
 export interface ProductListFilter {
@@ -191,6 +195,11 @@ function mapProductRow(row: Record<string, unknown>): Product {
     main_branch_stock: row['main_branch_stock'] !== undefined && row['main_branch_stock'] !== null
       ? Number(row['main_branch_stock'])
       : undefined,
+    compatible_models: Array.isArray(row['compatible_models'])
+      ? (row['compatible_models'] as string[])
+      : row['compatible_models']
+        ? String(row['compatible_models']).split(',').filter(Boolean)
+        : [],
     created_at: row['created_at'] as string,
     updated_at: row['updated_at'] as string,
   };
@@ -533,6 +542,23 @@ export async function createProduct(
     // Unassigned branch isolation: We no longer auto-insert 0-stock placeholder rows
     // across unrelated branches, preserving strict branch boundaries.
 
+    // --- compatible_models persistence ---
+    if (dto.compatible_models && dto.compatible_models.length > 0) {
+      const now2 = NOW_ISO();
+      for (const modelName of dto.compatible_models) {
+        const trimmed = modelName.trim();
+        if (!trimmed) continue;
+        const modelId = uuidv4();
+        const normalized = normalizeModelName(trimmed);
+        await client.query(
+          `INSERT INTO product_compatible_models (id, product_id, model_name, normalized_model, brand_id, notes, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, NULL, NULL, $5, $5)
+           ON CONFLICT DO NOTHING`,
+          [modelId, id, trimmed, normalized, now2]
+        );
+      }
+    }
+
     await client.query('COMMIT');
     client.release();
     const product = await getProductById(pool, id);
@@ -678,6 +704,23 @@ export async function createProductWithInitialStock(
       }
     }
 
+    // --- compatible_models persistence ---
+    if (dto.compatible_models && dto.compatible_models.length > 0) {
+      const now2 = NOW_ISO();
+      for (const modelName of dto.compatible_models) {
+        const trimmed = modelName.trim();
+        if (!trimmed) continue;
+        const modelId = uuidv4();
+        const normalized = normalizeModelName(trimmed);
+        await client.query(
+          `INSERT INTO product_compatible_models (id, product_id, model_name, normalized_model, brand_id, notes, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, NULL, NULL, $5, $5)
+           ON CONFLICT DO NOTHING`,
+          [modelId, id, trimmed, normalized, now2]
+        );
+      }
+    }
+
     await client.query('COMMIT');
     client.release();
     const result = await getProductById(pool, id);
@@ -779,7 +822,11 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
 
     const sql = `
       SELECT ${selectCols.split(', ').map(c => `p.${c}`).join(', ')},
-             COALESCE(s.quantity, 0)::bigint AS initial_quantity
+             COALESCE(s.quantity, 0)::bigint AS initial_quantity,
+             COALESCE(
+               ARRAY(SELECT pcm.model_name FROM product_compatible_models pcm WHERE pcm.product_id = p.id ORDER BY pcm.model_name),
+               ARRAY[]::text[]
+             ) AS compatible_models
       FROM products p
       LEFT JOIN stock s ON p.id = s.product_id AND s.branch_id = $${branchIdx}
       WHERE ${conditions.join(' AND ')}
@@ -805,7 +852,11 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
     SELECT ${selectCols.split(', ').map(c => `p.${c}`).join(', ')},
            COALESCE(SUM(s.quantity), 0)::bigint AS initial_quantity,
            COALESCE(SUM(CASE WHEN s.branch_id = $${warehouseIdx} THEN s.quantity ELSE 0 END), 0)::bigint AS warehouse_stock,
-           COALESCE(SUM(CASE WHEN s.branch_id = $${mainBranchIdx} THEN s.quantity ELSE 0 END), 0)::bigint AS main_branch_stock
+           COALESCE(SUM(CASE WHEN s.branch_id = $${mainBranchIdx} THEN s.quantity ELSE 0 END), 0)::bigint AS main_branch_stock,
+           COALESCE(
+             ARRAY(SELECT pcm.model_name FROM product_compatible_models pcm WHERE pcm.product_id = p.id ORDER BY pcm.model_name),
+             ARRAY[]::text[]
+           ) AS compatible_models
     FROM products p
     LEFT JOIN stock s ON p.id = s.product_id
     WHERE ${conditions.join(' AND ')}
@@ -843,12 +894,16 @@ export async function getProductById(
     return mapProductRow(res.rows[0]!);
   }
 
-  // F-06: Include warehouse_stock and main_branch_stock to match listProducts() org-wide contract
+  // F-06: Include warehouse_stock, main_branch_stock, and compatible_models to match listProducts() org-wide contract
   const res = await pool.query(
     `SELECT ${selectCols.split(', ').map(c => c.includes(' AS ') ? `p.${c}` : `p.${c}`).join(', ')},
             COALESCE(SUM(s.quantity), 0)::bigint AS initial_quantity,
             COALESCE(SUM(CASE WHEN s.branch_id = $2 THEN s.quantity ELSE 0 END), 0)::bigint AS warehouse_stock,
-            COALESCE(SUM(CASE WHEN s.branch_id = $3 THEN s.quantity ELSE 0 END), 0)::bigint AS main_branch_stock
+            COALESCE(SUM(CASE WHEN s.branch_id = $3 THEN s.quantity ELSE 0 END), 0)::bigint AS main_branch_stock,
+            COALESCE(
+              ARRAY(SELECT pcm.model_name FROM product_compatible_models pcm WHERE pcm.product_id = p.id ORDER BY pcm.model_name),
+              ARRAY[]::text[]
+            ) AS compatible_models
      FROM products p
      LEFT JOIN stock s ON p.id = s.product_id
      WHERE p.id = $1
@@ -1010,6 +1065,28 @@ export async function updateProduct(
         id,
       ]
     );
+
+    // --- compatible_models sync (only when supplied; omitting preserves existing records) ---
+    if (dto.compatible_models !== undefined && dto.compatible_models !== null) {
+      // DELETE all existing records then INSERT the new set atomically
+      await client.query(
+        `DELETE FROM product_compatible_models WHERE product_id = $1`,
+        [id]
+      );
+      const now2 = NOW_ISO();
+      for (const modelName of dto.compatible_models) {
+        const trimmed = modelName.trim();
+        if (!trimmed) continue;
+        const modelId = uuidv4();
+        const normalized = normalizeModelName(trimmed);
+        await client.query(
+          `INSERT INTO product_compatible_models (id, product_id, model_name, normalized_model, brand_id, notes, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, NULL, NULL, $5, $5)
+           ON CONFLICT DO NOTHING`,
+          [modelId, id, trimmed, normalized, now2]
+        );
+      }
+    }
 
     await client.query('COMMIT');
     client.release();

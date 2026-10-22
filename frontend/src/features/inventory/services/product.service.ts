@@ -148,6 +148,11 @@ export const productService = {
       initial_quantity: initialQty > 0 ? initialQty : 0,
       branch_id: branchId,
       initial_branch_id: branchId,
+      compatible_models: Array.isArray(productData.compatible_models)
+        ? productData.compatible_models
+        : Array.isArray(productData.compatibleModels)
+          ? productData.compatibleModels
+          : [],
     });
 
     const [categories, brands, companies, colors, qualities] = await Promise.all([
@@ -209,20 +214,9 @@ export const productService = {
     const rawUnitId = productData.unitId || productData.unit_id;
     const unitId = parseValueOrUndefined(rawUnitId);
 
-    const hasQuantityAdjustment =
-      productData.quantity !== undefined &&
-      productData.quantity !== null &&
-      !isNaN(Number(productData.quantity));
-
-    let activeBranchIdForAdjust: string | null = null;
-    if (hasQuantityAdjustment) {
-      activeBranchIdForAdjust = getActiveBranchId();
-      if (!activeBranchIdForAdjust) {
-        throw new Error(
-          'Stock quantity adjustment requires an active branch. Please select a branch before updating stock levels.'
-        );
-      }
-    }
+    // NOTE: Stock quantity adjustments are intentionally NOT performed here.
+    // Master product editing (name, price, category, compatible models) must never
+    // cause stock changes. Use explicit Intake / Adjust workflows for stock changes.
 
     const updated = await tauriClient.productUpdate(id, {
       name: productData.name,
@@ -238,15 +232,12 @@ export const productService = {
       sale_price: productData.price !== undefined ? Math.round(Number(productData.price)) : undefined,
       low_stock_threshold: productData.minStockThreshold !== undefined ? Number(productData.minStockThreshold) : productData.lowStockThreshold !== undefined ? Number(productData.lowStockThreshold) : undefined,
       description: productData.description || null,
+      compatible_models: productData.compatible_models !== undefined
+        ? (Array.isArray(productData.compatible_models) ? productData.compatible_models : [])
+        : productData.compatibleModels !== undefined
+          ? (Array.isArray(productData.compatibleModels) ? productData.compatibleModels : [])
+          : undefined,
     });
-
-    if (hasQuantityAdjustment && activeBranchIdForAdjust) {
-      await tauriClient.inventoryAdjust({
-        product_id: id,
-        branch_id: activeBranchIdForAdjust,
-        target_quantity: Number(productData.quantity),
-      });
-    }
 
     const [categories, brands, companies, colors, qualities, stockMap] = await Promise.all([
       categoryService.getCategories().catch(() => []),

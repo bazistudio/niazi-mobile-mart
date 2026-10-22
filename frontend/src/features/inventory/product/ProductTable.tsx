@@ -14,6 +14,7 @@ import { selectSortConfig, selectSetSort } from '@/features/inventory/core/inven
 interface ProductTableProps {
   products: InventoryProduct[];
   isLoading: boolean;
+  isOrgScope?: boolean;
 }
 
 function SortIcon({ field, activeField, direction }: { field: SortField; activeField: SortField; direction: SortDirection }) {
@@ -23,7 +24,7 @@ function SortIcon({ field, activeField, direction }: { field: SortField; activeF
     : <ArrowDown className="h-3.5 w-3.5 text-[#006970] dark:text-[#00B4BB]" />;
 }
 
-export const ProductTable = ({ products, isLoading }: ProductTableProps) => {
+export const ProductTable = ({ products, isLoading, isOrgScope = false }: ProductTableProps) => {
   const sort = selectSortConfig();
   const setSort = selectSetSort();
 
@@ -50,7 +51,10 @@ export const ProductTable = ({ products, isLoading }: ProductTableProps) => {
     { label: 'Product', field: 'name' },
     { label: 'Category', field: 'category' },
     { label: 'SKU' },
-    { label: 'Stock', field: 'stock' },
+    ...(isOrgScope
+      ? [{ label: 'Warehouse Stock', field: 'stock' as SortField }, { label: 'Total Org Stock' }]
+      : [{ label: 'Stock', field: 'stock' as SortField }]
+    ),
     { label: 'Status' },
     { label: 'Cost', field: 'purchasePrice' },
     { label: 'Price', field: 'price' },
@@ -114,17 +118,32 @@ export const ProductTable = ({ products, isLoading }: ProductTableProps) => {
                     {product.sku}
                   </code>
                 </td>
-                <td className="px-4 py-1.5">
-                  <span
-                    className={`font-semibold ${
-                      product.status === StockStatus.OUT_OF_STOCK ? 'text-red-600 dark:text-red-400' :
-                      product.status === StockStatus.LOW_STOCK ? 'text-amber-600 dark:text-amber-400' :
-                      'text-gray-900 dark:text-white'
-                    }`}
-                  >
-                    {product.stock} {product.unit}
-                  </span>
-                </td>
+                {isOrgScope ? (
+                  <>
+                    <td className="px-4 py-1.5">
+                      <span className="font-semibold text-gray-900 dark:text-white">
+                        {product.warehouseStock ?? product.stock} {product.unit}
+                      </span>
+                    </td>
+                    <td className="px-4 py-1.5">
+                      <span className="font-semibold text-gray-700 dark:text-gray-300">
+                        {product.totalOrgStock ?? product.stock} {product.unit}
+                      </span>
+                    </td>
+                  </>
+                ) : (
+                  <td className="px-4 py-1.5">
+                    <span
+                      className={`font-semibold ${
+                        product.status === StockStatus.OUT_OF_STOCK ? 'text-red-600 dark:text-red-400' :
+                        product.status === StockStatus.LOW_STOCK ? 'text-amber-600 dark:text-amber-400' :
+                        'text-gray-900 dark:text-white'
+                      }`}
+                    >
+                      {product.stock} {product.unit}
+                    </span>
+                  </td>
+                )}
                 <td className="px-4 py-1.5">
                   <StockStatusBadge status={product.status} />
                 </td>

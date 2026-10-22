@@ -90,7 +90,7 @@ export const ProductListWidget = () => {
         {reqStatus === 'loading' && filtered.length === 0 ? (
           <LoadingState rows={5} />
         ) : (
-          <ProductTable products={filtered} isLoading={reqStatus === 'loading'} />
+          <ProductTable products={filtered} isLoading={reqStatus === 'loading'} isOrgScope={isOrgAdmin} />
         )}
       </div>
     </div>

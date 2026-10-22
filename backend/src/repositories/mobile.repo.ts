@@ -419,6 +419,7 @@ export interface FullProfileSellerInfo {
   seller_id: string | null;
   seller_name: string;
   father_name: string;           // sensitive — only for org-admin
+  seller_cnic: string;           // full CNIC for official printed paperwork / legal receipts
   seller_cnic_masked: string | null;    // masked: "35201-*******-8", or null if CNIC unrecorded
   seller_phone: string;          // sensitive — only for org-admin
   seller_address: string;        // sensitive — only for org-admin
@@ -2133,6 +2134,7 @@ export class MobileRepo {
               seller_id:       pw.seller_id ?? null,
               seller_name:     pw.seller_name,
               father_name:     pw.father_name,
+              seller_cnic:     pw.seller_cnic,
               seller_cnic_masked: this.maskCnic(pw.seller_cnic),
               // Full phone/address returned here — route handler strips for non-admin roles
               seller_phone:    pw.seller_phone,

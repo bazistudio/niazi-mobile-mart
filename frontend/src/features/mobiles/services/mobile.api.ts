@@ -321,6 +321,7 @@ export interface FullProfileSellerInfo {
   seller_id: string | null;
   seller_name: string;
   father_name: string;
+  seller_cnic?: string;
   seller_cnic_masked: string | null;
   seller_phone: string;
   seller_address: string;

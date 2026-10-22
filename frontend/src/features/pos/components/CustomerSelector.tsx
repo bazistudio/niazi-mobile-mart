@@ -18,7 +18,7 @@ export const CustomerSelector: React.FC = () => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const activeSession = usePosStore((s) => s.getActiveSession());
+  const activeSession = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId));
   const setCustomer = usePosStore((s) => s.setCustomer);
   const loadInvoice = usePosStore((s) => s.loadInvoice);
 

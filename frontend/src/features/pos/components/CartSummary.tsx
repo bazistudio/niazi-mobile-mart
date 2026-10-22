@@ -28,7 +28,7 @@ export const CartSummary: React.FC = () => {
   const [isCashOpenModalOpen, setCashOpenModalOpen] = useState(false);
 
   const clearCart = usePosStore((s) => s.clearCart);
-  const activeSession = usePosStore((s) => s.getActiveSession());
+  const activeSession = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId));
   const setSessionMode = usePosStore((s) => s.setSessionMode);
   const setInvoiceDiscount = usePosStore((s) => s.setInvoiceDiscount);
   const completeTransaction = usePosStore((s) => s.completeTransaction);

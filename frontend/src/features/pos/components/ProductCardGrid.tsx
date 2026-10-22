@@ -20,7 +20,7 @@ export const ProductCardGrid: React.FC<ProductCardGridProps> = ({
   const products = useInventoryStore((s) => s.products);
   const status = useInventoryStore((s) => s.status);
   const addToCart = usePosStore((s) => s.addToCart);
-  const activeSession = usePosStore((s) => s.getActiveSession());
+  const activeSession = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId));
   const isReturnMode = activeSession?.mode === 'replace';
 
   // Filter products by selected category and search query

@@ -14,8 +14,8 @@
  *   // or: downloadHtmlAsPdf(html, filename)
  *
  * Legal notice:
- *   The declaration text below is a placeholder.
- *   The business owner MUST review and approve wording before use as an official affidavit.
+ *   The declaration text (حلف نامہ برائے ذاتی ملکیت) has been approved by the business owner.
+ *   This document is printed and physically signed by the seller at point of sale.
  */
 
 import type { MobileFullProfile } from '../services/mobile.api';
@@ -62,11 +62,11 @@ function boolCell(v: boolean | null | undefined): string {
 /** A two-column row for the detail tables. */
 function row(label: string, value: string | null | undefined, mono = false): string {
   const v = value ? esc(value) : '<span style="color:#9ca3af;font-style:italic">Not recorded</span>';
-  const style = mono ? 'font-family:monospace;font-size:12px;letter-spacing:0.03em' : '';
+  const style = mono ? 'font-family:monospace;font-size:12px;letter-spacing:0.02em' : '';
   return `
     <tr>
-      <td style="padding:5px 10px 5px 0;color:#6b7280;font-size:12px;white-space:nowrap;vertical-align:top">${label}</td>
-      <td style="padding:5px 0;font-size:12px;font-weight:500;${style}">${v}</td>
+      <td style="padding:4.5px 10px 4.5px 0;color:#6b7280;font-size:12px;white-space:nowrap;vertical-align:top">${label}</td>
+      <td style="padding:4.5px 0;font-size:12px;font-weight:500;${style}">${v}</td>
     </tr>`;
 }
 
@@ -83,7 +83,7 @@ export function buildUsedMobileA4Html(profile: MobileFullProfile): string {
 
   const sellerName    = esc(paperwork?.seller?.seller_name  ?? '—');
   const fatherName    = esc(paperwork?.seller?.father_name  ?? '—');
-  const sellerCnic    = esc(paperwork?.seller?.seller_cnic_masked ?? '—');
+  const sellerCnic    = esc(paperwork?.seller?.seller_cnic ?? paperwork?.seller?.seller_cnic_masked ?? '—');
   const sellerPhone   = esc(paperwork?.seller?.seller_phone ?? '—');
   const sellerAddr    = esc(paperwork?.seller?.seller_address ?? '—');
   const branchLabel   = esc(branch_name ?? device.branch_id ?? '—');
@@ -103,7 +103,7 @@ export function buildUsedMobileA4Html(profile: MobileFullProfile): string {
     ['SIM / Network',      inspection?.sim_network_ok],
   ];
   const checksHtml = checks.map(([label, val]) =>
-    `<td style="width:50%;padding:4px 6px;font-size:11px;border:1px solid #e5e7eb">${esc(label)}: ${boolCell(val)}</td>`
+    `<td style="width:50%;padding:6px 10px;font-size:12px;border:1px solid #e5e7eb">${esc(label)}: ${boolCell(val)}</td>`
   );
   // pair them up into rows
   const checkRows: string[] = [];
@@ -119,76 +119,145 @@ export function buildUsedMobileA4Html(profile: MobileFullProfile): string {
     ['Handsfree',      inspection?.accessories_handsfree],
   ];
   const accHtml = accessories.map(([label, val]) =>
-    `<span style="margin-right:12px;font-size:11px">${boolCell(val)} ${esc(label)}</span>`
+    `<span style="margin-right:16px;font-size:12px">${boolCell(val)} ${esc(label)}</span>`
   ).join('');
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Used Mobile Purchase Receipt — Sr No ${voucherNo}</title>
+  <title>Purchase Receipt — Sr No ${voucherNo}</title>
   <style>
-    @page { size: A4 portrait; margin: 18mm 16mm 18mm 16mm; }
+    @page { size: A4 portrait; margin: 12mm 14mm 12mm 14mm; }
     * { box-sizing: border-box; }
     body {
-      font-family: 'Segoe UI', Arial, sans-serif;
-      font-size: 13px;
+      font-family: 'Noto Nastaliq Urdu', 'Urdu Typesetting', 'Jameel Noori Nastaleeq', 'Segoe UI', Arial, sans-serif;
+      font-size: 12.5px;
       color: #111827;
       background: #fff;
       margin: 0;
       padding: 0;
+      line-height: 1.4;
     }
-    h2 { margin: 0 0 2px 0; font-size: 18px; font-weight: 700; color: #111827; }
-    h3 { margin: 14px 0 6px 0; font-size: 13px; font-weight: 700; text-transform: uppercase;
-         letter-spacing: 0.06em; color: #374151; border-bottom: 1.5px solid #d1d5db; padding-bottom: 3px; }
+    .page-content {
+      max-width: 182mm;
+      margin: 0 auto;
+      width: 100%;
+    }
+    h2 { margin: 0 0 2px 0; font-size: 20px; font-weight: 700; color: #111827; }
+    h3 { margin: 12px 0 5px 0; font-size: 12.5px; font-weight: 700; text-transform: uppercase;
+         letter-spacing: 0.05em; color: #374151; border-bottom: 1.5px solid #d1d5db; padding-bottom: 3px; }
     table { border-collapse: collapse; width: 100%; }
     .section { margin-bottom: 10px; }
-    .badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 9999px;
+    .declaration-box {
+      margin-top: 14px;
+      padding: 10px 14px;
+      border: 1.5px solid #374151;
+      border-radius: 4px;
+      background: #f9fafb;
+    }
+    .declaration-urdu {
+      direction: rtl;
+      text-align: right;
+      font-size: 14px;
+      line-height: 1.9;
+      font-family: 'Noto Nastaliq Urdu', 'Urdu Typesetting', 'Jameel Noori Nastaleeq', 'Segoe UI', Arial, sans-serif;
+      color: #111827;
+    }
+    .declaration-heading {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .declaration-english {
+      margin-top: 5px;
+      font-size: 11px;
+      color: #374151;
+      font-style: italic;
+      text-align: left;
+      direction: ltr;
+    }
+    .sig-section {
+      margin-top: 14px;
+    }
+    .sig-table td {
+      vertical-align: top;
+      padding: 0 10px;
+    }
+    .sig-table td:first-child { padding-left: 0; }
+    .sig-table td:last-child { padding-right: 0; }
+    .sig-label {
       font-size: 11px;
       font-weight: 600;
+      color: #374151;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 5px;
     }
-    .badge-blue { background: #dbeafe; color: #1d4ed8; }
-    .badge-green { background: #dcfce7; color: #15803d; }
-    .badge-yellow { background: #fef9c3; color: #854d0e; }
-    .badge-red { background: #fee2e2; color: #b91c1c; }
-    .footer { margin-top: 18px; border-top: 1.5px solid #d1d5db; padding-top: 10px;
-              font-size: 11px; color: #6b7280; }
-    .sig-block { border-top: 1px dashed #9ca3af; margin-top: 28px; padding-top: 4px;
-                 font-size: 11px; color: #6b7280; text-align: center; }
+    .sig-line {
+      border-bottom: 1.5px solid #374151;
+      height: 40px;
+      margin-bottom: 5px;
+    }
+    .sig-sub {
+      font-size: 10px;
+      color: #6b7280;
+      text-align: center;
+    }
+    .thumb-box {
+      width: 40mm;
+      height: 48mm;
+      border: 1.5px solid #111827;
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto;
+    }
+    .thumb-box-inner {
+      text-align: center;
+      font-size: 10.5px;
+      font-weight: 600;
+      color: #6b7280;
+      line-height: 1.4;
+    }
+    .admin-approval-box {
+      margin-top: 16px;
+      padding: 12px 16px;
+      border: 1.5px dashed #1d4ed8;
+      border-radius: 4px;
+      background: #eff6ff;
+    }
     @media print {
       body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
   </style>
 </head>
 <body>
+<div class="page-content">
 
   <!-- ── HEADER ───────────────────────────────────────────────────────── -->
-  <table style="margin-bottom:12px">
+  <table style="margin-bottom:10px">
     <tr>
-      <td style="width:60%;vertical-align:top">
+      <td style="width:58%;vertical-align:middle">
         <h2>Niazi Mobile Mart</h2>
-        <div style="font-size:11px;color:#6b7280;line-height:1.5">
-          Shop # LG 02, Makkah Mobile Mall<br>
-          Branch: <strong>${branchLabel}</strong>
+        <div style="font-size:11.5px;color:#6b7280;line-height:1.4">
+          Shop # LG 02, Makkah Mobile Mall | Branch: <strong>${branchLabel}</strong>
         </div>
       </td>
-      <td style="vertical-align:top;text-align:right">
+      <td style="vertical-align:middle;text-align:right">
         <div style="font-size:11px;color:#6b7280;margin-bottom:3px">Printed: ${esc(printDate)}</div>
-        <div style="font-size:22px;font-weight:800;color:#1d4ed8;letter-spacing:0.04em">Sr # ${voucherNo}</div>
-        <span class="badge badge-blue">USED MOBILE PURCHASE RECEIPT</span>
+        <div style="font-size:24px;font-weight:800;color:#1d4ed8;letter-spacing:0.04em">Sr # ${voucherNo}</div>
       </td>
     </tr>
   </table>
 
-  <hr style="border:none;border-top:2px solid #1d4ed8;margin-bottom:14px">
+  <hr style="border:none;border-top:2px solid #1d4ed8;margin-bottom:10px">
 
   <!-- ── DEVICE + PAPERWORK ────────────────────────────────────────────── -->
-  <table style="margin-bottom:6px">
+  <table style="margin-bottom:8px">
     <tr style="vertical-align:top">
-      <td style="width:50%;padding-right:12px">
+      <td style="width:50%;padding-right:14px">
         <h3>Device Information</h3>
         <table>
           ${row('Brand',        device.brand)}
@@ -203,7 +272,7 @@ export function buildUsedMobileA4Html(profile: MobileFullProfile): string {
           ${row('Status',       device.status?.replace(/_/g, ' '))}
         </table>
       </td>
-      <td style="width:50%;padding-left:12px;border-left:1px solid #e5e7eb">
+      <td style="width:50%;padding-left:14px;border-left:1px solid #e5e7eb">
         <h3>Purchase Paperwork</h3>
         <table>
           ${row('Voucher Sr No',    paperwork?.voucher_no)}
@@ -211,103 +280,120 @@ export function buildUsedMobileA4Html(profile: MobileFullProfile): string {
           ${row('Purchase Price',   purchPrice)}
           ${row('Recorded By',      paperwork?.recorded_by)}
         </table>
+
+        <!-- SELLER INFO -->
+        <h3 style="margin-top:10px">Seller Information</h3>
+        <table>
+          ${row('Full Name',    sellerName)}
+          ${row("Father's Name", fatherName)}
+          ${row('CNIC',         sellerCnic, true)}
+          ${row('Mobile No',    sellerPhone, true)}
+          ${row('Address',      sellerAddr)}
+        </table>
       </td>
     </tr>
   </table>
 
-  <!-- ── SELLER ───────────────────────────────────────────────────────── -->
-  <div class="section">
-    <h3>Seller Information</h3>
-    <table>
-      <tr>
-        <td style="width:50%;padding-right:12px;vertical-align:top">
-          <table>
-            ${row('Full Name',    sellerName)}
-            ${row("Father's Name", fatherName)}
-            ${row('CNIC',         sellerCnic, true)}
-          </table>
-        </td>
-        <td style="width:50%;padding-left:12px;border-left:1px solid #e5e7eb;vertical-align:top">
-          <table>
-            ${row('Mobile No',  sellerPhone, true)}
-            ${row('Address',    sellerAddr)}
-          </table>
-        </td>
-      </tr>
-    </table>
-  </div>
-
   <!-- ── INSPECTION ───────────────────────────────────────────────────── -->
   <div class="section">
-    <h3>Physical Inspection</h3>
+    <h3>Physical Inspection &amp; Accessories</h3>
     <table style="margin-bottom:6px">
       <tr style="vertical-align:top">
-        <td style="width:33%;padding-right:8px">
+        <td style="width:33%;padding-right:10px">
           <table>
             ${row('Body Grade',     inspection?.body_grade)}
             ${row('Screen',         inspection?.screen_condition?.replace(/_/g, ' '))}
           </table>
         </td>
-        <td style="width:33%;padding:0 8px;border-left:1px solid #e5e7eb">
+        <td style="width:33%;padding:0 10px;border-left:1px solid #e5e7eb">
           <table>
             ${row('Battery Health', inspection?.battery_health_percent != null ? `${inspection.battery_health_percent}%` : null)}
           </table>
         </td>
-        <td style="width:34%;padding-left:8px;border-left:1px solid #e5e7eb;font-size:12px">
+        <td style="width:34%;padding-left:10px;border-left:1px solid #e5e7eb;font-size:11.5px">
           <strong>Accessories:</strong><br>${accHtml || '<span style="color:#9ca3af;font-style:italic">Not recorded</span>'}
         </td>
       </tr>
     </table>
 
     <!-- Functional checks grid -->
-    <table style="border:1px solid #e5e7eb;margin-top:4px">
+    <table style="border:1px solid #e5e7eb;margin-top:5px">
       ${checkRows.join('\n')}
     </table>
 
     ${inspection?.defect_notes ? `
-    <div style="margin-top:6px;padding:6px 10px;background:#fef9c3;border:1px solid #fde68a;border-radius:4px;font-size:12px">
+    <div style="margin-top:6px;padding:5px 12px;background:#fef9c3;border:1px solid #fde68a;border-radius:3px;font-size:11.5px">
       <strong>Defect Notes:</strong> ${esc(inspection.defect_notes)}
     </div>` : ''}
   </div>
 
-  <!-- ── DECLARATION PLACEHOLDER ──────────────────────────────────────── -->
-  <div style="margin-top:10px;padding:8px 12px;border:1px dashed #d1d5db;border-radius:4px;font-size:11px;color:#6b7280">
-    <strong style="color:#374151">[DECLARATION PLACEHOLDER — Business Owner Must Approve Wording]</strong><br>
-    I, the seller named above, hereby declare that the above-mentioned mobile device is my lawful property,
-    free from any encumbrance, dispute, or pending case, and that I am voluntarily selling it to Niazi Mobile Mart.
-    Physical affidavit paperwork and thumb impressions have been obtained separately.
+  <!-- ── DECLARATION ──────────────────────────────────────────────────── -->
+  <div class="declaration-box">
+    <div class="declaration-urdu">
+      <span class="declaration-heading">حلف نامہ برائے ذاتی ملکیت</span>
+      <br>
+      <span>میں حلفیہ کہتا ہوں کہ یہ موبائل میری ذاتی ملکیت ہے اور میں خرید کنندہ سے رقم وصول کر چکا ہوں۔</span>
+    </div>
+    <div class="declaration-english">Seller affirms under oath that the device is unencumbered and not stolen or under police warrant.</div>
   </div>
 
   <!-- ── SIGNATURE BLOCKS ─────────────────────────────────────────────── -->
-  <table style="margin-top:20px">
-    <tr>
-      <td style="width:33%;text-align:center">
-        <div class="sig-block">Seller Signature / Thumb</div>
-      </td>
-      <td style="width:34%;text-align:center">
-        <div class="sig-block">Staff Signature</div>
-      </td>
-      <td style="width:33%;text-align:center">
-        <div class="sig-block">Shop Stamp</div>
-      </td>
-    </tr>
-  </table>
-
-  <!-- ── FOOTER ───────────────────────────────────────────────────────── -->
-  <div class="footer">
-    <table>
+  <div class="sig-section">
+    <h3>Signatures &amp; Thumb Impression</h3>
+    <table class="sig-table" style="width:100%">
       <tr>
-        <td style="width:60%">
-          This is a computer-generated record. This document does not replace a required physical affidavit, 
-          CNIC copy, or thumb impression. Not a tax invoice.
+        <td style="width:38%;vertical-align:top">
+          <div class="sig-label">Seller</div>
+          <div style="font-size:11.5px;margin-bottom:8px;line-height:1.4">
+            <div><strong>${sellerName}</strong> S/D/W of ${fatherName}</div>
+            <div>CNIC: <span style="font-family:monospace;font-weight:600">${sellerCnic}</span></div>
+          </div>
+          <div class="sig-line"></div>
+          <div class="sig-sub">Seller Signature</div>
         </td>
-        <td style="text-align:right;vertical-align:top">
-          Device ID: <span style="font-family:monospace;font-size:10px">${esc(device.id)}</span>
+        <td style="width:24%;vertical-align:top;text-align:center">
+          <div class="sig-label" style="text-align:center">Thumb Impression</div>
+          <div class="thumb-box">
+            <div class="thumb-box-inner">
+              Thumb Impression
+            </div>
+          </div>
+        </td>
+        <td style="width:38%;vertical-align:top;border-left:1px solid #e5e7eb;padding-left:14px">
+          <div class="sig-label">Shop Staff</div>
+          <div class="sig-line" style="height:36px"></div>
+          <div class="sig-sub" style="margin-bottom:10px">Staff Signature</div>
+          <div class="sig-label">Shop Stamp</div>
+          <div style="border:1px dashed #9ca3af;height:42px;border-radius:3px"></div>
         </td>
       </tr>
     </table>
   </div>
 
+  <!-- ── FINAL ADMIN APPROVAL & FILE FILING SECTION ───────────────────── -->
+  <div class="admin-approval-box">
+    <table style="width:100%">
+      <tr>
+        <td style="width:58%;vertical-align:middle">
+          <div style="font-size:12.5px;font-weight:700;color:#1e40af">
+            FINAL ADMIN APPROVAL &amp; RECORD ARCHIVE
+          </div>
+          <div style="font-size:11px;color:#4b5563;margin-top:4px">
+            Verified with original CNIC &amp; approved for permanent shop record filing.
+          </div>
+        </td>
+        <td style="width:42%;vertical-align:bottom;text-align:right">
+          <div style="display:inline-block;width:160px;text-align:center">
+            <div style="border-bottom:1.5px solid #1e40af;height:28px;margin-bottom:4px"></div>
+            <div style="font-size:11px;font-weight:700;color:#1e40af">Admin Signature</div>
+            <div style="font-size:10px;color:#6b7280">Date: _____ / _____ / 20___</div>
+          </div>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+</div>
 </body>
 </html>`;
 }

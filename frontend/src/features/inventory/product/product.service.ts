@@ -93,7 +93,14 @@ export const productService = {
     if (imageFile) {
       const formData = new FormData();
       Object.entries(data).forEach(([key, val]) => {
-        if (val !== undefined) formData.append(key, String(val));
+        if (val === undefined) return;
+        if (key === 'compatibleModels' || key === 'compatible_models') {
+          // Append each model as a separate FormData entry so getAll() retrieves the array correctly
+          const models = Array.isArray(val) ? val : [];
+          models.forEach((m: string) => formData.append('compatible_models', m));
+        } else {
+          formData.append(key, String(val));
+        }
       });
       formData.append('image', imageFile);
       payload = formData;

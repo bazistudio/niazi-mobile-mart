@@ -6,7 +6,7 @@ import { usePosStore } from '../store/usePosStore';
 import { CartItem } from '../store/usePosStore';
 
 export const CartTable = () => {
-  const activeSession = usePosStore(state => state.getActiveSession());
+  const activeSession = usePosStore(state => state.saleTabs.find(t => t.id === state.activeTabId));
   const updateQuantity = usePosStore(state => state.updateQuantity);
   const removeFromCart = usePosStore(state => state.removeFromCart);
 

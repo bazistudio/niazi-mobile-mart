@@ -1993,6 +1993,12 @@ export interface Product {
   low_stock_threshold: number;
   quantity?: number;
   min_stock_level?: number;
+  /** Stock in Central Warehouse (id=...0003). Present on org-wide catalog responses. */
+  warehouse_stock?: number;
+  /** Stock in Main Branch (id=...0002). Present on org-wide catalog responses. */
+  main_branch_stock?: number;
+  /** Compatible phone/device model names. */
+  compatible_models?: string[];
   is_active: boolean;
   description: string | null;
   created_at: string;
@@ -2017,6 +2023,7 @@ export interface CreateProductDto {
   initial_branch_id?: string | null;
   initial_quantity?: number | null;
   branch_id?: string | null;
+  compatible_models?: string[] | null;
 }
 
 export interface UpdateProductDto {
@@ -2035,6 +2042,7 @@ export interface UpdateProductDto {
   low_stock_threshold?: number | null;
   is_active?: boolean | null;
   description?: string | null;
+  compatible_models?: string[] | null;
 }
 
 export interface ProductFilter {

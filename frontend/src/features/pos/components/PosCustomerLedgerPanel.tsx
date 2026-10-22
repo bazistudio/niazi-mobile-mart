@@ -15,7 +15,7 @@ interface PosCustomerLedgerPanelProps {
 
 export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ isSaleSuccess }) => {
   const navigate = useNavigate();
-  const activeSession = usePosStore((s) => s.getActiveSession());
+  const activeSession = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId));
   const setCustomer = usePosStore((s) => s.setCustomer);
 
   const selectedCustomer = activeSession?.customer && activeSession.customer.id !== 'walk-in'

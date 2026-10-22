@@ -13,7 +13,7 @@ export const ProductSearch = () => {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [revealedPriceId, setRevealedPriceId] = useState<string | null>(null);
 
-  const activeSession = usePosStore(state => state.getActiveSession());
+  const activeSession = usePosStore(state => state.saleTabs.find(t => t.id === state.activeTabId));
   const addToCart = usePosStore(state => state.addToCart);
   const products = useInventoryStore((s) => s.products);
 

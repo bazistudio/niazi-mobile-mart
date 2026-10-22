@@ -346,6 +346,7 @@ export function OrganizationProductsPage() {
                     <th className="px-4 py-3">Category</th>
                     <th className="px-4 py-3">Purchase Cost</th>
                     <th className="px-4 py-3">Sale Price</th>
+                    <th className="px-4 py-3">Warehouse Stock</th>
                     <th className="px-4 py-3">Total Org Stock</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3 text-right">Actions</th>
@@ -354,7 +355,7 @@ export function OrganizationProductsPage() {
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {filteredProducts.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="text-center py-10 text-gray-400">
+                      <td colSpan={9} className="text-center py-10 text-gray-400">
                         No product master records found matching your search.
                       </td>
                     </tr>
@@ -370,8 +371,13 @@ export function OrganizationProductsPage() {
                         <td className="px-4 py-3 font-bold text-[#006970] dark:text-[#00B4BB]">
                           Rs. {(p.price || 0).toLocaleString()}
                         </td>
+                        {/* P0-1 fix: warehouse stock (central warehouse only) */}
                         <td className="px-4 py-3 font-bold text-gray-900 dark:text-white tabular-nums">
-                          {p.stock} {p.unit || 'pcs'}
+                          {(p.warehouseStock ?? p.stock)} {p.unit || 'pcs'}
+                        </td>
+                        {/* P0-1 fix: total org-wide stock */}
+                        <td className="px-4 py-3 text-gray-500 dark:text-gray-400 tabular-nums">
+                          {(p.totalOrgStock ?? p.stock)} {p.unit || 'pcs'}
                         </td>
                         <td className="px-4 py-3">
                           <span

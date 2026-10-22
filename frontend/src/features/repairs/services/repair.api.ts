@@ -55,6 +55,12 @@ export interface CreateRepairJobPayload {
   internal_notes?: string | null;
   customer_notes?: string | null;
   branch_id?: string | null;
+  /** Optional advance payment collected at booking time. */
+  advance_payment?: {
+    amount: number;
+    method: string;
+    reference?: string | null;
+  } | null;
 }
 
 function buildQueryString(filters: RepairJobFilters): string {

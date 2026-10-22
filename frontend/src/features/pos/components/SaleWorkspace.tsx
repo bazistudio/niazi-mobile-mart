@@ -22,7 +22,7 @@ export const SaleWorkspace: React.FC = () => {
   const products = useInventoryStore((s) => s.products);
   const fetchProducts = useInventoryStore((s) => s.fetchProducts);
   const addToCart = usePosStore((s) => s.addToCart);
-  const activeSession = usePosStore((s) => s.getActiveSession());
+  const activeSession = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId));
   const isReturnMode = activeSession?.mode === 'replace';
 
   // Listen for custom event to open invoice lookup from extra actions toolbar

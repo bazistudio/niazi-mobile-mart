@@ -1505,14 +1505,15 @@ export const AddMobileForm: React.FC = () => {
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center justify-between">
                   <label htmlFor={`${formId}-purchase-date`} className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-                    Purchase Date *
+                  Historical Purchase Date / تاریخ خریداری *
                   </label>
-                  <span className="text-[11px] text-text-muted font-urdu">تاریخ</span>
+                  <span className="text-[11px] text-text-muted font-urdu">تاریخ خریداری</span>
                 </div>
                 <input
                   id={`${formId}-purchase-date`}
                   type="date"
                   required={isUsed}
+                  max={new Date().toISOString().split('T')[0]}
                   value={formData.paperwork.purchaseDate}
                   onChange={(e) =>
                     setFormData((prev) => ({

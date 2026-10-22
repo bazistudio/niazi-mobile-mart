@@ -27,6 +27,12 @@ export interface ProductDTO {
   updatedAt: string;
   // Product versioning — foundation for offline sync and multi-device conflict detection
   version?: number;
+  /** Stock in the Central Warehouse. Present when scope='organization'. */
+  warehouseStock?: number;
+  /** Total organization-wide stock. Present when scope='organization'. */
+  totalOrgStock?: number;
+  /** Compatible phone/device model names. */
+  compatibleModels?: string[];
 }
 
 export interface PaginatedProductsDTO {

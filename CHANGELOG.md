@@ -5,6 +5,39 @@ All notable changes to Niazi Mobile Mart will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.47] - Unreleased Candidate
+
+### Added
+- **Product Master Compatible Models Persistence**:
+  - Implemented 1:N device model mapping (`compatible_models`) on product creation, initial stock intake, and product updates in `product.repo.ts`.
+  - Added multi-value compatible model input in `ProductEditModal.tsx` supporting comma- and newline-delimited models.
+  - Added compatible-model badge display in `ProductTable.tsx` with count indicators for spare parts and accessories.
+  - Extended frontend types and DTO contracts in `tauriClient.ts`, `inventory.dto.ts`, and `inventory.api.ts`.
+- **USED Mobile Inventory Legal A4 Paperwork & Date Management**:
+  - Expanded `usedMobileA4Template.ts` to include verified bilingual legal declarations (approved Urdu heading `حلف نامہ برائے ذاتی ملکیت` and oath statement), English device affirmation, and distinct seller signature, staff signature, and shop stamp areas.
+  - Added dedicated 40mm × 48mm thumb-impression box and administrative record filing approval section (`FINAL ADMIN APPROVAL & RECORD ARCHIVE`).
+  - Added unmasked seller CNIC display (`seller_cnic`) on legal paperwork while preserving backend masking for general queries.
+  - Restricted historical purchase date entry in `AddMobileForm.tsx` to past/present dates with bilingual Urdu labeling (`تاریخ خریداری`).
+  - Separated historical purchase date display from current document print timestamp.
+- **Organization Catalog Stock Split**:
+  - Separated Central Warehouse Stock from Total Organization Stock across `OrganizationProductsPage.tsx` and `ProductTable.tsx`.
+
+### Changed
+- **Decoupled Product Master Updates from Stock Adjustment**:
+  - Removed stock quantity adjustment (`tauriClient.inventoryAdjust`) side effects from `productService.updateProduct`, ensuring product metadata edits (name, price, models) never alter inventory stock counts.
+- **POS Cart Reactivity Enhancement**:
+  - Replaced imperative `getActiveSession()` getters with reactive Zustand state slice subscriptions (`state.saleTabs.find(t => t.id === state.activeTabId)`) across `CartSummary.tsx`, `CartTable.tsx`, `CustomerSelector.tsx`, `PosCustomerLedgerPanel.tsx`, `ProductCardGrid.tsx`, `ProductSearch.tsx`, and `SaleWorkspace.tsx`.
+- **Repair Booking Payload Contract Alignment**:
+  - Added optional `advance_payment` field to `CreateRepairJobPayload` in `repair.api.ts`, matching backend route and repository expectations (`advance_payment?: { amount: number; method: string; reference?: string | null; } | null;`) and resolving frontend TypeScript compilation errors.
+
+### Validation Notes
+- **Static Verification**: Frontend TypeScript check (`npx tsc --noEmit`) passes cleanly with zero errors.
+- **Untested / Unverified Status**:
+  - POS interactive multi-tab cart UI behavior remains untested in live user runtime.
+  - Physical A4 print output, single-page boundary enforcement, and Urdu Nastaliq font fallback on target printer drivers remain visually uncertified.
+  - Desktop production build packaging (`build:desktop`) has not yet been executed or certified.
+  - Database schema uniqueness constraint for `(product_id, normalized_model)` remains a known schema risk (mitigated in application logic during update).
+
 ## [1.3.45] - 2026-10-20
 
 ### Added

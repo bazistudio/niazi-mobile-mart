@@ -27,12 +27,19 @@ export function ProductEditModal({ product, onClose }: ProductEditModalProps) {
     colorId: product.colorId || '',
     qualityId: product.qualityId || '',
 
-    quantity: product.stock !== undefined ? String(product.stock) : '0',
+    // NOTE: quantity is intentionally NOT submitted — use Intake/Adjust for stock changes.
     minStockThreshold: product.minStockThreshold !== undefined ? String(product.minStockThreshold) : '2',
 
     purchasePrice: product.purchasePrice !== undefined ? String(product.purchasePrice) : '0',
     price: product.price !== undefined ? String(product.price) : '0',
+
+    // Compatible models — loaded from existing product data
+    compatibleModels: Array.isArray(product.compatibleModels) ? product.compatibleModels : [],
   });
+
+  const [compatibleModelsInput, setCompatibleModelsInput] = useState(
+    Array.isArray(product.compatibleModels) ? product.compatibleModels.join(', ') : ''
+  );
 
   const handleChange = (field: string, value: any) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -44,6 +51,12 @@ export function ProductEditModal({ product, onClose }: ProductEditModalProps) {
       toast.error('Product name is required');
       return;
     }
+
+    // Parse compatible models from comma/newline-separated input
+    const parsedModels = compatibleModelsInput
+      .split(/[,\n]+/)
+      .map((m) => m.trim())
+      .filter((m) => m.length > 0);
 
     try {
       await updateProduct({
@@ -58,10 +71,11 @@ export function ProductEditModal({ product, onClose }: ProductEditModalProps) {
           companyId: formData.companyId,
           colorId: formData.colorId,
           qualityId: formData.qualityId,
-          quantity: Number(formData.quantity) || 0,
+          // quantity intentionally omitted: stock changes must go through Intake/Adjust
           minStockThreshold: Number(formData.minStockThreshold) || 2,
           purchasePrice: Number(formData.purchasePrice) || 0,
           price: Number(formData.price) || 0,
+          compatible_models: parsedModels,
         },
       });
 
@@ -138,25 +152,15 @@ export function ProductEditModal({ product, onClose }: ProductEditModalProps) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Stock Quantity</label>
-                  <input
-                    type="number"
-                    value={formData.quantity}
-                    onChange={(e) => handleChange('quantity', e.target.value)}
-                    className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Min Stock Alert</label>
-                  <input
-                    type="number"
-                    value={formData.minStockThreshold}
-                    onChange={(e) => handleChange('minStockThreshold', e.target.value)}
-                    className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
-                  />
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Min Stock Alert</label>
+                <input
+                  type="number"
+                  value={formData.minStockThreshold}
+                  onChange={(e) => handleChange('minStockThreshold', e.target.value)}
+                  className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
+                />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">To adjust stock levels use the Intake / Adjust workflow.</p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -250,6 +254,20 @@ export function ProductEditModal({ product, onClose }: ProductEditModalProps) {
                   value={formData.qualityId}
                   onChange={(v) => handleChange('qualityId', v)}
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Compatible Models
+                </label>
+                <textarea
+                  value={compatibleModelsInput}
+                  onChange={(e) => setCompatibleModelsInput(e.target.value)}
+                  placeholder="e.g. Samsung Galaxy A54, iPhone 15, Redmi Note 12"
+                  rows={3}
+                  className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm resize-none"
+                />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Separate multiple models with commas or new lines.</p>
               </div>
             </div>
           </div>
