@@ -14,6 +14,7 @@
  */
 
 import { Pool, PoolClient } from 'pg';
+import { writeChangeLogEntry } from './change_log.repo';
 
 // ─── Domain types ──────────────────────────────────────────────────────────────
 
@@ -207,7 +208,7 @@ export class ExpenseRepo {
    *
    * Amount must be > 0 whole PKR rupees.
    */
-  async createExpense(dto: CreateExpenseDto, userId?: string | null): Promise<Expense> {
+  async createExpense(dto: CreateExpenseDto, userId?: string | null, organizationId?: string | null): Promise<Expense> {
     if (!dto.amount || dto.amount <= 0) {
       throw new ExpenseRepoError('Expense amount must be greater than zero', 400, 'VALIDATION');
     }
@@ -257,12 +258,20 @@ export class ExpenseRepo {
       );
 
       // 4. Cash movement side effect for CASH payments
+      // Workstream B: require an open session — reject 422 instead of silently inserting null
       if (paymentMethod === 'CASH') {
         const sessionResult = await client.query<{ id: string }>(
-          `SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' LIMIT 1`,
+          `SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' ORDER BY opened_at DESC LIMIT 1 FOR UPDATE`,
           [branchId]
         );
-        const sessionId = sessionResult.rows[0]?.id ?? null;
+        if (sessionResult.rows.length === 0) {
+          throw new ExpenseRepoError(
+            'No open cash session for this branch. Open a cash session before recording a CASH expense.',
+            422,
+            'NO_OPEN_SESSION'
+          );
+        }
+        const sessionId = sessionResult.rows[0]!.id;
         const movementId = uuidv4();
 
         await client.query(
@@ -282,6 +291,22 @@ export class ExpenseRepo {
             now,
           ]
         );
+      }
+
+      // Workstream C: audit log inside the transaction (not in setImmediate outside it)
+      if (organizationId && branchId) {
+        await writeChangeLogEntry(client, {
+          organizationId,
+          branchId,
+          eventType: 'EXPENSE_CREATED',
+          entityType: 'expense',
+          entityId: expenseId,
+          payloadStr: JSON.stringify({
+            expense_id: expenseId,
+            amount: dto.amount,
+            branch_id: branchId,
+          }),
+        });
       }
 
       await client.query('COMMIT');
@@ -386,7 +411,7 @@ export class ExpenseRepo {
   // Mirrors expense_service.rs::cancel_expense (cancel semantics)
   // ---------------------------------------------------------------------------
 
-  async cancelExpense(id: string, userId?: string | null): Promise<Expense> {
+  async cancelExpense(id: string, userId?: string | null, organizationId?: string | null): Promise<Expense> {
     const { v4: uuidv4 } = await import('uuid');
     const client: PoolClient = await this.pool.connect();
     try {
@@ -424,12 +449,20 @@ export class ExpenseRepo {
       );
 
       // 3. Compensating cash movement IN for CASH payments
+      // Workstream B: require an open session for the compensating movement too
       if (existing.payment_method === 'CASH') {
         const sessionResult = await client.query<{ id: string }>(
-          `SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' LIMIT 1`,
+          `SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' ORDER BY opened_at DESC LIMIT 1 FOR UPDATE`,
           [existing.branch_id]
         );
-        const sessionId = sessionResult.rows[0]?.id ?? null;
+        if (sessionResult.rows.length === 0) {
+          throw new ExpenseRepoError(
+            'No open cash session for this branch. Open a cash session before cancelling a CASH expense.',
+            422,
+            'NO_OPEN_SESSION'
+          );
+        }
+        const sessionId = sessionResult.rows[0]!.id;
         const movementId = uuidv4();
 
         await client.query(
@@ -449,6 +482,22 @@ export class ExpenseRepo {
             now,
           ]
         );
+      }
+
+      // Workstream C: audit log inside the transaction
+      if (organizationId && existing.branch_id) {
+        await writeChangeLogEntry(client, {
+          organizationId,
+          branchId: existing.branch_id,
+          eventType: 'EXPENSE_CANCELLED',
+          entityType: 'expense',
+          entityId: id,
+          payloadStr: JSON.stringify({
+            expense_id: id,
+            amount: existing.amount,
+            branch_id: existing.branch_id,
+          }),
+        });
       }
 
       await client.query('COMMIT');

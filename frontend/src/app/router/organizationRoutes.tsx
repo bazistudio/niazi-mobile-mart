@@ -20,6 +20,7 @@ import { OrganizationCustomersPage } from '@/pages/dashboard/organization/Organi
 import { OrganizationSuppliersPage } from '@/pages/dashboard/organization/OrganizationSuppliersPage';
 import { OrganizationProfilePage } from '@/pages/dashboard/organization/OrganizationProfilePage';
 import { OrganizationSettingsPage } from '@/pages/dashboard/organization/OrganizationSettingsPage';
+import { OrganizationHRPage } from '@/pages/dashboard/organization/OrganizationHRPage';
 
 export const organizationRoutes = (
   <Route element={<RoleGuard allowedRoles={['SUPER_ADMIN', 'MULTI_ADMIN', 'OWNER', 'ADMIN']} fallbackPath="/dashboard/shop-admin" />}>
@@ -75,8 +76,10 @@ export const organizationRoutes = (
       
       {/* 15. Suppliers */}
       <Route path="suppliers" element={<OrganizationSuppliersPage />} />
-      
-      
+
+      {/* 16. HR — Prototype (mock data, no backend writes) */}
+      <Route path="hr" element={<OrganizationHRPage />} />
+
       {/* 17. Settings */}
       <Route path="settings" element={<OrganizationSettingsPage />} />
     </Route>

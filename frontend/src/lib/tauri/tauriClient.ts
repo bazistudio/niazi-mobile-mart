@@ -1464,60 +1464,127 @@ export const tauriClient = {
   },
 
   // â”€â”€ Expense Domain (Phase 17) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Workstream D: expense functions now use httpFetch for browser mode;
+  // Tauri IPC remains the path for the desktop app.
+
   async expenseCategoryCreate(dto: CreateExpenseCategoryDto): Promise<ExpenseCategory> {
-    if (isTauriEnvironment()) {
+    try {
+      return await httpFetch<ExpenseCategory>('/api/expenses/categories', {
+        method: 'POST',
+        body: JSON.stringify(dto),
+      });
+    } catch (e) {
+      // Phase 1A: HTTP responses (4xx/5xx) have .status set by httpFetch — re-throw
+      // immediately so validation errors surface in the UI without an IPC retry.
+      // Mutating operation: never retry via IPC after an ambiguous network failure
+      // (the original POST may have already succeeded).
+      if (typeof (e as any).status === 'number' || isTauriEnvironment() === false) throw e;
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<ExpenseCategory>('expense_category_create', { dto });
     }
-    throw new Error('Tauri environment required');
   },
 
   async expenseCategoryUpdate(id: string, dto: UpdateExpenseCategoryDto): Promise<ExpenseCategory> {
-    if (isTauriEnvironment()) {
+    try {
+      return await httpFetch<ExpenseCategory>(`/api/expenses/categories/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(dto),
+      });
+    } catch (e) {
+      // Phase 1A: Re-throw HTTP errors immediately. PUT is idempotent but we still
+      // surface the error rather than silently retrying through IPC.
+      if (typeof (e as any).status === 'number' || isTauriEnvironment() === false) throw e;
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<ExpenseCategory>('expense_category_update', { id, dto });
     }
-    throw new Error('Tauri environment required');
   },
 
   async expenseCategoryList(activeOnly?: boolean): Promise<ExpenseCategory[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<ExpenseCategory[]>('expense_category_list', { activeOnly });
+    try {
+      const qs = activeOnly === false ? '?active_only=false' : '';
+      return await httpFetch<ExpenseCategory[]>(`/api/expenses/categories${qs}`);
+    } catch (e) {
+      // Phase 1A: Re-throw HTTP errors (4xx/5xx) — a server-side error must not
+      // silently return an empty list. Only fall back for true network failures.
+      if (typeof (e as any).status === 'number') throw e;
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<ExpenseCategory[]>('expense_category_list', { activeOnly });
+      }
+      return [];
     }
-    return [];
   },
 
   async expenseCreate(dto: CreateExpenseDto): Promise<Expense> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Expense>('expense_create', { dto });
+    try {
+      return await httpFetch<Expense>('/api/expenses', {
+        method: 'POST',
+        body: JSON.stringify(dto),
+      });
+    } catch (e) {
+      // Phase 1A: Re-throw ALL errors without IPC fallback.
+      // (1) HTTP errors (status is a number) must surface — 422 NO_OPEN_SESSION, etc.
+      // (2) For ambiguous network failures, DO NOT retry via IPC: the original POST
+      //     may have already committed to the database, and a second IPC call risks
+      //     creating a duplicate expense record.
+      throw e;
     }
-    throw new Error('Tauri environment required');
   },
 
   async expenseGetById(id: string): Promise<Expense | null> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Expense | null>('expense_get_by_id', { id });
+    try {
+      return await httpFetch<Expense>(`/api/expenses/${encodeURIComponent(id)}`);
+    } catch (e) {
+      // Phase 1A: Re-throw HTTP errors (4xx/5xx) — a 404 or 403 must surface, not
+      // silently return null. Only fall back for true network failures.
+      if (typeof (e as any).status === 'number') throw e;
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<Expense | null>('expense_get_by_id', { id });
+      }
+      return null;
     }
-    return null;
   },
 
   async expenseList(filter?: ExpenseFilterDto): Promise<Expense[]> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Expense[]>('expense_list', { filter });
+    try {
+      const params = new URLSearchParams();
+      if (filter?.branch_id) params.append('branch_id', filter.branch_id);
+      if (filter?.category_id) params.append('category_id', filter.category_id);
+      if (filter?.payment_method) params.append('payment_method', filter.payment_method);
+      if (filter?.status) params.append('status', filter.status);
+      if (filter?.search) params.append('search', filter.search);
+      if (filter?.start_date) params.append('start_date', filter.start_date);
+      if (filter?.end_date) params.append('end_date', filter.end_date);
+      if (filter?.limit != null) params.append('limit', String(filter.limit));
+      if (filter?.offset != null) params.append('offset', String(filter.offset));
+      const qs = params.toString();
+      return await httpFetch<Expense[]>(`/api/expenses${qs ? `?${qs}` : ''}`);
+    } catch (e) {
+      // Phase 1A: Re-throw HTTP errors (4xx/5xx) — a server-side error must not
+      // silently return an empty list. Only fall back for true network failures.
+      if (typeof (e as any).status === 'number') throw e;
+      if (isTauriEnvironment()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<Expense[]>('expense_list', { filter });
+      }
+      return [];
     }
-    return [];
   },
 
   async expenseCancel(id: string, _reason?: string): Promise<Expense> {
-    if (isTauriEnvironment()) {
-      const { invoke } = await import('@tauri-apps/api/core');
-      return await invoke<Expense>('expense_cancel', { id });
+    try {
+      return await httpFetch<Expense>(`/api/expenses/${encodeURIComponent(id)}/cancel`, {
+        method: 'POST',
+      });
+    } catch (e) {
+      // Phase 1A: Re-throw ALL errors without IPC fallback.
+      // (1) HTTP errors (status is a number) must surface — 422, 404, 409, etc.
+      // (2) For ambiguous network failures, DO NOT retry via IPC: the original POST
+      //     may have already cancelled the expense, and a second IPC call risks a
+      //     double-cancel or conflicting state.
+      throw e;
     }
-    throw new Error('Tauri environment required');
   },
 
   // ── Cash Management & Daily Closing Domain (Phase 17) ──────────────────────

@@ -1195,6 +1195,17 @@ export async function completeRepairJobTx(
     // No customer_ledger_entries are created; customers.balance is NOT updated.
     // The linked customer_id (if any) is retained on the job for reference only.
     const outstanding = netTotal - totalPaid;
+
+    // Workstream A — Walk-in settlement guard
+    // A walk-in repair (customer_id IS NULL) must be fully settled before delivery.
+    // Registered customers may carry a balance (CREDIT); walk-ins cannot.
+    if (customerId === null && outstanding > 0) {
+      throw new RepairRepoError(
+        `Walk-in repairs must be fully settled before delivery. Outstanding balance: ${outstanding}`,
+        422
+      );
+    }
+
     const settlementStatus = outstanding <= 0 ? 'PAID' : 'CREDIT';
 
     // ── Timeline entry ────────────────────────────────────────────────────────

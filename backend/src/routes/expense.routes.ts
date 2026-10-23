@@ -41,7 +41,8 @@ import { Pool } from 'pg';
 import { buildAuthMiddleware, authorizePermission, isOrgAdmin } from '../auth';
 import { ExpenseService, ExpenseServiceError } from '../services/expense.service';
 import type { ExpenseFilterDto } from '../services/expense.service';
-import { writeChangeLogEntry } from '../repositories/change_log.repo';
+// Workstream C: writeChangeLogEntry removed from routes — now called inside the
+// database transaction in expense.repo.ts for atomicity. Import no longer needed here.
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -291,6 +292,8 @@ export function buildExpenseRouter(pool: Pool): Router {
     }
 
     try {
+      // Workstream C: organizationId is now threaded into the service/repo so the
+      // audit log is written inside the database transaction — not in setImmediate.
       const expense = await service.createExpense(
         {
           category_id: body['category_id'] as string,
@@ -302,30 +305,10 @@ export function buildExpenseRouter(pool: Pool): Router {
           notes: (body['notes'] as string | null | undefined) ?? null,
           expense_date: (body['expense_date'] as string | null | undefined) ?? null,
         },
-        identity.user_id
+        identity.user_id,
+        identity.organization_id ?? null  // Workstream C: in-transaction audit log
       );
       res.status(201).json(expense);
-
-      setImmediate(() => {
-        const orgId = identity.organization_id;
-        const bId = expense.branch_id || identity.branch_id;
-        if (orgId && bId) {
-          pool.connect().then(cl => {
-            cl.query('BEGIN')
-              .then(() => writeChangeLogEntry(cl, {
-                organizationId: orgId,
-                branchId: bId,
-                eventType: 'EXPENSE_CREATED',
-                entityType: 'expense',
-                entityId: expense.id,
-                payloadStr: JSON.stringify({ expense_id: expense.id, amount: expense.amount, branch_id: bId }),
-              }))
-              .then(() => cl.query('COMMIT'))
-              .catch(() => cl.query('ROLLBACK').catch(() => {}))
-              .finally(() => cl.release());
-          }).catch(() => {});
-        }
-      });
     } catch (err: unknown) {
       handleError(res, err, 'create_expense');
     }
@@ -386,29 +369,13 @@ export function buildExpenseRouter(pool: Pool): Router {
         return;
       }
 
-      const cancelled = await service.cancelExpense(id, identity.user_id);
+      // Workstream C: organizationId threaded to repo for in-transaction audit log.
+      const cancelled = await service.cancelExpense(
+        id,
+        identity.user_id,
+        identity.organization_id ?? null  // Workstream C: in-transaction audit log
+      );
       res.status(200).json(cancelled);
-
-      setImmediate(() => {
-        const orgId = identity.organization_id;
-        const bId = cancelled.branch_id || identity.branch_id;
-        if (orgId && bId) {
-          pool.connect().then(cl => {
-            cl.query('BEGIN')
-              .then(() => writeChangeLogEntry(cl, {
-                organizationId: orgId,
-                branchId: bId,
-                eventType: 'EXPENSE_CANCELLED',
-                entityType: 'expense',
-                entityId: cancelled.id,
-                payloadStr: JSON.stringify({ expense_id: cancelled.id, branch_id: bId }),
-              }))
-              .then(() => cl.query('COMMIT'))
-              .catch(() => cl.query('ROLLBACK').catch(() => {}))
-              .finally(() => cl.release());
-          }).catch(() => {});
-        }
-      });
     } catch (err: unknown) {
       handleError(res, err, 'cancel_expense');
     }

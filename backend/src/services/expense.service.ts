@@ -119,7 +119,7 @@ export class ExpenseService {
    *   - category_id required
    *   - payment_method must be valid if provided
    */
-  async createExpense(dto: CreateExpenseDto, userId?: string | null): Promise<Expense> {
+  async createExpense(dto: CreateExpenseDto, userId?: string | null, organizationId?: string | null): Promise<Expense> {
     // Validate required fields
     if (!dto.category_id?.trim()) {
       throw new ExpenseServiceError('Expense category is required', 400, 'VALIDATION');
@@ -163,7 +163,7 @@ export class ExpenseService {
     }
 
     try {
-      return await this.repo.createExpense(dto, userId);
+      return await this.repo.createExpense(dto, userId, organizationId);
     } catch (err: unknown) {
       throw this.translateError(err, 'create_expense');
     }
@@ -212,12 +212,12 @@ export class ExpenseService {
    * Append-only: marks CANCELLED + inserts compensating cash movement IN for CASH payments.
    * Mirrors expense_service.rs::cancel_expense.
    */
-  async cancelExpense(id: string, userId?: string | null): Promise<Expense> {
+  async cancelExpense(id: string, userId?: string | null, organizationId?: string | null): Promise<Expense> {
     if (!id?.trim()) {
       throw new ExpenseServiceError('Expense ID is required', 400, 'VALIDATION');
     }
     try {
-      return await this.repo.cancelExpense(id, userId);
+      return await this.repo.cancelExpense(id, userId, organizationId);
     } catch (err: unknown) {
       throw this.translateError(err, 'cancel_expense');
     }

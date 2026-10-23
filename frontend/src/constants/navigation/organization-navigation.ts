@@ -15,7 +15,8 @@ import {
   Truck,
   Contact2,
   Settings,
-  Wrench
+  Wrench,
+  UserCog
 } from 'lucide-react';
 import { NavigationGroup } from '../../types/navigation';
 
@@ -37,6 +38,7 @@ export const organizationNavigation: NavigationGroup[] = [
       { name: 'Mobile Inventory', href: '/dashboard/organization/mobile-inventory', icon: Smartphone },
       { name: 'Customers', href: '/dashboard/organization/customers', icon: UserCheck },
       { name: 'Suppliers', href: '/dashboard/organization/suppliers', icon: Truck },
+      { name: 'HR', href: '/dashboard/organization/hr', icon: UserCog },
       { name: 'Settings', href: '/dashboard/organization/settings', icon: Settings },
     ],
   },
