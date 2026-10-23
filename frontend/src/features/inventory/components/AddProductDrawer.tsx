@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Package } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DynamicMasterSelect } from './master-data/DynamicMasterSelect';
 import { useProducts } from '@/features/inventory/hooks/useProducts';
+import { useInventoryStore } from '@/features/inventory/core/inventory.store';
 
 export interface AddProductDrawerProps {
   isOpen: boolean;
@@ -13,6 +14,8 @@ export interface AddProductDrawerProps {
 
 export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
   const { createProduct, isCreating } = useProducts({ page: 1, limit: 10 }, { enabled: false });
+  const fetchProducts = useInventoryStore((state) => state.fetchProducts);
+  const nameInputRef = useRef<HTMLInputElement>(null);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -47,9 +50,12 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
   });
 
 
-  // Load remembered master data on open
+  // Load remembered master data on open and focus product name
   useEffect(() => {
     if (isOpen) {
+      setTimeout(() => {
+        nameInputRef.current?.focus();
+      }, 100);
       try {
         const remembered = localStorage.getItem('niazi_last_product_masters') || localStorage.getItem('tijaratpro_last_product_masters');
         if (remembered) {
@@ -100,8 +106,12 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
         qualityId: formData.qualityId
       }));
 
+      const effectiveProductCode = formData.productCode.trim() || ('PRD-' + Math.floor(Math.random() * 10000).toString().padStart(4, '0'));
+
       await createProduct({
         ...formData,
+        productCode: effectiveProductCode,
+        sku: formData.sku.trim() || effectiveProductCode,
         purchasePrice: Number(formData.purchasePrice) || 0,
         price: Number(formData.price) || 0,
         quantity: Number(formData.quantity) || 0,
@@ -109,15 +119,27 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
         compatible_models: formData.compatibleModels,
       });
       
-      toast.success('Product created successfully');
+      toast.success('Product created! Ready for next product.');
 
-      // Reset main fields but keep master data
+      // Refresh products table in background so new item appears immediately
+      try {
+        fetchProducts({ scope: 'organization' });
+      } catch (e) {
+        // ignore
+      }
+
+      // Reset fields for the next product entry while preserving category/brand selections
       setFormData(prev => ({
         ...prev,
         name: '', productCode: '', sku: '', barcode: '', description: '',
         quantity: '', purchasePrice: '', price: '', compatibleModels: [], newModelInput: ''
       }));
-      onClose();
+
+      // Auto focus back to Product Name for rapid consecutive entry
+      setTimeout(() => {
+        nameInputRef.current?.focus();
+      }, 50);
+      // Retain modal open for rapid consecutive product intake; user closes manually
     } catch (err: any) {
       console.error('[AddProductDrawer] Failed to create product:', err);
       const errMsg = err?.response?.data?.message || err?.message || (typeof err === 'string' ? err : '') || String(err) || 'Failed to create product';
@@ -131,16 +153,25 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/50 backdrop-blur-sm overflow-y-auto"
       onClick={onClose}
     >
       <div 
-        className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-[1050px] h-[750px] max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+        className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-[1150px] min-h-[500px] my-auto flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-gray-100 dark:border-gray-800"
         onClick={(e) => e.stopPropagation()}
       >
         
         {/* Header */}
-        <div className="flex items-center justify-end px-4 pt-4 pb-0">
+        <div className="flex items-center justify-between px-6 pt-5 pb-2 border-b border-gray-100 dark:border-gray-800/80">
+          <div className="flex items-center gap-2">
+            <div className="p-2 rounded-xl bg-[#006970]/10 text-[#006970] dark:bg-[#006970]/20">
+              <Package className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-gray-900 dark:text-white">Add New Product</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Configure catalog specifications, pricing, and inventory tracking</p>
+            </div>
+          </div>
           <button 
             onClick={onClose}
             className="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 transition-colors p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
@@ -149,9 +180,9 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
           </button>
         </div>
 
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 pb-6 pt-2 flex flex-col">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        {/* Body with auto-layout and adaptive scrolling only if screen height is exceeded */}
+        <div className="flex-1 overflow-y-auto px-6 sm:px-8 py-5 flex flex-col max-h-[calc(90vh-140px)]">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
             
             {/* LEFT COLUMN */}
             <div className="flex flex-col gap-8">
@@ -164,6 +195,8 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Product Name *</label>
                     <input
+                      ref={nameInputRef}
+                      tabIndex={1}
                       type="text"
                       value={formData.name}
                       onChange={(e) => handleChange('name', e.target.value)}
@@ -180,6 +213,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                           <span className="text-gray-500 sm:text-sm">Rs.</span>
                         </div>
                         <input
+                          tabIndex={2}
                           type="number"
                           value={formData.purchasePrice}
                           onChange={(e) => handleChange('purchasePrice', e.target.value)}
@@ -195,6 +229,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                           <span className="text-gray-500 sm:text-sm">Rs.</span>
                         </div>
                         <input
+                          tabIndex={3}
                           type="number"
                           value={formData.price}
                           onChange={(e) => handleChange('price', e.target.value)}
@@ -215,13 +250,16 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Product Code</label>
                       <div className="flex">
                         <input
+                          tabIndex={-1}
                           type="text"
                           value={formData.productCode}
                           onChange={(e) => handleChange('productCode', e.target.value)}
-                          placeholder="PRD-0001"
+                          placeholder="PRD-0001 (Auto)"
                           className="block w-full px-3 py-2 border border-r-0 border-gray-300 dark:border-gray-600 rounded-l-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
                         />
                         <button 
+                          type="button"
+                          tabIndex={-1}
                           onClick={handleGenerateCode}
                           className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-r-md bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-600"
                         >
@@ -232,6 +270,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Barcode / SKU</label>
                       <input
+                        tabIndex={-1}
                         type="text"
                         value={formData.barcode}
                         onChange={(e) => handleChange('barcode', e.target.value)}
@@ -244,6 +283,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
                     <textarea
+                      tabIndex={-1}
                       value={formData.description}
                       onChange={(e) => handleChange('description', e.target.value)}
                       rows={4}
@@ -264,27 +304,27 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type *</label>
-                      <DynamicMasterSelect showAddButton hideAllOption entity="category" value={formData.categoryId} onChange={(v) => handleChange('categoryId', v)} />
+                      <DynamicMasterSelect tabIndex={4} showAddButton hideAllOption entity="category" value={formData.categoryId} onChange={(v) => handleChange('categoryId', v)} />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Brand</label>
-                      <DynamicMasterSelect showAddButton hideAllOption entity="brand" value={formData.brandId} onChange={(v) => handleChange('brandId', v)} />
+                      <DynamicMasterSelect tabIndex={5} showAddButton hideAllOption entity="brand" value={formData.brandId} onChange={(v) => handleChange('brandId', v)} />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Company</label>
-                      <DynamicMasterSelect showAddButton hideAllOption entity="company" value={formData.companyId} onChange={(v) => handleChange('companyId', v)} />
+                      <DynamicMasterSelect tabIndex={6} showAddButton hideAllOption entity="company" value={formData.companyId} onChange={(v) => handleChange('companyId', v)} />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Color</label>
-                      <DynamicMasterSelect showAddButton hideAllOption entity="color" value={formData.colorId} onChange={(v) => handleChange('colorId', v)} />
+                      <DynamicMasterSelect tabIndex={7} showAddButton hideAllOption entity="color" value={formData.colorId} onChange={(v) => handleChange('colorId', v)} />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Quality</label>
-                      <DynamicMasterSelect showAddButton hideAllOption entity="quality" value={formData.qualityId} onChange={(v) => handleChange('qualityId', v)} />
+                      <DynamicMasterSelect tabIndex={8} showAddButton hideAllOption entity="quality" value={formData.qualityId} onChange={(v) => handleChange('qualityId', v)} />
                     </div>
                   </div>
                 </div>
@@ -298,6 +338,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Open Stock *</label>
                       <input
+                        tabIndex={9}
                         type="number"
                         value={formData.quantity}
                         onChange={(e) => handleChange('quantity', e.target.value)}
@@ -308,6 +349,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Min Alert</label>
                       <input
+                        tabIndex={10}
                         type="number"
                         value={formData.minStockThreshold}
                         onChange={(e) => handleChange('minStockThreshold', e.target.value)}
@@ -318,6 +360,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                   </div>
                   <div className="flex items-center pt-1">
                     <input
+                      tabIndex={-1}
                       id="trackInventory"
                       type="checkbox"
                       checked={formData.trackInventory}
@@ -336,6 +379,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                     </label>
                     <div className="flex gap-2 mb-2">
                       <input
+                        tabIndex={-1}
                         type="text"
                         value={formData.newModelInput}
                         onChange={(e) => handleChange('newModelInput', e.target.value)}
@@ -356,6 +400,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                         className="block flex-1 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
                       />
                       <button
+                        tabIndex={-1}
                         type="button"
                         onClick={() => {
                           const val = formData.newModelInput.trim();
@@ -381,6 +426,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                           >
                             {m}
                             <button
+                              tabIndex={-1}
                               type="button"
                               onClick={() => {
                                 setFormData(prev => ({
@@ -406,19 +452,19 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="flex items-center">
-                      <input type="checkbox" id="serialTracking" checked={formData.serialTracking} onChange={(e) => handleChange('serialTracking', e.target.checked)} className="h-4 w-4 text-[#006970] rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700" />
+                      <input tabIndex={-1} type="checkbox" id="serialTracking" checked={formData.serialTracking} onChange={(e) => handleChange('serialTracking', e.target.checked)} className="h-4 w-4 text-[#006970] rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700" />
                       <label htmlFor="serialTracking" className="ml-2 text-sm text-gray-700 dark:text-gray-300">Serial Tracking</label>
                     </div>
                     <div className="flex items-center">
-                      <input type="checkbox" id="imeiTracking" checked={formData.imeiTracking} onChange={(e) => handleChange('imeiTracking', e.target.checked)} className="h-4 w-4 text-[#006970] rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700" />
+                      <input tabIndex={-1} type="checkbox" id="imeiTracking" checked={formData.imeiTracking} onChange={(e) => handleChange('imeiTracking', e.target.checked)} className="h-4 w-4 text-[#006970] rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700" />
                       <label htmlFor="imeiTracking" className="ml-2 text-sm text-gray-700 dark:text-gray-300">IMEI Tracking</label>
                     </div>
                     <div className="flex items-center">
-                      <input type="checkbox" id="batchTracking" checked={formData.batchTracking} onChange={(e) => handleChange('batchTracking', e.target.checked)} className="h-4 w-4 text-[#006970] rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700" />
+                      <input tabIndex={-1} type="checkbox" id="batchTracking" checked={formData.batchTracking} onChange={(e) => handleChange('batchTracking', e.target.checked)} className="h-4 w-4 text-[#006970] rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700" />
                       <label htmlFor="batchTracking" className="ml-2 text-sm text-gray-700 dark:text-gray-300">Batch Tracking</label>
                     </div>
                     <div className="flex items-center">
-                      <input type="checkbox" id="expiryTracking" checked={formData.expiryTracking} onChange={(e) => handleChange('expiryTracking', e.target.checked)} className="h-4 w-4 text-[#006970] rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700" />
+                      <input tabIndex={-1} type="checkbox" id="expiryTracking" checked={formData.expiryTracking} onChange={(e) => handleChange('expiryTracking', e.target.checked)} className="h-4 w-4 text-[#006970] rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700" />
                       <label htmlFor="expiryTracking" className="ml-2 text-sm text-gray-700 dark:text-gray-300">Expiry Tracking</label>
                     </div>
                   </div>
@@ -426,6 +472,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                     <div className="col-span-2 mt-2">
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Cost Method</label>
                       <select
+                        tabIndex={-1}
                         value={formData.costMethod}
                         onChange={(e) => handleChange('costMethod', e.target.value)}
                         className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm mb-1.5"
@@ -451,12 +498,15 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
         {/* Bottom Sticky Action */}
         <div className="p-4 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 flex justify-end gap-3">
           <button
+            type="button"
+            tabIndex={-1}
             onClick={onClose}
             className="px-6 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none transition-colors"
           >
             Cancel
           </button>
           <button
+            tabIndex={11}
             onClick={handleSave}
             disabled={!isValid || isCreating}
             className="px-8 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#006970] hover:bg-[#005a60] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#006970] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"

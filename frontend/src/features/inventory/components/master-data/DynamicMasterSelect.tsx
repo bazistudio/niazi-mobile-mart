@@ -16,6 +16,7 @@ export interface DynamicMasterSelectProps {
   onChange: (id: string) => void;
   hideAllOption?: boolean;
   showAddButton?: boolean;
+  tabIndex?: number;
 }
 
 // ─── Manage Panel (rendered via portal) ──────────────────────────────────────
@@ -373,6 +374,7 @@ export function DynamicMasterSelect({
   onChange,
   hideAllOption = false,
   showAddButton = false,
+  tabIndex,
 }: DynamicMasterSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isManageOpen, setIsManageOpen] = useState(false);
@@ -494,14 +496,94 @@ export function DynamicMasterSelect({
   const defaultLabel = hideAllOption ? `Select ${entity}` : entity.charAt(0).toUpperCase() + entity.slice(1);
   const displayLabel = selectedOption ? selectedOption.name : defaultLabel;
 
+  // In-place keyboard search buffer & arrow selection
+  const [highlightIndex, setHighlightIndex] = useState(-1);
+  const searchBufferRef = useRef('');
+  const searchTimeoutRef = useRef<any>(null);
+
+  const handleButtonKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    // If Tab key, close dropdown and let natural tab focus move forward
+    if (e.key === 'Tab') {
+      setIsOpen(false);
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!isOpen) {
+        setIsOpen(true);
+        setHighlightIndex(0);
+      } else {
+        setHighlightIndex((prev) => (prev + 1 < mergedOptions.length ? prev + 1 : 0));
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!isOpen) {
+        setIsOpen(true);
+        setHighlightIndex(mergedOptions.length - 1);
+      } else {
+        setHighlightIndex((prev) => (prev > 0 ? prev - 1 : mergedOptions.length - 1));
+      }
+      return;
+    }
+
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (isOpen && highlightIndex >= 0 && highlightIndex < mergedOptions.length) {
+        handleSelect(mergedOptions[highlightIndex].id);
+      } else if (!isOpen) {
+        setIsOpen(true);
+      }
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      setIsOpen(false);
+      return;
+    }
+
+    // Type-to-search for printable characters (starts with typed letter)
+    if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      e.preventDefault();
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+
+      searchBufferRef.current += e.key.toLowerCase();
+      searchTimeoutRef.current = setTimeout(() => {
+        searchBufferRef.current = '';
+      }, 700);
+
+      const query = searchBufferRef.current;
+      // Match from beginning of name first, then anywhere
+      let matchIdx = mergedOptions.findIndex((opt: MasterOption) =>
+        opt.name.toLowerCase().startsWith(query)
+      );
+      if (matchIdx === -1) {
+        matchIdx = mergedOptions.findIndex((opt: MasterOption) =>
+          opt.name.toLowerCase().includes(query)
+        );
+      }
+
+      if (matchIdx !== -1) {
+        setIsOpen(true);
+        setHighlightIndex(matchIdx);
+        onChange(mergedOptions[matchIdx].id);
+      }
+    }
+  };
+
   return (
     <div ref={containerRef} className="flex items-center gap-1 w-full">
       {/* Dropdown */}
       <div className="relative inline-block text-left flex-1">
         <button
           onClick={() => setIsOpen(!isOpen)}
+          onKeyDown={handleButtonKeyDown}
+          tabIndex={tabIndex}
           type="button"
-          className="inline-flex justify-between items-center w-full min-w-[120px] px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded shadow-sm hover:bg-gray-50 focus:outline-none dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+          className="inline-flex justify-between items-center w-full min-w-[120px] px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
         >
           <span className="truncate">{displayLabel}</span>
           <ChevronDown className="w-4 h-4 ml-2 -mr-1 flex-shrink-0" />
@@ -516,23 +598,29 @@ export function DynamicMasterSelect({
               {!hideAllOption && (
                 <button
                   onClick={() => handleSelect('')}
+                  tabIndex={-1}
                   type="button"
                   className={`w-full text-left px-4 py-2 text-sm ${!value ? 'bg-gray-100 text-gray-900 font-semibold dark:bg-gray-700 dark:text-white' : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700'}`}
                 >
                   All {entity}s
                 </button>
               )}
-              {mergedOptions.map((opt: MasterOption) => (
-                <button
-                  key={opt.id}
-                  onClick={() => handleSelect(opt.id)}
-                  type="button"
-                  className={`w-full text-left px-4 py-2 text-sm flex items-center gap-2 ${value === opt.id ? 'bg-gray-100 text-gray-900 font-semibold dark:bg-gray-700 dark:text-white' : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700'}`}
-                >
-                  {value === opt.id && <Check className="w-3 h-3 text-[#006970] flex-shrink-0" />}
-                  <span className="truncate">{opt.name}</span>
-                </button>
-              ))}
+              {mergedOptions.map((opt: MasterOption, idx: number) => {
+                const isSelected = value === opt.id;
+                const isHighlighted = highlightIndex === idx;
+                return (
+                  <button
+                    key={opt.id}
+                    onClick={() => handleSelect(opt.id)}
+                    tabIndex={-1}
+                    type="button"
+                    className={`w-full text-left px-4 py-2 text-sm flex items-center gap-2 ${isSelected || isHighlighted ? 'bg-teal-50 text-[#006970] font-semibold dark:bg-gray-700 dark:text-teal-300' : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700'}`}
+                  >
+                    {isSelected && <Check className="w-3 h-3 text-[#006970] flex-shrink-0" />}
+                    <span className="truncate">{opt.name}</span>
+                  </button>
+                );
+              })}
               {mergedOptions.length === 0 && !isLoading && (
                 <p className="px-4 py-2 text-xs text-gray-400 dark:text-gray-500">No {entity}s found</p>
               )}
@@ -541,10 +629,11 @@ export function DynamicMasterSelect({
         )}
       </div>
 
-      {/* + Create button */}
+      {/* + Create button (tabIndex -1 so keyboard Tab advances straight to next spec) */}
       {showAddButton && (
         <button
           onClick={openCreateMode}
+          tabIndex={-1}
           type="button"
           className="p-1.5 text-gray-500 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded shadow-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700 transition-colors flex-shrink-0"
           title={`Add ${entity}`}
@@ -553,11 +642,12 @@ export function DynamicMasterSelect({
         </button>
       )}
 
-      {/* ⚙ Manage button */}
+      {/* ⚙ Manage button (tabIndex -1 so keyboard Tab advances straight to next spec) */}
       {showAddButton && (
         <button
           ref={gearButtonRef}
           onClick={() => { setIsOpen(false); setIsManageOpen(true); }}
+          tabIndex={-1}
           type="button"
           className="p-1.5 text-gray-500 bg-gray-100 hover:bg-[#006970] hover:text-white border border-gray-300 rounded shadow-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-[#006970] dark:hover:text-white transition-colors flex-shrink-0"
           title={`Manage ${entity}s`}

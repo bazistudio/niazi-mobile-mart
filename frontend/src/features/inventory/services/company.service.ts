@@ -72,7 +72,12 @@ export const companyService = {
     const cleanName = data.name.trim();
     if (isTauriEnvironment()) {
       try {
-        const created = await tauriClient.companyCreate({ name: cleanName });
+        const code = cleanName.toUpperCase().replace(/[^A-Z0-9]/g, '_').substring(0, 20) || 'CMP';
+        const created = await tauriClient.companyCreate({
+          name: cleanName,
+          code,
+          description: null,
+        });
         const compObj = {
           id: created.id,
           name: created.name,
@@ -82,7 +87,16 @@ export const companyService = {
         saveStoredCompanies([...current.filter(c => c.id !== compObj.id), compObj]);
         return compObj;
       } catch (err) {
-        console.warn('Tauri companyCreate fallback to local storage', err);
+        console.warn('Tauri companyCreate failed, falling back to local storage', err);
+        // Fallback local storage generation so offline creation never stalls
+        const fallbackObj: ProductCompany = {
+          id: `cmp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          name: cleanName,
+          organizationId: '00000000-0000-0000-0000-000000000001',
+        };
+        const current = getStoredCompanies();
+        saveStoredCompanies([...current.filter(c => c.id !== fallbackObj.id), fallbackObj]);
+        return fallbackObj;
       }
     }
 
