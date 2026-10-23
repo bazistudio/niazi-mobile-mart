@@ -40,6 +40,8 @@ export const Sidebar = () => {
   const setActiveShop = useOrganizationStore((s) => s.setActiveShop);
   const user = useAuthStore((s) => s.user);
   const [showAllPages, setShowAllPages] = useState(false);
+  // Mobile drawer open/close state
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
 
   // Reset "View All Pages" state whenever the active branch changes,
   // so stale expanded-navigation state cannot persist across a branch switch.
@@ -47,6 +49,18 @@ export const Sidebar = () => {
   useEffect(() => {
     setShowAllPages(false);
   }, [activeBranchId]);
+
+  // Close mobile drawer on route change
+  useEffect(() => {
+    setIsMobileOpen(false);
+  }, [pathname]);
+
+  // Listen for POS header hamburger button to open mobile drawer
+  useEffect(() => {
+    const handler = () => setIsMobileOpen(true);
+    window.addEventListener('pos:open-sidebar-nav', handler);
+    return () => window.removeEventListener('pos:open-sidebar-nav', handler);
+  }, []);
 
   const currentNavigation =
     pathname.startsWith('/dashboard/organization')
@@ -86,11 +100,37 @@ export const Sidebar = () => {
     !pathname.startsWith('/dashboard/organization') && !isMainBranch(activeBranchId);
 
   return (
-    <aside
-      className={`flex flex-col flex-shrink-0 z-30 bg-surface border-r border-border h-screen sticky top-0 overflow-y-auto overflow-x-hidden custom-scrollbar transition-[width] duration-normal ease-standard select-none ${
-        isCollapsed ? 'w-[60px]' : 'w-64'
-      }`}
-    >
+    <>
+      {/* Mobile Hamburger Button — visible only below lg breakpoint, hidden on POS page */}
+      {!pathname?.includes('/pos') && (
+        <button
+          type="button"
+          onClick={() => setIsMobileOpen(true)}
+          className="lg:hidden fixed top-3 left-3 z-50 w-9 h-9 rounded-lg bg-surface border border-border shadow-md flex items-center justify-center text-text-primary hover:bg-surface-hover transition-colors"
+          aria-label="Open navigation menu"
+        >
+          <Menu className="h-4 w-4" />
+        </button>
+      )}
+
+      {/* Mobile Overlay Backdrop */}
+      {isMobileOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+          onClick={() => setIsMobileOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Sidebar — hidden on mobile unless drawer is open */}
+      <aside
+        className={`flex flex-col flex-shrink-0 z-50 bg-surface border-r border-border h-screen overflow-y-auto overflow-x-hidden custom-scrollbar transition-[width,transform] duration-normal ease-standard select-none
+          ${isCollapsed ? 'w-[60px]' : 'w-64'}
+          lg:sticky lg:top-0
+          fixed top-0 left-0
+          ${isMobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'}
+        `}
+      >
       {/* Logo / Header with Instant Admin Dashboard Switch */}
       <div
         className={`flex items-center h-14 flex-shrink-0 border-b border-border sticky top-0 bg-surface z-10 transition-all duration-normal ${
@@ -288,7 +328,8 @@ export const Sidebar = () => {
           </div>
         )}
       </nav>
-    </aside>
+      </aside>
+    </>
   );
 };
 

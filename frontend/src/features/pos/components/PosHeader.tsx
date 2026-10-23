@@ -8,7 +8,7 @@ import { InvoiceLookupModal } from './modals/InvoiceLookupModal';
 import { ShopSwitcher } from '@/components/layout/ShopSwitcher';
 import { UserMenu } from '@/components/layout/UserMenu';
 import { useTerminalStore } from '@/store/useTerminalStore';
-import { Lock } from 'lucide-react';
+import { Lock, Menu } from 'lucide-react';
 import { SyncStatusBadge } from '@/components/common/SyncStatusBadge';
 import { useCashStore, CashSessionOpenModal } from '@/features/cash';
 
@@ -30,6 +30,15 @@ export const PosHeader: React.FC = () => {
       <header className="h-[52px] min-h-[52px] px-3 sm:px-4 border-b border-border bg-surface flex items-center justify-between gap-2 sm:gap-4 shrink-0 z-40 select-none shadow-xs">
         {/* Left Section: Brand Badge & Shop Switcher */}
         <div className="flex items-center gap-2.5 shrink-0">
+          {/* Mobile Sidebar Toggle — dispatches event to Sidebar to open mobile drawer */}
+          <button
+            type="button"
+            onClick={() => { window.dispatchEvent(new CustomEvent('pos:open-sidebar-nav')); }}
+            className="lg:hidden w-8 h-8 rounded-lg border border-border bg-surface hover:bg-surface-hover flex items-center justify-center text-text-secondary transition-colors shadow-xs"
+            aria-label="Open navigation menu"
+          >
+            <Menu className="w-4 h-4" />
+          </button>
           <div className="flex items-center gap-1.5">
             <span className="w-6 h-6 rounded-md bg-primary text-white flex items-center justify-center font-black text-xs shadow-xs">
               N
@@ -52,7 +61,7 @@ export const PosHeader: React.FC = () => {
           <ProductSearch />
         </div>
 
-        {/* Right-Center: Multi-Sale Tabs */}
+        {/* Right-Center: Multi-Sale Tabs (desktop only — mobile gets its own row below) */}
         <div className="hidden lg:flex items-center shrink-0">
           <SaleTabNavigation />
         </div>
@@ -101,6 +110,11 @@ export const PosHeader: React.FC = () => {
           <UserMenu />
         </div>
       </header>
+
+      {/* Mobile Sale Tab Navigation Row — visible only below lg breakpoint */}
+      <div className="lg:hidden shrink-0 px-2 pb-1 bg-surface border-b border-border">
+        <SaleTabNavigation />
+      </div>
 
       {/* On-Demand Return by Invoice Lookup Modal */}
       <InvoiceLookupModal

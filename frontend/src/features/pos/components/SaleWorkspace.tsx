@@ -17,6 +17,8 @@ export const SaleWorkspace: React.FC = () => {
   const [isInvoiceLookupOpen, setInvoiceLookupOpen] = useState(false);
   const [invoiceLookupHeading, setInvoiceLookupHeading] = useState<string | undefined>(undefined);
   const [isSaleSuccess, setIsSaleSuccess] = useState(false);
+  // Mobile panel toggle: 'cart' | 'customer'
+  const [mobilePanel, setMobilePanel] = useState<'cart' | 'customer'>('cart');
 
   const activeShopId = useOrganizationStore((s) => s.activeShop?._id || s.activeShopId);
   const products = useInventoryStore((s) => s.products);
@@ -102,15 +104,47 @@ export const SaleWorkspace: React.FC = () => {
 
   return (
     <main className="flex-1 flex flex-col min-h-0 bg-background overflow-hidden p-2 sm:p-3 gap-2 select-none">
+      {/* Mobile Panel Toggle Strip — hidden on lg+ (desktop uses side-by-side columns) */}
+      <div className="lg:hidden flex shrink-0 rounded-xl overflow-hidden border border-border shadow-xs">
+        <button
+          type="button"
+          onClick={() => setMobilePanel('cart')}
+          className={`flex-1 py-2 text-xs font-black uppercase tracking-wider transition-colors ${
+            mobilePanel === 'cart'
+              ? 'bg-primary text-white'
+              : 'bg-surface text-text-secondary hover:bg-surface-hover'
+          }`}
+        >
+          🛒 POS Cart
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobilePanel('customer')}
+          className={`flex-1 py-2 text-xs font-black uppercase tracking-wider transition-colors ${
+            mobilePanel === 'customer'
+              ? 'bg-primary text-white'
+              : 'bg-surface text-text-secondary hover:bg-surface-hover'
+          }`}
+        >
+          👤 Customer
+        </button>
+      </div>
+
       {/* Main Dual-Column Content: Left 2/3 (8 cols) & Right 1/3 (4 cols) */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-hidden">
         {/* Left 2/3: Full-Width POS Cart Workspace */}
-        <div className="lg:col-span-8 flex flex-col min-h-0 overflow-hidden">
+        {/* On mobile: only visible when mobilePanel === 'cart' */}
+        <div className={`lg:col-span-8 min-h-0 overflow-hidden ${
+          mobilePanel === 'cart' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'
+        }`}>
           <CartPanel isSaleSuccess={isSaleSuccess} />
         </div>
 
         {/* Right 1/3: Customer & Ledger Panel */}
-        <div className="lg:col-span-4 flex flex-col min-h-0 overflow-hidden">
+        {/* On mobile: only visible when mobilePanel === 'customer' */}
+        <div className={`lg:col-span-4 min-h-0 overflow-hidden ${
+          mobilePanel === 'customer' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'
+        }`}>
           <PosCustomerLedgerPanel isSaleSuccess={isSaleSuccess} />
         </div>
       </div>
