@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Search, UserPlus, Phone, CreditCard, Receipt, FileText, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { UserPlus, CreditCard, Receipt, FileText, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
 import { useLedger } from '@/features/ledger/hooks/useLedger';
-import { CreditCustomerModal } from './modals/CreditCustomerModal';
+import { CustomerSelector } from './CustomerSelector';
 import { LedgerSettlementModal } from './modals/LedgerSettlementModal';
 import { CustomerFormDrawer } from '@/features/customers/components/modals/AddCustomerDrawer';
 import { useNavigate } from 'react-router-dom';
@@ -16,13 +16,15 @@ interface PosCustomerLedgerPanelProps {
 export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ isSaleSuccess }) => {
   const navigate = useNavigate();
   const activeSession = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId));
-  const setCustomer = usePosStore((s) => s.setCustomer);
 
   const selectedCustomer = activeSession?.customer && activeSession.customer.id !== 'walk-in'
     ? activeSession.customer
     : null;
 
-  const [isSearchModalOpen, setSearchModalOpen] = useState(false);
+  // Ref forwarded into CustomerSelector so the Receive Payment button can focus
+  // the search input directly when no customer is selected yet.
+  const customerSearchInputRef = useRef<HTMLInputElement>(null);
+
   const [isNewCustomerModalOpen, setNewCustomerModalOpen] = useState(false);
   const [isReceivePaymentOpen, setReceivePaymentOpen] = useState(false);
 
@@ -65,23 +67,8 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
           </button>
         </div>
 
-        {/* Search Customer Bar (F2) */}
-        <div
-          onClick={() => setSearchModalOpen(true)}
-          className="relative flex items-center w-full px-3 py-2 bg-surface-hover/80 hover:bg-surface-hover border border-border hover:border-primary/50 rounded-xl cursor-pointer transition-all shadow-xs group"
-        >
-          <Search className="w-4 h-4 text-text-muted group-hover:text-primary transition-colors shrink-0" />
-          <span className="ml-2.5 text-xs text-text-muted font-medium truncate flex-1">
-            {selectedCustomer ? (
-              <span className="text-text-primary font-bold">{selectedCustomer.name}</span>
-            ) : (
-              'Search Customer (Name, Phone, Khata)... (F2)'
-            )}
-          </span>
-          <kbd className="px-1.5 py-0.5 rounded bg-surface border border-border text-[10px] font-mono text-text-muted">
-            F2
-          </kbd>
-        </div>
+        {/* Inline Customer / Invoice Selector (replaces CreditCustomerModal) */}
+        <CustomerSelector searchOnly inputFocusRef={customerSearchInputRef} />
       </div>
 
       {/* 2. Customer Details Card */}
@@ -223,7 +210,8 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
           type="button"
           onClick={() => {
             if (!selectedCustomer) {
-              setSearchModalOpen(true);
+              // No customer selected — focus the inline search input (already visible)
+              customerSearchInputRef.current?.focus();
             } else {
               setReceivePaymentOpen(true);
             }
@@ -249,28 +237,6 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
           <span>View Full Statement</span>
         </button>
       </div>
-
-      {/* Customer Search & Pick Modal (F2) */}
-      {isSearchModalOpen && (
-        <CreditCustomerModal
-          onClose={() => setSearchModalOpen(false)}
-          onSelect={(cust) => {
-            if (cust) {
-              setCustomer({
-                id: cust.id || (cust as any)._id,
-                name: cust.name,
-                phone: cust.phone || cust.mobile,
-                mobile: cust.mobile || cust.phone,
-                currentBalance: cust.currentBalance ?? 0,
-                creditLimit: cust.creditLimit ?? 0,
-              });
-            } else {
-              setCustomer(null);
-            }
-            setSearchModalOpen(false);
-          }}
-        />
-      )}
 
       {/* Create New Customer Drawer */}
       {isNewCustomerModalOpen && (

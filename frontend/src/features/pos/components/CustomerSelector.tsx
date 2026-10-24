@@ -9,14 +9,24 @@ import { usePosStore, SaleCustomer } from '../store/usePosStore';
 import { queryKeys } from '@/lib/react-query/queryKeys';
 import { DBCustomer } from '@/types/db.types';
 
-export const CustomerSelector: React.FC = () => {
+interface CustomerSelectorProps {
+  /** When true, always renders the search surface even if a customer is already selected.
+   *  Used by PosCustomerLedgerPanel which shows its own customer-details card. */
+  searchOnly?: boolean;
+  /** Optional ref forwarded to the underlying search input (for programmatic focus). */
+  inputFocusRef?: React.RefObject<HTMLInputElement>;
+}
+
+export const CustomerSelector: React.FC<CustomerSelectorProps> = ({ searchOnly = false, inputFocusRef }) => {
   const [searchMode, setSearchMode] = useState<'customer' | 'invoice'>('customer');
   const [searchTerm, setSearchTerm] = useState('');
   const [isDropdownOpen, setDropdownOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const internalInputRef = useRef<HTMLInputElement>(null);
+  // Use externally-provided ref when given (allows parent to call .focus())
+  const inputRef = (inputFocusRef as React.RefObject<HTMLInputElement> | undefined) ?? internalInputRef;
 
   const activeSession = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId));
   const setCustomer = usePosStore((s) => s.setCustomer);
@@ -143,9 +153,9 @@ export const CustomerSelector: React.FC = () => {
   };
 
   // ──────────────────────────────────────────────────────────────────────────
-  // A. Selected Customer Card View
+  // A. Selected Customer Card View (skipped when searchOnly=true)
   // ──────────────────────────────────────────────────────────────────────────
-  if (activeCustomer) {
+  if (activeCustomer && !searchOnly) {
     const currentBalance = activeCustomer.currentBalance ?? 0;
     const creditLimit = activeCustomer.creditLimit ?? 0;
     const availableCredit = creditLimit - currentBalance;
