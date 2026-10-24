@@ -2698,7 +2698,6 @@ export interface ExpenseFilterDto {
   category_id?: string | null;
   status?: string | null;
   payment_method?: string | null;
-  search?: string | null;
   start_date?: string | null;
   end_date?: string | null;
   limit?: number | null;
