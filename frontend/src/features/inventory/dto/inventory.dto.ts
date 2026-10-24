@@ -39,6 +39,11 @@ export interface ProductDTO {
   colorName?: string;
   unitName?: string;
   categoryName?: string;
+  brandId?: string;
+  companyId?: string;
+  qualityId?: string;
+  colorId?: string;
+  unitId?: string;
 }
 
 export interface PaginatedProductsDTO {

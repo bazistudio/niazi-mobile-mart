@@ -69,6 +69,7 @@ export interface InventoryProduct {
   averageCost?: number; // Weighted average cost (whole PKR)
   lastPurchaseCost?: number; // Explicit alias for last purchase cost
   unit?: string;
+  unitId?: string;
   status: StockStatus;
   image?: string;
   updatedAt?: string;

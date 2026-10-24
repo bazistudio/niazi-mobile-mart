@@ -5,6 +5,11 @@ import { httpClient } from '@/lib/http/httpClient';
 import { PaginatedProductsDTO, AdjustStockResponseDTO, ProductCategoryDTO, UpdateProductDTO, CheckDuplicateResponseDTO, ProductDTO } from '../dto/inventory.dto';
 import { InventoryAdjustmentType, PaginationParams } from '../types';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
+import { categoryService } from '../services/category.service';
+import { brandService } from '../services/brand.service';
+import { companyService } from '../services/company.service';
+import { colorService } from '../services/color.service';
+import { qualityService } from '../services/quality.service';
 
 function getActiveBranchId(): string {
   const store = useOrganizationStore.getState();
@@ -32,15 +37,27 @@ export const inventoryApi = {
       branch_id: branchId,
     });
 
-    // Obtain active branch stock map only if in branch-scoped mode
-    let stockMap: Record<string, number> = {};
-    if (!isOrgScope && branchId) {
-      try {
-        stockMap = await tauriClient.inventoryGetStockMap(branchId);
-      } catch (err) {
-        console.warn('[inventoryApi.getProducts] Failed to fetch branch stock map', err);
-      }
-    }
+    // In addition to active branch stock map, optionally fetch master maps if needed for fallback
+    const [stockMapResult, categories, brands, companies, colors, qualities] = await Promise.all([
+      (!isOrgScope && branchId)
+        ? tauriClient.inventoryGetStockMap(branchId).catch((err) => {
+            console.warn('[inventoryApi.getProducts] Failed to fetch branch stock map', err);
+            return {} as Record<string, number>;
+          })
+        : Promise.resolve({} as Record<string, number>),
+      categoryService.getCategories().catch(() => []),
+      brandService.getBrands().catch(() => []),
+      companyService.getCompanies().catch(() => []),
+      colorService.getColors().catch(() => []),
+      qualityService.getQualities().catch(() => []),
+    ]);
+
+    const stockMap = stockMapResult || {};
+    const categoryMap = new Map(categories.map(c => [c.id, c.name]));
+    const brandMap = new Map(brands.map(b => [b.id, b.name]));
+    const companyMap = new Map(companies.map(c => [c.id, c.name]));
+    const colorMap = new Map(colors.map(c => [c.id, c.name]));
+    const qualityMap = new Map(qualities.map(q => [q.id, q.name]));
 
     const products: ProductDTO[] = items.map((p) => {
       // P0-1 fix: in org scope, preserve warehouse_stock and total org stock separately.
@@ -52,13 +69,19 @@ export const inventoryApi = {
         ? (p.warehouse_stock ?? 0)           // org catalog: show warehouse stock
         : (branchId ? (stockMap[p.id] ?? 0) : (p.quantity ?? 0));
 
+      const brandName = p.brand_name || (p.brand_id ? brandMap.get(p.brand_id) : undefined);
+      const companyName = p.company_name || (p.company_id ? companyMap.get(p.company_id) : undefined);
+      const qualityName = p.quality_name || (p.quality_id ? qualityMap.get(p.quality_id) : undefined);
+      const colorName = p.color_name || (p.color_id ? colorMap.get(p.color_id) : undefined);
+      const catName = p.category_name || (p.category_id ? categoryMap.get(p.category_id) : undefined);
+
       return {
         _id: p.id,
         name: p.name,
         sku: p.sku,
         barcode: p.barcode || undefined,
         category: p.category_id,
-        categoryId: { _id: p.category_id, name: 'Catalog' },
+        categoryId: { _id: p.category_id, name: catName || 'Catalog' },
         price: p.sale_price,
         purchasePrice: p.purchase_price,
         averageCost: p.average_cost,
@@ -67,12 +90,17 @@ export const inventoryApi = {
         warehouseStock,
         totalOrgStock,
         compatibleModels: Array.isArray(p.compatible_models) ? p.compatible_models : [],
-        brandName: p.brand_name || undefined,
-        companyName: p.company_name || undefined,
-        qualityName: p.quality_name || undefined,
-        colorName: p.color_name || undefined,
+        brandName: brandName || undefined,
+        companyName: companyName || undefined,
+        qualityName: qualityName || undefined,
+        colorName: colorName || undefined,
         unitName: p.unit_name || undefined,
-        categoryName: p.category_name || undefined,
+        categoryName: catName || undefined,
+        brandId: p.brand_id || undefined,
+        companyId: p.company_id || undefined,
+        qualityId: p.quality_id || undefined,
+        colorId: p.color_id || undefined,
+        unitId: p.unit_id || undefined,
         lowStockThreshold: p.low_stock_threshold,
         description: p.description || undefined,
         status: 'active',
