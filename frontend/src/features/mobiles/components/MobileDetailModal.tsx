@@ -236,12 +236,12 @@ export const MobileDetailModal: React.FC<MobileDetailModalProps> = ({
                     PDF
                   </button>
                 )}
-                {isOrgAdmin && onEdit && profile.device.condition === 'USED' && (
+                {isOrgAdmin && onEdit && (
                   <button
                     type="button"
                     onClick={() => onEdit(deviceId)}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary hover:bg-primary/90 rounded-lg transition-colors"
-                    title="Edit used mobile record"
+                    title="Edit mobile record"
                   >
                     <Pencil className="w-3.5 h-3.5" />
                     Edit

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { Button, Badge, Card } from '@/components/ui';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
+import { useAuthStore } from '@/lib/auth/core/auth.store';
 import { mobileApi, mapDeviceRowToItem } from '../services/mobile.api';
 import { MobileDetailModal } from './MobileDetailModal';
 import { EditMobileModal } from './EditMobileModal';
@@ -33,6 +34,9 @@ import type { MobileInventoryItem, MobileCondition } from '../types/mobile.types
 
 export const MobileInventoryDashboard: React.FC = () => {
   const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
+  const isOrgAdmin = user?.role === 'ADMIN';
+
   const activeShop = useOrganizationStore((s) => s.activeShop);
   const activeShopId = useOrganizationStore((s) => s.activeShopId);
   const branchId = activeShopId || activeShop?._id || activeShop?.id || undefined;
@@ -533,12 +537,13 @@ export const MobileInventoryDashboard: React.FC = () => {
           deviceId={selectedDeviceId}
           branchId={branchId}
           onClose={() => setSelectedDeviceId(null)}
-          onEdit={(id) => { setSelectedDeviceId(null); setEditDeviceId(id); }}
+          onEdit={isOrgAdmin ? (id) => { setSelectedDeviceId(null); setEditDeviceId(id); } : undefined}
           onPrint={handlePrint}
           onDownloadPdf={(p) => { void handleDownloadPdf(p); }}
         />
       )}
-      {editDeviceId && (
+      {/* Edit modal — organization-admin only */}
+      {isOrgAdmin && editDeviceId && (
         <EditMobileModal
           deviceId={editDeviceId}
           branchId={branchId}

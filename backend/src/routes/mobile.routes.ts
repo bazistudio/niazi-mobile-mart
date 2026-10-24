@@ -1309,19 +1309,18 @@ export function buildMobileRouter(pool: Pool): Router {
     const deviceId = typeof req.params.id === 'string' ? req.params.id : String(req.params.id ?? '');
     const body = req.body ?? {};
 
+    // SECURITY: Under MOB-FIX-05, ALL mobile record edits (both NEW and USED)
+    // require Organization Admin authority. Branch users receive 403 FORBIDDEN.
+    if (!isOrgAdmin(identity)) {
+      res.status(403).json({
+        error: 'FORBIDDEN',
+        message: 'Only organization administrators may update mobile inventory records',
+      });
+      return;
+    }
+
     const branchId = await resolveWriteBranchId(identity, body.branch_id, res);
     if (!branchId) return;
-
-    // SECURITY: USED-device records may only be edited by Org Admin.
-    // SHOP_ADMIN and all other non-ADMIN roles must receive 403.
-    // We check condition from the actual device (not trust body), but we do
-    // this check BEFORE loading the device to fast-fail unauthorized attempts.
-    // The repo patchMobileDevice also enforces branch/org ownership.
-    //
-    // For NEW devices we keep the existing SHOP_ADMIN write flow unchanged.
-    // We determine condition after validating the request shape, but we need
-    // to enforce on the actual device -- so we add a pre-load check below
-    // after the field validation and before the repo call.
 
     // Define allowed keys before evaluating request body (prevents TDZ ReferenceError)
     const orgAdminOnlyKeys = new Set([

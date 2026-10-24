@@ -23,6 +23,7 @@ import {
   AlertTriangle,
   Search,
   Store,
+  Pencil,
 } from 'lucide-react';
 import { Button, Card, Badge } from '@/components/ui';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
@@ -30,6 +31,8 @@ import { mobileApi, transformFormDataToApiPayload } from '../services/mobile.api
 import type { SellerSearchResult } from '../services/mobile.api';
 import { supplierApi } from '@/services/supplier.api';
 import type { FrontendSupplier } from '@/services/supplier.api';
+import { brandService } from '@/features/inventory/services/brand.service';
+import type { ProductBrand } from '@/features/inventory/types';
 import type {
   MobileCondition,
   PtaStatus,
@@ -165,6 +168,108 @@ export const AddMobileForm: React.FC = () => {
   const [customStorageInput, setCustomStorageInput] = useState('');
   const [isAddingRam, setIsAddingRam] = useState(false);
   const [customRamInput, setCustomRamInput] = useState('');
+
+  // Brand management state (central brandService persistence & editing)
+  const [brandsList, setBrandsList] = useState<ProductBrand[]>([]);
+  const [brandOptions, setBrandOptions] = useState<string[]>(POPULAR_BRANDS);
+  const [isAddingBrand, setIsAddingBrand] = useState(false);
+  const [customBrandInput, setCustomBrandInput] = useState('');
+  const [isSavingBrand, setIsSavingBrand] = useState(false);
+  const [brandError, setBrandError] = useState<string | null>(null);
+
+  // Inline brand editing state
+  const [isEditingBrand, setIsEditingBrand] = useState(false);
+  const [editingBrandName, setEditingBrandName] = useState('');
+
+  // Load brands dynamically on mount via brandService
+  useEffect(() => {
+    let active = true;
+    const fetchBrands = async () => {
+      try {
+        const brands = await brandService.getBrands();
+        if (active && Array.isArray(brands) && brands.length > 0) {
+          setBrandsList(brands);
+          const names = brands.map((b) => b.name.trim()).filter(Boolean);
+          setBrandOptions(Array.from(new Set([...names, ...POPULAR_BRANDS])));
+        }
+      } catch (err) {
+        console.warn('Failed to load brands via brandService, falling back to local defaults:', err);
+      }
+    };
+    void fetchBrands();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Save new brand through brandService and select it immediately
+  const handleSaveCustomBrand = async () => {
+    const trimmed = customBrandInput.trim();
+    if (!trimmed || isSavingBrand) return;
+
+    setIsSavingBrand(true);
+    setBrandError(null);
+
+    try {
+      const created = await brandService.createBrand({ name: trimmed });
+      const createdName = created?.name?.trim() || trimmed;
+
+      setBrandsList((prev) => [...prev.filter((b) => b.id !== created.id), created]);
+      setBrandOptions((prev) => Array.from(new Set([createdName, ...prev])));
+      setFormData((prev) => ({
+        ...prev,
+        specs: { ...prev.specs, brand: createdName },
+      }));
+
+      setCustomBrandInput('');
+      setIsAddingBrand(false);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to create brand. Please try again.';
+      setBrandError(msg);
+    } finally {
+      setIsSavingBrand(false);
+    }
+  };
+
+  // Inline update existing brand through brandService
+  const handleUpdateBrand = async () => {
+    const newName = editingBrandName.trim();
+    const currentName = formData.specs.brand.trim();
+    if (!newName || !currentName || isSavingBrand) return;
+
+    setIsSavingBrand(true);
+    setBrandError(null);
+
+    try {
+      const existingBrand = brandsList.find((b) => b.name.toLowerCase() === currentName.toLowerCase());
+      if (existingBrand) {
+        await brandService.updateBrand(existingBrand.id, { name: newName });
+        setBrandsList((prev) =>
+          prev.map((b) => (b.id === existingBrand.id ? { ...b, name: newName } : b))
+        );
+      } else {
+        // If it was a default or custom brand without remote ID yet, persist as new brand
+        const created = await brandService.createBrand({ name: newName });
+        setBrandsList((prev) => [...prev, created]);
+      }
+
+      setBrandOptions((prev) =>
+        Array.from(new Set(prev.map((b) => (b.toLowerCase() === currentName.toLowerCase() ? newName : b))))
+      );
+      setFormData((prev) => ({
+        ...prev,
+        specs: { ...prev.specs, brand: newName },
+      }));
+
+      setIsEditingBrand(false);
+      setEditingBrandName('');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to update brand. Please try again.';
+      setBrandError(msg);
+    } finally {
+      setIsSavingBrand(false);
+    }
+  };
 
   // Supplier selection state (NEW mobiles only)
   const [selectedSupplier, setSelectedSupplier] = useState<FrontendSupplier | null>(null);
@@ -756,29 +861,167 @@ export const AddMobileForm: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {/* Brand */}
             <div className="flex flex-col gap-1.5">
-              <label htmlFor={`${formId}-brand`} className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-                Brand *
-              </label>
-              <input
-                id={`${formId}-brand`}
-                type="text"
-                list={`${formId}-brands-list`}
-                placeholder="e.g. Apple, Samsung"
-                required
-                value={formData.specs.brand}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    specs: { ...prev.specs, brand: e.target.value },
-                  }))
-                }
-                className="w-full px-3 py-2 text-sm bg-surface text-text-primary border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring"
-              />
-              <datalist id={`${formId}-brands-list`}>
-                {POPULAR_BRANDS.map((b) => (
-                  <option key={b} value={b} />
-                ))}
-              </datalist>
+              <div className="flex items-center justify-between">
+                <label htmlFor={`${formId}-brand`} className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+                  Brand *
+                </label>
+                <div className="flex items-center gap-2">
+                  {formData.specs.brand && !isEditingBrand && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditingBrand(true);
+                        setEditingBrandName(formData.specs.brand);
+                        setBrandError(null);
+                      }}
+                      className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-primary transition-colors cursor-pointer"
+                      title={`Edit brand name "${formData.specs.brand}"`}
+                    >
+                      <Pencil className="w-3 h-3" />
+                      <span>Edit</span>
+                    </button>
+                  )}
+                  {!isAddingBrand ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAddingBrand(true);
+                        setIsEditingBrand(false);
+                        setBrandError(null);
+                      }}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-hover transition-colors cursor-pointer"
+                      title="Add new brand"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Add Brand</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAddingBrand(false);
+                        setCustomBrandInput('');
+                        setBrandError(null);
+                      }}
+                      className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text-primary transition-colors cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                      <span>Cancel</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {isEditingBrand ? (
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      placeholder="Enter updated brand name"
+                      autoFocus
+                      disabled={isSavingBrand}
+                      value={editingBrandName}
+                      onChange={(e) => setEditingBrandName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          void handleUpdateBrand();
+                        } else if (e.key === 'Escape') {
+                          setIsEditingBrand(false);
+                          setEditingBrandName('');
+                          setBrandError(null);
+                        }
+                      }}
+                      className="w-full px-3 py-2 text-sm bg-surface text-text-primary border border-primary rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleUpdateBrand()}
+                      disabled={!editingBrandName.trim() || isSavingBrand}
+                      className="px-3 py-2 bg-primary text-white text-xs font-semibold rounded-md hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0 flex items-center gap-1 cursor-pointer"
+                      title="Save Updated Brand"
+                    >
+                      {isSavingBrand ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      <span>{isSavingBrand ? 'Updating...' : 'Update'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditingBrand(false);
+                        setEditingBrandName('');
+                        setBrandError(null);
+                      }}
+                      className="px-2.5 py-2 text-xs text-text-muted hover:text-text-primary border border-border rounded-md hover:bg-surface-hover transition-colors cursor-pointer"
+                      title="Cancel Edit"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  {brandError && (
+                    <span className="text-[11px] text-red-500">{brandError}</span>
+                  )}
+                </div>
+              ) : isAddingBrand ? (
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      placeholder="e.g. Itel, Infinix"
+                      autoFocus
+                      disabled={isSavingBrand}
+                      value={customBrandInput}
+                      onChange={(e) => setCustomBrandInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          void handleSaveCustomBrand();
+                        } else if (e.key === 'Escape') {
+                          setIsAddingBrand(false);
+                          setCustomBrandInput('');
+                          setBrandError(null);
+                        }
+                      }}
+                      className="w-full px-3 py-2 text-sm bg-surface text-text-primary border border-primary rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveCustomBrand()}
+                      disabled={!customBrandInput.trim() || isSavingBrand}
+                      className="px-3 py-2 bg-primary text-white text-xs font-semibold rounded-md hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0 flex items-center gap-1 cursor-pointer"
+                      title="Save & Select Brand"
+                    >
+                      {isSavingBrand ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      <span>{isSavingBrand ? 'Saving...' : 'Save'}</span>
+                    </button>
+                  </div>
+                  {brandError && (
+                    <span className="text-[11px] text-red-500">{brandError}</span>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <input
+                    id={`${formId}-brand`}
+                    type="text"
+                    list={`${formId}-brands-list`}
+                    placeholder="e.g. Apple, Samsung, Itel"
+                    required
+                    value={formData.specs.brand}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        specs: { ...prev.specs, brand: e.target.value },
+                      }))
+                    }
+                    className="w-full px-3 py-2 text-sm bg-surface text-text-primary border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                  />
+                  <datalist id={`${formId}-brands-list`}>
+                    {brandOptions.map((b) => (
+                      <option key={b} value={b} />
+                    ))}
+                  </datalist>
+                </>
+              )}
             </div>
 
             {/* Model */}
@@ -1537,7 +1780,7 @@ export const AddMobileForm: React.FC = () => {
                   id={`${formId}-purchase-price`}
                   type="number"
                   min="0"
-                  step="1000"
+                  step="1"
                   required={isUsed}
                   placeholder="0"
                   value={formData.paperwork.purchasePrice || ''}
@@ -1888,7 +2131,7 @@ export const AddMobileForm: React.FC = () => {
                 id={`${formId}-cost-price`}
                 type="number"
                 min="0"
-                step="1000"
+                step="1"
                 required
                 placeholder="0"
                 value={isUsed ? formData.paperwork.purchasePrice || '' : formData.specs.costPrice || ''}
@@ -1906,7 +2149,7 @@ export const AddMobileForm: React.FC = () => {
                 id={`${formId}-expected-sale-price`}
                 type="number"
                 min="0"
-                step="1000"
+                step="1"
                 required
                 placeholder="0"
                 value={formData.specs.expectedSalePrice || ''}
