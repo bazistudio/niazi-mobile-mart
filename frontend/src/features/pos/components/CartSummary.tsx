@@ -84,8 +84,8 @@ export const CartSummary: React.FC = () => {
         e.preventDefault();
         handleCashSale();
       }
-      // Ctrl + P : Pay & Print
-      if (e.ctrlKey && e.key.toLowerCase() === 'p') {
+      // Ctrl + P or F12 : Pay & Print
+      if ((e.ctrlKey && e.key.toLowerCase() === 'p') || e.key === 'F12') {
         e.preventDefault();
         handlePayAndPrint();
       }
