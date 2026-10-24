@@ -113,6 +113,15 @@ export function handleNotifyHint(
     case 'CATEGORY_UPDATED':
       queryClient.invalidateQueries({ queryKey: ['categories'] });
       break;
+    case 'COMPANY_UPDATED':
+      queryClient.invalidateQueries({ queryKey: ['companies'] });
+      break;
+    case 'COLOR_UPDATED':
+      queryClient.invalidateQueries({ queryKey: ['colors'] });
+      break;
+    case 'QUALITY_UPDATED':
+      queryClient.invalidateQueries({ queryKey: ['qualities'] });
+      break;
     case 'SUPPLIER_UPDATED':
     case 'SUPPLIER_CREATED':
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });

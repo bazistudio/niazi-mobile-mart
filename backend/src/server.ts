@@ -342,6 +342,23 @@ async function main(): Promise<void> {
       }
       const item = await createBrand(pool, { name, code: req.body?.code, description: req.body?.description });
       res.status(201).json(item);
+      setImmediate(() => {
+        const orgId = identity.organization_id || '00000000-0000-0000-0000-000000000001';
+        pool.connect().then(cl => {
+          cl.query('BEGIN')
+            .then(() => writeChangeLogEntry(cl, {
+              organizationId: orgId,
+              branchId: identity.branch_id || '00000000-0000-0000-0000-000000000002',
+              eventType: 'BRAND_UPDATED',
+              entityType: 'brand',
+              entityId: item.id,
+              payloadStr: JSON.stringify(item),
+            }))
+            .then(() => cl.query('COMMIT'))
+            .catch(() => cl.query('ROLLBACK').catch(() => {}))
+            .finally(() => cl.release());
+        }).catch(() => {});
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to create brand' });
     }
@@ -362,6 +379,23 @@ async function main(): Promise<void> {
       }
       const item = await updateBrand(pool, id, { name });
       res.status(200).json(item);
+      setImmediate(() => {
+        const orgId = identity.organization_id || '00000000-0000-0000-0000-000000000001';
+        pool.connect().then(cl => {
+          cl.query('BEGIN')
+            .then(() => writeChangeLogEntry(cl, {
+              organizationId: orgId,
+              branchId: identity.branch_id || '00000000-0000-0000-0000-000000000002',
+              eventType: 'BRAND_UPDATED',
+              entityType: 'brand',
+              entityId: id,
+              payloadStr: JSON.stringify(item),
+            }))
+            .then(() => cl.query('COMMIT'))
+            .catch(() => cl.query('ROLLBACK').catch(() => {}))
+            .finally(() => cl.release());
+        }).catch(() => {});
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to update brand' });
     }
@@ -386,6 +420,23 @@ async function main(): Promise<void> {
       }
       const item = await createCategory(pool, { name, code: req.body?.code, description: req.body?.description });
       res.status(201).json(item);
+      setImmediate(() => {
+        const orgId = identity.organization_id || '00000000-0000-0000-0000-000000000001';
+        pool.connect().then(cl => {
+          cl.query('BEGIN')
+            .then(() => writeChangeLogEntry(cl, {
+              organizationId: orgId,
+              branchId: identity.branch_id || '00000000-0000-0000-0000-000000000002',
+              eventType: 'CATEGORY_UPDATED',
+              entityType: 'category',
+              entityId: item.id,
+              payloadStr: JSON.stringify(item),
+            }))
+            .then(() => cl.query('COMMIT'))
+            .catch(() => cl.query('ROLLBACK').catch(() => {}))
+            .finally(() => cl.release());
+        }).catch(() => {});
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to create category' });
     }
@@ -406,6 +457,23 @@ async function main(): Promise<void> {
       }
       const item = await updateCategory(pool, id, { name });
       res.status(200).json(item);
+      setImmediate(() => {
+        const orgId = identity.organization_id || '00000000-0000-0000-0000-000000000001';
+        pool.connect().then(cl => {
+          cl.query('BEGIN')
+            .then(() => writeChangeLogEntry(cl, {
+              organizationId: orgId,
+              branchId: identity.branch_id || '00000000-0000-0000-0000-000000000002',
+              eventType: 'CATEGORY_UPDATED',
+              entityType: 'category',
+              entityId: id,
+              payloadStr: JSON.stringify(item),
+            }))
+            .then(() => cl.query('COMMIT'))
+            .catch(() => cl.query('ROLLBACK').catch(() => {}))
+            .finally(() => cl.release());
+        }).catch(() => {});
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to update category' });
     }
@@ -430,6 +498,23 @@ async function main(): Promise<void> {
       }
       const item = await createCompany(pool, { name, code: req.body?.code, description: req.body?.description });
       res.status(201).json(item);
+      setImmediate(() => {
+        const orgId = identity.organization_id || '00000000-0000-0000-0000-000000000001';
+        pool.connect().then(cl => {
+          cl.query('BEGIN')
+            .then(() => writeChangeLogEntry(cl, {
+              organizationId: orgId,
+              branchId: identity.branch_id || '00000000-0000-0000-0000-000000000002',
+              eventType: 'COMPANY_UPDATED',
+              entityType: 'company',
+              entityId: item.id,
+              payloadStr: JSON.stringify(item),
+            }))
+            .then(() => cl.query('COMMIT'))
+            .catch(() => cl.query('ROLLBACK').catch(() => {}))
+            .finally(() => cl.release());
+        }).catch(() => {});
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to create company' });
     }
@@ -450,6 +535,23 @@ async function main(): Promise<void> {
       }
       const item = await updateCompany(pool, id, { name });
       res.status(200).json(item);
+      setImmediate(() => {
+        const orgId = identity.organization_id || '00000000-0000-0000-0000-000000000001';
+        pool.connect().then(cl => {
+          cl.query('BEGIN')
+            .then(() => writeChangeLogEntry(cl, {
+              organizationId: orgId,
+              branchId: identity.branch_id || '00000000-0000-0000-0000-000000000002',
+              eventType: 'COMPANY_UPDATED',
+              entityType: 'company',
+              entityId: id,
+              payloadStr: JSON.stringify(item),
+            }))
+            .then(() => cl.query('COMMIT'))
+            .catch(() => cl.query('ROLLBACK').catch(() => {}))
+            .finally(() => cl.release());
+        }).catch(() => {});
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to update company' });
     }
@@ -474,6 +576,23 @@ async function main(): Promise<void> {
       }
       const item = await createQuality(pool, { name, code: req.body?.code, description: req.body?.description });
       res.status(201).json(item);
+      setImmediate(() => {
+        const orgId = identity.organization_id || '00000000-0000-0000-0000-000000000001';
+        pool.connect().then(cl => {
+          cl.query('BEGIN')
+            .then(() => writeChangeLogEntry(cl, {
+              organizationId: orgId,
+              branchId: identity.branch_id || '00000000-0000-0000-0000-000000000002',
+              eventType: 'QUALITY_UPDATED',
+              entityType: 'quality',
+              entityId: item.id,
+              payloadStr: JSON.stringify(item),
+            }))
+            .then(() => cl.query('COMMIT'))
+            .catch(() => cl.query('ROLLBACK').catch(() => {}))
+            .finally(() => cl.release());
+        }).catch(() => {});
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to create quality' });
     }
@@ -494,6 +613,23 @@ async function main(): Promise<void> {
       }
       const item = await updateQuality(pool, id, { name });
       res.status(200).json(item);
+      setImmediate(() => {
+        const orgId = identity.organization_id || '00000000-0000-0000-0000-000000000001';
+        pool.connect().then(cl => {
+          cl.query('BEGIN')
+            .then(() => writeChangeLogEntry(cl, {
+              organizationId: orgId,
+              branchId: identity.branch_id || '00000000-0000-0000-0000-000000000002',
+              eventType: 'QUALITY_UPDATED',
+              entityType: 'quality',
+              entityId: id,
+              payloadStr: JSON.stringify(item),
+            }))
+            .then(() => cl.query('COMMIT'))
+            .catch(() => cl.query('ROLLBACK').catch(() => {}))
+            .finally(() => cl.release());
+        }).catch(() => {});
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to update quality' });
     }
@@ -518,6 +654,23 @@ async function main(): Promise<void> {
       }
       const item = await createColor(pool, { name, code: req.body?.code, description: req.body?.description });
       res.status(201).json(item);
+      setImmediate(() => {
+        const orgId = identity.organization_id || '00000000-0000-0000-0000-000000000001';
+        pool.connect().then(cl => {
+          cl.query('BEGIN')
+            .then(() => writeChangeLogEntry(cl, {
+              organizationId: orgId,
+              branchId: identity.branch_id || '00000000-0000-0000-0000-000000000002',
+              eventType: 'COLOR_UPDATED',
+              entityType: 'color',
+              entityId: item.id,
+              payloadStr: JSON.stringify(item),
+            }))
+            .then(() => cl.query('COMMIT'))
+            .catch(() => cl.query('ROLLBACK').catch(() => {}))
+            .finally(() => cl.release());
+        }).catch(() => {});
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to create color' });
     }
@@ -538,6 +691,23 @@ async function main(): Promise<void> {
       }
       const item = await updateColor(pool, id, { name });
       res.status(200).json(item);
+      setImmediate(() => {
+        const orgId = identity.organization_id || '00000000-0000-0000-0000-000000000001';
+        pool.connect().then(cl => {
+          cl.query('BEGIN')
+            .then(() => writeChangeLogEntry(cl, {
+              organizationId: orgId,
+              branchId: identity.branch_id || '00000000-0000-0000-0000-000000000002',
+              eventType: 'COLOR_UPDATED',
+              entityType: 'color',
+              entityId: id,
+              payloadStr: JSON.stringify(item),
+            }))
+            .then(() => cl.query('COMMIT'))
+            .catch(() => cl.query('ROLLBACK').catch(() => {}))
+            .finally(() => cl.release());
+        }).catch(() => {});
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to update color' });
     }

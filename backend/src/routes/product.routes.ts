@@ -241,7 +241,7 @@ export function createProductRouter(pool: Pool): Router {
                 eventType: 'PRODUCT_CREATED',
                 entityType: 'product',
                 entityId: (product as any).id ?? id,
-                payloadStr: JSON.stringify({ product_id: (product as any).id ?? id, branch_id: bId }),
+                payloadStr: JSON.stringify(product),
               }))
               .then(() => cl.query('COMMIT'))
               .catch(() => cl.query('ROLLBACK').catch(() => {}))
@@ -286,7 +286,7 @@ export function createProductRouter(pool: Pool): Router {
                 eventType: 'PRODUCT_UPDATED',
                 entityType: 'product',
                 entityId: id,
-                payloadStr: JSON.stringify({ product_id: id }),
+                payloadStr: JSON.stringify(product),
               }))
               .then(() => cl.query('COMMIT'))
               .catch(() => cl.query('ROLLBACK').catch(() => {}))

@@ -28,23 +28,6 @@ function saveStoredCategories(list: ProductCategory[]) {
 
 export const categoryService = {
   getCategories: async (): Promise<ProductCategory[]> => {
-    if (isTauriEnvironment()) {
-      try {
-        const list = await tauriClient.categoryList();
-        if (list && list.length > 0) {
-          return list.map((cat) => ({
-            id: cat.id,
-            name: cat.name,
-            organizationId: '00000000-0000-0000-0000-000000000001',
-          }));
-        }
-      } catch (err) {
-        console.warn('Tauri categoryList error', err);
-      }
-      return [];
-    }
-
-    // Browser mode -> call live PostgreSQL API
     try {
       const list = await httpFetch<any[]>('/api/categories');
       if (list && list.length > 0) {
@@ -65,30 +48,6 @@ export const categoryService = {
 
   createCategory: async (data: { name: string; organizationId?: string }): Promise<ProductCategory> => {
     const cleanName = data.name.trim();
-
-    if (isTauriEnvironment()) {
-      try {
-        const code = cleanName.toUpperCase().replace(/[^A-Z0-9]/g, '_');
-        const created = await tauriClient.categoryCreate({
-          name: cleanName,
-          code: code || 'CAT',
-          description: null,
-        });
-        const catObj = {
-          id: created.id,
-          name: created.name,
-          organizationId: '00000000-0000-0000-0000-000000000001',
-        };
-        const current = getStoredCategories();
-        saveStoredCategories([...current.filter(c => c.id !== catObj.id), catObj]);
-        return catObj;
-      } catch (err) {
-        console.warn('Tauri categoryCreate failed', err);
-        throw err;
-      }
-    }
-
-    // Browser mode -> POST to live PostgreSQL API
     const code = cleanName.toUpperCase().replace(/[^A-Z0-9]/g, '_').substring(0, 20) || 'CAT';
     const created = await httpFetch<any>('/api/categories', {
       method: 'POST',
@@ -106,22 +65,6 @@ export const categoryService = {
 
   updateCategory: async (id: string, data: { name: string }): Promise<ProductCategory> => {
     const cleanName = data.name.trim();
-    if (isTauriEnvironment()) {
-      try {
-        const updated = await tauriClient.categoryUpdate(id, { name: cleanName });
-        const catObj = {
-          id: updated.id,
-          name: updated.name,
-          organizationId: '00000000-0000-0000-0000-000000000001',
-        };
-        const current = getStoredCategories();
-        saveStoredCategories(current.map(c => c.id === id ? catObj : c));
-        return catObj;
-      } catch (err) {
-        console.warn('Tauri categoryUpdate fallback to local storage', err);
-      }
-    }
-
     const updated = await httpFetch<any>(`/api/categories/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify({ name: cleanName }),

@@ -35,22 +35,6 @@ function saveStoredCompanies(list: ProductCompany[]) {
 
 export const companyService = {
   getCompanies: async (): Promise<ProductCompany[]> => {
-    if (isTauriEnvironment()) {
-      try {
-        const list = await tauriClient.companyList();
-        if (list && list.length > 0) {
-          return list.map((c) => ({
-            id: c.id,
-            name: c.name,
-            organizationId: '00000000-0000-0000-0000-000000000001',
-          }));
-        }
-      } catch (err) {
-        console.warn('Tauri companyList fallback to stored companies', err);
-      }
-      return getStoredCompanies();
-    }
-
     try {
       const list = await httpFetch<any[]>('/api/companies');
       if (list && list.length > 0) {
@@ -70,36 +54,6 @@ export const companyService = {
   
   createCompany: async (data: { name: string; organizationId?: string }): Promise<ProductCompany> => {
     const cleanName = data.name.trim();
-    if (isTauriEnvironment()) {
-      try {
-        const code = cleanName.toUpperCase().replace(/[^A-Z0-9]/g, '_').substring(0, 20) || 'CMP';
-        const created = await tauriClient.companyCreate({
-          name: cleanName,
-          code,
-          description: null,
-        });
-        const compObj = {
-          id: created.id,
-          name: created.name,
-          organizationId: '00000000-0000-0000-0000-000000000001',
-        };
-        const current = getStoredCompanies();
-        saveStoredCompanies([...current.filter(c => c.id !== compObj.id), compObj]);
-        return compObj;
-      } catch (err) {
-        console.warn('Tauri companyCreate failed, falling back to local storage', err);
-        // Fallback local storage generation so offline creation never stalls
-        const fallbackObj: ProductCompany = {
-          id: `cmp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          name: cleanName,
-          organizationId: '00000000-0000-0000-0000-000000000001',
-        };
-        const current = getStoredCompanies();
-        saveStoredCompanies([...current.filter(c => c.id !== fallbackObj.id), fallbackObj]);
-        return fallbackObj;
-      }
-    }
-
     const created = await httpFetch<any>('/api/companies', {
       method: 'POST',
       body: JSON.stringify({ name: cleanName }),
@@ -116,22 +70,6 @@ export const companyService = {
 
   updateCompany: async (id: string, data: { name: string }): Promise<ProductCompany> => {
     const cleanName = data.name.trim();
-    if (isTauriEnvironment()) {
-      try {
-        const updated = await tauriClient.companyUpdate(id, { name: cleanName });
-        const compObj = {
-          id: updated.id,
-          name: updated.name,
-          organizationId: '00000000-0000-0000-0000-000000000001',
-        };
-        const current = getStoredCompanies();
-        saveStoredCompanies(current.map(c => c.id === id ? compObj : c));
-        return compObj;
-      } catch (err) {
-        console.warn('Tauri companyUpdate fallback to local storage', err);
-      }
-    }
-
     const updated = await httpFetch<any>(`/api/companies/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify({ name: cleanName }),

@@ -39,22 +39,6 @@ function saveStoredColors(list: ProductColor[]) {
 
 export const colorService = {
   getColors: async (): Promise<ProductColor[]> => {
-    if (isTauriEnvironment()) {
-      try {
-        const list = await tauriClient.colorList();
-        if (list && list.length > 0) {
-          return list.map((c) => ({
-            id: c.id,
-            name: c.name,
-            organizationId: '00000000-0000-0000-0000-000000000001',
-          }));
-        }
-      } catch (err) {
-        console.warn('Tauri colorList fallback to stored colors', err);
-      }
-      return getStoredColors();
-    }
-
     try {
       const list = await httpFetch<any[]>('/api/colors');
       if (list && list.length > 0) {
@@ -74,22 +58,6 @@ export const colorService = {
   
   createColor: async (data: { name: string; organizationId?: string }): Promise<ProductColor> => {
     const cleanName = data.name.trim();
-    if (isTauriEnvironment()) {
-      try {
-        const created = await tauriClient.colorCreate({ name: cleanName });
-        const colorObj = {
-          id: created.id,
-          name: created.name,
-          organizationId: '00000000-0000-0000-0000-000000000001',
-        };
-        const current = getStoredColors();
-        saveStoredColors([...current.filter(c => c.id !== colorObj.id), colorObj]);
-        return colorObj;
-      } catch (err) {
-        console.warn('Tauri colorCreate fallback to local storage', err);
-      }
-    }
-
     const created = await httpFetch<any>('/api/colors', {
       method: 'POST',
       body: JSON.stringify({ name: cleanName }),
@@ -106,22 +74,6 @@ export const colorService = {
 
   updateColor: async (id: string, data: { name: string }): Promise<ProductColor> => {
     const cleanName = data.name.trim();
-    if (isTauriEnvironment()) {
-      try {
-        const updated = await tauriClient.colorUpdate(id, { name: cleanName });
-        const colorObj = {
-          id: updated.id,
-          name: updated.name,
-          organizationId: '00000000-0000-0000-0000-000000000001',
-        };
-        const current = getStoredColors();
-        saveStoredColors(current.map(c => c.id === id ? colorObj : c));
-        return colorObj;
-      } catch (err) {
-        console.warn('Tauri colorUpdate fallback to local storage', err);
-      }
-    }
-
     const updated = await httpFetch<any>(`/api/colors/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify({ name: cleanName }),

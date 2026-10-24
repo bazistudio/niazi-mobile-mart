@@ -48,23 +48,6 @@ function saveStoredBrands(list: ProductBrand[]) {
 
 export const brandService = {
   getBrands: async (): Promise<ProductBrand[]> => {
-    if (isTauriEnvironment()) {
-      try {
-        const list = await tauriClient.brandList();
-        if (list && list.length > 0) {
-          return list.map((b) => ({
-            id: b.id,
-            name: b.name,
-            organizationId: '00000000-0000-0000-0000-000000000001',
-          }));
-        }
-      } catch (err) {
-        console.warn('Tauri brandList fallback to stored brands', err);
-      }
-      return getStoredBrands();
-    }
-
-    // Browser mode -> call live PostgreSQL API
     try {
       const list = await httpFetch<any[]>('/api/brands');
       if (list && list.length > 0) {
@@ -84,27 +67,6 @@ export const brandService = {
   
   createBrand: async (data: { name: string; organizationId?: string }): Promise<ProductBrand> => {
     const cleanName = data.name.trim();
-    if (isTauriEnvironment()) {
-      try {
-        const code = cleanName.toUpperCase().replace(/[^A-Z0-9]/g, '_');
-        const created = await tauriClient.brandCreate({
-          name: cleanName,
-          code: code || 'BRD',
-          description: null,
-        });
-        const brandObj = {
-          id: created.id,
-          name: created.name,
-          organizationId: '00000000-0000-0000-0000-000000000001',
-        };
-        const current = getStoredBrands();
-        saveStoredBrands([...current.filter(b => b.id !== brandObj.id), brandObj]);
-        return brandObj;
-      } catch (err) {
-        console.warn('Tauri brandCreate fallback to local storage', err);
-      }
-    }
-
     const created = await httpFetch<any>('/api/brands', {
       method: 'POST',
       body: JSON.stringify({ name: cleanName }),
@@ -121,24 +83,6 @@ export const brandService = {
 
   updateBrand: async (id: string, data: { name: string }): Promise<ProductBrand> => {
     const cleanName = data.name.trim();
-    if (isTauriEnvironment()) {
-      try {
-        const updated = await tauriClient.brandUpdate(id, {
-          name: cleanName,
-        });
-        const brandObj = {
-          id: updated.id,
-          name: updated.name,
-          organizationId: '00000000-0000-0000-0000-000000000001',
-        };
-        const current = getStoredBrands();
-        saveStoredBrands(current.map(b => b.id === id ? brandObj : b));
-        return brandObj;
-      } catch (err) {
-        console.warn('Tauri brandUpdate fallback to local storage', err);
-      }
-    }
-
     const updated = await httpFetch<any>(`/api/brands/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify({ name: cleanName }),
