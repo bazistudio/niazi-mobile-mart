@@ -12,7 +12,7 @@ interface Props {
   customer: DBCustomer;
   invoiceTotal: number;
   onClose: () => void;
-  onSuccess: (receivedAmount: number) => void;
+  onSuccess: (receivedAmount: number, customer: DBCustomer) => void;
   /**
    * GAP-04: When true, the modal records the payment via ledgerApi itself and shows a
    * print-receipt option after confirmation. Use this for the standalone "Receive Payment"
@@ -71,8 +71,8 @@ export const LedgerSettlementModal: React.FC<Props> = ({
     }
 
     if (!standaloneMode) {
-      // CartSummary path: just delegate to caller.
-      onSuccess(receivedAmount);
+      // CartSummary path: just delegate to caller with exact customer.
+      onSuccess(receivedAmount, customer);
       return;
     }
 
@@ -110,9 +110,9 @@ export const LedgerSettlementModal: React.FC<Props> = ({
         }),
       });
 
-      // Notify caller to refresh the ledger panel — pass receivedAmount so callers
+      // Notify caller to refresh the ledger panel — pass receivedAmount and customer so callers
       // that track the amount still work, but onSuccess does NOT record a second payment.
-      onSuccess(receivedAmount);
+      onSuccess(receivedAmount, customer);
     } catch (err: any) {
       toast.error(err?.message || 'Failed to record payment. Please try again.');
     } finally {

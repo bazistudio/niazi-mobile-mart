@@ -381,10 +381,13 @@ export function DynamicMasterSelect({
   const [isCreatingMode, setIsCreatingMode] = useState(false);
   const [newEntityName, setNewEntityName] = useState('');
   const [error, setError] = useState('');
+  const [highlightIndex, setHighlightIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const gearButtonRef = useRef<HTMLButtonElement>(null);
+  const searchBufferRef = useRef('');
+  const searchTimeoutRef = useRef<any>(null);
 
   const { options, isLoading, createOption, isCreating, updateOption, isUpdating, deleteOption, isDeleting } = useMasterData(entity);
 
@@ -496,10 +499,7 @@ export function DynamicMasterSelect({
   const defaultLabel = hideAllOption ? `Select ${entity}` : entity.charAt(0).toUpperCase() + entity.slice(1);
   const displayLabel = selectedOption ? selectedOption.name : defaultLabel;
 
-  // In-place keyboard search buffer & arrow selection
-  const [highlightIndex, setHighlightIndex] = useState(-1);
-  const searchBufferRef = useRef('');
-  const searchTimeoutRef = useRef<any>(null);
+
 
   const handleButtonKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
     // If Tab key, close dropdown and let natural tab focus move forward

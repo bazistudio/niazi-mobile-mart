@@ -46,6 +46,7 @@ export const CartSummary: React.FC = () => {
 
   const [isCustomerModalOpen, setCustomerModalOpen] = useState(false);
   const [isLedgerModalOpen, setLedgerModalOpen] = useState(false);
+  const [activeSettlementCustomer, setActiveSettlementCustomer] = useState<DBCustomer | null>(null);
   const [isMultiPaymentOpen, setMultiPaymentOpen] = useState(false);
   const [isDiscountModalOpen, setDiscountModalOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<'sale' | 'print' | null>(null);
@@ -90,11 +91,7 @@ export const CartSummary: React.FC = () => {
         handlePayAndPrint();
       }
       // Ctrl + L : Handled globally by lock terminal
-      // F2 : Customer Search
-      if (e.key === 'F2') {
-        e.preventDefault();
-        setCustomerModalOpen(true);
-      }
+      // F2 : Dedicated inline customer search handled by CustomerSelector
     };
 
     window.addEventListener('keydown', handleGlobalKeyDown);
@@ -164,6 +161,7 @@ export const CartSummary: React.FC = () => {
 
     if (selectedCustomer) {
       setPendingAction('sale');
+      setActiveSettlementCustomer(selectedCustomer as any);
       setLedgerModalOpen(true);
       return;
     }
@@ -187,6 +185,7 @@ export const CartSummary: React.FC = () => {
 
     if (selectedCustomer) {
       setPendingAction('print');
+      setActiveSettlementCustomer(selectedCustomer as any);
       setLedgerModalOpen(true);
       return;
     }
@@ -312,12 +311,17 @@ export const CartSummary: React.FC = () => {
     await processTransaction(paymentBreakdown, null, shouldPrint || pendingAction === 'print');
   };
 
-  const handleLedgerSuccess = (receivedAmount: number) => {
+  const handleLedgerSuccess = (receivedAmount: number, settledCustomer?: DBCustomer) => {
     setLedgerModalOpen(false);
+    const targetCust = settledCustomer || activeSettlementCustomer || selectedCustomer;
+    if (!targetCust || !targetCust.id || targetCust.id === 'walk-in') {
+      toast.error('No valid customer selected for credit sale.');
+      return;
+    }
     const payments = receivedAmount > 0 ? [{ method: 'cash', amount: receivedAmount }] : [];
     processTransaction(
       payments,
-      { id: selectedCustomer!.id, name: selectedCustomer!.name },
+      { id: targetCust.id, name: targetCust.name },
       pendingAction === 'print'
     );
   };
@@ -477,6 +481,7 @@ export const CartSummary: React.FC = () => {
             type="button"
             onClick={() => {
               if (selectedCustomer) {
+                setActiveSettlementCustomer(selectedCustomer as any);
                 setLedgerModalOpen(true);
               } else {
                 setCustomerModalOpen(true);
@@ -634,35 +639,42 @@ export const CartSummary: React.FC = () => {
         </button>
       </div>
 
-      {/* Credit Customer Modal (for F2 / MultiPayment credit pick) */}
+      {/* Credit Customer Modal (for MultiPayment credit pick when no customer is selected) */}
       {isCustomerModalOpen && (
         <CreditCustomerModal
           onClose={() => setCustomerModalOpen(false)}
           onSelect={(customer) => {
             if (customer) {
-              setCustomer({
+              const saleCust = {
                 id: customer.id || (customer as any)._id,
                 name: customer.name,
                 phone: customer.phone || customer.mobile,
                 mobile: customer.mobile || customer.phone,
                 currentBalance: customer.currentBalance ?? 0,
                 creditLimit: customer.creditLimit ?? 0,
-              });
+              };
+              setCustomer(saleCust);
+              setActiveSettlementCustomer(customer);
+              setCustomerModalOpen(false);
+              setLedgerModalOpen(true);
             } else {
               setCustomer(null);
+              setActiveSettlementCustomer(null);
+              setCustomerModalOpen(false);
             }
-            setCustomerModalOpen(false);
-            setLedgerModalOpen(true);
           }}
         />
       )}
 
       {/* Ledger Settlement Modal */}
-      {isLedgerModalOpen && selectedCustomer && (
+      {isLedgerModalOpen && (activeSettlementCustomer || selectedCustomer) && (
         <LedgerSettlementModal
-          customer={selectedCustomer as any}
+          customer={(activeSettlementCustomer || selectedCustomer) as any}
           invoiceTotal={grandTotal}
-          onClose={() => setLedgerModalOpen(false)}
+          onClose={() => {
+            setLedgerModalOpen(false);
+            setActiveSettlementCustomer(null);
+          }}
           onSuccess={handleLedgerSuccess}
         />
       )}
@@ -682,7 +694,12 @@ export const CartSummary: React.FC = () => {
           onConfirm={handleMultiPaymentConfirm}
           onCreditSelect={() => {
             setMultiPaymentOpen(false);
-            setCustomerModalOpen(true);
+            if (selectedCustomer) {
+              setActiveSettlementCustomer(selectedCustomer as any);
+              setLedgerModalOpen(true);
+            } else {
+              setCustomerModalOpen(true);
+            }
           }}
         />
       )}
