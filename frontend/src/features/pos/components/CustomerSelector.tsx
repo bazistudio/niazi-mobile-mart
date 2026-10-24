@@ -14,7 +14,7 @@ interface CustomerSelectorProps {
    *  Used by PosCustomerLedgerPanel which shows its own customer-details card. */
   searchOnly?: boolean;
   /** Optional ref forwarded to the underlying search input (for programmatic focus). */
-  inputFocusRef?: React.RefObject<HTMLInputElement>;
+  inputFocusRef?: React.RefObject<HTMLInputElement | null>;
 }
 
 export const CustomerSelector: React.FC<CustomerSelectorProps> = ({ searchOnly = false, inputFocusRef }) => {

@@ -1,12 +1,11 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { UserPlus, CreditCard, Receipt, FileText, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { CreditCard, Receipt, FileText, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
 import { useLedger } from '@/features/ledger/hooks/useLedger';
 import { CustomerSelector } from './CustomerSelector';
 import { LedgerSettlementModal } from './modals/LedgerSettlementModal';
-import { CustomerFormDrawer } from '@/features/customers/components/modals/AddCustomerDrawer';
 import { useNavigate } from 'react-router-dom';
 
 interface PosCustomerLedgerPanelProps {
@@ -25,7 +24,6 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
   // the search input directly when no customer is selected yet.
   const customerSearchInputRef = useRef<HTMLInputElement>(null);
 
-  const [isNewCustomerModalOpen, setNewCustomerModalOpen] = useState(false);
   const [isReceivePaymentOpen, setReceivePaymentOpen] = useState(false);
 
   // Fetch real ledger timeline for selected customer
@@ -57,14 +55,6 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
             <CreditCard className="w-4 h-4 text-primary" />
             Customer & Ledger Panel
           </span>
-          <button
-            type="button"
-            onClick={() => setNewCustomerModalOpen(true)}
-            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition-colors"
-          >
-            <UserPlus className="w-3.5 h-3.5" />
-            <span>+ New Customer</span>
-          </button>
         </div>
 
         {/* Inline Customer / Invoice Selector (replaces CreditCustomerModal) */}
@@ -237,15 +227,6 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
           <span>View Full Statement</span>
         </button>
       </div>
-
-      {/* Create New Customer Drawer */}
-      {isNewCustomerModalOpen && (
-        <CustomerFormDrawer
-          isOpen={isNewCustomerModalOpen}
-          onClose={() => setNewCustomerModalOpen(false)}
-          customers={[]}
-        />
-      )}
 
       {/* Receive Payment / Settle Balance Modal */}
       {/* GAP-04: standaloneMode=true causes the modal to call ledgerApi.recordPayment itself
