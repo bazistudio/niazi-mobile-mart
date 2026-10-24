@@ -45,6 +45,12 @@ export interface Product {
   main_branch_stock?: number;
   /** Compatible phone/device model names. Populated when queried with compatible_models join. */
   compatible_models?: string[];
+  brand_name?: string | null;
+  company_name?: string | null;
+  quality_name?: string | null;
+  color_name?: string | null;
+  unit_name?: string | null;
+  category_name?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -200,6 +206,12 @@ function mapProductRow(row: Record<string, unknown>): Product {
       : row['compatible_models']
         ? String(row['compatible_models']).split(',').filter(Boolean)
         : [],
+    brand_name: (row['brand_name'] as string | null) ?? null,
+    company_name: (row['company_name'] as string | null) ?? null,
+    quality_name: (row['quality_name'] as string | null) ?? null,
+    color_name: (row['color_name'] as string | null) ?? null,
+    unit_name: (row['unit_name'] as string | null) ?? null,
+    category_name: (row['category_name'] as string | null) ?? null,
     created_at: row['created_at'] as string,
     updated_at: row['updated_at'] as string,
   };
@@ -759,7 +771,19 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
 
   if (filter.search) {
     const term = `%${filter.search}%`;
-    conditions.push(`(p.name ILIKE $${idx} OR p.sku ILIKE $${idx} OR p.barcode ILIKE $${idx})`);
+    conditions.push(`(
+      p.name ILIKE $${idx}
+      OR p.sku ILIKE $${idx}
+      OR p.barcode ILIKE $${idx}
+      OR b.name ILIKE $${idx}
+      OR cmp.name ILIKE $${idx}
+      OR q.name ILIKE $${idx}
+      OR c.name ILIKE $${idx}
+      OR EXISTS (
+        SELECT 1 FROM product_compatible_models pcm_sub
+        WHERE pcm_sub.product_id = p.id AND (pcm_sub.model_name ILIKE $${idx} OR pcm_sub.normalized_model ILIKE $${idx})
+      )
+    )`);
     params.push(term);
     idx++;
   }
@@ -823,12 +847,24 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
     const sql = `
       SELECT ${selectCols.split(', ').map(c => `p.${c}`).join(', ')},
              COALESCE(s.quantity, 0)::bigint AS initial_quantity,
+             b.name AS brand_name,
+             cmp.name AS company_name,
+             q.name AS quality_name,
+             c.name AS color_name,
+             u.name AS unit_name,
+             ct.name AS category_name,
              COALESCE(
                ARRAY(SELECT pcm.model_name FROM product_compatible_models pcm WHERE pcm.product_id = p.id ORDER BY pcm.model_name),
                ARRAY[]::text[]
              ) AS compatible_models
       FROM products p
       LEFT JOIN stock s ON p.id = s.product_id AND s.branch_id = $${branchIdx}
+      LEFT JOIN brands b ON p.brand_id = b.id
+      LEFT JOIN companies cmp ON p.company_id = cmp.id
+      LEFT JOIN qualities q ON p.quality_id = q.id
+      LEFT JOIN colors c ON p.color_id = c.id
+      LEFT JOIN units u ON p.unit_id = u.id
+      LEFT JOIN ${caps.catTable} ct ON p.${caps.catCol} = ct.id
       WHERE ${conditions.join(' AND ')}
       ORDER BY p.name ASC
     `;
@@ -853,14 +889,26 @@ export async function listProducts(pool: Pool, filter: ProductListFilter): Promi
            COALESCE(SUM(s.quantity), 0)::bigint AS initial_quantity,
            COALESCE(SUM(CASE WHEN s.branch_id = $${warehouseIdx} THEN s.quantity ELSE 0 END), 0)::bigint AS warehouse_stock,
            COALESCE(SUM(CASE WHEN s.branch_id = $${mainBranchIdx} THEN s.quantity ELSE 0 END), 0)::bigint AS main_branch_stock,
+           b.name AS brand_name,
+           cmp.name AS company_name,
+           q.name AS quality_name,
+           c.name AS color_name,
+           u.name AS unit_name,
+           ct.name AS category_name,
            COALESCE(
              ARRAY(SELECT pcm.model_name FROM product_compatible_models pcm WHERE pcm.product_id = p.id ORDER BY pcm.model_name),
              ARRAY[]::text[]
            ) AS compatible_models
     FROM products p
     LEFT JOIN stock s ON p.id = s.product_id
+    LEFT JOIN brands b ON p.brand_id = b.id
+    LEFT JOIN companies cmp ON p.company_id = cmp.id
+    LEFT JOIN qualities q ON p.quality_id = q.id
+    LEFT JOIN colors c ON p.color_id = c.id
+    LEFT JOIN units u ON p.unit_id = u.id
+    LEFT JOIN ${caps.catTable} ct ON p.${caps.catCol} = ct.id
     WHERE ${conditions.join(' AND ')}
-    GROUP BY p.id, p.name, p.normalized_name, p.sku, p.barcode, p.${caps.catCol}, p.brand_id, p.company_id, p.quality_id, p.color_id, p.unit_id, p.purchase_price, p.average_cost, p.sale_price, p.low_stock_threshold, p.is_active, p.description, p.created_at, p.updated_at
+    GROUP BY p.id, p.name, p.normalized_name, p.sku, p.barcode, p.${caps.catCol}, p.brand_id, p.company_id, p.quality_id, p.color_id, p.unit_id, p.purchase_price, p.average_cost, p.sale_price, p.low_stock_threshold, p.is_active, p.description, p.created_at, p.updated_at, b.name, cmp.name, q.name, c.name, u.name, ct.name
     ORDER BY p.name ASC
   `;
 
@@ -881,9 +929,25 @@ export async function getProductById(
   if (branchId != null && branchId.trim()) {
     const res = await pool.query(
       `SELECT ${selectCols.split(', ').map(c => c.includes(' AS ') ? `p.${c}` : `p.${c}`).join(', ')},
-              COALESCE(s.quantity, 0)::bigint AS initial_quantity
+              COALESCE(s.quantity, 0)::bigint AS initial_quantity,
+              b.name AS brand_name,
+              cmp.name AS company_name,
+              q.name AS quality_name,
+              c.name AS color_name,
+              u.name AS unit_name,
+              ct.name AS category_name,
+              COALESCE(
+                ARRAY(SELECT pcm.model_name FROM product_compatible_models pcm WHERE pcm.product_id = p.id ORDER BY pcm.model_name),
+                ARRAY[]::text[]
+              ) AS compatible_models
        FROM products p
        LEFT JOIN stock s ON p.id = s.product_id AND s.branch_id = $2
+       LEFT JOIN brands b ON p.brand_id = b.id
+       LEFT JOIN companies cmp ON p.company_id = cmp.id
+       LEFT JOIN qualities q ON p.quality_id = q.id
+       LEFT JOIN colors c ON p.color_id = c.id
+       LEFT JOIN units u ON p.unit_id = u.id
+       LEFT JOIN ${caps.catTable} ct ON p.${caps.catCol} = ct.id
        WHERE p.id = $1
          AND (COALESCE(s.quantity, 0) > 0 OR EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.product_id = p.id AND sm.branch_id = $2))`,
       [id, branchId.trim()]
@@ -900,14 +964,26 @@ export async function getProductById(
             COALESCE(SUM(s.quantity), 0)::bigint AS initial_quantity,
             COALESCE(SUM(CASE WHEN s.branch_id = $2 THEN s.quantity ELSE 0 END), 0)::bigint AS warehouse_stock,
             COALESCE(SUM(CASE WHEN s.branch_id = $3 THEN s.quantity ELSE 0 END), 0)::bigint AS main_branch_stock,
+            b.name AS brand_name,
+            cmp.name AS company_name,
+            q.name AS quality_name,
+            c.name AS color_name,
+            u.name AS unit_name,
+            ct.name AS category_name,
             COALESCE(
               ARRAY(SELECT pcm.model_name FROM product_compatible_models pcm WHERE pcm.product_id = p.id ORDER BY pcm.model_name),
               ARRAY[]::text[]
             ) AS compatible_models
      FROM products p
      LEFT JOIN stock s ON p.id = s.product_id
+     LEFT JOIN brands b ON p.brand_id = b.id
+     LEFT JOIN companies cmp ON p.company_id = cmp.id
+     LEFT JOIN qualities q ON p.quality_id = q.id
+     LEFT JOIN colors c ON p.color_id = c.id
+     LEFT JOIN units u ON p.unit_id = u.id
+     LEFT JOIN ${caps.catTable} ct ON p.${caps.catCol} = ct.id
      WHERE p.id = $1
-     GROUP BY p.id, p.name, p.normalized_name, p.sku, p.barcode, p.${caps.catCol}, p.brand_id, p.company_id, p.quality_id, p.color_id, p.unit_id, p.purchase_price, p.average_cost, p.sale_price, p.low_stock_threshold, p.is_active, p.description, p.created_at, p.updated_at`,
+     GROUP BY p.id, p.name, p.normalized_name, p.sku, p.barcode, p.${caps.catCol}, p.brand_id, p.company_id, p.quality_id, p.color_id, p.unit_id, p.purchase_price, p.average_cost, p.sale_price, p.low_stock_threshold, p.is_active, p.description, p.created_at, p.updated_at, b.name, cmp.name, q.name, c.name, u.name, ct.name`,
     [id, CENTRAL_WAREHOUSE_ID, MAIN_BRANCH_ID]
   );
   if (res.rows.length === 0) {
@@ -1907,11 +1983,11 @@ export async function receiveStock(
 
     // ── Step 5: UPDATE products.average_cost, purchase_price, sale_price ──────
     await client.query(
-      `UPDATE products 
-       SET average_cost = $1, 
-           purchase_price = $2, 
-           sale_price = $3, 
-           updated_at = $4 
+      `UPDATE products
+       SET average_cost = $1,
+           purchase_price = $2,
+           sale_price = $3,
+           updated_at = $4
        WHERE id = $5`,
       [cWac, cNew, updatedSalePrice, now, productId]
     );

@@ -33,6 +33,12 @@ export interface ProductDTO {
   totalOrgStock?: number;
   /** Compatible phone/device model names. */
   compatibleModels?: string[];
+  brandName?: string;
+  companyName?: string;
+  qualityName?: string;
+  colorName?: string;
+  unitName?: string;
+  categoryName?: string;
 }
 
 export interface PaginatedProductsDTO {

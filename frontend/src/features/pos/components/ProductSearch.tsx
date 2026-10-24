@@ -57,11 +57,19 @@ export const ProductSearch = () => {
     }
 
     const lowerTerm = debouncedTerm.toLowerCase();
-    const filtered = products.filter(p =>
-      p.name.toLowerCase().includes(lowerTerm) ||
-      p.sku.toLowerCase().includes(lowerTerm) ||
-      (p.barcode || '').includes(lowerTerm)
-    ).slice(0, 20); // Cap at 20 results
+    const filtered = products.filter(p => {
+      const matchName = p.name.toLowerCase().includes(lowerTerm);
+      const matchSku = p.sku.toLowerCase().includes(lowerTerm);
+      const matchBarcode = (p.barcode || '').toLowerCase().includes(lowerTerm);
+      const matchBrand = (p.brand || '').toLowerCase().includes(lowerTerm) && p.brand !== '-';
+      const matchCompany = (p.company || '').toLowerCase().includes(lowerTerm) && p.company !== '-';
+      const matchQuality = (p.quality || '').toLowerCase().includes(lowerTerm) && p.quality !== '-';
+      const matchColor = (p.color || '').toLowerCase().includes(lowerTerm) && p.color !== '-';
+      const matchCategory = (p.category || '').toLowerCase().includes(lowerTerm);
+      const matchModels = Array.isArray(p.compatibleModels) && p.compatibleModels.some((m: string) => m.toLowerCase().includes(lowerTerm));
+
+      return matchName || matchSku || matchBarcode || matchBrand || matchCompany || matchQuality || matchColor || matchCategory || matchModels;
+    }).slice(0, 20); // Cap at 20 results
 
     setResults(filtered);
     setSelectedIndex(0);
@@ -127,7 +135,12 @@ export const ProductSearch = () => {
       const exactMatch = products.find(p =>
         (p.barcode || '').toLowerCase() === searchTarget ||
         (p.sku || '').toLowerCase() === searchTarget ||
-        p.name.toLowerCase() === searchTarget
+        p.name.toLowerCase() === searchTarget ||
+        (p.quality || '').toLowerCase() === searchTarget ||
+        (p.color || '').toLowerCase() === searchTarget ||
+        (p.brand || '').toLowerCase() === searchTarget ||
+        (p.company || '').toLowerCase() === searchTarget ||
+        (Array.isArray(p.compatibleModels) && p.compatibleModels.some((m: string) => m.toLowerCase() === searchTarget))
       );
 
       if (exactMatch && (exactMatch.stock > 0 || targetBucket === 'return')) {
@@ -224,9 +237,18 @@ export const ProductSearch = () => {
               {results.map((product, index) => {
                 const isSelected = index === selectedIndex;
                 const canAdd = product.stock > 0 || targetBucket === 'return';
+
+                const hasQuality = product.quality && product.quality !== '-' && product.quality.trim().length > 0;
+                const hasColor = product.color && product.color !== '-' && product.color.trim().length > 0;
+                const hasCompany = product.company && product.company !== '-' && product.company.trim().length > 0;
+                const hasBrand = product.brand && product.brand !== '-' && product.brand.trim().length > 0;
+                const fitsModels = Array.isArray(product.compatibleModels) && product.compatibleModels.length > 0
+                  ? product.compatibleModels.slice(0, 3).join(', ') + (product.compatibleModels.length > 3 ? '...' : '')
+                  : null;
+
                 return (
                   <div
-                    key={product.id}
+                    key={product.id || product._id}
                     onClick={() => {
                       if (canAdd) handleAdd(product);
                     }}
@@ -235,6 +257,7 @@ export const ProductSearch = () => {
                         : 'border-gray-100 dark:border-gray-800'
                       } ${canAdd ? 'hover:bg-gray-50 dark:hover:bg-gray-800/50' : 'opacity-60 cursor-not-allowed'}`}
                   >
+                    {/* Primary Line: Product Name & Sale Price */}
                     <div className="flex justify-between items-start gap-2">
                       <span className="text-[11px] sm:text-xs font-semibold text-gray-900 dark:text-gray-100 leading-tight">
                         {product.name}
@@ -254,12 +277,49 @@ export const ProductSearch = () => {
                           : (product.price ?? product.salePrice ?? 0).toLocaleString()}
                       </span>
                     </div>
+
+                    {/* Specification Line: Quality, Color, Brand, Company, Fits */}
+                    {(hasQuality || hasColor || hasCompany || hasBrand || fitsModels) && (
+                      <div className="flex flex-wrap items-center gap-1.5 text-[9px] text-gray-600 dark:text-gray-300">
+                        {hasQuality && (
+                          <span className="px-1.5 py-0.2 bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 rounded font-medium">
+                            {product.quality}
+                          </span>
+                        )}
+                        {hasColor && (
+                          <span className="px-1.5 py-0.2 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 rounded font-medium">
+                            {product.color}
+                          </span>
+                        )}
+                        {hasBrand && (
+                          <span className="px-1.5 py-0.2 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded font-medium">
+                            {product.brand}
+                          </span>
+                        )}
+                        {hasCompany && (
+                          <span className="px-1.5 py-0.2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded font-medium">
+                            {product.company}
+                          </span>
+                        )}
+                        {fitsModels && (
+                          <span className="text-[9px] text-gray-500 dark:text-gray-400 font-normal">
+                            Fits: <span className="font-medium text-gray-700 dark:text-gray-300">{fitsModels}</span>
+                          </span>
+                        )}
+                      </div>
+                    )}
                     
+                    {/* Identification / Status Line: SKU, Barcode, Stock, ADD button */}
                     <div className="flex justify-between items-center gap-2 mt-0.5">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[10px] text-gray-500 dark:text-gray-400 font-mono">
                           {product.sku}
                         </span>
+                        {product.barcode && (
+                          <span className="text-[9px] text-gray-400 font-mono">
+                            {product.barcode}
+                          </span>
+                        )}
                         <span className={`text-[9px] px-1.5 py-0.5 rounded font-black uppercase tracking-wider ${canAdd ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>
                           {product.stock} Left
                         </span>

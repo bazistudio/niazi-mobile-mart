@@ -2066,6 +2066,12 @@ export interface Product {
   main_branch_stock?: number;
   /** Compatible phone/device model names. */
   compatible_models?: string[];
+  brand_name?: string | null;
+  company_name?: string | null;
+  quality_name?: string | null;
+  color_name?: string | null;
+  unit_name?: string | null;
+  category_name?: string | null;
   is_active: boolean;
   description: string | null;
   created_at: string;

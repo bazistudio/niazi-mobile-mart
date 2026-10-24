@@ -1,14 +1,14 @@
-'use client';
-
 import React, { useState } from 'react';
 import { Minus, Plus, Trash2, ArrowDownToLine } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
 import { CartItem } from '../store/usePosStore';
+import { useInventoryStore } from '@/features/inventory/core/inventory.store';
 
 export const CartTable = () => {
   const activeSession = usePosStore(state => state.saleTabs.find(t => t.id === state.activeTabId));
   const updateQuantity = usePosStore(state => state.updateQuantity);
   const removeFromCart = usePosStore(state => state.removeFromCart);
+  const inventoryProducts = useInventoryStore(state => state.products);
 
   // Local state for quantity input to allow empty string during typing
   const [localQuantities, setLocalQuantities] = useState<Record<string, string>>({});
@@ -66,8 +66,8 @@ export const CartTable = () => {
           {index + 1}
         </div>
 
-        {/* 2. Product Name */}
-        <div className="flex-1 min-w-[140px] pr-2">
+        {/* 2. Product Name & Specifications */}
+        <div className="flex-1 min-w-[140px] pr-2 flex flex-col justify-center">
           <p
             className={`text-sm font-bold truncate flex items-center gap-1.5 ${
               isReturn ? 'text-warning' : 'text-text-primary'
@@ -77,6 +77,21 @@ export const CartTable = () => {
             {isReturn && <ArrowDownToLine className="h-3.5 w-3.5 shrink-0" />}
             <span>{item.productName}</span>
           </p>
+          {(() => {
+            const invProd = inventoryProducts.find(p => (p.id || (p as any)._id) === item.productId);
+            if (!invProd) return null;
+            const specs: string[] = [];
+            if (invProd.quality && invProd.quality !== '-' && invProd.quality.trim().length > 0) specs.push(invProd.quality);
+            if (invProd.color && invProd.color !== '-' && invProd.color.trim().length > 0) specs.push(invProd.color);
+            if (invProd.brand && invProd.brand !== '-' && invProd.brand.trim().length > 0) specs.push(invProd.brand);
+            if (invProd.company && invProd.company !== '-' && invProd.company.trim().length > 0) specs.push(invProd.company);
+            if (specs.length === 0) return null;
+            return (
+              <span className="text-[10px] text-text-muted font-medium truncate leading-tight">
+                {specs.join(' • ')}
+              </span>
+            );
+          })()}
         </div>
 
         {/* 3. IMEI / Serial */}

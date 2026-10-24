@@ -61,11 +61,11 @@ export const productService = {
         status = StockStatus.LOW_STOCK;
       }
 
-      const catName = p.category_id ? (categoryMap.get(p.category_id) || p.category_id) : 'General';
-      const brandName = p.brand_id ? (brandMap.get(p.brand_id) || p.brand_id) : '-';
-      const compName = p.company_id ? (companyMap.get(p.company_id) || p.company_id) : '-';
-      const colorName = p.color_id ? (colorMap.get(p.color_id) || p.color_id) : '-';
-      const qualityName = p.quality_id ? (qualityMap.get(p.quality_id) || p.quality_id) : '-';
+      const catName = p.category_name || (p.category_id ? (categoryMap.get(p.category_id) || p.category_id) : 'General');
+      const brandName = p.brand_name || (p.brand_id ? (brandMap.get(p.brand_id) || p.brand_id) : '-');
+      const compName = p.company_name || (p.company_id ? (companyMap.get(p.company_id) || p.company_id) : '-');
+      const colorName = p.color_name || (p.color_id ? (colorMap.get(p.color_id) || p.color_id) : '-');
+      const qualityName = p.quality_name || (p.quality_id ? (qualityMap.get(p.quality_id) || p.quality_id) : '-');
 
       return {
         id: p.id,
@@ -82,6 +82,7 @@ export const productService = {
         colorId: p.color_id || undefined,
         quality: qualityName,
         qualityId: p.quality_id || undefined,
+        compatibleModels: p.compatible_models || [],
         stock: currentStock,
         minStockThreshold: minStock,
         price: p.sale_price,
