@@ -24,8 +24,8 @@ export function POSPage() {
       const hasRecoveredData = saleTabs.length > 1 || saleTabs[0].cart.length > 0 || saleTabs[0].status !== 'draft';
       if (hasRecoveredData) {
         toast.success(`Recovered Previous POS Session (${saleTabs.length} active sales restored)`, {
-          duration: 4000,
-          position: 'top-center',
+          duration: 1500,
+          position: 'bottom-center',
           style: {
             background: '#006970',
             color: '#fff',
