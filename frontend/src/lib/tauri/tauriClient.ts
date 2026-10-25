@@ -2694,6 +2694,7 @@ export interface CreateExpenseDto {
 }
 
 export interface ExpenseFilterDto {
+  search?: string | null;
   branch_id?: string | null;
   category_id?: string | null;
   status?: string | null;

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Package } from 'lucide-react';
+import { X, Package, Building2, Store } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DynamicMasterSelect } from './master-data/DynamicMasterSelect';
 import { useProducts } from '@/features/inventory/hooks/useProducts';
@@ -210,7 +210,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
       >
         
         {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-5 pb-2 border-b border-gray-100 dark:border-gray-800/80">
+        <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-gray-100 dark:border-gray-800/80 gap-4">
           <div className="flex items-center gap-2">
             <div className="p-2 rounded-xl bg-[#006970]/10 text-[#006970] dark:bg-[#006970]/20">
               <Package className="w-5 h-5" />
@@ -220,12 +220,35 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
               <p className="text-xs text-gray-500 dark:text-gray-400">Configure catalog specifications, pricing, and inventory tracking</p>
             </div>
           </div>
-          <button 
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 transition-colors p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-          >
-            <X className="w-5 h-5" />
-          </button>
+
+          <div className="flex items-center gap-3">
+            {/* Destination Branch in Header */}
+            <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800/60 px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700">
+              <Building2 className="w-4 h-4 text-[#006970] dark:text-[#00B4BB] shrink-0" />
+              <select
+                tabIndex={-1}
+                value={formData.branchId}
+                onChange={(e) => handleChange('branchId', e.target.value)}
+                disabled={isLoadingBranches || branches.length === 0}
+                className="bg-transparent text-xs font-semibold text-gray-900 dark:text-white focus:outline-none cursor-pointer pr-1 py-0.5"
+              >
+                {isLoadingBranches && <option value="">Loading branches...</option>}
+                {!isLoadingBranches && branches.length === 0 && <option value="">No branches available</option>}
+                {!isLoadingBranches && branches.map((b) => (
+                  <option key={b.id} value={b.id} className="dark:bg-gray-800 text-gray-900 dark:text-white">
+                    {b.name} {b.is_warehouse === 1 || b.id === '00000000-0000-0000-0000-000000000003' ? '(Warehouse)' : b.code ? `(${b.code})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 transition-colors p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Body with auto-layout and adaptive scrolling only if screen height is exceeded */}
@@ -382,7 +405,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
               <section>
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider mb-4 border-b border-gray-200 dark:border-gray-800 pb-2">3. Inventory</h3>
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Open Stock *</label>
                       <input
@@ -395,30 +418,9 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Stock Destination *</label>
-                      <select
-                        tabIndex={10}
-                        value={formData.branchId}
-                        onChange={(e) => handleChange('branchId', e.target.value)}
-                        disabled={isLoadingBranches || branches.length === 0}
-                        className="block w-full px-2 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        {isLoadingBranches && <option value="">Loading branches...</option>}
-                        {!isLoadingBranches && branches.length === 0 && <option value="">No branches available</option>}
-                        {!isLoadingBranches && branches.map((b) => (
-                          <option key={b.id} value={b.id}>
-                            {b.name} {b.is_warehouse === 1 || b.id === '00000000-0000-0000-0000-000000000003' ? '(Warehouse)' : b.code ? `(${b.code})` : ''}
-                          </option>
-                        ))}
-                      </select>
-                      {branchLoadError && (
-                        <p className="text-[11px] text-red-500 mt-0.5">{branchLoadError}</p>
-                      )}
-                    </div>
-                    <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Min Alert</label>
                       <input
-                        tabIndex={11}
+                        tabIndex={10}
                         type="number"
                         value={formData.minStockThreshold}
                         onChange={(e) => handleChange('minStockThreshold', e.target.value)}
