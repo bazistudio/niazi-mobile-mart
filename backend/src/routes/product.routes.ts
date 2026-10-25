@@ -203,10 +203,43 @@ export function createProductRouter(pool: Pool): Router {
         (dto as any).quantity ??
         0
       );
-      // Centralized catalog rule: Initial opening stock for newly added products always deposits into
-      // the Central Warehouse (seeded by migration 030_central_warehouse_location.sql).
-      // Retail branches initialize with 0 stock until explicitly transferred from the warehouse.
-      const branchId = CENTRAL_WAREHOUSE_ID;
+      // Stock destination rule:
+      //   Org Admin adding a product → Can explicitly specify destination branch (dto.branch_id),
+      //   falling back to Central Warehouse (CENTRAL_WAREHOUSE_ID) if unspecified.
+      //   When an explicit branch_id is provided, validate that the caller has access to that branch
+      //   and that the branch exists and is active in the database.
+      //   Branch users adding shared catalog products remain strictly blocked by authorizeProductMutation above.
+      const callerIsOrgAdmin = isOrgAdmin(identity);
+      const rawBranchId = (dto.branch_id || (dto as any).branchId || (dto as any).initial_branch_id || null) as string | null;
+      let branchId: string;
+
+      if (rawBranchId && typeof rawBranchId === 'string' && rawBranchId.trim()) {
+        const cleanBranchId = rawBranchId.trim();
+        if (!canAccessBranch(identity, cleanBranchId)) {
+          res.status(403).json({ error: 'Access denied: cannot allocate initial stock to a branch you do not manage' });
+          return;
+        }
+
+        // Verify branch exists and is active in branches table
+        const bCheck = await pool.query(
+          'SELECT id, is_active FROM branches WHERE id = $1 LIMIT 1',
+          [cleanBranchId]
+        );
+        if (bCheck.rows.length === 0) {
+          res.status(400).json({ error: `Destination branch '${cleanBranchId}' does not exist` });
+          return;
+        }
+        if (bCheck.rows[0].is_active === 0 || bCheck.rows[0].is_active === false) {
+          res.status(400).json({ error: `Cannot allocate initial stock to deactivated branch '${cleanBranchId}'` });
+          return;
+        }
+
+        branchId = cleanBranchId;
+      } else {
+        branchId = callerIsOrgAdmin
+          ? CENTRAL_WAREHOUSE_ID
+          : (identity.branch_id ?? CENTRAL_WAREHOUSE_ID);
+      }
 
       // Always spread resolved branchId and initial_quantity so createProduct/createProductWithInitialStock receive normalized values.
       const dtoWithBranch = {

@@ -6,6 +6,8 @@ import toast from 'react-hot-toast';
 import { DynamicMasterSelect } from './master-data/DynamicMasterSelect';
 import { useProducts } from '@/features/inventory/hooks/useProducts';
 import { useInventoryStore } from '@/features/inventory/core/inventory.store';
+import { httpClient } from '@/lib/http/httpClient';
+import type { Branch } from '@/lib/tauri/tauriClient';
 
 export interface AddProductDrawerProps {
   isOpen: boolean;
@@ -17,6 +19,10 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
   const fetchProducts = useInventoryStore((state) => state.fetchProducts);
   const nameInputRef = useRef<HTMLInputElement>(null);
   
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [isLoadingBranches, setIsLoadingBranches] = useState<boolean>(false);
+  const [branchLoadError, setBranchLoadError] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
     name: '',
     productCode: '',
@@ -31,6 +37,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
     qualityId: '',
     
     quantity: '',
+    branchId: '',
     minStockThreshold: '2',
     trackInventory: true,
     
@@ -49,6 +56,45 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
     costMethod: 'Average Cost'
   });
 
+
+  // Load branches for stock destination selection
+  useEffect(() => {
+    let cancelled = false;
+    if (isOpen) {
+      setIsLoadingBranches(true);
+      setBranchLoadError(null);
+      httpClient.get<Branch[]>('/api/v1/branches')
+        .then((list) => {
+          if (cancelled) return;
+          if (list && list.length > 0) {
+            setBranches(list);
+            setFormData((prev) => {
+              if (prev.branchId) return prev;
+              const warehouseBranch =
+                list.find((b) => b.id === '00000000-0000-0000-0000-000000000003') ||
+                list.find((b) => b.code === 'WAREHOUSE' || b.name.toLowerCase().includes('warehouse'));
+              const mainBranch =
+                list.find((b) => b.code === 'MAIN' || b.name.toLowerCase().includes('main')) ||
+                list[0];
+              const defaultBranch = warehouseBranch ?? mainBranch;
+              return { ...prev, branchId: defaultBranch ? defaultBranch.id : '' };
+            });
+          }
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            console.error('[AddProductDrawer] Failed to load branches:', err);
+            setBranchLoadError('Failed to load branches');
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setIsLoadingBranches(false);
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
 
   // Load remembered master data on open and focus product name
   useEffect(() => {
@@ -115,6 +161,8 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
         purchasePrice: Number(formData.purchasePrice) || 0,
         price: Number(formData.price) || 0,
         quantity: Number(formData.quantity) || 0,
+        branchId: formData.branchId || undefined,
+        branch_id: formData.branchId || undefined,
         lowStockThreshold: Number(formData.minStockThreshold) || 2,
         compatible_models: formData.compatibleModels,
       });
@@ -334,7 +382,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
               <section>
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider mb-4 border-b border-gray-200 dark:border-gray-800 pb-2">3. Inventory</h3>
                 <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Open Stock *</label>
                       <input
@@ -347,9 +395,30 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                       />
                     </div>
                     <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Stock Destination *</label>
+                      <select
+                        tabIndex={10}
+                        value={formData.branchId}
+                        onChange={(e) => handleChange('branchId', e.target.value)}
+                        disabled={isLoadingBranches || branches.length === 0}
+                        className="block w-full px-2 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {isLoadingBranches && <option value="">Loading branches...</option>}
+                        {!isLoadingBranches && branches.length === 0 && <option value="">No branches available</option>}
+                        {!isLoadingBranches && branches.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.name} {b.is_warehouse === 1 || b.id === '00000000-0000-0000-0000-000000000003' ? '(Warehouse)' : b.code ? `(${b.code})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {branchLoadError && (
+                        <p className="text-[11px] text-red-500 mt-0.5">{branchLoadError}</p>
+                      )}
+                    </div>
+                    <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Min Alert</label>
                       <input
-                        tabIndex={10}
+                        tabIndex={11}
                         type="number"
                         value={formData.minStockThreshold}
                         onChange={(e) => handleChange('minStockThreshold', e.target.value)}
