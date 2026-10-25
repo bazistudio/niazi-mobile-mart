@@ -14,15 +14,11 @@ import { useTerminalStore } from '@/store/useTerminalStore';
 
 import { SyncStatusBadge } from '../common/SyncStatusBadge';
 
-interface TopbarProps {
-  setMobileMenuOpen?: (isOpen: boolean) => void;
-}
-
 /** Shared icon-button style for topbar action buttons */
 const topbarIconBtn =
   'inline-flex items-center justify-center w-9 h-9 rounded-md border border-border bg-surface text-text-muted hover:bg-surface-hover hover:text-text-primary transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring';
 
-export const Topbar = ({ setMobileMenuOpen }: TopbarProps = {}) => {
+export const Topbar = () => {
   const forceSync = selectForceSync();
   const inventoryStatus = selectStatus();
   const isSyncing = inventoryStatus === 'loading';
