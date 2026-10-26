@@ -63,6 +63,8 @@ import {
   RegisterInspectionInput,
   RegisterPaperworkInput,
   PatchMobileDeviceInput,
+  PatchPaperworkInput,
+  PatchImeiInput,
   MobileFullProfile,
   FullProfileSellerInfo,
 } from '../repositories/mobile.repo';
@@ -1201,6 +1203,175 @@ export function buildMobileRouter(pool: Pool): Router {
   });
 
   // -------------------------------------------------------------------------
+  // PATCH /:id/imei — Org Admin: correct a mis-typed IMEI number
+  // -------------------------------------------------------------------------
+
+  /**
+   * PATCH /:id/imei
+   *
+   * Allows an org administrator to replace a single IMEI that was typed
+   * incorrectly during device registration (e.g. one digit transposed).
+   *
+   * Body:
+   * {
+   *   branch_id: string,   // required for org-admin
+   *   imei_id:   string,   // UUID of the row in mobile_imei_identifiers
+   *   new_imei:  string,   // replacement 15-digit IMEI
+   * }
+   *
+   * Requires: isOrgAdmin
+   * 200 { success: true, slot: 'IMEI1'|'IMEI2' }
+   * 404  imei_id not found on this device
+   * 409  new_imei already registered in this org
+   */
+  router.patch('/:id/imei', async (req: Request, res: Response) => {
+    try {
+      const identity = req.identity!;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Only organization administrators may correct IMEI numbers' });
+        return;
+      }
+
+      const deviceId = req.params.id;
+      if (!isNonBlankString(deviceId)) {
+        res.status(400).json({ error: 'device id is required' });
+        return;
+      }
+
+      const body = req.body as Record<string, unknown>;
+
+      if (!isNonBlankString(body.branch_id)) {
+        res.status(400).json({ error: 'branch_id is required' });
+        return;
+      }
+      if (!isNonBlankString(body.imei_id)) {
+        res.status(400).json({ error: 'imei_id is required' });
+        return;
+      }
+      if (!isNonBlankString(body.new_imei) || !isValidImei(body.new_imei as string)) {
+        res.status(400).json({ error: 'new_imei must be exactly 15 decimal digits' });
+        return;
+      }
+
+      const input: PatchImeiInput = {
+        device_id:       deviceId,
+        organization_id: identity.organization_id,
+        branch_id:       body.branch_id as string,
+        updated_by:      identity.user_id,
+        imei_id:         body.imei_id as string,
+        new_imei:        body.new_imei as string,
+      };
+
+      const result = await repo.patchImei(input);
+
+      if (result === 'not_found') {
+        res.status(404).json({ error: 'IMEI record not found on this device' });
+        return;
+      }
+      if (result === 'conflict') {
+        res.status(409).json({ error: 'IMEI_ALREADY_REGISTERED', message: 'This IMEI is already registered in the organization' });
+        return;
+      }
+
+      res.status(200).json({ success: true });
+    } catch (err) {
+      handleMobileError(res, err, 'patch-imei');
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // PATCH /:id/paperwork — Org Admin: correct seller identity on paperwork
+  // -------------------------------------------------------------------------
+
+  /**
+   * PATCH /:id/paperwork
+   *
+   * Allows an organization administrator to correct seller identity fields
+   * that were recorded incorrectly when the USED device was first registered.
+   *
+   * Body:
+   * {
+   *   branch_id:        string,   // required for org-admin
+   *   seller_name?:     string,
+   *   father_name?:     string,
+   *   seller_cnic?:     string,   // DDDDD-DDDDDDD-D
+   *   seller_phone?:    string,
+   *   seller_address?:  string,
+   * }
+   *
+   * Requires: isOrgAdmin
+   * Returns 200 { success: true } on success, 404 if no paperwork found.
+   */
+  router.patch('/:id/paperwork', async (req: Request, res: Response) => {
+    try {
+      const identity = req.identity!;
+      if (!isOrgAdmin(identity)) {
+        res.status(403).json({ error: 'Only organization administrators may correct paperwork seller information' });
+        return;
+      }
+
+      const deviceId = req.params.id;
+      if (!isNonBlankString(deviceId)) {
+        res.status(400).json({ error: 'device id is required' });
+        return;
+      }
+
+      const body = req.body as Record<string, unknown>;
+
+      // Org-admin must supply branch_id
+      const branchId = body.branch_id;
+      if (!isNonBlankString(branchId)) {
+        res.status(400).json({ error: 'branch_id is required' });
+        return;
+      }
+
+      // Validate any supplied fields
+      if (body.seller_name !== undefined && !isNonBlankString(body.seller_name)) {
+        res.status(400).json({ error: 'seller_name must not be blank' });
+        return;
+      }
+      if (body.father_name !== undefined && !isNonBlankString(body.father_name)) {
+        res.status(400).json({ error: 'father_name must not be blank' });
+        return;
+      }
+      if (body.seller_cnic !== undefined && !isValidCnic(body.seller_cnic as string)) {
+        res.status(400).json({ error: 'seller_cnic must be in format DDDDD-DDDDDDD-D' });
+        return;
+      }
+      if (body.seller_phone !== undefined && !isNonBlankString(body.seller_phone)) {
+        res.status(400).json({ error: 'seller_phone must not be blank' });
+        return;
+      }
+      if (body.seller_address !== undefined && !isNonBlankString(body.seller_address)) {
+        res.status(400).json({ error: 'seller_address must not be blank' });
+        return;
+      }
+
+      const patchInput: PatchPaperworkInput = {
+        device_id:       deviceId,
+        organization_id: identity.organization_id,
+        branch_id:       branchId as string,
+        updated_by:      identity.user_id,
+        ...(body.seller_name    !== undefined && { seller_name:    body.seller_name    as string }),
+        ...(body.father_name    !== undefined && { father_name:    body.father_name    as string }),
+        ...(body.seller_cnic    !== undefined && { seller_cnic:    body.seller_cnic    as string }),
+        ...(body.seller_phone   !== undefined && { seller_phone:   body.seller_phone   as string }),
+        ...(body.seller_address !== undefined && { seller_address: body.seller_address as string }),
+      };
+
+      const found = await repo.patchPaperwork(patchInput);
+      if (!found) {
+        res.status(404).json({ error: 'Paperwork not found for this device in this branch' });
+        return;
+      }
+
+      res.status(200).json({ success: true });
+    } catch (err) {
+      handleMobileError(res, err, 'patch-paperwork');
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // PATCH /:id — restricted device update
   // -------------------------------------------------------------------------
 
@@ -1326,14 +1497,20 @@ export function buildMobileRouter(pool: Pool): Router {
     const orgAdminOnlyKeys = new Set([
       'brand', 'model', 'storage', 'ram', 'color', 'serial_number',
       'purchase_date', 'purchase_price',
-      'body_grade', 'screen_condition', 'battery_health_percent', 'defect_notes',
+      'body_grade', 'screen_condition', 'battery_health_percent',
+      'touch_working', 'battery_backup_ok', 'front_camera_ok', 'back_camera_ok',
+      'accessories_box', 'accessories_original_charger', 'accessories_cable', 'accessories_handsfree',
+      'defect_notes',
     ]);
     const ALLOWED_PATCH_BODY_KEYS = new Set([
       'branch_id', 'status', 'expected_sale_price', 'pta_status', 'notes',
       // Org-admin USED-device fields:
       'brand', 'model', 'storage', 'ram', 'color', 'serial_number',
       'purchase_date', 'purchase_price',
-      'body_grade', 'screen_condition', 'battery_health_percent', 'defect_notes',
+      'body_grade', 'screen_condition', 'battery_health_percent',
+      'touch_working', 'battery_backup_ok', 'front_camera_ok', 'back_camera_ok',
+      'accessories_box', 'accessories_original_charger', 'accessories_cable', 'accessories_handsfree',
+      'defect_notes',
     ]);
 
     // Reject unknown / immutable fields (DEF-03)
@@ -1452,6 +1629,14 @@ export function buildMobileRouter(pool: Pool): Router {
       battery_health_percent: body.battery_health_percent !== undefined
         ? (body.battery_health_percent !== null ? Number(body.battery_health_percent) : null)
         : undefined,
+      touch_working:                body.touch_working                !== undefined ? Boolean(body.touch_working)                : undefined,
+      battery_backup_ok:            body.battery_backup_ok            !== undefined ? Boolean(body.battery_backup_ok)            : undefined,
+      front_camera_ok:              body.front_camera_ok              !== undefined ? Boolean(body.front_camera_ok)              : undefined,
+      back_camera_ok:               body.back_camera_ok               !== undefined ? Boolean(body.back_camera_ok)               : undefined,
+      accessories_box:              body.accessories_box              !== undefined ? Boolean(body.accessories_box)              : undefined,
+      accessories_original_charger: body.accessories_original_charger !== undefined ? Boolean(body.accessories_original_charger) : undefined,
+      accessories_cable:            body.accessories_cable            !== undefined ? Boolean(body.accessories_cable)            : undefined,
+      accessories_handsfree:        body.accessories_handsfree        !== undefined ? Boolean(body.accessories_handsfree)        : undefined,
       defect_notes:        body.defect_notes !== undefined ? (body.defect_notes ?? null) : undefined,
     };
 

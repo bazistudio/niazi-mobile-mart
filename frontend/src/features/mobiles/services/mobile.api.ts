@@ -373,6 +373,21 @@ export interface MobileFullProfile {
   branch_code: string | null;
 }
 
+export interface PatchImeiPayload {
+  branch_id: string;
+  imei_id: string;   // UUID PK of the mobile_imei_identifiers row to correct
+  new_imei: string;  // replacement 15-digit IMEI
+}
+
+export interface PatchPaperworkPayload {
+  branch_id: string;
+  seller_name?: string;
+  father_name?: string;
+  seller_cnic?: string;
+  seller_phone?: string;
+  seller_address?: string;
+}
+
 export interface PatchMobilePayload {
   branch_id: string;
   status?: 'IN_STOCK' | 'INSPECTION' | 'SOLD';
@@ -391,6 +406,14 @@ export interface PatchMobilePayload {
   body_grade?: string;
   screen_condition?: string;
   battery_health_percent?: number | null;
+  touch_working?: boolean;
+  battery_backup_ok?: boolean;
+  front_camera_ok?: boolean;
+  back_camera_ok?: boolean;
+  accessories_box?: boolean;
+  accessories_original_charger?: boolean;
+  accessories_cable?: boolean;
+  accessories_handsfree?: boolean;
   defect_notes?: string | null;
 }
 
@@ -553,5 +576,33 @@ export const mobileApi = {
     );
   },
 
+  /**
+   * Patch seller identity fields on the purchase paperwork record.
+   * Org-Admin only — used to correct mistakes made at registration time.
+   */
+  patchPaperwork: async (
+    deviceId: string,
+    payload: PatchPaperworkPayload
+  ): Promise<{ success: boolean }> => {
+    return httpClient.patch<{ success: boolean }>(
+      `/api/mobiles/${encodeURIComponent(deviceId)}/paperwork`,
+      payload
+    );
+  },
+
+  /**
+   * Correct a mis-typed IMEI on a registered device.
+   * Org-Admin only. Voucher No is never affected.
+   * 409 means the new IMEI is already registered in this organization.
+   */
+  patchImei: async (
+    deviceId: string,
+    payload: PatchImeiPayload
+  ): Promise<{ success: boolean }> => {
+    return httpClient.patch<{ success: boolean }>(
+      `/api/mobiles/${encodeURIComponent(deviceId)}/imei`,
+      payload
+    );
+  },
 
 };

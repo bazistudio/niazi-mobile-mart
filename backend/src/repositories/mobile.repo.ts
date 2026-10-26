@@ -358,6 +358,30 @@ export interface CreateSellerInput {
   notes?: string | null;
 }
 
+/** Input for patchImei (PATCH /:id/imei) — Org Admin only. */
+export interface PatchImeiInput {
+  device_id: string;
+  organization_id: string;
+  branch_id: string;
+  updated_by: string;
+  imei_id: string;    // PK of the row in mobile_imei_identifiers to correct
+  new_imei: string;   // replacement value (15-digit, must not already be registered)
+}
+
+/** Input for patchPaperwork (PATCH /:id/paperwork) — Org Admin only. */
+export interface PatchPaperworkInput {
+  device_id: string;
+  organization_id: string;
+  branch_id: string;
+  updated_by: string;
+  // All seller identity fields are optional — only supplied ones are updated
+  seller_name?: string;
+  father_name?: string;
+  seller_cnic?: string;
+  seller_phone?: string;
+  seller_address?: string;
+}
+
 /** Input for updateSeller (PATCH). */
 export interface UpdateSellerInput {
   seller_id: string;
@@ -407,6 +431,14 @@ export interface PatchMobileDeviceInput {
   body_grade?: MobileBodyGrade;
   screen_condition?: MobileScreenCondition;
   battery_health_percent?: number | null;
+  touch_working?: boolean;
+  battery_backup_ok?: boolean;
+  front_camera_ok?: boolean;
+  back_camera_ok?: boolean;
+  accessories_box?: boolean;
+  accessories_original_charger?: boolean;
+  accessories_cable?: boolean;
+  accessories_handsfree?: boolean;
   defect_notes?: string | null;
 }
 
@@ -1069,6 +1101,161 @@ export class MobileRepo {
   }
 
   // -------------------------------------------------------------------------
+  // Phase C.1 — patchPaperwork (Org Admin: correct seller info on paperwork)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Updates seller identity fields on an existing mobile_purchase_paperwork record.
+   * Only fields explicitly provided in input are changed; omitted fields keep their
+   * current value. Org-Admin-only — enforced by the route before calling this.
+   */
+  async patchPaperwork(input: PatchPaperworkInput): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const existing = await client.query<{
+        seller_name: string; father_name: string;
+        seller_cnic: string; seller_phone: string; seller_address: string;
+      }>(
+        `SELECT seller_name, father_name, seller_cnic, seller_phone, seller_address
+         FROM mobile_purchase_paperwork
+         WHERE device_id = $1 AND organization_id = $2 AND branch_id = $3
+         FOR UPDATE`,
+        [input.device_id, input.organization_id, input.branch_id]
+      );
+
+      if (existing.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return false;
+      }
+
+      const cur = existing.rows[0];
+      const newSellerName    = input.seller_name    !== undefined ? input.seller_name    : cur.seller_name;
+      const newFatherName    = input.father_name    !== undefined ? input.father_name    : cur.father_name;
+      const newSellerCnic    = input.seller_cnic    !== undefined ? input.seller_cnic    : cur.seller_cnic;
+      const newSellerPhone   = input.seller_phone   !== undefined ? input.seller_phone   : cur.seller_phone;
+      const newSellerAddress = input.seller_address !== undefined ? input.seller_address : cur.seller_address;
+      const now = this.nowIso();
+
+      await client.query(
+        `UPDATE mobile_purchase_paperwork
+         SET seller_name    = $1,
+             father_name    = $2,
+             seller_cnic    = $3,
+             seller_phone   = $4,
+             seller_address = $5,
+             updated_at     = $6
+         WHERE device_id = $7 AND organization_id = $8 AND branch_id = $9`,
+        [
+          newSellerName, newFatherName, newSellerCnic,
+          newSellerPhone, newSellerAddress, now,
+          input.device_id, input.organization_id, input.branch_id,
+        ]
+      );
+
+      await this.writeAuditEntry(client, {
+        organizationId: input.organization_id,
+        branchId:       input.branch_id,
+        eventType:      'MOBILE_PAPERWORK_CORRECTED',
+        entityId:       input.device_id,
+        eventPayload: {
+          device_id:  input.device_id,
+          updated_by: input.updated_by,
+          fields_updated: [
+            ...(input.seller_name    !== undefined ? ['seller_name']    : []),
+            ...(input.father_name    !== undefined ? ['father_name']    : []),
+            ...(input.seller_cnic    !== undefined ? ['seller_cnic']    : []),
+            ...(input.seller_phone   !== undefined ? ['seller_phone']   : []),
+            ...(input.seller_address !== undefined ? ['seller_address'] : []),
+          ],
+        },
+      });
+
+      await client.query('COMMIT');
+      return true;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  // Phase C.2 — patchImei (Org Admin: correct a mis-typed IMEI)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Replaces one IMEI on a device with a corrected value.
+   * - Verifies the imei_id row belongs to the device / org.
+   * - Checks the new IMEI is not already registered in the org.
+   * - Updates mobile_imei_identifiers in a transaction.
+   * - Writes a MOBILE_IMEI_CORRECTED audit entry (old slot recorded, value NOT logged).
+   * Returns 'not_found' | 'conflict' | 'ok'.
+   */
+  async patchImei(input: PatchImeiInput): Promise<'not_found' | 'conflict' | 'ok'> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Lock the target IMEI row and verify ownership
+      const existing = await client.query<{ id: string; imei: string; slot: MobileSlot }>(
+        `SELECT id, imei, slot
+         FROM mobile_imei_identifiers
+         WHERE id = $1 AND device_id = $2 AND organization_id = $3
+         FOR UPDATE`,
+        [input.imei_id, input.device_id, input.organization_id]
+      );
+
+      if (existing.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return 'not_found';
+      }
+
+      const old = existing.rows[0];
+
+      // No-op: same value
+      if (old.imei === input.new_imei) {
+        await client.query('ROLLBACK');
+        return 'ok';
+      }
+
+      // Check uniqueness within the org (pass client for same-tx check)
+      const taken = await this.isImeiTaken(input.organization_id, input.new_imei, client);
+      if (taken) {
+        await client.query('ROLLBACK');
+        return 'conflict';
+      }
+
+      await client.query(
+        `UPDATE mobile_imei_identifiers SET imei = $1 WHERE id = $2`,
+        [input.new_imei, input.imei_id]
+      );
+
+      await this.writeAuditEntry(client, {
+        organizationId: input.organization_id,
+        branchId:       input.branch_id,
+        eventType:      'MOBILE_IMEI_CORRECTED',
+        entityId:       input.device_id,
+        eventPayload: {
+          device_id:  input.device_id,
+          updated_by: input.updated_by,
+          imei_id:    input.imei_id,
+          slot:       old.slot,
+          // Note: old/new IMEI values intentionally not logged (device identity data)
+        },
+      });
+
+      await client.query('COMMIT');
+      return 'ok';
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   // Phase C — patchMobileDevice
   // -------------------------------------------------------------------------
 
@@ -1197,6 +1384,14 @@ export class MobileRepo {
       const hasInspectionUpdate = input.body_grade !== undefined
         || input.screen_condition !== undefined
         || input.battery_health_percent !== undefined
+        || input.touch_working !== undefined
+        || input.battery_backup_ok !== undefined
+        || input.front_camera_ok !== undefined
+        || input.back_camera_ok !== undefined
+        || input.accessories_box !== undefined
+        || input.accessories_original_charger !== undefined
+        || input.accessories_cable !== undefined
+        || input.accessories_handsfree !== undefined
         || input.defect_notes !== undefined;
       if (device.condition === 'USED' && hasInspectionUpdate) {
         // Build dynamic SET clause only for supplied fields
@@ -1214,6 +1409,38 @@ export class MobileRepo {
         if (input.battery_health_percent !== undefined) {
           inspUpdates.push(`battery_health_percent = $${pidx++}`);
           inspParams.push(input.battery_health_percent);
+        }
+        if (input.touch_working !== undefined) {
+          inspUpdates.push(`touch_working = $${pidx++}`);
+          inspParams.push(input.touch_working);
+        }
+        if (input.battery_backup_ok !== undefined) {
+          inspUpdates.push(`battery_backup_ok = $${pidx++}`);
+          inspParams.push(input.battery_backup_ok);
+        }
+        if (input.front_camera_ok !== undefined) {
+          inspUpdates.push(`front_camera_ok = $${pidx++}`);
+          inspParams.push(input.front_camera_ok);
+        }
+        if (input.back_camera_ok !== undefined) {
+          inspUpdates.push(`back_camera_ok = $${pidx++}`);
+          inspParams.push(input.back_camera_ok);
+        }
+        if (input.accessories_box !== undefined) {
+          inspUpdates.push(`accessories_box = $${pidx++}`);
+          inspParams.push(input.accessories_box);
+        }
+        if (input.accessories_original_charger !== undefined) {
+          inspUpdates.push(`accessories_original_charger = $${pidx++}`);
+          inspParams.push(input.accessories_original_charger);
+        }
+        if (input.accessories_cable !== undefined) {
+          inspUpdates.push(`accessories_cable = $${pidx++}`);
+          inspParams.push(input.accessories_cable);
+        }
+        if (input.accessories_handsfree !== undefined) {
+          inspUpdates.push(`accessories_handsfree = $${pidx++}`);
+          inspParams.push(input.accessories_handsfree);
         }
         if (input.defect_notes !== undefined) {
           inspUpdates.push(`defect_notes = $${pidx++}`);

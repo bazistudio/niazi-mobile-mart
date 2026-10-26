@@ -103,7 +103,7 @@ export function buildUsedMobileA4Html(profile: MobileFullProfile): string {
     ['SIM / Network',      inspection?.sim_network_ok],
   ];
   const checksHtml = checks.map(([label, val]) =>
-    `<td style="width:50%;padding:6px 10px;font-size:12px;border:1px solid #e5e7eb">${esc(label)}: ${boolCell(val)}</td>`
+    `<td style="width:50%;padding:4px 8px;font-size:12px;border:1px solid #e5e7eb">${esc(label)}: ${boolCell(val)}</td>`
   );
   // pair them up into rows
   const checkRows: string[] = [];
@@ -145,13 +145,13 @@ export function buildUsedMobileA4Html(profile: MobileFullProfile): string {
       width: 100%;
     }
     h2 { margin: 0 0 2px 0; font-size: 20px; font-weight: 700; color: #111827; }
-    h3 { margin: 12px 0 5px 0; font-size: 12.5px; font-weight: 700; text-transform: uppercase;
+    h3 { margin: 8px 0 4px 0; font-size: 12.5px; font-weight: 700; text-transform: uppercase;
          letter-spacing: 0.05em; color: #374151; border-bottom: 1.5px solid #d1d5db; padding-bottom: 3px; }
     table { border-collapse: collapse; width: 100%; }
     .section { margin-bottom: 10px; }
     .declaration-box {
-      margin-top: 14px;
-      padding: 10px 14px;
+      margin-top: 10px;
+      padding: 8px 14px;
       border: 1.5px solid #374151;
       border-radius: 4px;
       background: #f9fafb;
@@ -160,7 +160,7 @@ export function buildUsedMobileA4Html(profile: MobileFullProfile): string {
       direction: rtl;
       text-align: right;
       font-size: 14px;
-      line-height: 1.9;
+      line-height: 1.6;
       font-family: 'Noto Nastaliq Urdu', 'Urdu Typesetting', 'Jameel Noori Nastaleeq', 'Segoe UI', Arial, sans-serif;
       color: #111827;
     }
@@ -178,7 +178,7 @@ export function buildUsedMobileA4Html(profile: MobileFullProfile): string {
       direction: ltr;
     }
     .sig-section {
-      margin-top: 14px;
+      margin-top: 10px;
     }
     .sig-table td {
       vertical-align: top;
@@ -205,8 +205,8 @@ export function buildUsedMobileA4Html(profile: MobileFullProfile): string {
       text-align: center;
     }
     .thumb-box {
-      width: 40mm;
-      height: 48mm;
+      width: 38mm;
+      height: 30mm;
       border: 1.5px solid #111827;
       border-radius: 3px;
       display: flex;
@@ -222,8 +222,8 @@ export function buildUsedMobileA4Html(profile: MobileFullProfile): string {
       line-height: 1.4;
     }
     .admin-approval-box {
-      margin-top: 16px;
-      padding: 12px 16px;
+      margin-top: 10px;
+      padding: 10px 14px;
       border: 1.5px dashed #1d4ed8;
       border-radius: 4px;
       background: #eff6ff;
