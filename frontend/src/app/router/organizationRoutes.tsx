@@ -21,6 +21,7 @@ import { OrganizationSuppliersPage } from '@/pages/dashboard/organization/Organi
 import { OrganizationProfilePage } from '@/pages/dashboard/organization/OrganizationProfilePage';
 import { OrganizationSettingsPage } from '@/pages/dashboard/organization/OrganizationSettingsPage';
 import { OrganizationHRPage } from '@/pages/dashboard/organization/OrganizationHRPage';
+import { CashManagementPage } from '@/pages/dashboard/shop-admin/CashManagementPage';
 
 export const organizationRoutes = (
   <Route element={<RoleGuard allowedRoles={['SUPER_ADMIN', 'MULTI_ADMIN', 'OWNER', 'ADMIN']} fallbackPath="/dashboard/shop-admin" />}>
@@ -59,6 +60,9 @@ export const organizationRoutes = (
       {/* 10. Ledger */}
       <Route path="ledger" element={<OrganizationLedgerPage />} />
       
+      {/* Cash Management — All Branches */}
+      <Route path="cash" element={<CashManagementPage />} />
+
       {/* 11. Analytics */}
       <Route path="analytics" element={<OrganizationAnalyticsPage />} />
       

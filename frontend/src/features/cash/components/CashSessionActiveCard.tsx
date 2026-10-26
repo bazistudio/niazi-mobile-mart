@@ -25,6 +25,7 @@ interface CashSessionActiveCardProps {
   onReceivePayment: () => void;
   onAddExpense: () => void;
   onPaySupplier: () => void;
+  branchSelector?: React.ReactNode;
 }
 
 export const CashSessionActiveCard: React.FC<CashSessionActiveCardProps> = ({
@@ -34,6 +35,7 @@ export const CashSessionActiveCard: React.FC<CashSessionActiveCardProps> = ({
   onReceivePayment,
   onAddExpense,
   onPaySupplier,
+  branchSelector,
 }) => {
   const { currentSession: session, summary, isLoading } = useCashStore();
   const isOpen = session?.status === 'OPEN';
@@ -55,15 +57,20 @@ export const CashSessionActiveCard: React.FC<CashSessionActiveCardProps> = ({
   return (
     <div className="bg-white dark:bg-neutral-800 rounded-xl shadow p-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-2">
           <Wallet className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-          <h2 className="text-lg font-semibold text-neutral-900 dark:text-white">
+          <h2 className="text-lg font-semibold text-neutral-900 dark:text-white whitespace-nowrap">
             Cash Session
           </h2>
         </div>
+        {branchSelector && (
+          <div className="flex-1 flex items-center justify-center min-w-[280px] max-w-full overflow-hidden">
+            {branchSelector}
+          </div>
+        )}
         <span
-          className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${
+          className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium shrink-0 ${
             isOpen
               ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
               : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-400'

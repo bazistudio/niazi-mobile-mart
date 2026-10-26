@@ -5,7 +5,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { buildAuthMiddleware, authorizePermission, canAccessBranch, RequestIdentity, NIAZI_ORGANIZATION_ID } from '../auth';
+import { buildAuthMiddleware, authorizePermission, canAccessBranch, isOrgAdmin, RequestIdentity, NIAZI_ORGANIZATION_ID } from '../auth';
 import {
   closeCashSession,
   getCurrentCashSession,
@@ -297,6 +297,185 @@ export function createCashRouter(pool: Pool): Router {
       const branchId = requestedBranchId || identity.branch_id || null;
       const movements = await listCashMovements(pool, branchId);
       res.status(200).json(movements);
+    } catch (err) {
+      sendError(req, res, err);
+    }
+  });
+
+  // ── GET /api/cash/organization-summary ──────────────────────────────────
+  // CMA-2: Organization Admin only — returns per-branch cash session status
+  // and daily totals for all active non-warehouse branches, plus org-wide totals.
+  router.get('/organization-summary', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    // Hard gate: Org Admin only. Branch users receive 403 immediately.
+    if (!isOrgAdmin(identity)) {
+      res.status(403).json({ error: 'Access denied: Organization administrator access required' });
+      return;
+    }
+
+    // Single-tenant guard: token must belong to the known organization.
+    if (identity.organization_id !== NIAZI_ORGANIZATION_ID) {
+      res.status(403).json({ error: 'Access denied: Invalid organization context' });
+      return;
+    }
+
+    try {
+      // 1. Load all active, non-warehouse retail branches for this organization.
+      //    Exclude the Central Warehouse (is_warehouse = 1) — it has no cash sessions.
+      const branchesResult = await pool.query<{
+        id: string;
+        name: string;
+        code: string;
+        is_active: number;
+      }>(
+        `SELECT id, name, code, is_active
+           FROM branches
+          WHERE organization_id = $1
+            AND is_warehouse = 0
+          ORDER BY name ASC`,
+        [NIAZI_ORGANIZATION_ID]
+      );
+
+      const branches = branchesResult.rows;
+
+      if (branches.length === 0) {
+        res.status(200).json({
+          generated_at: new Date().toISOString(),
+          organization_id: NIAZI_ORGANIZATION_ID,
+          branches: [],
+          org_totals: {
+            total_opening_cash: 0,
+            total_cash_in: 0,
+            total_cash_out: 0,
+            total_expected_cash: 0,
+            total_cash_sales: 0,
+            total_customer_payments: 0,
+            total_supplier_payments: 0,
+            total_expenses: 0,
+            open_session_count: 0,
+            closed_session_count: 0,
+            no_session_count: 0,
+          },
+        });
+        return;
+      }
+
+      // 2. Fetch the daily summary for each branch.
+      //    getDailySummary uses the current OPEN session when available,
+      //    falling back to the most recent session for the current calendar date.
+      //    We call it without a targetDate so it follows the same semantics as
+      //    the existing /api/cash/summary endpoint.
+      const branchSummaries = await Promise.all(
+        branches.map(async (branch) => {
+          try {
+            const summary = await getDailySummary(pool, branch.id);
+            return {
+              branch_id: branch.id,
+              branch_name: branch.name,
+              branch_code: branch.code,
+              is_active: branch.is_active === 1,
+              session_id: summary.session_id,
+              session_status: summary.session_status, // 'OPEN' | 'CLOSED' | 'NONE'
+              business_date: summary.business_date,
+              opening_cash: summary.opening_cash,
+              cash_sales: summary.cash_sales,
+              customer_payments: summary.customer_payments,
+              supplier_payments: summary.supplier_payments,
+              cash_expenses: summary.cash_expenses,
+              cash_in_adjustments: summary.cash_in_adjustments,
+              cash_out_adjustments: summary.cash_out_adjustments,
+              total_cash_in: summary.total_cash_in,
+              total_cash_out: summary.total_cash_out,
+              expected_closing_cash: summary.expected_closing_cash,
+              actual_closing_cash: summary.actual_closing_cash,
+              cash_variance: summary.cash_variance,
+              error: null as string | null,
+            };
+          } catch (branchErr) {
+            // Surface per-branch errors without aborting the whole response.
+            console.error(
+              `[cash.routes] organization-summary: getDailySummary failed for branch ${branch.id} (${branch.name}):`,
+              (branchErr as Error).message
+            );
+            return {
+              branch_id: branch.id,
+              branch_name: branch.name,
+              branch_code: branch.code,
+              is_active: branch.is_active === 1,
+              session_id: null as string | null,
+              session_status: 'NONE' as const,
+              business_date: null as string | null,
+              opening_cash: 0,
+              cash_sales: 0,
+              customer_payments: 0,
+              supplier_payments: 0,
+              cash_expenses: 0,
+              cash_in_adjustments: 0,
+              cash_out_adjustments: 0,
+              total_cash_in: 0,
+              total_cash_out: 0,
+              expected_closing_cash: 0,
+              actual_closing_cash: null as number | null,
+              cash_variance: null as number | null,
+              error: (branchErr as Error).message,
+            };
+          }
+        })
+      );
+
+      // 3. Compute organization-wide totals by summing branch rows.
+      //    Only include branches with session_status !== 'NONE' (i.e., actual data)
+      //    in the numeric totals to avoid zeroes from error branches inflating counts.
+      //    Count stats cover all branches regardless.
+      let totalOpeningCash = 0;
+      let totalCashIn = 0;
+      let totalCashOut = 0;
+      let totalExpectedCash = 0;
+      let totalCashSales = 0;
+      let totalCustomerPayments = 0;
+      let totalSupplierPayments = 0;
+      let totalExpenses = 0;
+      let openCount = 0;
+      let closedCount = 0;
+      let noneCount = 0;
+
+      for (const b of branchSummaries) {
+        if (b.session_status === 'OPEN') openCount++;
+        else if (b.session_status === 'CLOSED') closedCount++;
+        else noneCount++;
+
+        // Only add to monetary totals when there is an actual session (not a NONE/error row).
+        if (b.session_status !== 'NONE' && b.error === null) {
+          totalOpeningCash += b.opening_cash;
+          totalCashIn += b.total_cash_in;
+          totalCashOut += b.total_cash_out;
+          totalExpectedCash += b.expected_closing_cash;
+          totalCashSales += b.cash_sales;
+          totalCustomerPayments += b.customer_payments;
+          totalSupplierPayments += b.supplier_payments;
+          totalExpenses += b.cash_expenses;
+        }
+      }
+
+      res.status(200).json({
+        generated_at: new Date().toISOString(),
+        organization_id: NIAZI_ORGANIZATION_ID,
+        branches: branchSummaries,
+        org_totals: {
+          total_opening_cash: totalOpeningCash,
+          total_cash_in: totalCashIn,
+          total_cash_out: totalCashOut,
+          total_expected_cash: totalExpectedCash,
+          total_cash_sales: totalCashSales,
+          total_customer_payments: totalCustomerPayments,
+          total_supplier_payments: totalSupplierPayments,
+          total_expenses: totalExpenses,
+          open_session_count: openCount,
+          closed_session_count: closedCount,
+          no_session_count: noneCount,
+        },
+      });
     } catch (err) {
       sendError(req, res, err);
     }

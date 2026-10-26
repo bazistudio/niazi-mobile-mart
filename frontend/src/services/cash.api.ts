@@ -7,6 +7,7 @@ import {
   CreateCashAdjustmentDto,
   CashMovementFilterDto,
   DailyCashSummaryDto,
+  OrgCashSummaryDto,
 } from '@/lib/tauri/tauriClient';
 
 export const cashApi = {
@@ -40,5 +41,10 @@ export const cashApi = {
 
   getDailySummary: async (branchId?: string, businessDate?: string): Promise<DailyCashSummaryDto> => {
     return await tauriClient.cashDailySummary(branchId, businessDate);
+  },
+
+  // CMA-3: Organization Admin only — all-branch cash session status and daily totals.
+  getOrganizationSummary: async (): Promise<OrgCashSummaryDto> => {
+    return await tauriClient.cashOrganizationSummary();
   },
 };

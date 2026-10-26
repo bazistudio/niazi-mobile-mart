@@ -46,4 +46,7 @@ export const queryKeys = {
     ['ledger', partyType, partyId, branchId ?? 'all'] as const,
   orders: ['orders'] as const,
   ordersToday: ['orders', 'today'] as const,
+  cash: {
+    orgSummary: ['cash', 'organization-summary'] as const,
+  },
 };

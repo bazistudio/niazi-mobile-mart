@@ -167,10 +167,10 @@ export async function httpFetch<T>(path: string, options: RequestInit = {}): Pro
       if (errData) {
         if (typeof errData === 'string') {
           errorMsg = errData;
-        } else if (errData.error) {
-          errorMsg = typeof errData.error === 'string' ? errData.error : JSON.stringify(errData.error);
         } else if (errData.message) {
           errorMsg = typeof errData.message === 'string' ? errData.message : JSON.stringify(errData.message);
+        } else if (errData.error) {
+          errorMsg = typeof errData.error === 'string' ? errData.error : JSON.stringify(errData.error);
         }
       }
     } catch {
@@ -1262,6 +1262,12 @@ export const tauriClient = {
 
   // â”€â”€ Supplier & Procurement Domain (Phase 16) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async supplierCreate(dto: CreateSupplierDto): Promise<Supplier> {
+    if (getApiBaseUrl()) {
+      return await httpFetch<Supplier>('/api/v1/suppliers', {
+        method: 'POST',
+        body: JSON.stringify(dto),
+      });
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Supplier>('storage_supplier_create', { dto });
@@ -1270,6 +1276,12 @@ export const tauriClient = {
   },
 
   async supplierUpdate(id: string, dto: UpdateSupplierDto): Promise<Supplier> {
+    if (getApiBaseUrl()) {
+      return await httpFetch<Supplier>(`/api/v1/suppliers/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(dto),
+      });
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Supplier>('storage_supplier_update', { id, dto });
@@ -1278,6 +1290,9 @@ export const tauriClient = {
   },
 
   async supplierGetById(id: string): Promise<Supplier | null> {
+    if (getApiBaseUrl()) {
+      return await httpFetch<Supplier | null>(`/api/v1/suppliers/${encodeURIComponent(id)}`);
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<Supplier | null>('storage_supplier_get_by_id', { id });
@@ -1286,6 +1301,9 @@ export const tauriClient = {
   },
 
   async supplierGetDetail(id: string): Promise<SupplierDetailDto> {
+    if (getApiBaseUrl()) {
+      return await httpFetch<SupplierDetailDto>(`/api/v1/suppliers/${encodeURIComponent(id)}`);
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<SupplierDetailDto>('storage_supplier_get_detail', { id });
@@ -1294,6 +1312,21 @@ export const tauriClient = {
   },
 
   async supplierList(filter?: SupplierFilter): Promise<SupplierSummaryDto[]> {
+    if (getApiBaseUrl()) {
+      const params = new URLSearchParams();
+      if (filter?.search) params.set('search', filter.search);
+      if (filter?.is_active !== undefined && filter?.is_active !== null) {
+        params.set('is_active', String(filter.is_active));
+      }
+      if (filter?.limit !== undefined && filter?.limit !== null) {
+        params.set('limit', String(filter.limit));
+      }
+      if (filter?.offset !== undefined && filter?.offset !== null) {
+        params.set('offset', String(filter.offset));
+      }
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      return await httpFetch<SupplierSummaryDto[]>(`/api/v1/suppliers${qs}`);
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<SupplierSummaryDto[]>('storage_supplier_list', { filter });
@@ -1302,6 +1335,11 @@ export const tauriClient = {
   },
 
   async supplierSearch(query: string): Promise<SupplierSummaryDto[]> {
+    if (getApiBaseUrl()) {
+      return await httpFetch<SupplierSummaryDto[]>(
+        `/api/v1/suppliers/search?q=${encodeURIComponent(query)}`
+      );
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       return await invoke<SupplierSummaryDto[]>('storage_supplier_search', { query });
@@ -1713,6 +1751,20 @@ export const tauriClient = {
       throw e;
     }
   },
+
+  // CMA-2: Organization Admin only — all-branch cash session status and daily totals.
+  async cashOrganizationSummary(): Promise<OrgCashSummaryDto> {
+    try {
+      return await httpFetch<OrgCashSummaryDto>('/api/cash/organization-summary');
+    } catch (e) {
+      if (isTauriEnvironment()) {
+        // Tauri desktop does not yet expose a native command for this endpoint;
+        // fall through so the error surfaces cleanly.
+      }
+      throw e;
+    }
+  },
+
 
   // â”€â”€ Returns & Stock Reversal Domain (Phase 18) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async salesReturnGetReturnable(saleId: string): Promise<SaleReturnableInfoDto> {
@@ -2795,6 +2847,52 @@ export interface DailyCashSummaryDto {
   expected_closing_cash: number;
   actual_closing_cash: number | null;
   cash_variance: number | null;
+}
+
+// CMA-2: Per-branch summary row returned by GET /api/cash/organization-summary.
+// Mirrors DailyCashSummaryDto but business_date and session_id may be null
+// for branches that have no session today (session_status = 'NONE').
+export interface OrgBranchCashSummary {
+  branch_id: string;
+  branch_name: string;
+  branch_code: string;
+  is_active: boolean;
+  session_id: string | null;
+  session_status: string;       // 'OPEN' | 'CLOSED' | 'NONE'
+  business_date: string | null; // null when session_status is 'NONE'
+  opening_cash: number;
+  cash_sales: number;
+  customer_payments: number;
+  supplier_payments: number;
+  cash_expenses: number;
+  cash_in_adjustments: number;
+  cash_out_adjustments: number;
+  total_cash_in: number;
+  total_cash_out: number;
+  expected_closing_cash: number;
+  actual_closing_cash: number | null;
+  cash_variance: number | null;
+  error: string | null;
+}
+
+// CMA-2: Organization-wide cash overview returned by GET /api/cash/organization-summary.
+export interface OrgCashSummaryDto {
+  generated_at: string;
+  organization_id: string;
+  branches: OrgBranchCashSummary[];
+  org_totals: {
+    total_opening_cash: number;
+    total_cash_in: number;
+    total_cash_out: number;
+    total_expected_cash: number;
+    total_cash_sales: number;
+    total_customer_payments: number;
+    total_supplier_payments: number;
+    total_expenses: number;
+    open_session_count: number;
+    closed_session_count: number;
+    no_session_count: number;
+  };
 }
 
 // â”€â”€ Type Definitions for Returns & Stock Reversal (Phase 18) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
