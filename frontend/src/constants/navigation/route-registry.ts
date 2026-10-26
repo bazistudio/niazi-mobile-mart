@@ -6,6 +6,12 @@ export const VALID_ROUTES = [
   '/dashboard/shop-admin/pos',
   '/dashboard/shop-admin/sales',
   
+  // Mobile Inventory
+  '/dashboard/shop-admin/mobiles',
+  '/dashboard/shop-admin/mobiles/add',
+  '/dashboard/shop-admin/mobiles/sale',
+  '/dashboard/shop-admin/mobiles/sale-history',
+
   // Inventory & Products
   '/dashboard/shop-admin/products',
   '/dashboard/shop-admin/products/new',

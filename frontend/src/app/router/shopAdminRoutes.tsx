@@ -11,6 +11,8 @@ import { InventoryStockPage } from '@/pages/dashboard/shop-admin/inventory/Inven
 import { InventoryImportPage } from '@/pages/dashboard/shop-admin/inventory/InventoryImportPage';
 import { MobileInventoryPage } from '@/pages/dashboard/shop-admin/MobileInventoryPage';
 import { AddMobilePage } from '@/pages/dashboard/shop-admin/AddMobilePage';
+import { MobileSalePage } from '@/pages/dashboard/shop-admin/MobileSalePage';
+import { MobileSaleHistoryPage } from '@/pages/dashboard/shop-admin/MobileSaleHistoryPage';
 import { StockPage } from '@/pages/dashboard/shop-admin/StockPage';
 import { ImportPage } from '@/pages/dashboard/shop-admin/ImportPage';
 import { SalesPage } from '@/pages/dashboard/shop-admin/SalesPage';
@@ -78,6 +80,26 @@ export const shopAdminCoreRoutes = (
       element={
         <PermissionGuard requiredPermission={PERMISSIONS.INVENTORY_VIEW} fallbackPath="/dashboard/shop-admin">
           <AddMobilePage />
+        </PermissionGuard>
+      }
+    />
+
+    {/* Mobile Sale Workspace — Frontend Preview (no real sale submission) */}
+    <Route
+      path="mobiles/sale"
+      element={
+        <PermissionGuard requiredPermission={PERMISSIONS.INVENTORY_VIEW} fallbackPath="/dashboard/shop-admin">
+          <MobileSalePage />
+        </PermissionGuard>
+      }
+    />
+
+    {/* Mobile Sale History — Frontend Preview (typed sample adapter) */}
+    <Route
+      path="mobiles/sale-history"
+      element={
+        <PermissionGuard requiredPermission={PERMISSIONS.INVENTORY_VIEW} fallbackPath="/dashboard/shop-admin">
+          <MobileSaleHistoryPage />
         </PermissionGuard>
       }
     />

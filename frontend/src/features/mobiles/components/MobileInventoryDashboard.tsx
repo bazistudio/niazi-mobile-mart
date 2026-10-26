@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import {
   Smartphone,
   Plus,
@@ -32,8 +32,16 @@ import { downloadHtmlAsPdf } from '@/lib/printer/pdfExport';
 import type { BranchInvestmentSummary } from '../services/mobile.api';
 import type { MobileInventoryItem, MobileCondition } from '../types/mobile.types';
 
+// ─── Mobile module sub-navigation tabs ──────────────────────────────────────
+const MOBILE_NAV_TABS = [
+  { label: 'Inventory', href: '/dashboard/shop-admin/mobiles' },
+  { label: 'Mobile Sale', href: '/dashboard/shop-admin/mobiles/sale' },
+  { label: 'Sale History', href: '/dashboard/shop-admin/mobiles/sale-history' },
+] as const;
+
 export const MobileInventoryDashboard: React.FC = () => {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const user = useAuthStore((s) => s.user);
   const isOrgAdmin = user?.role === 'ADMIN';
 
@@ -146,6 +154,29 @@ export const MobileInventoryDashboard: React.FC = () => {
   return (
     <>
     <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto pb-16 px-4 sm:px-6">
+      {/* Mobile module sub-nav */}
+      <div className="flex items-center gap-1 pt-4 border-b border-border pb-0 overflow-x-auto">
+        {MOBILE_NAV_TABS.map((tab) => {
+          const isActive =
+            tab.href === '/dashboard/shop-admin/mobiles'
+              ? pathname === '/dashboard/shop-admin/mobiles'
+              : pathname.startsWith(tab.href);
+          return (
+            <Link
+              key={tab.href}
+              to={tab.href}
+              className={`px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                isActive
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border'
+              }`}
+            >
+              {tab.label}
+            </Link>
+          );
+        })}
+      </div>
+
       {/* Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pt-4 border-b border-border pb-5">
         <div>
