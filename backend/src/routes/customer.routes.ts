@@ -449,7 +449,28 @@ export function createCustomerV1Router(pool: Pool): Router {
         return;
       }
 
-      // Pass branch from authenticated identity — not from client-supplied body (DEF-03)
+      // Resolve branch: Org Admin can target a specified branch (validated with canAccessBranch);
+      // Non-org-admin is locked to identity.branch_id.
+      const requestedBranchId =
+        (req.query['branch_id'] as string | undefined)?.trim() ||
+        (body as any)?.branch_id?.trim() ||
+        (req.headers['x-branch-id'] as string | undefined)?.trim() ||
+        undefined;
+
+      let effectiveBranchId = identity.branch_id ?? null;
+      if (isOrgAdmin(identity)) {
+        if (requestedBranchId) {
+          if (!canAccessBranch(identity, requestedBranchId)) {
+            res.status(403).json({ error: 'FORBIDDEN', message: 'Access to this branch is not authorized' });
+            return;
+          }
+          effectiveBranchId = requestedBranchId;
+        }
+      } else if (requestedBranchId && requestedBranchId !== identity.branch_id) {
+        res.status(403).json({ error: 'FORBIDDEN', message: 'Cannot record payment for a foreign branch' });
+        return;
+      }
+
       const result = await recordCustomerPayment(
         pool,
         customerId,
@@ -460,7 +481,7 @@ export function createCustomerV1Router(pool: Pool): Router {
           reference_number: body.reference_number ?? null,
         },
         identity.user_id ?? null,
-        identity.branch_id ?? null
+        effectiveBranchId
       );
 
       res.status(201).json(result);

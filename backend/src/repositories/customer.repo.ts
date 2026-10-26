@@ -845,7 +845,7 @@ export async function recordCustomerPayment(
       const sessionResult = await client.query<{ id: string }>(
         `SELECT id FROM cash_sessions
          WHERE status = 'OPEN' AND branch_id = $1
-         ORDER BY created_at DESC LIMIT 1`,
+         ORDER BY opened_at DESC LIMIT 1`,
         [branchId]
       );
       if (!sessionResult.rows[0]) {

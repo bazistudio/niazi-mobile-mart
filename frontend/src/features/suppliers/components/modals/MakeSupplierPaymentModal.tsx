@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import toast from 'react-hot-toast';
 import { X, CreditCard, Banknote, Smartphone } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ledgerApi } from '@/services/ledger.api';
@@ -54,7 +55,7 @@ export const MakeSupplierPaymentModal = ({ isOpen, onClose, supplier, onPaymentS
     },
     onError: (err: any) => {
       console.error('Failed to save payment', err);
-      alert(err.response?.data?.message || 'Failed to save payment');
+      toast.error(err.response?.data?.message || 'Failed to save payment');
     }
   });
 

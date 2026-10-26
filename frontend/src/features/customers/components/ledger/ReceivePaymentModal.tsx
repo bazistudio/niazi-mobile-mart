@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import toast from 'react-hot-toast';
 import { X, CreditCard, Banknote, Smartphone } from 'lucide-react';
 import { DBCustomer } from '@/types/db.types';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -8,6 +9,7 @@ import { invalidateQueries } from '@/lib/react-query/invalidate';
 import { usePrintStore } from '@/lib/printer';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
 import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 
 interface ReceivePaymentModalProps {
   isOpen: boolean;
@@ -22,6 +24,9 @@ export const ReceivePaymentModal = ({ isOpen, onClose, customer, onPaymentSucces
 
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
+  const activeShopId = useOrganizationStore(
+    (s) => s.activeShopId || s.activeShop?._id || s.activeShop?.id || null
+  );
   const { openPreview } = usePrintStore();
   const { settings, shopHeader } = usePrinterStore();
 
@@ -56,7 +61,7 @@ export const ReceivePaymentModal = ({ isOpen, onClose, customer, onPaymentSucces
     },
     onError: (err: any) => {
       console.error('Failed to save payment', err);
-      alert(err.response?.data?.message || 'Failed to save payment');
+      toast.error(err.response?.data?.message || 'Failed to save payment');
     }
   });
 
@@ -64,12 +69,19 @@ export const ReceivePaymentModal = ({ isOpen, onClose, customer, onPaymentSucces
 
   const handleSave = async () => {
     if (!amount || isNaN(Number(amount))) return;
+
+    const isCash = method.toLowerCase() === 'cash';
+    if (isCash && !activeShopId) {
+      toast.error('No branch selected. Please select a branch before recording a cash payment.');
+      return;
+    }
     
     paymentMutation.mutate({
       partyId: customer?.id,
       partyType: 'CUSTOMER',
       amount: Number(amount),
       method: method.toLowerCase() === 'bank transfer' ? 'bank' : method.toLowerCase() as any,
+      branchId: activeShopId || null,
     });
   };
 

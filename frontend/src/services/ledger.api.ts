@@ -87,6 +87,7 @@ export interface RecordPaymentPayload {
   method: string;
   notes?: string;
   idempotencyKey?: string;
+  branchId?: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -197,11 +198,12 @@ export const ledgerApi = {
   recordPayment: async (
     payload: RecordPaymentPayload
   ): Promise<{ success: boolean; data: { paymentId: string; newBalance: number; receiptNumber?: string } }> => {
-    const body = {
+    const body: Record<string, any> = {
       amount: Math.round(payload.amount),
       payment_method: payload.method?.toUpperCase() || 'CASH',
       notes: payload.notes || null,
       reference_number: payload.idempotencyKey || null,
+      branch_id: payload.branchId ?? null,
     };
 
     if (payload.partyType === 'CUSTOMER') {

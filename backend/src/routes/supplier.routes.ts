@@ -29,7 +29,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { buildAuthMiddleware, authorizePermission } from '../auth';
+import { buildAuthMiddleware, authorizePermission, isOrgAdmin, canAccessBranch } from '../auth';
 import { SupplierService, SupplierServiceError } from '../services/supplier.service';
 import type { SupplierFilter, RecordSupplierPaymentDto } from '../services/supplier.service';
 
@@ -240,11 +240,31 @@ export function buildSupplierRouter(pool: Pool): Router {
 
     const identity = req.identity;
     const performedBy = identity?.user_id ?? null;
-    // Pass branch from authenticated identity — not from client-supplied body
-    const branchId = identity?.branch_id ?? null;
+
+    // Resolve branch: Org Admin can target a specified branch (validated with canAccessBranch);
+    // Non-org-admin is locked to identity.branch_id.
+    const requestedBranchId =
+      (req.query['branch_id'] as string | undefined)?.trim() ||
+      (body['branch_id'] as string | undefined)?.trim() ||
+      (req.headers['x-branch-id'] as string | undefined)?.trim() ||
+      undefined;
+
+    let effectiveBranchId = identity?.branch_id ?? null;
+    if (identity && isOrgAdmin(identity)) {
+      if (requestedBranchId) {
+        if (!canAccessBranch(identity, requestedBranchId)) {
+          res.status(403).json({ error: 'FORBIDDEN', message: 'Access to this branch is not authorized' });
+          return;
+        }
+        effectiveBranchId = requestedBranchId;
+      }
+    } else if (requestedBranchId && requestedBranchId !== identity?.branch_id) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Cannot record payment for a foreign branch' });
+      return;
+    }
 
     try {
-      const result = await service.recordPayment(id, dto, performedBy, branchId);
+      const result = await service.recordPayment(id, dto, performedBy, effectiveBranchId);
       res.status(201).json(result);
     } catch (err: unknown) {
       handleError(res, err, 'record_supplier_payment');

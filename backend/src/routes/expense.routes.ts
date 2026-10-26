@@ -275,21 +275,27 @@ export function buildExpenseRouter(pool: Pool): Router {
     const requestedBranchId =
       (body['branch_id'] as string | null | undefined) ?? null;
     const effectiveBranchId = resolveBranch(req, res, requestedBranchId);
-    if (effectiveBranchId === 'UNAUTHORIZED') return;
+    // Validate branch resolution — every expense must belong to a valid branch
+    if (!effectiveBranchId) {
+      res.status(400).json({ error: 'branch_id is required' });
+      return;
+    }
 
     // Validate required fields early for clear 400 messages
     if (!body['category_id'] || typeof body['category_id'] !== 'string') {
       res.status(400).json({ error: 'category_id is required' });
       return;
     }
-    if (!body['description'] || typeof body['description'] !== 'string') {
-      res.status(400).json({ error: 'description is required' });
-      return;
-    }
     if (body['amount'] === undefined || body['amount'] === null) {
       res.status(400).json({ error: 'amount is required' });
       return;
     }
+
+    // Description is optional — trim if string, otherwise default to empty string
+    const description =
+      typeof body['description'] === 'string'
+        ? body['description'].trim()
+        : '';
 
     try {
       // Workstream C: organizationId is now threaded into the service/repo so the
@@ -301,7 +307,7 @@ export function buildExpenseRouter(pool: Pool): Router {
           amount: Number(body['amount']),
           payment_method:
             (body['payment_method'] as string | null | undefined) ?? null,
-          description: body['description'] as string,
+          description,
           notes: (body['notes'] as string | null | undefined) ?? null,
           expense_date: (body['expense_date'] as string | null | undefined) ?? null,
         },

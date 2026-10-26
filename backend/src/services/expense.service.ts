@@ -124,9 +124,12 @@ export class ExpenseService {
     if (!dto.category_id?.trim()) {
       throw new ExpenseServiceError('Expense category is required', 400, 'VALIDATION');
     }
-    if (typeof dto.description !== 'string' || !dto.description.trim()) {
-      throw new ExpenseServiceError('Expense description cannot be empty', 400, 'VALIDATION');
-    }
+    // Normalize optional description (default to empty string to satisfy database constraint)
+    const description =
+      typeof dto.description === 'string'
+        ? dto.description.trim()
+        : '';
+    dto.description = description;
 
     // Validate amount — must be positive integer
     const amount = dto.amount;

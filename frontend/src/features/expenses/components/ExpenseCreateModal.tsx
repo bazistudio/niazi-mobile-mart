@@ -45,7 +45,7 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
   // Form states
   const [categoryId, setCategoryId] = useState('');
   const [amount, setAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'BANK' | 'ONLINE'>('CASH');
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'BANK_TRANSFER' | 'OTHER'>('CASH');
   const [description, setDescription] = useState('');
   const [notes, setNotes] = useState('');
   const [expenseDate, setExpenseDate] = useState(new Date().toISOString().split('T')[0]);
@@ -114,7 +114,7 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const numAmount = parseFloat(amount);
+    const numAmount = Math.round(parseFloat(amount));
     if (isNaN(numAmount) || numAmount <= 0) {
       toast.error('Please enter a valid amount');
       return;
@@ -123,6 +123,8 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
       toast.error('Please select an expense category');
       return;
     }
+    // Description is optional — trim if provided, otherwise null/empty
+    const trimmedDescription = description.trim() || null;
 
     // Combine notes and reference number if provided
     let combinedNotes = notes.trim();
@@ -132,13 +134,20 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
         : `Ref #: ${referenceNo.trim()}`;
     }
 
+    const branchId =
+      expenseScope === 'BRANCH'
+        ? (activeShop?.id || activeShop?._id || null)
+        : null;
+
     await addExpense({
       category_id: categoryId,
+      branch_id: branchId,
       amount: numAmount,
       payment_method: paymentMethod,
-      description: description.trim() ? description.trim() : null,
+      description: trimmedDescription,
       notes: combinedNotes ? combinedNotes : null,
-      expense_date: expenseDate ? new Date(expenseDate).toISOString() : null,
+      // expenseDate is already YYYY-MM-DD from the date input — do NOT wrap in new Date()
+      expense_date: expenseDate || null,
     });
 
     onClose();
@@ -324,11 +333,11 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 <input
                   required
                   type="number"
-                  min="0.01"
-                  step="0.01"
+                  min="1"
+                  step="1"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  placeholder="0.00"
+                  placeholder="0"
                   className="w-full pl-8 pr-2.5 py-1.5 border border-border rounded-lg bg-surface text-sm font-bold text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring shadow-2xs"
                 />
               </div>
@@ -355,9 +364,9 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
                 <button
                   type="button"
-                  onClick={() => setPaymentMethod('BANK')}
+                  onClick={() => setPaymentMethod('BANK_TRANSFER')}
                   className={`flex flex-col items-center justify-center py-1 px-1 rounded-lg border text-center transition-all cursor-pointer ${
-                    paymentMethod === 'BANK'
+                    paymentMethod === 'BANK_TRANSFER'
                       ? 'bg-primary/10 border-primary text-primary font-bold shadow-2xs'
                       : 'bg-surface border-border text-text-secondary hover:bg-surface-hover'
                   }`}
@@ -368,9 +377,9 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
                 <button
                   type="button"
-                  onClick={() => setPaymentMethod('ONLINE')}
+                  onClick={() => setPaymentMethod('OTHER')}
                   className={`flex flex-col items-center justify-center py-1 px-1 rounded-lg border text-center transition-all cursor-pointer ${
-                    paymentMethod === 'ONLINE'
+                    paymentMethod === 'OTHER'
                       ? 'bg-primary/10 border-primary text-primary font-bold shadow-2xs'
                       : 'bg-surface border-border text-text-secondary hover:bg-surface-hover'
                   }`}
@@ -413,7 +422,7 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
           {/* 5. Description */}
           <div>
             <label className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
-              Description / Purpose
+              Description / Purpose <span className="text-text-muted font-normal">(Opt)</span>
             </label>
             <input
               type="text"
