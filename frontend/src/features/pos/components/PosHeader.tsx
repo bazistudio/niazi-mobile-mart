@@ -56,13 +56,13 @@ export const PosHeader: React.FC = () => {
           </div>
         </div>
 
-        {/* Center Section: Primary Product / Barcode Omnibox */}
-        <div className="flex-1 max-w-xl min-w-0">
+        {/* Center Section: Primary Product / Barcode Omnibox with resilient autolayout */}
+        <div className="flex-1 min-w-[200px] sm:min-w-[260px] md:min-w-[320px] max-w-2xl">
           <ProductSearch />
         </div>
 
-        {/* Right-Center: Multi-Sale Tabs (desktop only — mobile gets its own row below) */}
-        <div className="hidden lg:flex items-center shrink-0">
+        {/* Right-Center: Multi-Sale Tabs (visible on wide desktop viewports) */}
+        <div className="hidden xl:flex items-center shrink-0">
           <SaleTabNavigation />
         </div>
 
@@ -84,7 +84,7 @@ export const PosHeader: React.FC = () => {
             title={currentSession ? `Register Open (Session ${currentSession.id.slice(0, 8)})` : 'Register Closed — Click to Open Session'}
           >
             <span className={`w-2 h-2 rounded-full ${currentSession ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-            <span className="hidden sm:inline">
+            <span className="hidden 2xl:inline">
               {currentSession ? 'Register Open' : 'Open Register'}
             </span>
           </button>
@@ -111,8 +111,8 @@ export const PosHeader: React.FC = () => {
         </div>
       </header>
 
-      {/* Mobile Sale Tab Navigation Row — visible only below lg breakpoint */}
-      <div className="lg:hidden shrink-0 px-2 pb-1 bg-surface border-b border-border">
+      {/* Sale Tab Navigation Sub-Row — visible on screens below xl breakpoint (e.g. tablet or standard desktop with expanded sidebar) */}
+      <div className="xl:hidden shrink-0 px-3 py-1 bg-surface border-b border-border flex items-center">
         <SaleTabNavigation />
       </div>
 
