@@ -54,7 +54,7 @@ export interface SupplierStatementDto {
 export interface LedgerTimelineEntry {
   id: string;
   transactionId: string;
-  type: 'payment' | 'invoice' | 'supplier_invoice' | 'sale';
+  type: 'payment' | 'invoice' | 'supplier_invoice' | 'sale' | 'opening_balance';
   amount: number;
   runningBalance: number;
   timestamp: number;
@@ -80,6 +80,26 @@ export interface PartyLedgerResponse {
   };
 }
 
+// ─── Opening Balance DTO (mirrors backend SetOpeningBalanceDto / SetOpeningBalanceResult) ─
+
+export type OpeningBalanceDirection = 'debit' | 'credit';
+
+export interface SetOpeningBalancePayload {
+  amount: number;                        // positive integer, whole PKR rupees
+  direction: OpeningBalanceDirection;    // 'debit' = customer owes shop; 'credit' = shop owes customer
+  balance_as_of: string;                 // ISO-8601 YYYY-MM-DD, must not be in the future
+  notes: string;                         // required, non-empty explanation
+  reference_number?: string | null;      // optional legacy customer code / reference
+}
+
+export interface SetOpeningBalanceResult {
+  entry_id: string;
+  balance_after: number;
+  direction: OpeningBalanceDirection;
+  amount: number;
+  balance_as_of: string;
+}
+
 export interface RecordPaymentPayload {
   partyId: string;
   partyType: 'CUSTOMER' | 'SUPPLIER';
@@ -93,20 +113,46 @@ export interface RecordPaymentPayload {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function mapCustomerEntry(entry: LedgerStatementEntry): LedgerTimelineEntry {
-  const isPayment = entry.entry_type === 'PAYMENT';
+  const isPayment       = entry.entry_type === 'PAYMENT';
+  const isOpeningBalance = entry.entry_type === 'OPENING_BALANCE';
+
+  let type: LedgerTimelineEntry['type'];
+  let amount: number;
+  let debitAccount: string;
+  let creditAccount: string;
+
+  if (isOpeningBalance) {
+    // Debit opening balance: customer owes shop (debit > 0)
+    // Credit opening balance: shop owes customer (credit > 0)
+    type          = 'opening_balance';
+    amount        = entry.debit || entry.credit;   // exactly one is non-zero
+    debitAccount  = entry.debit > 0 ? 'receivable' : 'advance';
+    creditAccount = entry.debit > 0 ? 'opening_equity' : 'receivable';
+  } else if (isPayment) {
+    type          = 'payment';
+    amount        = entry.credit;
+    debitAccount  = 'cash';
+    creditAccount = 'receivable';
+  } else {
+    type          = 'invoice';
+    amount        = entry.debit;
+    debitAccount  = 'receivable';
+    creditAccount = 'sales';
+  }
+
   return {
     id: entry.id,
     transactionId: entry.reference_number || entry.id,
-    type: isPayment ? 'payment' : 'invoice',
-    amount: isPayment ? entry.credit : entry.debit,
+    type,
+    amount,
     runningBalance: entry.balance,
     timestamp: new Date(entry.date).getTime() || Date.now(),
     description: entry.description,
     entry_type: entry.entry_type,
     debit: entry.debit,
     credit: entry.credit,
-    debitAccount: isPayment ? 'cash' : 'receivable',
-    creditAccount: isPayment ? 'receivable' : 'sales',
+    debitAccount,
+    creditAccount,
     branch_id: entry.branch_id ?? null,
     branch_name: entry.branch_name ?? null,
     branch_code: entry.branch_code ?? null,
@@ -238,4 +284,25 @@ export const ledgerApi = {
   /** Alias kept for backward compat with supplier payment calls */
   recordPayout: (payload: RecordPaymentPayload) =>
     ledgerApi.recordPayment({ ...payload, partyType: 'SUPPLIER' }),
+
+  /**
+   * Set the opening balance for a customer with no prior ledger activity.
+   * Organization-admin only.  Calls POST /api/v1/customers/:id/opening-balance.
+   * Returns SetOpeningBalanceResult on success; throws on validation/auth/conflict error.
+   */
+  setCustomerOpeningBalance: async (
+    customerId: string,
+    payload: SetOpeningBalancePayload
+  ): Promise<SetOpeningBalanceResult> => {
+    return httpClient.post<SetOpeningBalanceResult>(
+      `/api/v1/customers/${encodeURIComponent(customerId)}/opening-balance`,
+      {
+        amount:           Math.round(payload.amount),
+        direction:        payload.direction,
+        balance_as_of:    payload.balance_as_of,
+        notes:            payload.notes,
+        reference_number: payload.reference_number ?? null,
+      }
+    );
+  },
 };

@@ -2,13 +2,15 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { customerApi } from '@/services/customer.api';
 import { LedgerBook } from '@/features/ledger/components/LedgerBook';
-import { Phone, MapPin, FileText, ShoppingCart, DollarSign, Calendar, Printer, Edit, Plus, CreditCard, ArrowLeft, ChevronDown, ChevronUp, Download, Loader2 } from 'lucide-react';
+import { Phone, MapPin, FileText, ShoppingCart, DollarSign, Calendar, Printer, Edit, Plus, CreditCard, ArrowLeft, ChevronDown, ChevronUp, Download, Loader2, Scale } from 'lucide-react';
 import { usePrintStore } from '@/lib/printer';
 import { downloadHtmlAsPdf } from '@/lib/printer/pdfExport';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
 import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
 import { useLedger } from '@/features/ledger/hooks/useLedger';
 import { ReceivePaymentModal } from './ledger/ReceivePaymentModal';
+import { SetOpeningBalanceModal } from './modals/SetOpeningBalanceModal';
+import { useAuthStore } from '@/lib/auth/core/auth.store';
 import { Badge } from '@/components/ui';
 
 interface CustomerProfileProps {
@@ -26,6 +28,10 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
   const { settings, shopHeader, fetchSettings } = usePrinterStore();
   const [expandedInvoices, setExpandedInvoices] = useState<Record<string, boolean>>({});
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isOpeningBalanceModalOpen, setIsOpeningBalanceModalOpen] = useState(false);
+
+  const { user } = useAuthStore();
+  const isOrgAdmin = user?.role === 'ADMIN';
 
   useEffect(() => {
     if (!settings || !shopHeader) {
@@ -183,6 +189,16 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
             >
               <CreditCard className="w-4 h-4" /> Receive Payment
             </button>
+            {isOrgAdmin && (
+              <button
+                type="button"
+                onClick={() => setIsOpeningBalanceModalOpen(true)}
+                className={`${actionBtnClass} bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 dark:text-blue-400 dark:hover:bg-blue-400/20`}
+                title="Set an opening balance for this customer (org-admin only)"
+              >
+                <Scale className="w-4 h-4" /> Set Opening Balance
+              </button>
+            )}
             <button
               type="button"
               onClick={handlePrintFullLedger}
@@ -343,6 +359,17 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
         customer={customer}
         onPaymentSuccess={fetchDetail}
       />
+
+      {/* SetOpeningBalanceModal — org-admin only; backend enforces the same guard */}
+      {isOrgAdmin && (
+        <SetOpeningBalanceModal
+          isOpen={isOpeningBalanceModalOpen}
+          onClose={() => setIsOpeningBalanceModalOpen(false)}
+          customerId={customer.id}
+          customerName={customer.name}
+          onSuccess={fetchDetail}
+        />
+      )}
     </div>
   );
 };

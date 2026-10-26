@@ -24,7 +24,8 @@
 
 import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
-import { writeChangeLogEntry } from './change_log.repo';
+import { writeChangeLogEntry, writeChangeLogOrgWide } from './change_log.repo';
+import { NIAZI_ORGANIZATION_ID } from '../auth';
 
 // ─── Error class (mirrors Rust AppError → HTTP mapping) ──────────────────────
 
@@ -918,6 +919,230 @@ export async function recordCustomerPayment(
     if (err instanceof CustomerRepoError) throw err;
     const msg = err instanceof Error ? err.message : String(err);
     throw new CustomerRepoError(`Failed to record customer payment: ${msg}`, 500);
+  } finally {
+    client.release();
+  }
+}
+
+// ─── Opening Balance ──────────────────────────────────────────────────────────
+
+export type OpeningBalanceDirection = 'debit' | 'credit';
+
+export interface SetOpeningBalanceDto {
+  /** Positive integer amount in the system monetary unit (whole PKR rupees). */
+  amount: number;
+  /** 'debit'  → customer owes shop  (debit = amount, credit = 0).
+   *  'credit' → shop owes customer  (debit = 0,      credit = amount). */
+  direction: OpeningBalanceDirection;
+  /** ISO-8601 calendar date string, e.g. '2024-12-31'.  Must not be in the future. */
+  balance_as_of: string;
+  /** Required non-empty explanation recorded for audit purposes. */
+  notes: string;
+  /** Optional legacy customer code or reference from the source POS. */
+  reference_number?: string | null;
+}
+
+export interface SetOpeningBalanceResult {
+  entry_id: string;
+  balance_after: number;
+  direction: OpeningBalanceDirection;
+  amount: number;
+  balance_as_of: string;
+}
+
+/**
+ * Records the single opening-balance ledger entry for a customer that has no
+ * prior ledger activity.
+ *
+ * Authorization: MUST only be called for an authenticated org-admin identity.
+ *   The route handler enforces isOrgAdmin() before calling this function.
+ *
+ * Flow (atomic transaction):
+ *   1. BEGIN.
+ *   2. SELECT customer FOR UPDATE — validates existence, active status, org scope.
+ *   3. Confirm zero prior ledger entries → 409 if any exist.
+ *   4. Compute balance_after from the direction.
+ *   5. INSERT customer_ledger_entries (entry_type = 'OPENING_BALANCE').
+ *   6. writeChangeLogOrgWide() — inside the same transaction (atomic audit).
+ *   7. COMMIT.
+ *
+ * Uniqueness guarantee:
+ *   The partial unique index customer_ledger_entries_opening_balance_unique
+ *   (added by migration 040) enforces at most one OPENING_BALANCE row per
+ *   customer at the DB level.  PostgreSQL error 23505 from that index is
+ *   surfaced as CustomerRepoError(409) so the route handler can map it to
+ *   HTTP 409 explicitly.
+ *
+ * Balance convention (ledger-as-source-of-truth):
+ *   calculateOutstandingBalance() = SUM(debit) - SUM(credit).
+ *   For a debit opening entry: balance_after =  amount  (customer owes shop).
+ *   For a credit opening entry: balance_after = -amount (shop owes customer).
+ */
+export async function setCustomerOpeningBalance(
+  pool: Pool,
+  customerId: string,
+  dto: SetOpeningBalanceDto,
+  performedBy?: string | null,
+  branchId?: string | null
+): Promise<SetOpeningBalanceResult> {
+  // ── Input validation ──────────────────────────────────────────────────────
+  if (!Number.isInteger(dto.amount) || dto.amount <= 0) {
+    throw new CustomerRepoError('amount must be a positive integer (whole rupees)', 400);
+  }
+  if (dto.direction !== 'debit' && dto.direction !== 'credit') {
+    throw new CustomerRepoError("direction must be 'debit' or 'credit'", 400);
+  }
+  const notes = (dto.notes ?? '').trim();
+  if (!notes) {
+    throw new CustomerRepoError('notes is required and must not be empty', 400);
+  }
+  // Validate balance_as_of: must be a valid ISO date and not in the future.
+  const balanceAsOf = (dto.balance_as_of ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(balanceAsOf)) {
+    throw new CustomerRepoError('balance_as_of must be an ISO date string (YYYY-MM-DD)', 400);
+  }
+  const asOfMs = Date.parse(balanceAsOf);
+  if (isNaN(asOfMs)) {
+    throw new CustomerRepoError('balance_as_of is not a valid date', 400);
+  }
+  // Allow today but not tomorrow.  Use UTC midnight comparison to avoid
+  // timezone-induced off-by-one rejections on the posting day itself.
+  const todayUtc = new Date();
+  todayUtc.setUTCHours(23, 59, 59, 999);
+  if (asOfMs > todayUtc.getTime()) {
+    throw new CustomerRepoError('balance_as_of must not be a future date', 400);
+  }
+
+  const client: PoolClient = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // ── 1. Lock customer row ───────────────────────────────────────────────
+    const custResult = await client.query<{ id: string; name: string; is_active: unknown }>(
+      `SELECT id, name, is_active FROM customers WHERE id = $1 FOR UPDATE`,
+      [customerId]
+    );
+    if (!custResult.rows[0]) {
+      throw new CustomerRepoError(`Customer '${customerId}' not found`, 404);
+    }
+    const customerRow = custResult.rows[0];
+    // is_active is stored as INTEGER 0/1
+    const isActive =
+      typeof customerRow.is_active === 'boolean'
+        ? customerRow.is_active
+        : Number(customerRow.is_active) === 1;
+    if (!isActive) {
+      throw new CustomerRepoError(
+        `Customer '${customerId}' is inactive and cannot receive an opening balance`,
+        409
+      );
+    }
+
+    // ── 2. Verify no prior ledger entries exist ────────────────────────────
+    const existingResult = await client.query<{ cnt: string }>(
+      `SELECT COUNT(*)::TEXT AS cnt FROM customer_ledger_entries WHERE customer_id = $1`,
+      [customerId]
+    );
+    const existingCount = parseInt(existingResult.rows[0]?.cnt ?? '0', 10);
+    if (existingCount > 0) {
+      throw new CustomerRepoError(
+        `Customer already has ${existingCount} ledger ${existingCount === 1 ? 'entry' : 'entries'}. ` +
+        'An opening balance can only be set for customers with no prior ledger activity.',
+        409
+      );
+    }
+
+    // ── 3. Compute debit / credit / balance_after ──────────────────────────
+    const debit  = dto.direction === 'debit'  ? dto.amount : 0;
+    const credit = dto.direction === 'credit' ? dto.amount : 0;
+    // balance_after = SUM(debit) - SUM(credit) after this single entry
+    const balanceAfter = debit - credit;
+
+    // ── 4. INSERT ledger entry ─────────────────────────────────────────────
+    const entryId = uuidv4();
+    const now = new Date().toISOString();
+    const refNum = dto.reference_number?.trim() || null;
+    const description = refNum
+      ? `Opening balance (as of ${balanceAsOf}) — ${notes} [ref: ${refNum}]`
+      : `Opening balance (as of ${balanceAsOf}) — ${notes}`;
+
+    await client.query(
+      `INSERT INTO customer_ledger_entries
+         (id, customer_id, reference_id, reference_number, entry_type,
+          debit, credit, balance_after, description, performed_by, balance_as_of, created_at)
+       VALUES ($1, $2, $3, $4, 'OPENING_BALANCE', $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        entryId,
+        customerId,
+        entryId,      // self-reference (no parent sale/payment)
+        refNum,
+        debit,
+        credit,
+        balanceAfter,
+        description,
+        performedBy ?? null,
+        balanceAsOf,
+        now,
+      ]
+    );
+
+    // ── 5. Atomic audit event (writeChangeLogOrgWide — must not be in a try/catch) ─
+    //
+    // The spec mandates that the ledger entry and the audit event commit
+    // together or roll back together.  writeChangeLogOrgWide is called
+    // OUTSIDE a nested try/catch so any failure aborts the transaction.
+    let auditBranchId = branchId?.trim() || null;
+    if (!auditBranchId) {
+      // Org admin users often have branch_id = NULL.  change_log.branch_id has an
+      // ON DELETE RESTRICT foreign key constraint to branches(id). Find an active branch
+      // or fall back to canonical Main Branch ('00000000-0000-0000-0000-000000000002').
+      const branchRes = await client.query<{ id: string }>(
+        `SELECT id FROM branches WHERE is_active = 1 ORDER BY (code = 'MAIN') DESC, created_at ASC LIMIT 1`
+      );
+      auditBranchId = branchRes.rows[0]?.id || '00000000-0000-0000-0000-000000000002';
+    }
+    await writeChangeLogOrgWide(client, {
+      organizationId: NIAZI_ORGANIZATION_ID,
+      branchId: auditBranchId,
+      notifyBranchId: null,   // org-wide notification
+      eventType: 'OPENING_BALANCE_POSTED',
+      entityType: 'customer_opening_balance',
+      entityId: entryId,
+      payloadStr: JSON.stringify({
+        customer_id:   customerId,
+        entry_id:      entryId,
+        amount:        dto.amount,
+        direction:     dto.direction,
+        balance_after: balanceAfter,
+        balance_as_of: balanceAsOf,
+        performed_by:  performedBy ?? null,
+        reference_number: refNum,
+      }),
+    });
+
+    await client.query('COMMIT');
+
+    return {
+      entry_id:      entryId,
+      balance_after: balanceAfter,
+      direction:     dto.direction,
+      amount:        dto.amount,
+      balance_as_of: balanceAsOf,
+    };
+  } catch (err: unknown) {
+    await client.query('ROLLBACK');
+    // PostgreSQL unique-violation on the partial index (migration 040)
+    if ((err as { code?: string }).code === '23505') {
+      throw new CustomerRepoError(
+        'An opening balance entry already exists for this customer. ' +
+        'Each customer may only have one opening balance.',
+        409
+      );
+    }
+    if (err instanceof CustomerRepoError) throw err;
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new CustomerRepoError(`Failed to set opening balance: ${msg}`, 500);
   } finally {
     client.release();
   }

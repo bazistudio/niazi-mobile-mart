@@ -39,6 +39,8 @@ import {
   validateUpdateCustomer,
   recordCustomerPayment,
   RecordCustomerPaymentDto,
+  setCustomerOpeningBalance,
+  SetOpeningBalanceDto,
 } from '../repositories/customer.repo';
 
 // ─── Error Response Helper ────────────────────────────────────────────────────
@@ -489,6 +491,107 @@ export function createCustomerV1Router(pool: Pool): Router {
       if (err instanceof CustomerRepoError && err.statusCode === 404) {
         res.status(404).json({ error: 'NOT_FOUND', message: err.message });
         return;
+      }
+      sendError(req, res, err);
+    }
+  });
+
+  // ── POST /api/v1/customers/:id/opening-balance ────────────────────────────
+  // Records the single opening-balance ledger entry for a customer with no
+  // prior ledger activity.  Organization-admin only.
+  //
+  // Authorization:
+  //   - Authenticated (buildAuthMiddleware above).
+  //   - isOrgAdmin() enforced server-side; non-admins receive HTTP 403.
+  //
+  // Body: SetOpeningBalanceDto
+  //   { amount: number, direction: 'debit'|'credit',
+  //     balance_as_of: string, notes: string, reference_number?: string }
+  //
+  // Returns: 201 + SetOpeningBalanceResult on success.
+  // Errors:
+  //   400 – validation failure (amount, direction, date format, missing notes)
+  //   403 – caller is not an org-admin
+  //   404 – customer not found
+  //   409 – customer already has ledger entries or opening balance already posted
+  //   500 – unexpected server error
+  router.post('/:id/opening-balance', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as import('../auth').RequestIdentity;
+
+    // ── Authorization: org-admin only ────────────────────────────────────
+    if (!isOrgAdmin(identity)) {
+      res.status(403).json({
+        error: 'FORBIDDEN',
+        message: 'Only organization administrators may set a customer opening balance',
+      });
+      return;
+    }
+
+    try {
+      const customerId = req.params['id'] as string;
+      const body = req.body as Partial<SetOpeningBalanceDto>;
+
+      // ── Request-level validation ────────────────────────────────────────
+      if (typeof body.amount !== 'number' || !Number.isFinite(body.amount)) {
+        res.status(400).json({ error: 'VALIDATION_ERROR', message: 'amount must be a number' });
+        return;
+      }
+      if (body.amount <= 0 || !Number.isInteger(body.amount)) {
+        res.status(400).json({
+          error: 'VALIDATION_ERROR',
+          message: 'amount must be a positive integer (whole rupees; no decimals or zero)',
+        });
+        return;
+      }
+      if (body.direction !== 'debit' && body.direction !== 'credit') {
+        res.status(400).json({
+          error: 'VALIDATION_ERROR',
+          message: "direction must be 'debit' (customer owes shop) or 'credit' (shop owes customer)",
+        });
+        return;
+      }
+      if (!body.balance_as_of || typeof body.balance_as_of !== 'string') {
+        res.status(400).json({ error: 'VALIDATION_ERROR', message: 'balance_as_of is required' });
+        return;
+      }
+      if (!body.notes || typeof body.notes !== 'string' || !body.notes.trim()) {
+        res.status(400).json({ error: 'VALIDATION_ERROR', message: 'notes is required and must not be empty' });
+        return;
+      }
+
+      const dto: SetOpeningBalanceDto = {
+        amount:           Math.round(body.amount),
+        direction:        body.direction,
+        balance_as_of:    body.balance_as_of.trim(),
+        notes:            body.notes.trim(),
+        reference_number: typeof body.reference_number === 'string' ? body.reference_number.trim() || null : null,
+      };
+
+      const result = await setCustomerOpeningBalance(
+        pool,
+        customerId,
+        dto,
+        identity.user_id ?? null,
+        identity.branch_id ?? null
+      );
+
+      res.status(201).json(result);
+    } catch (err) {
+      // 409 must be returned as HTTP 409 (not 400 like sendError maps it).
+      // Check explicitly before delegating to sendError.
+      if (err instanceof CustomerRepoError) {
+        if (err.statusCode === 404) {
+          res.status(404).json({ error: 'NOT_FOUND', message: err.message });
+          return;
+        }
+        if (err.statusCode === 409) {
+          res.status(409).json({ error: 'DUPLICATE_OPENING_BALANCE', message: err.message });
+          return;
+        }
+        if (err.statusCode === 400) {
+          res.status(400).json({ error: 'VALIDATION_ERROR', message: err.message });
+          return;
+        }
       }
       sendError(req, res, err);
     }

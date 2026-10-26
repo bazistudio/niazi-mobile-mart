@@ -47,11 +47,13 @@ const SummaryTile: React.FC<SummaryTileProps> = ({ label, value, sub, colorClass
 // ─── Entry type badge ─────────────────────────────────────────────────────────
 const EntryTypeBadge: React.FC<{ entryType: string }> = ({ entryType }) => {
   const map: Record<string, { label: string; cls: string }> = {
-    SALE:        { label: 'Sale',        cls: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300' },
-    PAYMENT:     { label: 'Payment',     cls: 'bg-green-100  text-green-700  dark:bg-green-900/30  dark:text-green-300'  },
-    PURCHASE:    { label: 'Purchase',    cls: 'bg-blue-100   text-blue-700   dark:bg-blue-900/30   dark:text-blue-300'   },
-    ADJUSTMENT:  { label: 'Adjust',      cls: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' },
-    CREDIT_NOTE: { label: 'Credit',      cls: 'bg-teal-100   text-teal-700   dark:bg-teal-900/30   dark:text-teal-300'   },
+    SALE:            { label: 'Sale',            cls: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300' },
+    PAYMENT:         { label: 'Payment',         cls: 'bg-green-100  text-green-700  dark:bg-green-900/30  dark:text-green-300'  },
+    PURCHASE:        { label: 'Purchase',        cls: 'bg-blue-100   text-blue-700   dark:bg-blue-900/30   dark:text-blue-300'   },
+    ADJUSTMENT:      { label: 'Adjust',          cls: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' },
+    CREDIT_NOTE:     { label: 'Credit',          cls: 'bg-teal-100   text-teal-700   dark:bg-teal-900/30   dark:text-teal-300'   },
+    RETURN:          { label: 'Return',          cls: 'bg-rose-100   text-rose-700   dark:bg-rose-900/30   dark:text-rose-300'   },
+    OPENING_BALANCE: { label: 'Opening Balance', cls: 'bg-sky-100    text-sky-700    dark:bg-sky-900/30    dark:text-sky-300'    },
   };
   const badge = map[entryType] ?? { label: entryType, cls: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' };
   return (
