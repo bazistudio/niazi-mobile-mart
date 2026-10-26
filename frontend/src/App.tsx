@@ -12,6 +12,31 @@ import { AppRoutes } from '@/app/router/AppRoutes';
 import { isTauriEnvironment } from '@/lib/tauri/tauriClient';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
+import { UserGuideModal } from '@/components/help/UserGuideModal';
+import { useDesktopMenuBridge } from '@/hooks/useDesktopMenuBridge';
+
+function DesktopMenuWrapper() {
+  const [guideOpen, setGuideOpen] = React.useState(false);
+  const [guideSection, setGuideSection] = React.useState('overview');
+
+  useDesktopMenuBridge({
+    onOpenUserGuide: (sec) => {
+      setGuideSection(sec || 'overview');
+      setGuideOpen(true);
+    },
+  });
+
+  return (
+    <>
+      <UserGuideModal
+        isOpen={guideOpen}
+        onClose={() => setGuideOpen(false)}
+        initialSection={guideSection}
+      />
+    </>
+  );
+}
+
 export default function App() {
   React.useEffect(() => {
     if (isTauriEnvironment()) {
@@ -28,6 +53,9 @@ export default function App() {
           <BrowserRouter>
             {/* Rehydrates Zustand store on boot */}
             <AuthHydrator />
+
+            {/* Native Desktop Menu Bridge & Help Guide */}
+            <DesktopMenuWrapper />
 
             {/* Core Application Routes & Layout Shell */}
             <AppRoutes />

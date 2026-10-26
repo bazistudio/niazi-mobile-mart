@@ -119,44 +119,177 @@ pub fn run() {
         .setup(move |app| {
             use tauri::Manager;
             let handle = app.handle();
+            // ─────────────────────────────────────────────────────────────
+            // 1. FILE MENU
+            // ─────────────────────────────────────────────────────────────
+            let file_new_sale = MenuItem::with_id(handle, "nav_pos", "New Sale\tCtrl+P", true, Some("Ctrl+P"))?;
+            let file_add_product = MenuItem::with_id(handle, "action_add_product", "Add Product...", true, None::<&str>)?;
+            let file_add_mobile = MenuItem::with_id(handle, "nav_mobiles_add", "Add Mobile Intake...", true, None::<&str>)?;
+            let file_record_expense = MenuItem::with_id(handle, "action_record_expense", "Record Expense...\tCtrl+O", true, Some("Ctrl+O"))?;
+            let file_lock_terminal = MenuItem::with_id(handle, "action_lock_terminal", "Lock Terminal\tCtrl+L", true, Some("Ctrl+L"))?;
+            let file_sign_out = MenuItem::with_id(handle, "nav_profile", "Your Profile / Sign Out...", true, None::<&str>)?;
+
             let file_menu = SubmenuBuilder::new(handle, "File")
                 .id("file_menu")
+                .item(&file_new_sale)
+                .item(&file_add_product)
+                .item(&file_add_mobile)
+                .item(&file_record_expense)
+                .separator()
+                .item(&file_lock_terminal)
+                .item(&file_sign_out)
+                .separator()
                 .item(&PredefinedMenuItem::quit(handle, Some("Exit"))?)
                 .build()?;
 
-            let check_updates_item = MenuItem::with_id(
-                handle,
-                "help_check_updates",
-                "Check for Updates...",
-                true,
-                None::<&str>,
-            )?;
+            // ─────────────────────────────────────────────────────────────
+            // 2. EDIT MENU (Standard native editing accelerators)
+            // ─────────────────────────────────────────────────────────────
+            let edit_menu = SubmenuBuilder::new(handle, "Edit")
+                .id("edit_menu")
+                .item(&PredefinedMenuItem::undo(handle, Some("Undo\tCtrl+Z"))?)
+                .item(&PredefinedMenuItem::redo(handle, Some("Redo\tCtrl+Y"))?)
+                .separator()
+                .item(&PredefinedMenuItem::cut(handle, Some("Cut\tCtrl+X"))?)
+                .item(&PredefinedMenuItem::copy(handle, Some("Copy\tCtrl+C"))?)
+                .item(&PredefinedMenuItem::paste(handle, Some("Paste\tCtrl+V"))?)
+                .item(&PredefinedMenuItem::select_all(handle, Some("Select All\tCtrl+A"))?)
+                .build()?;
 
-            let devtools_item = MenuItem::with_id(
-                handle,
-                "help_toggle_devtools",
-                "Toggle Developer Tools (F12)",
-                true,
-                Some("F12"),
-            )?;
+            // ─────────────────────────────────────────────────────────────
+            // 3. VIEW MENU
+            // ─────────────────────────────────────────────────────────────
+            let view_dashboard = MenuItem::with_id(handle, "nav_dashboard", "Branch Dashboard\tCtrl+D", true, Some("Ctrl+D"))?;
+            let view_org_dashboard = MenuItem::with_id(handle, "nav_org_dashboard", "Organization Dashboard", true, None::<&str>)?;
+            let view_fullscreen = MenuItem::with_id(handle, "action_toggle_fullscreen", "Toggle Fullscreen\tF11", true, Some("F11"))?;
 
-            let about_item = MenuItem::with_id(
-                handle,
-                "help_about",
-                "About Niazi Mobile Mart",
-                true,
-                None::<&str>,
-            )?;
+            let view_menu = SubmenuBuilder::new(handle, "View")
+                .id("view_menu")
+                .item(&view_dashboard)
+                .item(&view_org_dashboard)
+                .separator()
+                .item(&view_fullscreen)
+                .build()?;
+
+            // ─────────────────────────────────────────────────────────────
+            // 4. SALES & POS MENU
+            // ─────────────────────────────────────────────────────────────
+            let sales_pos = MenuItem::with_id(handle, "nav_pos", "Open POS Terminal\tCtrl+P", true, None::<&str>)?;
+            let sales_analytics = MenuItem::with_id(handle, "nav_sales_analytics", "Sales Analytics", true, None::<&str>)?;
+            let sales_history = MenuItem::with_id(handle, "nav_history", "Transaction History", true, None::<&str>)?;
+
+            let sales_menu = SubmenuBuilder::new(handle, "Sales & POS")
+                .id("sales_menu")
+                .item(&sales_pos)
+                .item(&sales_analytics)
+                .item(&sales_history)
+                .build()?;
+
+            // ─────────────────────────────────────────────────────────────
+            // 5. INVENTORY MENU
+            // ─────────────────────────────────────────────────────────────
+            let inv_products = MenuItem::with_id(handle, "nav_inventory", "Products & Stock Catalog\tCtrl+I", true, Some("Ctrl+I"))?;
+            let inv_mobiles = MenuItem::with_id(handle, "nav_mobiles", "Mobile Inventory (IMEI)", true, None::<&str>)?;
+            let inv_add_mobile = MenuItem::with_id(handle, "nav_mobiles_add", "Add Mobile Intake", true, None::<&str>)?;
+            let inv_stock = MenuItem::with_id(handle, "nav_inventory_stock", "Stock Levels & Adjustments", true, None::<&str>)?;
+            let inv_import = MenuItem::with_id(handle, "nav_inventory_import", "Bulk Product Import", true, None::<&str>)?;
+
+            let inventory_menu = SubmenuBuilder::new(handle, "Inventory")
+                .id("inventory_menu")
+                .item(&inv_products)
+                .item(&inv_mobiles)
+                .item(&inv_add_mobile)
+                .separator()
+                .item(&inv_stock)
+                .item(&inv_import)
+                .build()?;
+
+            // ─────────────────────────────────────────────────────────────
+            // 6. FINANCIALS MENU
+            // ─────────────────────────────────────────────────────────────
+            let fin_cash = MenuItem::with_id(handle, "nav_cash", "Cash Management & Till Register", true, None::<&str>)?;
+            let fin_org_cash = MenuItem::with_id(handle, "nav_org_cash", "All-Branches Cash Overview", true, None::<&str>)?;
+            let fin_customers = MenuItem::with_id(handle, "nav_customers", "Customer Accounts & Receivables", true, None::<&str>)?;
+            let fin_suppliers = MenuItem::with_id(handle, "nav_suppliers", "Supplier Accounts & Payables", true, None::<&str>)?;
+            let fin_ledger = MenuItem::with_id(handle, "nav_ledger", "Business Ledger Book", true, None::<&str>)?;
+            let fin_expenses = MenuItem::with_id(handle, "nav_expenses", "Operational Expenses Ledger", true, None::<&str>)?;
+
+            let financials_menu = SubmenuBuilder::new(handle, "Financials")
+                .id("financials_menu")
+                .item(&fin_cash)
+                .item(&fin_org_cash)
+                .separator()
+                .item(&fin_customers)
+                .item(&fin_suppliers)
+                .separator()
+                .item(&fin_ledger)
+                .item(&fin_expenses)
+                .build()?;
+
+            // ─────────────────────────────────────────────────────────────
+            // 7. ADMINISTRATION MENU
+            // ─────────────────────────────────────────────────────────────
+            let admin_org_dash = MenuItem::with_id(handle, "nav_org_dashboard", "Organization Overview", true, None::<&str>)?;
+            let admin_branches = MenuItem::with_id(handle, "nav_admin_branches", "Branch Management & Outlets", true, None::<&str>)?;
+            let admin_workforce = MenuItem::with_id(handle, "nav_admin_workforce", "Users & Staff Administration", true, None::<&str>)?;
+            let admin_roles = MenuItem::with_id(handle, "nav_admin_roles", "Roles & Access Permissions", true, None::<&str>)?;
+            let admin_audit = MenuItem::with_id(handle, "nav_admin_audit", "Audit Log Records", true, None::<&str>)?;
+            let admin_backup = MenuItem::with_id(handle, "nav_admin_backup", "Database Backup & Restore Settings", true, None::<&str>)?;
+
+            let admin_menu = SubmenuBuilder::new(handle, "Administration")
+                .id("admin_menu")
+                .item(&admin_org_dash)
+                .separator()
+                .item(&admin_branches)
+                .item(&admin_workforce)
+                .item(&admin_roles)
+                .separator()
+                .item(&admin_audit)
+                .item(&admin_backup)
+                .build()?;
+
+            // ─────────────────────────────────────────────────────────────
+            // 8. HELP MENU
+            // ─────────────────────────────────────────────────────────────
+            let help_user_guide = MenuItem::with_id(handle, "help_user_guide", "User Guide & Documentation", true, None::<&str>)?;
+            let help_workforce_guide = MenuItem::with_id(handle, "help_guide_workforce", "Users & Staff Administration Guide", true, None::<&str>)?;
+            let help_roles_guide = MenuItem::with_id(handle, "help_guide_roles", "Roles & Permissions Guide", true, None::<&str>)?;
+            let help_branches_guide = MenuItem::with_id(handle, "help_guide_branches", "Branch Management Guide", true, None::<&str>)?;
+            let help_backup_guide = MenuItem::with_id(handle, "help_guide_backup", "Database Backup & Safety Guide", true, None::<&str>)?;
+            let help_printer_setup = MenuItem::with_id(handle, "nav_printer_settings", "Printer & Hardware Setup...", true, None::<&str>)?;
+            let check_updates_item = MenuItem::with_id(handle, "help_check_updates", "Check for Updates...", true, None::<&str>)?;
+            let devtools_item = MenuItem::with_id(handle, "help_toggle_devtools", "Toggle Developer Tools (F12)", true, Some("F12"))?;
+            let about_item = MenuItem::with_id(handle, "help_about", "About Niazi Mobile Mart", true, None::<&str>)?;
 
             let help_menu = SubmenuBuilder::new(handle, "Help")
                 .id("help_menu")
+                .item(&help_user_guide)
+                .separator()
+                .item(&help_workforce_guide)
+                .item(&help_roles_guide)
+                .item(&help_branches_guide)
+                .item(&help_backup_guide)
+                .separator()
+                .item(&help_printer_setup)
                 .item(&check_updates_item)
                 .item(&devtools_item)
                 .separator()
                 .item(&about_item)
                 .build()?;
 
-            let menu = Menu::with_items(handle, &[&file_menu, &help_menu])?;
+            let menu = Menu::with_items(
+                handle,
+                &[
+                    &file_menu,
+                    &edit_menu,
+                    &view_menu,
+                    &sales_menu,
+                    &inventory_menu,
+                    &financials_menu,
+                    &admin_menu,
+                    &help_menu,
+                ],
+            )?;
             app.set_menu(menu)?;
 
             // Start Rust background SyncWorkerDaemon for offline outbox processing if running in SQLite mode
@@ -186,40 +319,150 @@ pub fn run() {
 
             Ok(())
         })
-        .on_menu_event(|app_handle, event| match event.id().as_ref() {
-            "help_toggle_devtools" => {
-                use tauri::Manager;
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    if window.is_devtools_open() {
-                        window.close_devtools();
-                    } else {
-                        window.open_devtools();
+        .on_menu_event(|app_handle, event| {
+            use tauri::Emitter;
+            match event.id().as_ref() {
+                // ── Help: Developer Tools ──
+                "help_toggle_devtools" => {
+                    use tauri::Manager;
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        if window.is_devtools_open() {
+                            window.close_devtools();
+                        } else {
+                            window.open_devtools();
+                        }
                     }
                 }
+                // ── Help: About Dialog ──
+                "help_about" => {
+                    let version = app_handle.package_info().version.to_string();
+                    let app_name = app_handle.package_info().name.clone();
+                    let message = format!(
+                        "{}\nVersion: {}\n\n© 2026 Niazi Mobile Mart\nDesktop ERP & POS System",
+                        app_name, version
+                    );
+                    let handle = app_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                        handle
+                            .dialog()
+                            .message(message)
+                            .title("About Niazi Mobile Mart")
+                            .kind(MessageDialogKind::Info)
+                            .show(|_| {});
+                    });
+                }
+                // ── Help: Check for Updates ──
+                "help_check_updates" => {
+                    let _ = app_handle.emit("trigger-update-check", ());
+                }
+                // ── View: Fullscreen ──
+                "action_toggle_fullscreen" => {
+                    use tauri::Manager;
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        if let Ok(is_full) = window.is_fullscreen() {
+                            let _ = window.set_fullscreen(!is_full);
+                        }
+                    }
+                }
+                // ── Actions ──
+                "action_add_product" => {
+                    let _ = app_handle.emit("menu-action", "add_product");
+                }
+                "action_record_expense" => {
+                    let _ = app_handle.emit("menu-action", "record_expense");
+                }
+                "action_lock_terminal" => {
+                    let _ = app_handle.emit("menu-action", "lock_terminal");
+                }
+                // ── User Guide Sections ──
+                "help_user_guide" => {
+                    let _ = app_handle.emit("menu-action", "open_user_guide");
+                }
+                "help_guide_workforce" => {
+                    let _ = app_handle.emit("menu-action", "open_user_guide_workforce");
+                }
+                "help_guide_roles" => {
+                    let _ = app_handle.emit("menu-action", "open_user_guide_roles");
+                }
+                "help_guide_branches" => {
+                    let _ = app_handle.emit("menu-action", "open_user_guide_branches");
+                }
+                "help_guide_backup" => {
+                    let _ = app_handle.emit("menu-action", "open_user_guide_backup");
+                }
+                // ── Navigation Routes ──
+                "nav_pos" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/pos");
+                }
+                "nav_dashboard" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin");
+                }
+                "nav_org_dashboard" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/organization");
+                }
+                "nav_sales_analytics" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/sales");
+                }
+                "nav_history" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/history");
+                }
+                "nav_inventory" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/inventory");
+                }
+                "nav_mobiles" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/mobiles");
+                }
+                "nav_mobiles_add" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/mobiles/add");
+                }
+                "nav_inventory_stock" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/inventory/stock");
+                }
+                "nav_inventory_import" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/inventory/import");
+                }
+                "nav_cash" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/cash");
+                }
+                "nav_org_cash" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/organization/cash");
+                }
+                "nav_customers" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/customers");
+                }
+                "nav_suppliers" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/suppliers");
+                }
+                "nav_ledger" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/ledger");
+                }
+                "nav_expenses" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/expenses");
+                }
+                "nav_admin_branches" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/organization/settings?tab=branches");
+                }
+                "nav_admin_workforce" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/settings/workforce");
+                }
+                "nav_admin_roles" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/organization/settings?tab=roles");
+                }
+                "nav_admin_audit" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/audit-logs");
+                }
+                "nav_admin_backup" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/organization/settings?tab=backup");
+                }
+                "nav_printer_settings" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/settings/printer");
+                }
+                "nav_profile" => {
+                    let _ = app_handle.emit("menu-navigate", "/dashboard/shop-admin/profile");
+                }
+                _ => {}
             }
-            "help_about" => {
-                let version = app_handle.package_info().version.to_string();
-                let app_name = app_handle.package_info().name.clone();
-                let message = format!(
-                    "{}\nVersion: {}\n\n© 2026 Niazi Mobile Mart\nDesktop ERP & POS System",
-                    app_name, version
-                );
-                let handle = app_handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-                    handle
-                        .dialog()
-                        .message(message)
-                        .title("About Niazi Mobile Mart")
-                        .kind(MessageDialogKind::Info)
-                        .show(|_| {});
-                });
-            }
-            "help_check_updates" => {
-                use tauri::Emitter;
-                let _ = app_handle.emit("trigger-update-check", ());
-            }
-            _ => {}
         })
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
