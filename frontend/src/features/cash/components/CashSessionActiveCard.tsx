@@ -13,7 +13,9 @@ import {
   Receipt,
 } from 'lucide-react';
 import { useCashStore } from '../store/cash.store';
-import { formatCurrency } from '@/utils/format';
+
+const formatCurrency = (val: number | undefined | null) =>
+  `PKR ${(val || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
 
 interface CashSessionActiveCardProps {
   onOpenSession: () => void;
