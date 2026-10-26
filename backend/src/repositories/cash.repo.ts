@@ -270,11 +270,90 @@ export async function getDailySummary(
   branchId: string,
   targetDate?: string | null
 ): Promise<DailyCashSummaryDto> {
+  // CASH-2 FIX (P1): When no explicit historical date is requested, prioritise the
+  // branch's current OPEN session regardless of its business_date.  The prior
+  // implementation keyed the session lookup on today's UTC date, which caused the
+  // cash display to reset to zero after midnight for any session opened on a
+  // previous calendar day.
+  if (!targetDate) {
+    const openSessRes = await pool.query(
+      "SELECT * FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' ORDER BY opened_at DESC LIMIT 1",
+      [branchId]
+    );
+    if (openSessRes.rows.length > 0) {
+      const s = openSessRes.rows[0] as Record<string, unknown>;
+      const sessionId = s['id'] as string;
+      const sessionStatus = s['status'] as string;
+      const openingCash = Number(s['opening_cash'] ?? s['opening_float'] ?? 0);
+      const actualClosingCash = s['actual_closing_cash'] != null ? Number(s['actual_closing_cash']) : null;
+      const variance = s['cash_variance'] != null ? Number(s['cash_variance']) : null;
+      const businessDate = (s['business_date'] as string) || ((s['opened_at'] as string) || '').slice(0, 10);
+
+      const mvRes = await pool.query(
+        'SELECT movement_type, direction, COALESCE(SUM(amount), 0)::BIGINT AS total FROM cash_movements WHERE session_id = $1 GROUP BY movement_type, direction',
+        [sessionId]
+      );
+
+      let cashSales = 0;
+      let customerPayments = 0;
+      let supplierPayments = 0;
+      let cashExpenses = 0;
+      let cashInAdjustments = 0;
+      let cashOutAdjustments = 0;
+      let totalCashIn = 0;
+      let totalCashOut = 0;
+
+      for (const row of mvRes.rows) {
+        const mType = (row['movement_type'] as string) || '';
+        const dir = (row['direction'] as string) || '';
+        const amt = Number(row['total'] ?? 0);
+
+        if (dir === 'IN') { totalCashIn += amt; }
+        else if (dir === 'OUT') { totalCashOut += amt; }
+
+        if (mType === 'SALE_PAYMENT') {
+          if (dir === 'IN') cashSales += amt; else cashSales -= amt;
+        } else if (mType === 'CUSTOMER_PAYMENT') {
+          customerPayments += amt;
+        } else if (mType === 'SUPPLIER_PAYMENT') {
+          supplierPayments += amt;
+        } else if (mType === 'EXPENSE') {
+          cashExpenses += amt;
+        } else if (mType === 'CASH_ADJUSTMENT') {
+          if (dir === 'IN') cashInAdjustments += amt; else cashOutAdjustments += amt;
+        }
+      }
+
+      const expectedClosingCash = openingCash + totalCashIn - totalCashOut;
+
+      return {
+        session_id: sessionId,
+        session_status: sessionStatus,
+        business_date: businessDate,
+        opening_cash: openingCash,
+        cash_sales: cashSales,
+        customer_payments: customerPayments,
+        supplier_payments: supplierPayments,
+        cash_expenses: cashExpenses,
+        cash_in_adjustments: cashInAdjustments,
+        cash_out_adjustments: cashOutAdjustments,
+        total_cash_in: totalCashIn,
+        total_cash_out: totalCashOut,
+        expected_closing_cash: expectedClosingCash,
+        actual_closing_cash: actualClosingCash,
+        cash_variance: variance != null ? variance : (actualClosingCash != null ? actualClosingCash - expectedClosingCash : null),
+      };
+    }
+  }
+
+  // Historical date path: used when (a) an explicit targetDate is provided, or
+  // (b) no OPEN session exists for this branch.  Behaviour is unchanged from the
+  // original implementation so historical reports are unaffected.
   const date = targetDate || new Date().toISOString().slice(0, 10);
 
   const sessRes = await pool.query(
-    "SELECT * FROM cash_sessions WHERE branch_id = $1 AND (business_date = $2 OR opened_at LIKE $3) ORDER BY opened_at DESC LIMIT 1",
-    [branchId, date, `${date}%`]
+    'SELECT * FROM cash_sessions WHERE branch_id = $1 AND business_date = $2 ORDER BY opened_at DESC LIMIT 1',
+    [branchId, date]
   );
 
   let sessionId: string | null = null;
@@ -296,8 +375,8 @@ export async function getDailySummary(
   const endTs = `${date}T23:59:59.999Z`;
 
   const mvQuery = sessionId
-    ? "SELECT movement_type, direction, COALESCE(SUM(amount), 0)::BIGINT AS total FROM cash_movements WHERE session_id = $1 GROUP BY movement_type, direction"
-    : "SELECT movement_type, direction, COALESCE(SUM(amount), 0)::BIGINT AS total FROM cash_movements WHERE branch_id = $1 AND created_at >= $2 AND created_at <= $3 GROUP BY movement_type, direction";
+    ? 'SELECT movement_type, direction, COALESCE(SUM(amount), 0)::BIGINT AS total FROM cash_movements WHERE session_id = $1 GROUP BY movement_type, direction'
+    : 'SELECT movement_type, direction, COALESCE(SUM(amount), 0)::BIGINT AS total FROM cash_movements WHERE branch_id = $1 AND created_at >= $2 AND created_at <= $3 GROUP BY movement_type, direction';
 
   const mvParams = sessionId ? [sessionId] : [branchId, startTs, endTs];
   const mvRes = await pool.query(mvQuery, mvParams);
@@ -316,15 +395,11 @@ export async function getDailySummary(
     const dir = (row['direction'] as string) || '';
     const amt = Number(row['total'] ?? 0);
 
-    if (dir === 'IN') {
-      totalCashIn += amt;
-    } else if (dir === 'OUT') {
-      totalCashOut += amt;
-    }
+    if (dir === 'IN') { totalCashIn += amt; }
+    else if (dir === 'OUT') { totalCashOut += amt; }
 
     if (mType === 'SALE_PAYMENT') {
-      if (dir === 'IN') cashSales += amt;
-      else cashSales -= amt;
+      if (dir === 'IN') cashSales += amt; else cashSales -= amt;
     } else if (mType === 'CUSTOMER_PAYMENT') {
       customerPayments += amt;
     } else if (mType === 'SUPPLIER_PAYMENT') {
@@ -332,8 +407,7 @@ export async function getDailySummary(
     } else if (mType === 'EXPENSE') {
       cashExpenses += amt;
     } else if (mType === 'CASH_ADJUSTMENT') {
-      if (dir === 'IN') cashInAdjustments += amt;
-      else cashOutAdjustments += amt;
+      if (dir === 'IN') cashInAdjustments += amt; else cashOutAdjustments += amt;
     }
   }
 

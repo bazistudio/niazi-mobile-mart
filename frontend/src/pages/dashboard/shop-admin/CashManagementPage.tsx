@@ -8,19 +8,33 @@ import {
   CashMovementsTable,
   CashSessionHistoryTable,
 } from '@/features/cash';
+import { CashVoucherModal } from '@/features/cash/components/CashVoucherModal';
+import { ExpenseCreateModal } from '@/features/expenses/components/ExpenseCreateModal';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { Coins, RefreshCw } from 'lucide-react';
 
 export const CashManagementPage: React.FC = () => {
   const activeShopId = useOrganizationStore((s) => s.activeShopId || s.activeShop?._id);
   const { fetchCurrentState, isLoading } = useCashStore();
+
+  // Existing session modals
   const [isOpenModalActive, setIsOpenModalActive] = useState(false);
   const [isCloseModalActive, setIsCloseModalActive] = useState(false);
   const [isAdjustmentModalActive, setIsAdjustmentModalActive] = useState(false);
 
+  // CASH-2: three new voucher action modals
+  const [isReceivePaymentModalActive, setIsReceivePaymentModalActive] = useState(false);
+  const [isExpenseModalActive, setIsExpenseModalActive] = useState(false);
+  const [isSupplierPaymentModalActive, setIsSupplierPaymentModalActive] = useState(false);
+
   useEffect(() => {
     fetchCurrentState(activeShopId || undefined);
   }, [fetchCurrentState, activeShopId]);
+
+  // CASH-2: refresh after successful voucher operations (§2.6)
+  const handleVoucherSuccess = () => {
+    fetchCurrentState(activeShopId || undefined);
+  };
 
   return (
     <div className="flex flex-col gap-6 sm:gap-8 w-full max-w-7xl mx-auto pb-12">
@@ -56,6 +70,9 @@ export const CashManagementPage: React.FC = () => {
         onOpenSession={() => setIsOpenModalActive(true)}
         onCloseSession={() => setIsCloseModalActive(true)}
         onAdjustment={() => setIsAdjustmentModalActive(true)}
+        onReceivePayment={() => setIsReceivePaymentModalActive(true)}
+        onAddExpense={() => setIsExpenseModalActive(true)}
+        onPaySupplier={() => setIsSupplierPaymentModalActive(true)}
       />
 
       {/* Real-Time Cash Movements Ledger */}
@@ -68,7 +85,7 @@ export const CashManagementPage: React.FC = () => {
         <CashSessionHistoryTable />
       </div>
 
-      {/* Modals */}
+      {/* ── Existing session modals ── */}
       <CashSessionOpenModal
         isOpen={isOpenModalActive}
         onClose={() => setIsOpenModalActive(false)}
@@ -82,6 +99,37 @@ export const CashManagementPage: React.FC = () => {
       <CashAdjustmentModal
         isOpen={isAdjustmentModalActive}
         onClose={() => setIsAdjustmentModalActive(false)}
+      />
+
+      {/* ── CASH-2: Voucher action modals ── */}
+
+      {/* Receive Customer Payment — search wrapper → ReceivePaymentModal */}
+      <CashVoucherModal
+        isOpen={isReceivePaymentModalActive}
+        onClose={() => {
+          setIsReceivePaymentModalActive(false);
+          handleVoucherSuccess();
+        }}
+        voucherType="receive_payment"
+      />
+
+      {/* Add Expense — self-contained, no wrapper needed */}
+      <ExpenseCreateModal
+        isOpen={isExpenseModalActive}
+        onClose={() => {
+          setIsExpenseModalActive(false);
+          handleVoucherSuccess();
+        }}
+      />
+
+      {/* Pay Supplier Cash — search wrapper → MakeSupplierPaymentModal */}
+      <CashVoucherModal
+        isOpen={isSupplierPaymentModalActive}
+        onClose={() => {
+          setIsSupplierPaymentModalActive(false);
+          handleVoucherSuccess();
+        }}
+        voucherType="pay_supplier"
       />
     </div>
   );

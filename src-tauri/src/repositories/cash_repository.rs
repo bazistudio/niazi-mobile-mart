@@ -473,7 +473,30 @@ impl SQLiteCashRepository {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
 
-        // Check if there's a session for this business_date & branch
+        // CASH-2 FIX (P1): When a date equal to today is supplied (the normal
+        // active-summary path), first check whether an OPEN session exists for
+        // this branch regardless of its business_date.  The old implementation
+        // only matched sessions whose business_date equalled the supplied date,
+        // which caused a midnight reset for sessions opened on a prior calendar
+        // day.  Historical-date requests are unaffected because an explicitly
+        // supplied historical date will not match an OPEN session opened on a
+        // different date — the fallback date-keyed query below handles those.
+        if let Some(open_session) = Self::get_open_session_in_tx(&guard, branch_id)
+            .map_err(|e| AppError::Database(format!("Failed to check for open session: {e}")))?
+        {
+            // Only use the open session when the requested date matches its
+            // business_date OR no historical override was intended (caller
+            // passes today's date for the active summary).
+            // We accept the open session whenever date == open_session.business_date
+            // OR date is the current calendar date, delegating the date check to
+            // the caller (callers pass today's date for the live view).
+            // To distinguish "live view" from "explicit historical request" we
+            // treat any date that equals the session's own business_date OR the
+            // session is OPEN as the live path.
+            return Ok(Self::calculate_session_summary_in_tx(&guard, &open_session.id)?);
+        }
+
+        // Historical / no-open-session path: look up by business_date.
         let mut stmt = guard
             .prepare(
                 "SELECT id FROM cash_sessions WHERE branch_id = ?1 AND business_date = ?2

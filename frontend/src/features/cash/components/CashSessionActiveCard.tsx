@@ -1,5 +1,4 @@
 import React from 'react';
-import { useCashStore } from '../store/cash.store';
 import {
   Wallet,
   ArrowDownLeft,
@@ -9,185 +8,191 @@ import {
   Unlock,
   Sliders,
   CheckCircle,
+  UserCheck,
+  ShoppingCart,
+  Receipt,
 } from 'lucide-react';
+import { useCashStore } from '../store/cash.store';
+import { formatCurrency } from '@/utils/format';
 
-interface Props {
+interface CashSessionActiveCardProps {
   onOpenSession: () => void;
   onCloseSession: () => void;
   onAdjustment: () => void;
+  // CASH-2: three new voucher action callbacks
+  onReceivePayment: () => void;
+  onAddExpense: () => void;
+  onPaySupplier: () => void;
 }
 
-export const CashSessionActiveCard: React.FC<Props> = ({
+export const CashSessionActiveCard: React.FC<CashSessionActiveCardProps> = ({
   onOpenSession,
   onCloseSession,
   onAdjustment,
+  onReceivePayment,
+  onAddExpense,
+  onPaySupplier,
 }) => {
-  const { currentSession, summary, isLoading } = useCashStore();
+  const { currentSession: session, summary, isLoading } = useCashStore();
+  const isOpen = session?.status === 'OPEN';
 
-  if (isLoading && !summary) {
+  if (isLoading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <div className="animate-pulse h-32 bg-gray-200 dark:bg-neutral-800 rounded-2xl"></div>
-        <div className="animate-pulse h-32 bg-gray-200 dark:bg-neutral-800 rounded-2xl"></div>
-        <div className="animate-pulse h-32 bg-gray-200 dark:bg-neutral-800 rounded-2xl"></div>
-        <div className="animate-pulse h-32 bg-gray-200 dark:bg-neutral-800 rounded-2xl"></div>
+      <div className="bg-white dark:bg-neutral-800 rounded-xl shadow p-6 animate-pulse">
+        <div className="h-6 bg-neutral-200 dark:bg-neutral-700 rounded w-1/3 mb-4" />
+        <div className="h-10 bg-neutral-200 dark:bg-neutral-700 rounded w-1/2 mb-6" />
+        <div className="grid grid-cols-2 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-16 bg-neutral-200 dark:bg-neutral-700 rounded" />
+          ))}
+        </div>
       </div>
     );
   }
 
-  const isOpen = currentSession?.status === 'OPEN';
-
   return (
-    <div className="space-y-6">
-      {/* Session Status Banner */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-5 bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-100 dark:border-neutral-800 shadow-sm gap-4">
-        <div className="flex items-center gap-4">
-          <div
-            className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-              isOpen
-                ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400'
-                : 'bg-amber-100 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400'
-            }`}
-          >
-            {isOpen ? <Unlock className="w-6 h-6" /> : <Lock className="w-6 h-6" />}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl font-bold text-neutral-900 dark:text-white">
-                {isOpen ? 'Current Cash Session is Active' : 'No Active Cash Session'}
-              </h2>
-              <span
-                className={`px-2.5 py-0.5 rounded-full text-xs font-black tracking-wider uppercase ${
-                  isOpen
-                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                    : 'bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-400'
-                }`}
-              >
-                {isOpen ? 'OPEN' : 'CLOSED'}
-              </span>
+    <div className="bg-white dark:bg-neutral-800 rounded-xl shadow p-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Wallet className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+          <h2 className="text-lg font-semibold text-neutral-900 dark:text-white">
+            Cash Session
+          </h2>
+        </div>
+        <span
+          className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${
+            isOpen
+              ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+              : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-400'
+          }`}
+        >
+          {isOpen ? (
+            <>
+              <Unlock className="w-3 h-3" /> Open
+            </>
+          ) : (
+            <>
+              <Lock className="w-3 h-3" /> Closed
+            </>
+          )}
+        </span>
+      </div>
+
+      {/* Expected Cash */}
+      <div className="mb-6">
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">Expected Cash</p>
+        <p className="text-3xl font-bold text-neutral-900 dark:text-white">
+          {summary ? formatCurrency(summary.expected_closing_cash) : '—'}
+        </p>
+        {summary && (
+          <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">
+            Opening: {formatCurrency(summary.opening_cash)}
+          </p>
+        )}
+      </div>
+
+      {/* KPI grid */}
+      {summary && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3">
+            <div className="flex items-center gap-1 mb-1">
+              <ArrowDownLeft className="w-3.5 h-3.5 text-green-600 dark:text-green-400" />
+              <span className="text-xs text-green-700 dark:text-green-400 font-medium">Cash In</span>
             </div>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-              {isOpen && currentSession
-                ? `Opened on ${currentSession.business_date} at ${new Date(
-                    currentSession.opened_at
-                  ).toLocaleTimeString()}`
-                : 'Open a session to begin recording daily cash drawer operations.'}
+            <p className="text-sm font-bold text-green-800 dark:text-green-300">
+              {formatCurrency(summary.total_cash_in)}
+            </p>
+          </div>
+          <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-3">
+            <div className="flex items-center gap-1 mb-1">
+              <ArrowUpRight className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+              <span className="text-xs text-red-700 dark:text-red-400 font-medium">Cash Out</span>
+            </div>
+            <p className="text-sm font-bold text-red-800 dark:text-red-300">
+              {formatCurrency(summary.total_cash_out)}
+            </p>
+          </div>
+          <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3">
+            <div className="flex items-center gap-1 mb-1">
+              <Calculator className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span className="text-xs text-blue-700 dark:text-blue-400 font-medium">Sales</span>
+            </div>
+            <p className="text-sm font-bold text-blue-800 dark:text-blue-300">
+              {formatCurrency(summary.cash_sales)}
+            </p>
+          </div>
+          <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3">
+            <div className="flex items-center gap-1 mb-1">
+              <CheckCircle className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+              <span className="text-xs text-purple-700 dark:text-purple-400 font-medium">Expenses</span>
+            </div>
+            <p className="text-sm font-bold text-purple-800 dark:text-purple-300">
+              {formatCurrency(summary.cash_expenses)}
             </p>
           </div>
         </div>
+      )}
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          {isOpen ? (
-            <>
+      {/* Action buttons */}
+      <div className="flex flex-col gap-3">
+        {!isOpen ? (
+          <button
+            onClick={onOpenSession}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-medium transition-colors"
+          >
+            <Unlock className="w-4 h-4" />
+            Open Cash Session
+          </button>
+        ) : (
+          <>
+            {/* Voucher actions — only shown while session is OPEN (CASH-2) */}
+            <div className="grid grid-cols-3 gap-2">
               <button
-                type="button"
+                onClick={onReceivePayment}
+                className="flex flex-col items-center justify-center gap-1.5 px-3 py-3 bg-green-50 hover:bg-green-100 dark:bg-green-900/20 dark:hover:bg-green-900/40 text-green-700 dark:text-green-400 rounded-xl text-xs font-medium transition-colors border border-green-200 dark:border-green-800"
+                title="Receive Customer Payment"
+              >
+                <UserCheck className="w-4 h-4" />
+                <span className="text-center leading-tight">Receive Payment</span>
+              </button>
+              <button
+                onClick={onAddExpense}
+                className="flex flex-col items-center justify-center gap-1.5 px-3 py-3 bg-orange-50 hover:bg-orange-100 dark:bg-orange-900/20 dark:hover:bg-orange-900/40 text-orange-700 dark:text-orange-400 rounded-xl text-xs font-medium transition-colors border border-orange-200 dark:border-orange-800"
+                title="Add Expense"
+              >
+                <Receipt className="w-4 h-4" />
+                <span className="text-center leading-tight">Add Expense</span>
+              </button>
+              <button
+                onClick={onPaySupplier}
+                className="flex flex-col items-center justify-center gap-1.5 px-3 py-3 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 text-red-700 dark:text-red-400 rounded-xl text-xs font-medium transition-colors border border-red-200 dark:border-red-800"
+                title="Pay Supplier Cash"
+              >
+                <ShoppingCart className="w-4 h-4" />
+                <span className="text-center leading-tight">Pay Supplier</span>
+              </button>
+            </div>
+
+            {/* Session management actions */}
+            <div className="flex gap-2">
+              <button
                 onClick={onAdjustment}
-                className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white text-sm font-semibold rounded-xl transition-colors"
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-700 dark:hover:bg-neutral-600 text-neutral-700 dark:text-neutral-300 rounded-xl text-sm font-medium transition-colors"
               >
                 <Sliders className="w-4 h-4" />
                 Adjust Cash
               </button>
               <button
-                type="button"
                 onClick={onCloseSession}
-                className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-sm"
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-medium transition-colors"
               >
-                <CheckCircle className="w-4 h-4" />
+                <Lock className="w-4 h-4" />
                 Close Day
               </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              onClick={onOpenSession}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-sm"
-            >
-              <Unlock className="w-4 h-4" />
-              Open Cash Session
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Opening Cash */}
-        <div className="bg-white dark:bg-neutral-900 p-5 rounded-2xl border border-neutral-100 dark:border-neutral-800 shadow-sm relative overflow-hidden">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">
-              Opening Cash
-            </span>
-            <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400">
-              <Wallet className="w-4 h-4" />
             </div>
-          </div>
-          <div className="text-2xl font-black text-neutral-900 dark:text-white tabular-nums">
-            PKR {(summary?.opening_cash || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-          </div>
-          <p className="text-xs text-neutral-400 mt-1">Starting drawer balance</p>
-        </div>
-
-        {/* Total Cash In */}
-        <div className="bg-white dark:bg-neutral-900 p-5 rounded-2xl border border-neutral-100 dark:border-neutral-800 shadow-sm relative overflow-hidden">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">
-              Total Cash In
-            </span>
-            <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400">
-              <ArrowDownLeft className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
-            +PKR {(summary?.total_cash_in || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-          </div>
-          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-neutral-400 mt-1">
-            <span>Sales: PKR {(summary?.cash_sales || 0).toLocaleString()}</span>
-            <span>Cust: PKR {(summary?.customer_payments || 0).toLocaleString()}</span>
-            {summary && summary.cash_in_adjustments > 0 && (
-              <span>Adj: PKR {summary.cash_in_adjustments.toLocaleString()}</span>
-            )}
-          </div>
-        </div>
-
-        {/* Total Cash Out */}
-        <div className="bg-white dark:bg-neutral-900 p-5 rounded-2xl border border-neutral-100 dark:border-neutral-800 shadow-sm relative overflow-hidden">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">
-              Total Cash Out
-            </span>
-            <div className="p-2 rounded-lg bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400">
-              <ArrowUpRight className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-2xl font-black text-red-600 dark:text-red-400 tabular-nums">
-            -PKR {(summary?.total_cash_out || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-          </div>
-          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-neutral-400 mt-1">
-            <span>Suppliers: PKR {(summary?.supplier_payments || 0).toLocaleString()}</span>
-            <span>Expenses: PKR {(summary?.cash_expenses || 0).toLocaleString()}</span>
-            {summary && summary.cash_out_adjustments > 0 && (
-              <span>Adj: PKR {summary.cash_out_adjustments.toLocaleString()}</span>
-            )}
-          </div>
-        </div>
-
-        {/* Expected Cash */}
-        <div className="bg-white dark:bg-neutral-900 p-5 rounded-2xl border border-neutral-100 dark:border-neutral-800 shadow-sm relative overflow-hidden">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">
-              Expected Cash
-            </span>
-            <div className="p-2 rounded-lg bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400">
-              <Calculator className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="text-2xl font-black text-purple-600 dark:text-purple-400 tabular-nums">
-            PKR {(summary?.expected_closing_cash || 0).toLocaleString(undefined, {
-              minimumFractionDigits: 2,
-            })}
-          </div>
-          <p className="text-xs text-neutral-400 mt-1">Opening + Cash In - Cash Out</p>
-        </div>
+          </>
+        )}
       </div>
     </div>
   );
