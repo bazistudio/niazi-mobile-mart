@@ -1390,3 +1390,652 @@ describe('16. Seller Update HTTP Route Integration (PATCH /sellers/:sellerId)', 
     assert.equal(lastCapturedInput, null);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 17. IMEI Correction HTTP Route & Repository Integration (PATCH /:id/imei)
+// ---------------------------------------------------------------------------
+
+describe('17. IMEI Correction HTTP Route & Repository Integration (PATCH /:id/imei)', () => {
+  let appServer: Server;
+  let serverBaseUrl: string;
+  let activeUserRole: string = 'ADMIN';
+  let lastCapturedImeiInput: any = null;
+  let mockImeiResult: 'ok' | 'not_found' | 'conflict' = 'ok';
+  const originalPatchImei = MobileRepo.prototype.patchImei;
+
+  let tokenOrgAdmin: string;
+  let tokenShopAdmin: string;
+
+  const mockClient = {
+    query: async () => ({ rows: [] }),
+    release: () => {},
+  } as unknown as PoolClient;
+
+  const mockPool = {
+    connect: async () => mockClient,
+    query: async (sql: string) => {
+      const trimmed = sql.trim();
+      if (trimmed.includes('FROM users')) {
+        return {
+          rows: [
+            {
+              is_active: 1,
+              status: 'ACTIVE',
+              role: activeUserRole,
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+
+  before(async () => {
+    tokenOrgAdmin = issueToken({
+      userId: 'user-org-admin-1',
+      username: 'orgadmin1',
+      role: 'ADMIN',
+      branchId: null,
+      accessProfile: { allowed_pages: ['*'], allowed_actions: ['*'], limits: DEFAULT_LIMITS },
+    });
+
+    tokenShopAdmin = issueToken({
+      userId: 'user-shop-admin-1',
+      username: 'shopadmin1',
+      role: 'SHOP_ADMIN',
+      branchId: 'branch-main-pos',
+      accessProfile: { allowed_pages: ['*'], allowed_actions: ['*'], limits: DEFAULT_LIMITS },
+    });
+
+    MobileRepo.prototype.patchImei = async function (input: any) {
+      lastCapturedImeiInput = input;
+      return mockImeiResult;
+    };
+
+    const app = express();
+    app.use(express.json());
+    app.use('/api/mobiles', buildMobileRouter(mockPool));
+
+    await new Promise<void>((resolve) => {
+      appServer = app.listen(0, '127.0.0.1', () => {
+        const addr = appServer.address() as AddressInfo;
+        serverBaseUrl = `http://127.0.0.1:${addr.port}/api/mobiles`;
+        resolve();
+      });
+    });
+  });
+
+  after(async () => {
+    MobileRepo.prototype.patchImei = originalPatchImei;
+    if (appServer) {
+      await new Promise<void>((resolve) => appServer.close(() => resolve()));
+    }
+  });
+
+  test('PATCH /:id/imei: Org Admin successfully corrects IMEI with valid 15-digit input', async () => {
+    activeUserRole = 'ADMIN';
+    mockImeiResult = 'ok';
+    lastCapturedImeiInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/device-uuid-1/imei`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenOrgAdmin}`,
+      },
+      body: JSON.stringify({
+        branch_id: 'branch-main-pos',
+        imei_id: 'imei-row-uuid-1',
+        new_imei: '358240051111110',
+      }),
+    });
+
+    assert.equal(res.status, 200);
+    const data = await res.json() as { success?: boolean };
+    assert.equal(data.success, true);
+    assert.equal(lastCapturedImeiInput.device_id, 'device-uuid-1');
+    assert.equal(lastCapturedImeiInput.imei_id, 'imei-row-uuid-1');
+    assert.equal(lastCapturedImeiInput.new_imei, '358240051111110');
+    assert.equal(lastCapturedImeiInput.organization_id, NIAZI_ORGANIZATION_ID);
+    assert.equal(lastCapturedImeiInput.updated_by, 'user-org-admin-1');
+  });
+
+  test('PATCH /:id/imei: rejects invalid or non-15-digit IMEI with 400', async () => {
+    activeUserRole = 'ADMIN';
+    lastCapturedImeiInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/device-uuid-1/imei`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenOrgAdmin}`,
+      },
+      body: JSON.stringify({
+        branch_id: 'branch-main-pos',
+        imei_id: 'imei-row-uuid-1',
+        new_imei: '12345', // invalid length
+      }),
+    });
+
+    assert.equal(res.status, 400);
+    const data = await res.json() as { error?: string };
+    assert.match(data.error || '', /15 decimal digits/);
+    assert.equal(lastCapturedImeiInput, null);
+  });
+
+  test('PATCH /:id/imei: returns 409 Conflict when repo indicates IMEI already registered', async () => {
+    activeUserRole = 'ADMIN';
+    mockImeiResult = 'conflict';
+    lastCapturedImeiInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/device-uuid-1/imei`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenOrgAdmin}`,
+      },
+      body: JSON.stringify({
+        branch_id: 'branch-main-pos',
+        imei_id: 'imei-row-uuid-1',
+        new_imei: '358240051111110',
+      }),
+    });
+
+    assert.equal(res.status, 409);
+    const data = await res.json() as { error?: string; message?: string };
+    assert.equal(data.error, 'IMEI_ALREADY_REGISTERED');
+    assert.match(data.message || '', /already registered/);
+  });
+
+  test('PATCH /:id/imei: returns 404 when IMEI record not found on device', async () => {
+    activeUserRole = 'ADMIN';
+    mockImeiResult = 'not_found';
+    lastCapturedImeiInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/device-uuid-1/imei`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenOrgAdmin}`,
+      },
+      body: JSON.stringify({
+        branch_id: 'branch-main-pos',
+        imei_id: 'non-existent-imei-row',
+        new_imei: '358240051111110',
+      }),
+    });
+
+    assert.equal(res.status, 404);
+    const data = await res.json() as { error?: string };
+    assert.match(data.error || '', /not found/);
+  });
+
+  test('PATCH /:id/imei: non-org-admin (SHOP_ADMIN) is denied with 403', async () => {
+    activeUserRole = 'SHOP_ADMIN';
+    lastCapturedImeiInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/device-uuid-1/imei`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenShopAdmin}`,
+      },
+      body: JSON.stringify({
+        branch_id: 'branch-main-pos',
+        imei_id: 'imei-row-uuid-1',
+        new_imei: '358240051111110',
+      }),
+    });
+
+    assert.equal(res.status, 403);
+    const data = await res.json() as { error?: string };
+    assert.match(data.error || '', /Only organization administrators/);
+    assert.equal(lastCapturedImeiInput, null);
+  });
+
+  test('patchImei repository: locks row FOR UPDATE, inserts MOBILE_IMEI_CORRECTED audit, and commits', async () => {
+    const executedQueries: Array<{ sql: string; values?: any[] }> = [];
+    let clientReleased = false;
+
+    const mockDbClient = {
+      query: async (sql: string, values?: any[]) => {
+        const normalized = sql.replace(/\s+/g, ' ').trim();
+        executedQueries.push({ sql: normalized, values });
+
+        if (normalized.includes('FROM mobile_imei_identifiers') && normalized.includes('FOR UPDATE')) {
+          return { rows: [{ id: 'imei-row-1', imei: '358240050000001', slot: 'IMEI1' }] };
+        }
+        if (normalized.includes('FROM mobile_imei_identifiers WHERE imei')) {
+          return { rows: [] }; // not taken
+        }
+        if (normalized.includes('UPDATE mobile_imei_identifiers')) {
+          return { rows: [{ id: 'imei-row-1', imei: '358240059999999' }] };
+        }
+        if (normalized.includes('INSERT INTO audit_logs') || normalized.includes('INSERT INTO change_log')) {
+          return { rows: [] };
+        }
+        return { rows: [] };
+      },
+      release: () => {
+        clientReleased = true;
+      },
+    } as unknown as PoolClient;
+
+    const mockDbPool = {
+      connect: async () => mockDbClient,
+      query: async (sql: string, values?: any[]) => {
+        return { rows: [] };
+      },
+    } as unknown as Pool;
+
+    const testRepo = new MobileRepo(mockDbPool);
+    const result = await originalPatchImei.call(testRepo, {
+      device_id: 'device-101',
+      organization_id: 'org-test',
+      branch_id: 'branch-test',
+      updated_by: 'user-admin',
+      imei_id: 'imei-row-1',
+      new_imei: '358240059999999',
+    });
+
+    assert.equal(result, 'ok');
+    assert.ok(executedQueries.some((q) => q.sql.startsWith('BEGIN')));
+    assert.ok(executedQueries.some((q) => q.sql.includes('FOR UPDATE')));
+    assert.ok(executedQueries.some((q) => q.sql.includes('INSERT INTO change_log') && q.values?.includes('MOBILE_IMEI_CORRECTED')));
+    assert.ok(executedQueries.some((q) => q.sql.startsWith('COMMIT')));
+    assert.equal(clientReleased, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 18. Seller Paperwork Correction HTTP Route & Repository Integration (PATCH /:id/paperwork)
+// ---------------------------------------------------------------------------
+
+describe('18. Seller Paperwork Correction HTTP Route & Repository Integration (PATCH /:id/paperwork)', () => {
+  let appServer: Server;
+  let serverBaseUrl: string;
+  let activeUserRole: string = 'ADMIN';
+  let lastCapturedPwInput: any = null;
+  let mockPwResult: boolean = true;
+  const originalPatchPaperwork = MobileRepo.prototype.patchPaperwork;
+
+  let tokenOrgAdmin: string;
+  let tokenShopAdmin: string;
+
+  const mockClient = {
+    query: async () => ({ rows: [] }),
+    release: () => {},
+  } as unknown as PoolClient;
+
+  const mockPool = {
+    connect: async () => mockClient,
+    query: async (sql: string) => {
+      const trimmed = sql.trim();
+      if (trimmed.includes('FROM users')) {
+        return {
+          rows: [
+            {
+              is_active: 1,
+              status: 'ACTIVE',
+              role: activeUserRole,
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+
+  before(async () => {
+    tokenOrgAdmin = issueToken({
+      userId: 'user-org-admin-1',
+      username: 'orgadmin1',
+      role: 'ADMIN',
+      branchId: null,
+      accessProfile: { allowed_pages: ['*'], allowed_actions: ['*'], limits: DEFAULT_LIMITS },
+    });
+
+    tokenShopAdmin = issueToken({
+      userId: 'user-shop-admin-1',
+      username: 'shopadmin1',
+      role: 'SHOP_ADMIN',
+      branchId: 'branch-main-pos',
+      accessProfile: { allowed_pages: ['*'], allowed_actions: ['*'], limits: DEFAULT_LIMITS },
+    });
+
+    MobileRepo.prototype.patchPaperwork = async function (input: any) {
+      lastCapturedPwInput = input;
+      return mockPwResult;
+    };
+
+    const app = express();
+    app.use(express.json());
+    app.use('/api/mobiles', buildMobileRouter(mockPool));
+
+    await new Promise<void>((resolve) => {
+      appServer = app.listen(0, '127.0.0.1', () => {
+        const addr = appServer.address() as AddressInfo;
+        serverBaseUrl = `http://127.0.0.1:${addr.port}/api/mobiles`;
+        resolve();
+      });
+    });
+  });
+
+  after(async () => {
+    MobileRepo.prototype.patchPaperwork = originalPatchPaperwork;
+    if (appServer) {
+      await new Promise<void>((resolve) => appServer.close(() => resolve()));
+    }
+  });
+
+  test('PATCH /:id/paperwork: Org Admin successfully corrects seller details and passes validated CNIC', async () => {
+    activeUserRole = 'ADMIN';
+    mockPwResult = true;
+    lastCapturedPwInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/device-uuid-1/paperwork`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenOrgAdmin}`,
+      },
+      body: JSON.stringify({
+        branch_id: 'branch-main-pos',
+        seller_name: 'Muhammad Tariq',
+        father_name: 'Abdul Rehman',
+        seller_cnic: '35201-1234567-1',
+        seller_phone: '03001234567',
+        seller_address: 'Main Bazar Kot Radha Kishan',
+      }),
+    });
+
+    assert.equal(res.status, 200);
+    const data = await res.json() as { success?: boolean };
+    assert.equal(data.success, true);
+    assert.equal(lastCapturedPwInput.seller_name, 'Muhammad Tariq');
+    assert.equal(lastCapturedPwInput.father_name, 'Abdul Rehman');
+    assert.equal(lastCapturedPwInput.seller_cnic, '35201-1234567-1');
+    assert.equal(lastCapturedPwInput.seller_phone, '03001234567');
+    assert.equal(lastCapturedPwInput.seller_address, 'Main Bazar Kot Radha Kishan');
+    assert.equal(lastCapturedPwInput.device_id, 'device-uuid-1');
+  });
+
+  test('PATCH /:id/paperwork: rejects invalid Pakistani CNIC with 400', async () => {
+    activeUserRole = 'ADMIN';
+    lastCapturedPwInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/device-uuid-1/paperwork`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenOrgAdmin}`,
+      },
+      body: JSON.stringify({
+        branch_id: 'branch-main-pos',
+        seller_cnic: '3520112345671', // missing hyphens
+      }),
+    });
+
+    assert.equal(res.status, 400);
+    const data = await res.json() as { error?: string };
+    assert.match(data.error || '', /DDDDD-DDDDDDD-D/);
+    assert.equal(lastCapturedPwInput, null);
+  });
+
+  test('PATCH /:id/paperwork: non-org-admin (SHOP_ADMIN) is denied with 403', async () => {
+    activeUserRole = 'SHOP_ADMIN';
+    lastCapturedPwInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/device-uuid-1/paperwork`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenShopAdmin}`,
+      },
+      body: JSON.stringify({
+        branch_id: 'branch-main-pos',
+        seller_name: 'Muhammad Tariq',
+      }),
+    });
+
+    assert.equal(res.status, 403);
+    const data = await res.json() as { error?: string };
+    assert.match(data.error || '', /Only organization administrators/);
+    assert.equal(lastCapturedPwInput, null);
+  });
+
+  test('PATCH /:id/paperwork: returns 404 when paperwork row not found for device', async () => {
+    activeUserRole = 'ADMIN';
+    mockPwResult = false;
+    lastCapturedPwInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/device-uuid-1/paperwork`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenOrgAdmin}`,
+      },
+      body: JSON.stringify({
+        branch_id: 'branch-main-pos',
+        seller_name: 'Muhammad Tariq',
+      }),
+    });
+
+    assert.equal(res.status, 404);
+    const data = await res.json() as { error?: string };
+    assert.match(data.error || '', /Paperwork not found/);
+  });
+
+  test('patchPaperwork repository: updates seller fields, writes MOBILE_PAPERWORK_CORRECTED audit, and commits', async () => {
+    const executedQueries: Array<{ sql: string; values?: any[] }> = [];
+    let clientReleased = false;
+
+    const mockDbClient = {
+      query: async (sql: string, values?: any[]) => {
+        const normalized = sql.replace(/\s+/g, ' ').trim();
+        executedQueries.push({ sql: normalized, values });
+
+        if (normalized.includes('FROM mobile_purchase_paperwork') && normalized.includes('FOR UPDATE')) {
+          return {
+            rows: [
+              {
+                seller_name: 'Old Name',
+                father_name: 'Old Father',
+                seller_cnic: '35201-0000000-1',
+                seller_phone: '03000000000',
+                seller_address: 'Old Address',
+              },
+            ],
+          };
+        }
+        if (normalized.includes('UPDATE mobile_purchase_paperwork')) {
+          return { rows: [] };
+        }
+        if (normalized.includes('INSERT INTO audit_logs') || normalized.includes('INSERT INTO change_log')) {
+          return { rows: [] };
+        }
+        return { rows: [] };
+      },
+      release: () => {
+        clientReleased = true;
+      },
+    } as unknown as PoolClient;
+
+    const mockDbPool = {
+      connect: async () => mockDbClient,
+    } as unknown as Pool;
+
+    const testRepo = new MobileRepo(mockDbPool);
+    const result = await originalPatchPaperwork.call(testRepo, {
+      device_id: 'device-1',
+      organization_id: 'org-1',
+      branch_id: 'branch-1',
+      updated_by: 'user-admin',
+      seller_name: 'New Name',
+      seller_cnic: '35201-9999999-9',
+    });
+
+    assert.equal(result, true);
+    assert.ok(executedQueries.some((q) => q.sql.startsWith('BEGIN')));
+    assert.ok(executedQueries.some((q) => q.sql.includes('FOR UPDATE')));
+    assert.ok(executedQueries.some((q) => q.sql.includes('INSERT INTO change_log') && q.values?.includes('MOBILE_PAPERWORK_CORRECTED')));
+    assert.ok(executedQueries.some((q) => q.sql.startsWith('COMMIT')));
+    assert.equal(clientReleased, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 19. Inspection & Functional Check Booleans in Device Patch (PATCH /:id)
+// ---------------------------------------------------------------------------
+
+describe('19. Inspection & Functional Check Booleans in Device Patch (PATCH /:id)', () => {
+  let appServer: Server;
+  let serverBaseUrl: string;
+  let lastCapturedPatchInput: any = null;
+  const originalPatchMobileDevice = MobileRepo.prototype.patchMobileDevice;
+  let tokenOrgAdmin: string;
+
+  const mockClient = {
+    query: async () => ({ rows: [] }),
+    release: () => {},
+  } as unknown as PoolClient;
+
+  const mockPool = {
+    connect: async () => mockClient,
+    query: async (sql: string) => {
+      const trimmed = sql.trim();
+      if (trimmed.includes('FROM users')) {
+        return {
+          rows: [
+            {
+              is_active: 1,
+              status: 'ACTIVE',
+              role: 'ADMIN',
+            },
+          ],
+        };
+      }
+      if (trimmed.includes('SELECT EXISTS') && trimmed.includes('branches')) {
+        return { rows: [{ exists: true }] };
+      }
+      if (trimmed.includes('SELECT branch_id FROM mobile_devices')) {
+        return { rows: [{ branch_id: 'branch-main-pos' }] };
+      }
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+
+  before(async () => {
+    tokenOrgAdmin = issueToken({
+      userId: 'user-org-admin-1',
+      username: 'orgadmin1',
+      role: 'ADMIN',
+      branchId: null,
+      accessProfile: { allowed_pages: ['*'], allowed_actions: ['*'], limits: DEFAULT_LIMITS },
+    });
+
+    MobileRepo.prototype.patchMobileDevice = async function (input: any) {
+      lastCapturedPatchInput = input;
+      return {
+        id: input.device_id,
+        organization_id: input.organization_id,
+        branch_id: input.branch_id,
+      } as any;
+    };
+
+    const app = express();
+    app.use(express.json());
+    app.use('/api/mobiles', buildMobileRouter(mockPool));
+
+    await new Promise<void>((resolve) => {
+      appServer = app.listen(0, '127.0.0.1', () => {
+        const addr = appServer.address() as AddressInfo;
+        serverBaseUrl = `http://127.0.0.1:${addr.port}/api/mobiles`;
+        resolve();
+      });
+    });
+  });
+
+  after(async () => {
+    MobileRepo.prototype.patchMobileDevice = originalPatchMobileDevice;
+    if (appServer) {
+      await new Promise<void>((resolve) => appServer.close(() => resolve()));
+    }
+  });
+
+  test('PATCH /:id: accepts functional check booleans and preserves explicit false values', async () => {
+    lastCapturedPatchInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/device-101`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenOrgAdmin}`,
+      },
+      body: JSON.stringify({
+        branch_id: 'branch-main-pos',
+        touch_working: false,       // explicit false must NOT be dropped
+        battery_backup_ok: true,
+        front_camera_ok: false,     // explicit false
+        back_camera_ok: true,
+        accessories_box: true,
+        accessories_original_charger: false,
+        accessories_cable: true,
+        accessories_handsfree: false,
+      }),
+    });
+
+    assert.equal(res.status, 200);
+    assert.strictEqual(lastCapturedPatchInput.touch_working, false);
+    assert.strictEqual(lastCapturedPatchInput.battery_backup_ok, true);
+    assert.strictEqual(lastCapturedPatchInput.front_camera_ok, false);
+    assert.strictEqual(lastCapturedPatchInput.back_camera_ok, true);
+    assert.strictEqual(lastCapturedPatchInput.accessories_box, true);
+    assert.strictEqual(lastCapturedPatchInput.accessories_original_charger, false);
+    assert.strictEqual(lastCapturedPatchInput.accessories_cable, true);
+    assert.strictEqual(lastCapturedPatchInput.accessories_handsfree, false);
+  });
+
+  test('PATCH /:id: omitted inspection fields remain undefined and are not overwritten', async () => {
+    lastCapturedPatchInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/device-101`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenOrgAdmin}`,
+      },
+      body: JSON.stringify({
+        branch_id: 'branch-main-pos',
+        touch_working: true,
+      }),
+    });
+
+    assert.equal(res.status, 200);
+    assert.strictEqual(lastCapturedPatchInput.touch_working, true);
+    assert.strictEqual(lastCapturedPatchInput.battery_backup_ok, undefined);
+    assert.strictEqual(lastCapturedPatchInput.front_camera_ok, undefined);
+    assert.strictEqual(lastCapturedPatchInput.accessories_box, undefined);
+  });
+
+  test('PATCH /:id: rejects unknown inspection keys with 400 Disallowed or unknown field', async () => {
+    lastCapturedPatchInput = null;
+
+    const res = await fetch(`${serverBaseUrl}/device-101`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenOrgAdmin}`,
+      },
+      body: JSON.stringify({
+        branch_id: 'branch-main-pos',
+        unknown_sensor_working: true, // unsupported key
+      }),
+    });
+
+    assert.equal(res.status, 400);
+    const data = await res.json() as { error?: string };
+    assert.match(data.error || '', /Disallowed or unknown field/);
+    assert.equal(lastCapturedPatchInput, null);
+  });
+});
