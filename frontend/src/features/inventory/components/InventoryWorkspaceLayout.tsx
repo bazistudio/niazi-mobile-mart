@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { Link, useLocation, Outlet } from 'react-router-dom';
 import { InventoryFilterProvider } from './InventoryFilterContext';
 import { InventoryFilterBar } from './InventoryFilterBar';
-import { AddProductDrawer } from './AddProductDrawer';
 import { useInventoryUIStore } from '@/features/inventory/store/inventory-ui.store';
 import { selectProducts } from '@/features/inventory/core/inventory.selectors';
 import { usePermissions } from '@/lib/auth/usePermissions';
@@ -109,11 +108,6 @@ export function InventoryWorkspaceLayout({ children }: { children?: React.ReactN
         <main className="flex-1 overflow-hidden flex flex-col relative">
           {children || <Outlet />}
         </main>
-        
-        <AddProductDrawer 
-          isOpen={isAddProductOpen}
-          onClose={() => setAddProductOpen(false)}
-        />
       </div>
     </InventoryFilterProvider>
   );
