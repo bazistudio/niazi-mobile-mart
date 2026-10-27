@@ -62,8 +62,8 @@ if (SKIP_INTEGRATION) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** A branch ID that is clearly test-only so cleanup cannot accidentally touch real data. */
-const mkBranchId = () => `test-cash2-${uuidv4()}`;
+/** A valid 36-character UUID branch ID so foreign key and length check constraints pass. */
+const mkBranchId = () => uuidv4();
 
 /** ISO date string for today (UTC). */
 const todayUTC = () => new Date().toISOString().slice(0, 10);
@@ -91,10 +91,16 @@ async function insertSession(
   const id = opts.id ?? uuidv4();
   const openedAt = opts.openedAt ?? new Date().toISOString();
   await pool.query(
+    `INSERT INTO branches (id, organization_id, name, code, is_active, is_warehouse, created_at, updated_at)
+     VALUES ($1, '00000000-0000-0000-0000-000000000001', 'Test Branch ' || $1, substr($1, 1, 10), 1, 0, $2, $2)
+     ON CONFLICT (id) DO NOTHING`,
+    [opts.branchId, openedAt]
+  );
+  await pool.query(
     `INSERT INTO cash_sessions
        (id, branch_id, status, opening_cash, business_date, opened_at, closed_at,
-        closing_cash, physical_count, variance, closed_by_user_id, notes)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 0, 0, 0, NULL, NULL)`,
+        actual_closing_cash, cash_variance, closed_by, notes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 0, 0, NULL, NULL)`,
     [id, opts.branchId, opts.status, opts.openingCash, opts.businessDate, openedAt, opts.closedAt ?? null]
   );
   return id;
@@ -109,23 +115,25 @@ async function insertMovement(
     movementType: string;
     direction: 'IN' | 'OUT';
     amount: number;
-    sourceType: string;
+    sourceType?: string;
+    paymentMethod?: string;
     description?: string;
   }
 ): Promise<string> {
   const id = uuidv4();
+  const movementType = opts.movementType === 'SALE' ? 'SALE_PAYMENT' : opts.movementType;
   await pool.query(
     `INSERT INTO cash_movements
-       (id, session_id, branch_id, movement_type, direction, amount, source_type, description, created_at)
+       (id, session_id, branch_id, movement_type, direction, amount, payment_method, description, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
     [
       id,
       opts.sessionId,
       opts.branchId,
-      opts.movementType,
+      movementType,
       opts.direction,
       opts.amount,
-      opts.sourceType,
+      opts.paymentMethod ?? 'CASH',
       opts.description ?? 'test movement',
     ]
   );
@@ -137,6 +145,7 @@ async function cleanupBranches(pool: Pool, branchIds: string[]): Promise<void> {
   for (const branchId of branchIds) {
     await pool.query('DELETE FROM cash_movements WHERE branch_id = $1', [branchId]);
     await pool.query('DELETE FROM cash_sessions WHERE branch_id = $1', [branchId]);
+    await pool.query('DELETE FROM branches WHERE id = $1', [branchId]);
   }
 }
 
@@ -524,7 +533,7 @@ if (!SKIP_INTEGRATION) {
      *          Branch isolation is enforced at the query level.
      */
     test('16 -- Unknown branch returns empty-session contract (branch isolation)', async () => {
-      const unknownBranch = `test-cash2-unknown-${uuidv4()}`;
+      const unknownBranch = uuidv4();
       // NOT pushed to testBranches -- nothing to clean up
 
       const summary = await getDailySummary(pool, unknownBranch);
