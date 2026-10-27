@@ -89,7 +89,7 @@ export function OrganizationSettingsPage() {
         </div>
 
         {/* Category Detail View */}
-        <div className="md:col-span-3 space-y-6">
+        <div className="md:col-span-3 space-y-6 min-w-0">
           {/* Header Banner for Current Category */}
           <div className="bg-white dark:bg-gray-800/90 rounded-xl p-5 border border-gray-200/80 dark:border-gray-700/80 shadow-sm flex items-center justify-between">
             <div className="flex items-center gap-3">

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/Badge';
 import { Button, IconButton } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -13,6 +14,7 @@ import {
   Users,
   Plus,
   Edit3,
+  Shield,
   MoreHorizontal,
   Loader2,
   KeyRound,
@@ -29,6 +31,7 @@ interface UserListProps {
 }
 
 export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
+  const navigate = useNavigate();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffUser | null>(null);
   const [openActionsId, setOpenActionsId] = useState<string | null>(null);
@@ -58,6 +61,11 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
     setEditingStaff(user);
     setIsDrawerOpen(true);
     setOpenActionsId(null);
+  };
+
+  const handleNavigatePermissions = () => {
+    setOpenActionsId(null);
+    navigate('/dashboard/organization/settings?tab=roles');
   };
 
   const handleStatusToggle = async (user: StaffUser) => {
@@ -145,7 +153,7 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
           </div>
         </Card>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-border">
+        <div className="overflow-x-auto rounded-lg border border-border pb-28 md:pb-32 -mb-28 md:-mb-32">
           <table className="w-full text-sm">
             <thead className="bg-surface-hover border-b border-border">
               <tr>
@@ -173,7 +181,10 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {staff.map((user) => (
+              {staff.map((user, index) => {
+                const isBottomRow = index >= staff.length - 2 && staff.length > 2;
+
+                return (
                 <tr key={user._id} className="hover:bg-surface-hover/50 transition-colors">
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="font-medium text-text-primary">{user.name}</div>
@@ -212,6 +223,14 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
                   <td className="px-4 py-3 whitespace-nowrap text-right relative">
                     <div className="flex items-center justify-end gap-1">
                       <IconButton
+                        icon={<Shield className="w-4 h-4" />}
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Manage role permissions for ${user.name}`}
+                        title="Manage role permissions"
+                        onClick={handleNavigatePermissions}
+                      />
+                      <IconButton
                         icon={<Edit3 className="w-4 h-4" />}
                         variant="ghost"
                         size="sm"
@@ -231,10 +250,26 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
                         {openActionsId === user._id && (
                           <>
                             <div
-                              className="fixed inset-0 z-10"
+                              className="fixed inset-0 z-40"
                               onClick={() => setOpenActionsId(null)}
                             />
-                            <div className="absolute right-0 top-full mt-1 z-20 w-52 bg-surface rounded-lg shadow-dropdown border border-border p-1">
+                            <div
+                              className={`absolute right-0 z-50 w-52 bg-surface rounded-lg shadow-xl border border-border p-1 ${
+                                isBottomRow ? 'bottom-full mb-1' : 'top-full mt-1'
+                              }`}
+                            >
+                              {/* Manage Role Permissions */}
+                              <button
+                                type="button"
+                                onClick={handleNavigatePermissions}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-primary hover:bg-surface-hover rounded-md transition-colors"
+                              >
+                                <Shield className="w-4 h-4 text-primary" />
+                                Role Permissions
+                              </button>
+
+                              <div className="my-1 border-t border-border" />
+
                               {/* Suspend / Unsuspend */}
                               <button
                                 type="button"
@@ -282,7 +317,8 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

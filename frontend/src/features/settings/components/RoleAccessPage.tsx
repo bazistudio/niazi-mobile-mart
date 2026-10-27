@@ -105,7 +105,7 @@ export const RoleAccessPage: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col gap-6 w-full max-w-5xl mx-auto pb-12">
+    <div className="flex flex-col gap-6 w-full min-w-0">
       {/* Page Header */}
       <div>
         <h1 className="text-2xl font-bold text-text-primary">
