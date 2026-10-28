@@ -17,7 +17,7 @@ import express, { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { Pool } from 'pg';
 
-import { buildAuthMiddleware, authorizePermission, authorizeProductMutation, isAdmin, isOrgAdmin, canAccessBranch, RequestIdentity, CENTRAL_WAREHOUSE_ID } from '../auth';
+import { buildAuthMiddleware, authorizePermission, authorizeProductMutation, isAdmin, isBranchAdmin, isOrgAdmin, canAccessBranch, RequestIdentity, CENTRAL_WAREHOUSE_ID } from '../auth';
 import { writeChangeLogEntry } from '../repositories/change_log.repo';
 import {
   createProduct,
@@ -62,6 +62,38 @@ export function sendError(_req: Request, res: Response, err: unknown): void {
   }
   const message = err instanceof Error ? err.message : 'Internal server error';
   res.status(500).json({ error: message });
+}
+
+// ─── Product Cost / Valuation Protection Helper (REL-3) ─────────────────────
+
+/**
+ * Checks if identity is authorized to inspect product purchase cost, valuation, and margin.
+ * Authorized roles:
+ * - Organization Admin (ADMIN)
+ * - Branch Admin (SHOP_ADMIN)
+ * - Operations / Accounting roles: MANAGER, ACCOUNTANT, or any user possessing 'can_view_profit: true'
+ * Unauthorized roles (SALESMAN, CASHIER, STAFF, PUBLIC_USER) have purchase cost scrubbed at the data boundary.
+ */
+export function canViewProductCost(identity: RequestIdentity | undefined | null): boolean {
+  if (!identity) return false;
+  if (isBranchAdmin(identity)) return true;
+  const role = String(identity.role || '').toUpperCase();
+  if (role === 'MANAGER' || role === 'ACCOUNTANT') return true;
+  if (identity.access_profile?.limits?.can_view_profit === true) return true;
+  return false;
+}
+
+/**
+ * Sanitizes product record by zeroing out proprietary supplier purchase price and average cost
+ * when caller lacks purchase cost viewing authorization.
+ */
+export function sanitizeProductCost<T extends { purchase_price?: number; average_cost?: number }>(product: T, canViewCost: boolean): T {
+  if (canViewCost) return product;
+  return {
+    ...product,
+    purchase_price: 0,
+    average_cost: 0,
+  };
 }
 
 // ─── Price Validation ─────────────────────────────────────────────────────────
@@ -130,7 +162,9 @@ export function createProductRouter(pool: Pool): Router {
       };
 
       const products = await listProducts(pool, filter);
-      res.status(200).json(products);
+      const callerCanViewCost = canViewProductCost(identity);
+      const sanitizedProducts = callerCanViewCost ? products : products.map(p => sanitizeProductCost(p, false));
+      res.status(200).json(sanitizedProducts);
     } catch (err) {
       sendError(req, res, err);
     }
@@ -168,7 +202,9 @@ export function createProductRouter(pool: Pool): Router {
         res.status(404).json({ error: 'Product not found' });
         return;
       }
-      res.status(200).json(product);
+      const callerCanViewCost = canViewProductCost(identity);
+      const sanitizedProduct = sanitizeProductCost(product, callerCanViewCost);
+      res.status(200).json(sanitizedProduct);
     } catch (err) {
       sendError(req, res, err);
     }
