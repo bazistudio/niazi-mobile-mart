@@ -13,7 +13,7 @@ pub async fn cash_session_open(
     state: State<'_, AppState>,
     mut dto: OpenCashSessionDto,
 ) -> AppResult<CashSession> {
-    AuthService::require_permission(&state, Some("cash_management"), None).await?;
+    AuthService::require_permission(&state, Some("cash_management"), Some("cash:open")).await?;
     let authorized_branch = AuthService::require_branch_access(&state, dto.branch_id.as_deref()).await?;
     dto.branch_id = Some(authorized_branch);
     let session = state.get_session().await;
@@ -58,7 +58,7 @@ pub async fn cash_session_close(
     state: State<'_, AppState>,
     dto: CloseCashSessionDto,
 ) -> AppResult<CashSession> {
-    AuthService::require_permission(&state, Some("cash_management"), None).await?;
+    AuthService::require_permission(&state, Some("cash_management"), Some("cash:close")).await?;
     let cash_session = state.cash_service.get_session_by_id(&dto.session_id).await?;
     AuthService::require_branch_access(&state, Some(&cash_session.branch_id)).await?;
     let session = state.get_session().await;

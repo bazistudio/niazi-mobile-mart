@@ -13,6 +13,8 @@ import {
   Receipt,
 } from 'lucide-react';
 import { useCashStore } from '../store/cash.store';
+import { usePermissions } from '@/lib/auth/usePermissions';
+import { PERMISSIONS } from '@/constants/permissions';
 
 const formatCurrency = (val: number | undefined | null) =>
   `PKR ${(val || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
@@ -38,6 +40,8 @@ export const CashSessionActiveCard: React.FC<CashSessionActiveCardProps> = ({
   branchSelector,
 }) => {
   const { currentSession: session, summary, isLoading } = useCashStore();
+  const { hasPermission } = usePermissions();
+  const canManageRegister = hasPermission(PERMISSIONS.FINANCE_MANAGE);
   const isOpen = session?.status === 'OPEN';
 
   if (isLoading) {
@@ -146,13 +150,23 @@ export const CashSessionActiveCard: React.FC<CashSessionActiveCardProps> = ({
       {/* Action buttons */}
       <div className="flex flex-col gap-3">
         {!isOpen ? (
-          <button
-            onClick={onOpenSession}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-medium transition-colors"
-          >
-            <Unlock className="w-4 h-4" />
-            Open Cash Session
-          </button>
+          canManageRegister ? (
+            <button
+              onClick={onOpenSession}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-medium transition-colors"
+            >
+              <Unlock className="w-4 h-4" />
+              Open Cash Session
+            </button>
+          ) : (
+            <div
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-neutral-100 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 rounded-xl text-sm font-medium border border-neutral-200 dark:border-neutral-700 cursor-not-allowed"
+              title="Register open/close actions require finance management permission"
+            >
+              <Lock className="w-4 h-4" />
+              Register Closed (Open Restricted)
+            </div>
+          )
         ) : (
           <>
             {/* Voucher actions — only shown while session is OPEN (CASH-2) */}
@@ -192,13 +206,23 @@ export const CashSessionActiveCard: React.FC<CashSessionActiveCardProps> = ({
                 <Sliders className="w-4 h-4" />
                 Adjust Cash
               </button>
-              <button
-                onClick={onCloseSession}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-medium transition-colors"
-              >
-                <Lock className="w-4 h-4" />
-                Close Day
-              </button>
+              {canManageRegister ? (
+                <button
+                  onClick={onCloseSession}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-medium transition-colors"
+                >
+                  <Lock className="w-4 h-4" />
+                  Close Day
+                </button>
+              ) : (
+                <div
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-neutral-100 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 rounded-xl text-sm font-medium border border-neutral-200 dark:border-neutral-700 cursor-not-allowed"
+                  title="Register closing requires finance management permission"
+                >
+                  <Lock className="w-4 h-4" />
+                  Close Restricted
+                </div>
+              )}
             </div>
           </>
         )}

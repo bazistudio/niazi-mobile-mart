@@ -82,12 +82,15 @@ impl StaffAccessProfile {
                 "sales".to_string(),
                 "customers".to_string(),
                 "parties".to_string(),
+                "cash".to_string(),
             ],
             allowed_actions: vec![
                 "pos:sale".to_string(),
                 "pos:hold".to_string(),
                 "order:create".to_string(),
                 "order:read".to_string(),
+                "cash:open".to_string(),
+                "cash:close".to_string(),
             ],
             limits: StaffOperationalLimits {
                 max_discount_percent: 0.0,
@@ -153,6 +156,7 @@ impl StaffAccessProfile {
                 "suppliers".to_string(),
                 "parties".to_string(),
                 "expenses".to_string(),
+                "cash".to_string(),
             ],
             allowed_actions: vec![],
             limits: StaffOperationalLimits {
@@ -175,6 +179,7 @@ impl StaffAccessProfile {
                 "sales".to_string(),
                 "customers".to_string(),
                 "parties".to_string(),
+                "cash".to_string(),
             ],
             allowed_actions: vec![
                 "pos:sale".to_string(),
@@ -266,14 +271,25 @@ impl StaffAccessProfile {
             {
                 return true;
             }
-            // Canonical aliases for finance / cash management
-            if (p_lower == "cash" || p_lower == "cash_management" || p_lower == "business-ledger" || p_lower == "finance")
-                && (clean == "finance" || clean == "cash" || clean == "cash_management" || clean == "business-ledger" || clean.starts_with("finance."))
+            // Canonical aliases for cash management (strictly isolated from business-ledger)
+            if (p_lower == "cash" || p_lower == "cash_management")
+                && (clean == "cash" || clean == "cash_management" || clean == "finance" || clean.starts_with("finance."))
             {
                 return true;
             }
-            if (clean == "cash" || clean == "cash_management" || clean == "business-ledger" || clean == "finance")
-                && (p_lower == "finance" || p_lower == "cash" || p_lower == "cash_management" || p_lower == "business-ledger" || p_lower.starts_with("finance."))
+            if (clean == "cash" || clean == "cash_management")
+                && (p_lower == "cash" || p_lower == "cash_management" || p_lower == "finance" || p_lower.starts_with("finance."))
+            {
+                return true;
+            }
+            // Dedicated aliases for business-ledger (requires explicit business-ledger grant or finance root)
+            if p_lower == "business-ledger"
+                && (clean == "business-ledger" || clean == "finance" || clean.starts_with("finance."))
+            {
+                return true;
+            }
+            if clean == "business-ledger"
+                && (p_lower == "business-ledger" || p_lower == "finance" || p_lower.starts_with("finance."))
             {
                 return true;
             }
@@ -365,9 +381,10 @@ mod tests {
         assert!(profile.has_page_access("purchases"));
         assert!(profile.has_page_access("expenses"));
         assert!(profile.has_page_access("customers"));
+        // Default SELECT page:
+        assert!(profile.has_page_access("cash"));
         // INDIVIDUAL/REJECT pages - NOT default:
         assert!(!profile.has_page_access("pos"));
-        assert!(!profile.has_page_access("cash"));
         assert!(!profile.has_page_access("business-ledger"));
         assert!(!profile.has_page_access("reports"));
         assert!(!profile.has_page_access("settings"));
@@ -405,16 +422,28 @@ mod tests {
     #[test]
     fn test_page_alias_security() {
         let accountant = StaffAccessProfile::accountant_default();
-        // Expenses must NOT grant finance or cash
+        // Expenses must NOT grant finance or business-ledger
         assert!(accountant.has_page_access("expenses"));
-        assert!(!accountant.has_page_access("finance"));
-        assert!(!accountant.has_page_access("cash"));
+        assert!(accountant.has_page_access("cash"));
         assert!(!accountant.has_page_access("business-ledger"));
 
         let cashier = StaffAccessProfile::cashier_default();
         // Products must NOT grant inventory
         assert!(cashier.has_page_access("products"));
         assert!(!cashier.has_page_access("inventory"));
+        // Cashier has cash management, but NEVER business-ledger
+        assert!(cashier.has_page_access("cash"));
+        assert!(cashier.has_page_access("cash_management"));
+        assert!(!cashier.has_page_access("business-ledger"));
+
+        let salesman = StaffAccessProfile::salesman_default();
+        // Salesman has cash management page, but NEVER business-ledger
+        assert!(salesman.has_page_access("cash"));
+        assert!(salesman.has_page_access("cash_management"));
+        assert!(!salesman.has_page_access("business-ledger"));
+        // Salesman has no register actions by default
+        assert!(!salesman.has_action_access("cash:open"));
+        assert!(!salesman.has_action_access("cash:close"));
     }
 }
 
