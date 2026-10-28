@@ -8,10 +8,13 @@ import { ProductEditModal } from '@/features/inventory/product/components/Produc
 import { ProductDeleteDialog } from '@/features/inventory/product/components/ProductDeleteDialog';
 import { Loader2, Plus, Edit, Trash2 } from 'lucide-react';
 import { usePermissions } from '@/lib/auth/usePermissions';
+import { PERMISSIONS } from '@/constants/permissions';
 
 export function InventoryProductsPage() {
-  const { role } = usePermissions();
+  const { role, hasPermission } = usePermissions();
   const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
+  const normalizedRole = (role || '').toUpperCase();
+  const canViewCost = isOrgAdmin || (!['SALESMAN', 'CASHIER'].includes(normalizedRole) && (hasPermission(PERMISSIONS.INVENTORY_VIEW) || hasPermission(PERMISSIONS.PURCHASES_VIEW)));
 
   const { filters } = useInventoryFilters();
   const [editingProduct, setEditingProduct] = useState<InventoryProduct | null>(null);
@@ -49,13 +52,17 @@ export function InventoryProductsPage() {
         <span>{row.stock}</span>
       </div>
     )},
-    { key: 'purchasePrice', label: 'Purchase', render: (row) => `Rs. ${(row.purchasePrice || 0).toLocaleString()}` },
-    { key: 'price', label: 'Sale', render: (row) => `Rs. ${(row.price || 0).toLocaleString()}` },
-    { 
-      key: 'totalValue', 
-      label: 'Value', 
-      render: (row) => <span className="font-medium text-[#006970] dark:text-[#00B4BB]">Rs. {((row.stock || 0) * (row.purchasePrice || 0)).toLocaleString()}</span>
-    },
+    ...(canViewCost ? [
+      { key: 'purchasePrice', label: 'Purchase', render: (row: InventoryProduct) => `Rs. ${(row.purchasePrice || 0).toLocaleString()}` },
+    ] : []),
+    { key: 'price', label: 'Sale', render: (row: InventoryProduct) => `Rs. ${(row.price || 0).toLocaleString()}` },
+    ...(canViewCost ? [
+      {
+        key: 'totalValue',
+        label: 'Value',
+        render: (row: InventoryProduct) => <span className="font-medium text-[#006970] dark:text-[#00B4BB]">Rs. {((row.stock || 0) * (row.purchasePrice || 0)).toLocaleString()}</span>
+      },
+    ] : []),
     ...(isOrgAdmin ? [{ 
       key: 'actions' as const, 
       label: 'Action', 

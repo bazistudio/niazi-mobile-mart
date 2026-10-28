@@ -5,12 +5,16 @@ import { InventoryFilterBar } from './InventoryFilterBar';
 import { useInventoryUIStore } from '@/features/inventory/store/inventory-ui.store';
 import { selectProducts } from '@/features/inventory/core/inventory.selectors';
 import { usePermissions } from '@/lib/auth/usePermissions';
+import { PERMISSIONS } from '@/constants/permissions';
 
 export function InventoryWorkspaceLayout({ children }: { children?: React.ReactNode }) {
   const location = useLocation();
   const pathname = location.pathname;
-  const { role } = usePermissions();
+  const { role, hasPermission } = usePermissions();
   const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
+  const canViewStock = hasPermission(PERMISSIONS.INVENTORY_VIEW);
+  const normalizedRole = (role || '').toUpperCase();
+  const canViewInvestVolume = isOrgAdmin || (!['SALESMAN', 'CASHIER'].includes(normalizedRole) && (hasPermission(PERMISSIONS.INVENTORY_VIEW) || hasPermission(PERMISSIONS.PURCHASES_VIEW)));
 
   const [formatInMillions, setFormatInMillions] = useState(false);
   const { isAddProductOpen, setAddProductOpen } = useInventoryUIStore();
@@ -51,16 +55,18 @@ export function InventoryWorkspaceLayout({ children }: { children?: React.ReactN
                 Products
               </Link>
               
-              <Link
-                to="/dashboard/shop-admin/inventory/stock"
-                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  isStock
-                    ? 'border-[#006970] text-[#006970] dark:border-[#00B4BB] dark:text-[#00B4BB]'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-                }`}
-              >
-                Stock
-              </Link>
+              {canViewStock && (
+                <Link
+                  to="/dashboard/shop-admin/inventory/stock"
+                  className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                    isStock
+                      ? 'border-[#006970] text-[#006970] dark:border-[#00B4BB] dark:text-[#00B4BB]'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                  }`}
+                >
+                  Stock
+                </Link>
+              )}
               
               {isOrgAdmin && (
                 <Link
@@ -79,7 +85,7 @@ export function InventoryWorkspaceLayout({ children }: { children?: React.ReactN
             {/* Right Side Actions: Total Volume and Add Product */}
             <div className="flex items-center gap-3 pb-1.5">
               {isOrgAdmin && (
-                <button 
+                <button
                   onClick={() => setAddProductOpen(true)}
                   className="px-3 py-1.5 bg-[#006970] hover:bg-[#005a60] text-white text-sm font-medium rounded shadow-sm transition-colors cursor-pointer"
                 >
@@ -87,14 +93,16 @@ export function InventoryWorkspaceLayout({ children }: { children?: React.ReactN
                 </button>
               )}
               
-              <button 
-                onClick={() => setFormatInMillions(!formatInMillions)}
-                className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-3 py-1.5 rounded shadow-sm flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-                title="Click to toggle millions format"
-              >
-                <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Invest Volume:</span>
-                <span className="text-sm font-bold text-[#006970] dark:text-[#00B4BB]">{formatCurrency(totalVolume)}</span>
-              </button>
+              {canViewInvestVolume && (
+                <button
+                  onClick={() => setFormatInMillions(!formatInMillions)}
+                  className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-3 py-1.5 rounded shadow-sm flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                  title="Click to toggle millions format"
+                >
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Invest Volume:</span>
+                  <span className="text-sm font-bold text-[#006970] dark:text-[#00B4BB]">{formatCurrency(totalVolume)}</span>
+                </button>
+              )}
             </div>
           </div>
 

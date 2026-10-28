@@ -1,5 +1,6 @@
 import React from 'react';
-import { Route } from 'react-router-dom';
+import { Route, Navigate, Outlet } from 'react-router-dom';
+import { usePermissions } from '@/lib/auth/usePermissions';
 import { PermissionGuard } from '@/app/guards/PermissionGuard';
 import { PERMISSIONS } from '@/constants/permissions';
 import { ShopAdminDashboard } from '@/features/dashboard/components/shop-admin/ShopAdminDashboard';
@@ -37,6 +38,16 @@ import { PrinterPage } from '@/pages/dashboard/shop-admin/settings/PrinterPage';
 import { RolesSettingsPage } from '@/pages/dashboard/shop-admin/settings/RolesSettingsPage';
 import { WorkforcePage } from '@/pages/dashboard/shop-admin/settings/WorkforcePage';
 
+// Dedicated route-level guard allowing entry to inventory layout when user has either PRODUCTS_VIEW or INVENTORY_VIEW
+const InventoryWorkspaceRouteGuard: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
+  const { hasPermission } = usePermissions();
+  const permitted = hasPermission(PERMISSIONS.PRODUCTS_VIEW) || hasPermission(PERMISSIONS.INVENTORY_VIEW);
+  if (!permitted) {
+    return <Navigate to="/dashboard/shop-admin" replace />;
+  }
+  return children ? <>{children}</> : <Outlet />;
+};
+
 export const shopAdminCoreRoutes = (
   <>
     {/* Base Dashboard Overview — Accessible to all authenticated shop staff */}
@@ -56,13 +67,20 @@ export const shopAdminCoreRoutes = (
     <Route
       path="inventory"
       element={
-        <PermissionGuard requiredPermission={PERMISSIONS.INVENTORY_VIEW} fallbackPath="/dashboard/shop-admin">
+        <InventoryWorkspaceRouteGuard>
           <InventoryWorkspaceLayout />
-        </PermissionGuard>
+        </InventoryWorkspaceRouteGuard>
       }
     >
       <Route index element={<InventoryProductsPage />} />
-      <Route path="stock" element={<InventoryStockPage />} />
+      <Route
+        path="stock"
+        element={
+          <PermissionGuard requiredPermission={PERMISSIONS.INVENTORY_VIEW} fallbackPath="/dashboard/shop-admin/inventory">
+            <InventoryStockPage />
+          </PermissionGuard>
+        }
+      />
       <Route path="import" element={<InventoryImportPage />} />
     </Route>
 
