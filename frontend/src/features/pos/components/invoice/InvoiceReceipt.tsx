@@ -1,14 +1,16 @@
+
 import React, { useEffect } from 'react';
 import { usePosStore } from '../../store/usePosStore';
 import { usePrintStore } from '@/lib/printer';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
 import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
 import { UnifiedInvoice, PrinterSettings, ShopHeader } from '@/features/settings/printer/types/printer.types';
+import { useInventoryStore } from '@/features/inventory/core/inventory.store';
 
 export const InvoiceReceipt: React.FC = () => {
   const invoice = usePosStore(state => state.lastInvoice);
   const setLastInvoice = usePosStore(state => state.setLastInvoice);
-  
+
   const { openPreview } = usePrintStore();
   const { settings, shopHeader, fetchSettings } = usePrinterStore();
 
@@ -20,6 +22,8 @@ export const InvoiceReceipt: React.FC = () => {
 
   useEffect(() => {
     if (invoice) {
+      const inventoryProducts = useInventoryStore.getState().products;
+
       const effectiveShop: ShopHeader = shopHeader || {
         name: invoice.shop?.name || 'Niazi Mobile Mart POS',
         address: invoice.shop?.address || '',
@@ -54,12 +58,57 @@ export const InvoiceReceipt: React.FC = () => {
         // DEF-SALE-06: use real customer/cashier from InvoiceDocument (set during sale)
         customer: invoice.customer ? { name: invoice.customer.name } : undefined,
         cashier: invoice.cashier || 'Cashier',
-        items: invoice.items.map(i => ({ 
-          name: i.name, 
-          qty: i.qty, 
-          price: i.price, 
-          total: i.subtotal 
-        })),
+        items: invoice.items.map(i => {
+          let specs: string | undefined;
+          try {
+            const rawItem = i as any;
+            const targetId = rawItem.productId || rawItem.id;
+            let matchedProduct: any = null;
+
+            if (targetId) {
+              matchedProduct = inventoryProducts.find(p => (p.id || (p as any)._id) === targetId);
+            }
+
+            if (!matchedProduct && i.name) {
+              const exactMatches = inventoryProducts.filter(p => p.name && p.name.trim().toLowerCase() === i.name.trim().toLowerCase());
+              if (exactMatches.length === 1) {
+                matchedProduct = exactMatches[0];
+              }
+            }
+
+            if (matchedProduct) {
+              const specList: string[] = [];
+              if (matchedProduct.category && matchedProduct.category !== '-' && matchedProduct.category.trim().length > 0 && matchedProduct.category.toLowerCase() !== 'uncategorized') {
+                specList.push(matchedProduct.category);
+              }
+              if (matchedProduct.quality && matchedProduct.quality !== '-' && matchedProduct.quality.trim().length > 0) {
+                specList.push(matchedProduct.quality);
+              }
+              if (matchedProduct.color && matchedProduct.color !== '-' && matchedProduct.color.trim().length > 0) {
+                specList.push(matchedProduct.color);
+              }
+              if (matchedProduct.brand && matchedProduct.brand !== '-' && matchedProduct.brand.trim().length > 0) {
+                specList.push(matchedProduct.brand);
+              }
+              if (matchedProduct.company && matchedProduct.company !== '-' && matchedProduct.company.trim().length > 0) {
+                specList.push(matchedProduct.company);
+              }
+              if (specList.length > 0) {
+                specs = specList.join(' • ');
+              }
+            }
+          } catch (lookupErr) {
+            console.warn('Failed to resolve specs for invoice item:', lookupErr);
+          }
+
+          return {
+            name: i.name,
+            qty: i.qty,
+            price: i.price,
+            total: i.subtotal,
+            specs,
+          };
+        }),
         subtotal: invoice.summary.subtotal,
         discount: invoice.summary.discountTotal,
         tax: 0,
@@ -74,13 +123,13 @@ export const InvoiceReceipt: React.FC = () => {
       };
 
       const html = printFormatter.format(unified, effectiveSettings);
-      openPreview({ 
-        html, 
-        documentType: 'SaleInvoice', 
-        referenceId: invoice.transactionId, 
-        title: `Sale Receipt - ${invoice.invoiceId}` 
+      openPreview({
+        html,
+        documentType: 'SaleInvoice',
+        referenceId: invoice.transactionId,
+        title: `Sale Receipt - ${invoice.invoiceId}`
       });
-      
+
       setLastInvoice(null);
     }
   }, [invoice, settings, shopHeader, openPreview, setLastInvoice]);

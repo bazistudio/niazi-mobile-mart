@@ -371,7 +371,8 @@ const formatA4 = (invoice: UnifiedInvoice, settings: PrinterSettings, title: str
           ${invoice.items.map(item => `
             <tr style="border-bottom: 1px solid #eee;">
               <td style="padding: 6px;">
-                <div>${item.name}</div>
+                <div>${escapeHtml(item.name)}</div>
+                ${item.specs ? `<div style="font-size: 10px; color: #555; margin-top: 1px;">${escapeHtml(item.specs)}</div>` : ''}
                 ${item.imei ? `<div style="font-size: 10px; color: #555; font-family: monospace;">IMEI: ${maskImei(item.imei)}</div>` : ''}
               </td>
               <td style="text-align: center; padding: 6px;">${item.qty}</td>
@@ -427,14 +428,20 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, _widt
   const fontFamily = settings.font?.family === 'monospace' ? 'Courier, "Courier New", monospace' : 'Arial, sans-serif';
 
   return `
-    <div style="font-family: ${fontFamily}; font-size: ${baseFontSize}px; width: ${pxWidth}px; margin: 0 auto; line-height: 1.3; color: #000000; background-color: #ffffff; padding: 8px 14px; box-sizing: border-box;">
+    <div style="font-family: ${fontFamily}; font-size: ${baseFontSize}px; width: ${pxWidth}px; margin: 0 auto; line-height: 1.3; color: #000000; background-color: #ffffff; padding: 8px 8px; box-sizing: border-box; font-weight: bold;">
       <style>
         @media print {
+          @page {
+            size: 80mm auto;
+            margin: 0;
+          }
           body, html {
             background-color: #ffffff !important;
             color: #000000 !important;
             margin: 0 !important;
             padding: 0 !important;
+            height: auto !important;
+            overflow: hidden !important;
           }
         }
       </style>
@@ -445,16 +452,16 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, _widt
         ${settings.invoice?.showShopInfo !== false ? `
           ${rtlDiv(invoice.shop.name, "font-weight:900;font-size:17px;text-transform:uppercase;letter-spacing:0.5px;text-align:center;")}
           ${invoice.shop.branchName ? `<div style="font-size: 12px; font-weight: bold; margin-top: 2px; color: #222;">[ ${invoice.shop.branchName} ]</div>` : ''}
-          ${invoice.shop.address ? rtlDiv(invoice.shop.address, 'font-size:11px;white-space:pre-wrap;margin-top:2px;text-align:center;') : ''}
-          ${invoice.shop.phone || invoice.shop.secondaryPhone ? `<div style="font-size: 11px; margin-top: 2px;">Tel: ${invoice.shop.phone}${invoice.shop.secondaryPhone ? ' / ' + invoice.shop.secondaryPhone : ''}</div>` : ''}
-          ${invoice.shop.whatsapp ? `<div style="font-size: 11px;">WhatsApp: ${invoice.shop.whatsapp}</div>` : ''}
-          ${invoice.shop.taxNumber ? `<div style="font-size: 11px;">NTN: ${invoice.shop.taxNumber}</div>` : ''}
+          ${invoice.shop.address ? rtlDiv(invoice.shop.address, 'font-size:11px;font-weight:bold;white-space:pre-wrap;margin-top:2px;text-align:center;') : ''}
+          ${invoice.shop.phone || invoice.shop.secondaryPhone ? `<div style="font-size: 11px; font-weight: bold; margin-top: 2px;">Tel: ${invoice.shop.phone}${invoice.shop.secondaryPhone ? ' / ' + invoice.shop.secondaryPhone : ''}</div>` : ''}
+          ${invoice.shop.whatsapp ? `<div style="font-size: 11px; font-weight: bold;">WhatsApp: ${invoice.shop.whatsapp}</div>` : ''}
+          ${invoice.shop.taxNumber ? `<div style="font-size: 11px; font-weight: bold;">NTN: ${invoice.shop.taxNumber}</div>` : ''}
         ` : ''}
         <div style="margin-top: 4px; font-weight: bold; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.5px;">*** ${title} ***</div>
       </div>
       
       <!-- Meta Information Section -->
-      <div style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 5px 0; margin-bottom: 6px; font-size: 11.5px;">
+      <div style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 5px 0; margin-bottom: 6px; font-size: 11.5px; font-weight: bold;">
         <div style="display: flex; justify-content: space-between;">
           <span>Invoice #:</span>
           <span style="font-weight: bold;">${invoice.invoiceNo}</span>
@@ -471,7 +478,7 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, _widt
         ${invoice.customer ? `
         <div style="display: flex; justify-content: space-between;">
           <span>Customer:</span>
-          <span style="font-weight: 600;">${invoice.customer.name}</span>
+          <span style="font-weight: bold;">${invoice.customer.name}</span>
         </div>
         ${invoice.customer.phone ? `
         <div style="display: flex; justify-content: space-between;">
@@ -482,7 +489,7 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, _widt
       </div>
 
       <!-- Items Table: Item (1st), Qty (2nd), Price (3rd), Amount (4th) -->
-      <table style="width: 100%; text-align: left; margin-bottom: 6px; font-size: 12px; border-collapse: collapse;">
+      <table style="width: 100%; text-align: left; margin-bottom: 6px; font-size: 12px; font-weight: bold; border-collapse: collapse;">
         <thead>
           <tr style="border-bottom: 1px dashed #000;">
             <th style="padding: 3px 2px; width: 46%; text-align: left;">Item</th>
@@ -495,11 +502,12 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, _widt
           ${invoice.items.map(item => `
             <tr style="vertical-align: top; border-bottom: 1px dotted #ccc;">
               <td style="padding: 4px 2px; word-break: break-word;">
-                <div style="font-weight: 600;">${item.name}</div>
-                ${item.imei ? `<div style="font-size: 9.5px; color: #333;">IMEI: ${maskImei(item.imei)}</div>` : ''}
+                <div style="font-weight: bold;">${escapeHtml(item.name)}</div>
+                ${item.specs ? `<div style="font-size: 9px; color: #000; font-weight: bold; margin-top: 1px;">${escapeHtml(item.specs)}</div>` : ''}
+                ${item.imei ? `<div style="font-size: 9.5px; color: #000; font-weight: bold;">IMEI: ${maskImei(item.imei)}</div>` : ''}
               </td>
               <td style="padding: 4px 0; text-align: center; font-weight: bold;">${item.qty}</td>
-              <td style="padding: 4px 0; text-align: right; tabular-nums;">${item.price.toLocaleString()}</td>
+              <td style="padding: 4px 0; text-align: right; font-weight: bold; tabular-nums;">${item.price.toLocaleString()}</td>
               <td style="padding: 4px 0; text-align: right; font-weight: bold; tabular-nums;">${item.total.toLocaleString()}</td>
             </tr>
           `).join('')}
@@ -507,7 +515,7 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, _widt
       </table>
       
       <!-- Financial Summary Totals -->
-      <div style="border-top: 1px dashed #000; padding-top: 5px; font-size: 12.5px;">
+      <div style="border-top: 1px dashed #000; padding-top: 5px; font-size: 12.5px; font-weight: bold;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
           <span>Subtotal:</span>
           <span style="font-weight: bold;">Rs ${invoice.subtotal.toLocaleString()}</span>
@@ -539,7 +547,7 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, _widt
         ${invoice.tendered && invoice.tendered > 0 ? `
         <div style="display: flex; justify-content: space-between; font-size: 11.5px;">
           <span>Tendered:</span>
-          <span>Rs ${invoice.tendered.toLocaleString()}</span>
+          <span style="font-weight: bold;">Rs ${invoice.tendered.toLocaleString()}</span>
         </div>` : ''}
         
         ${invoice.change && invoice.change > 0 ? `
@@ -558,13 +566,13 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, _widt
       
       <!-- Return Policy & Warranty Instructions -->
       ${invoice.returnPolicy || invoice.shop.returnPolicy ? `
-      <div style="border-top: 1px dashed #000; margin-top: 8px; padding-top: 5px; text-align: center; font-size: 10.5px;">
+      <div style="border-top: 1px dashed #000; margin-top: 8px; padding-top: 5px; text-align: center; font-size: 10.5px; font-weight: bold;">
         <div style="font-weight: bold; margin-bottom: 1px;">Return Policy:</div>
         ${rtlDiv(invoice.returnPolicy || invoice.shop.returnPolicy || '', 'text-align:center;')}
       </div>` : ''}
 
       ${invoice.warrantyInstructions || invoice.shop.warrantyInstructions ? `
-      <div style="border-top: 1px dotted #000; margin-top: 5px; padding-top: 4px; text-align: center; font-size: 10px; color: #222;">
+      <div style="border-top: 1px dotted #000; margin-top: 5px; padding-top: 4px; text-align: center; font-size: 10px; font-weight: bold; color: #000;">
         <div style="font-weight: bold; margin-bottom: 1px;">Warranty Terms:</div>
         ${rtlDiv(invoice.warrantyInstructions || invoice.shop.warrantyInstructions || '', 'text-align:center;')}
       </div>` : ''}
@@ -572,13 +580,13 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, _widt
       <!-- Barcode Section -->
       ${settings.invoice?.showBarcode !== false ? `
       <div style="margin-top: 8px;">
-        ${generateBarcodeSvg(invoice.invoiceNo, pxWidth - 28, 38)}
+        ${generateBarcodeSvg(invoice.invoiceNo, pxWidth - 16, 38)}
       </div>` : ''}
       
       <!-- Footer & Branding -->
       <div style="text-align: center; margin-top: 10px; font-size: 10.5px; border-top: 1px dashed #000; padding-top: 5px;">
         <div style="font-weight: bold;">${invoice.shop.footerText || 'Thank you for shopping with us!'}</div>
-        <div style="font-size: 9px; color: #555; margin-top: 4px; letter-spacing: 0.5px;">Powered by Niazi Mobile Mart</div>
+        <div style="font-size: 9px; font-weight: bold; color: #000; margin-top: 4px; letter-spacing: 0.5px;">Powered by Niazi Mobile Mart</div>
       </div>
     </div>
   `;

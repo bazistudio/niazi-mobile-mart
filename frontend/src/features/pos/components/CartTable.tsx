@@ -81,6 +81,9 @@ export const CartTable = () => {
             const invProd = inventoryProducts.find(p => (p.id || (p as any)._id) === item.productId);
             if (!invProd) return null;
             const specs: string[] = [];
+            if (invProd.category && invProd.category !== '-' && invProd.category.trim().length > 0 && invProd.category.toLowerCase() !== 'uncategorized') {
+              specs.push(invProd.category);
+            }
             if (invProd.quality && invProd.quality !== '-' && invProd.quality.trim().length > 0) specs.push(invProd.quality);
             if (invProd.color && invProd.color !== '-' && invProd.color.trim().length > 0) specs.push(invProd.color);
             if (invProd.brand && invProd.brand !== '-' && invProd.brand.trim().length > 0) specs.push(invProd.brand);

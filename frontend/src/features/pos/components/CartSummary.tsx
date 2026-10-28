@@ -96,13 +96,23 @@ export const CartSummary: React.FC = () => {
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [activeSession?.cart?.length, activeSession?.returnedItems?.length]);
+  }, [
+    activeSession?.cart?.length,
+    activeSession?.returnedItems?.length,
+    activeSession?.customer?.id,
+    activeSession?.linkedInvoiceId,
+    activeSession?.invoiceDiscountValue,
+  ]);
 
   if (!activeSession) return null;
 
   const cart = activeSession.cart ?? [];
   const returnedItems = activeSession.returnedItems ?? [];
   const isCartEmpty = cart.length === 0 && returnedItems.length === 0;
+  const hasCustomer = !!(activeSession.customer && activeSession.customer.id !== 'walk-in');
+  const hasLinkedInvoice = !!activeSession.linkedInvoiceId;
+  const hasDiscount = (activeSession.invoiceDiscountValue || 0) > 0;
+  const canClearCart = !isCartEmpty || hasCustomer || hasLinkedInvoice || hasDiscount;
 
   // Render-time display calculations
   const subtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
@@ -139,7 +149,7 @@ export const CartSummary: React.FC = () => {
   };
 
   const handleClearCart = () => {
-    if (isCartEmpty) return;
+    if (!canClearCart) return;
     if (window.confirm('Are you sure you want to clear the current sale tab?')) {
       clearCart();
       toast.success('Cart cleared');
@@ -557,7 +567,7 @@ export const CartSummary: React.FC = () => {
         <button
           type="button"
           onClick={handleClearCart}
-          disabled={isCartEmpty || isProcessing}
+          disabled={!canClearCart || isProcessing}
           title="Clear Cart (Ctrl+Delete)"
           className="col-span-3 h-11 flex items-center justify-center gap-1.5 rounded-xl border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-all disabled:opacity-disabled shadow-xs"
         >

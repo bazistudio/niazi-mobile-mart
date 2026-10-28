@@ -63,6 +63,7 @@ export interface UnifiedInvoice {
     price: number;
     total: number;
     imei?: string;
+    specs?: string;
   }[];
   subtotal: number;
   discount: number;

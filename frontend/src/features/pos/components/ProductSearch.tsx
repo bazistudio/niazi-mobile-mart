@@ -238,12 +238,30 @@ export const ProductSearch = () => {
                 const isSelected = index === selectedIndex;
                 const canAdd = product.stock > 0 || targetBucket === 'return';
 
+                const hasCategory = product.category && product.category !== '-' && product.category.trim().length > 0 && product.category.toLowerCase() !== 'uncategorized';
                 const hasQuality = product.quality && product.quality !== '-' && product.quality.trim().length > 0;
                 const hasColor = product.color && product.color !== '-' && product.color.trim().length > 0;
                 const hasCompany = product.company && product.company !== '-' && product.company.trim().length > 0;
                 const hasBrand = product.brand && product.brand !== '-' && product.brand.trim().length > 0;
                 const fitsModels = Array.isArray(product.compatibleModels) && product.compatibleModels.length > 0
                   ? product.compatibleModels.slice(0, 3).join(', ') + (product.compatibleModels.length > 3 ? '...' : '')
+                  : null;
+
+                // Determine if a compatible model triggered this search match
+                const activeQuery = debouncedTerm.toLowerCase().trim();
+                const matchesDirectField = activeQuery.length > 0 && (
+                  product.name.toLowerCase().includes(activeQuery) ||
+                  product.sku.toLowerCase().includes(activeQuery) ||
+                  (product.barcode || '').toLowerCase().includes(activeQuery) ||
+                  (hasBrand && (product.brand || '').toLowerCase().includes(activeQuery)) ||
+                  (hasCompany && (product.company || '').toLowerCase().includes(activeQuery)) ||
+                  (hasQuality && (product.quality || '').toLowerCase().includes(activeQuery)) ||
+                  (hasColor && (product.color || '').toLowerCase().includes(activeQuery)) ||
+                  (hasCategory && (product.category || '').toLowerCase().includes(activeQuery))
+                );
+
+                const matchedCompatibleModel = !matchesDirectField && activeQuery.length > 0 && Array.isArray(product.compatibleModels)
+                  ? product.compatibleModels.find((m: string) => m.toLowerCase().includes(activeQuery))
                   : null;
 
                 return (
@@ -259,9 +277,17 @@ export const ProductSearch = () => {
                   >
                     {/* Primary Line: Product Name & Sale Price */}
                     <div className="flex justify-between items-start gap-2">
-                      <span className="text-[11px] sm:text-xs font-semibold text-gray-900 dark:text-gray-100 leading-tight">
-                        {product.name}
-                      </span>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[11px] sm:text-xs font-semibold text-gray-900 dark:text-gray-100 leading-tight">
+                          {product.name}
+                        </span>
+                        {matchedCompatibleModel && (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-amber-700 dark:text-amber-400">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"></span>
+                            Matched compatible model: <span className="underline decoration-amber-400">{matchedCompatibleModel}</span>
+                          </span>
+                        )}
+                      </div>
                       <span 
                         className="text-[11px] sm:text-xs font-black text-right text-gray-900 dark:text-gray-100 tabular-nums shrink-0 cursor-pointer select-none"
                         onMouseDown={(e) => { e.stopPropagation(); setRevealedPriceId(product.id || product._id); }}
@@ -278,9 +304,14 @@ export const ProductSearch = () => {
                       </span>
                     </div>
 
-                    {/* Specification Line: Quality, Color, Brand, Company, Fits */}
-                    {(hasQuality || hasColor || hasCompany || hasBrand || fitsModels) && (
+                    {/* Specification Line: Type, Quality, Color, Brand, Company, Fits */}
+                    {(hasCategory || hasQuality || hasColor || hasCompany || hasBrand || fitsModels) && (
                       <div className="flex flex-wrap items-center gap-1.5 text-[9px] text-gray-600 dark:text-gray-300">
+                        {hasCategory && (
+                          <span className="px-1.5 py-0.2 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded font-bold uppercase tracking-wider">
+                            {product.category}
+                          </span>
+                        )}
                         {hasQuality && (
                           <span className="px-1.5 py-0.2 bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 rounded font-medium">
                             {product.quality}
