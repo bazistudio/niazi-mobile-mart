@@ -7,6 +7,18 @@ export const useDashboardShortcuts = () => {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore shortcuts if the user is focused on an editable element
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable ||
+          target.getAttribute('role') === 'textbox')
+      ) {
+        return;
+      }
+
       // 1. Check for Ctrl + Shift + {Key} (Existing shortcuts)
       if (e.ctrlKey && e.shiftKey) {
         switch (e.key.toLowerCase()) {
@@ -38,6 +50,11 @@ export const useDashboardShortcuts = () => {
             // Fast Navigate to POS
             e.preventDefault();
             navigate('/dashboard/shop-admin/pos');
+            break;
+          case 'm':
+            // Fast Navigate to Mobile POS
+            e.preventDefault();
+            navigate('/dashboard/shop-admin/mobiles/sale');
             break;
           case 'd':
             // Navigate to Dashboard

@@ -34,6 +34,10 @@ export const GlobalFooter: React.FC = () => {
         </span>
         <span className="text-border">•</span>
         <span className="flex items-center gap-1">
+          <kbd className="px-1 py-0.2 rounded bg-surface-hover border border-border text-[10px] font-mono text-text-secondary">Ctrl+M</kbd> Mobile POS
+        </span>
+        <span className="text-border">•</span>
+        <span className="flex items-center gap-1">
           <kbd className="px-1 py-0.2 rounded bg-surface-hover border border-border text-[10px] font-mono text-text-secondary">Ctrl+D</kbd> Dashboard
         </span>
         <span className="text-border">•</span>
