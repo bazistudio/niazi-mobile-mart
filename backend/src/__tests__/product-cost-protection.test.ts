@@ -1,39 +1,12 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import http from 'node:http';
-import fs from 'node:fs';
-import path from 'node:path';
+import crypto from 'node:crypto';
 import express, { Request, Response, NextFunction } from 'express';
 import { canViewProductCost, sanitizeProductCost, createProductRouter } from '../routes/product.routes';
 import { RequestIdentity, NIAZI_ORGANIZATION_ID } from '../auth';
 import { issueToken } from '../services/jwt.service';
 import * as productRepo from '../repositories/product.repo';
-
-// Setup JWT keys from disk if not already set
-const privCandidates = [
-  path.join(process.cwd(), 'backend', 'jwt_private.pem'),
-  path.join(process.cwd(), 'jwt_private.pem'),
-  path.join(process.cwd(), '..', 'jwt_private.pem'),
-];
-for (const p of privCandidates) {
-  if (fs.existsSync(p)) {
-    process.env['JWT_PRIVATE_KEY'] = fs.readFileSync(p, 'utf8');
-    break;
-  }
-}
-
-const pubCandidates = [
-  path.join(process.cwd(), 'backend', 'jwt_pub.pem'),
-  path.join(process.cwd(), 'jwt_pub.pem'),
-  path.join(process.cwd(), 'src-tauri', 'src', 'services', 'jwt_public_key.pem'),
-  path.join(process.cwd(), '..', 'jwt_pub.pem'),
-];
-for (const p of pubCandidates) {
-  if (fs.existsSync(p)) {
-    process.env['JWT_PUBLIC_KEY'] = fs.readFileSync(p, 'utf8');
-    break;
-  }
-}
 
 describe('REL-3 / REL-4C: Product Cost Data Protection & HTTP Endpoint Tests', () => {
   const sampleProducts: productRepo.Product[] = [
@@ -238,8 +211,21 @@ describe('REL-3 / REL-4C: Product Cost Data Protection & HTTP Endpoint Tests', (
     let activeTestIdentity: RequestIdentity | null = null;
     let originalListProducts: any;
     let originalGetProductById: any;
+    let originalJwtPrivateKey: string | undefined;
+    let originalJwtPublicKey: string | undefined;
 
     before(async () => {
+      // Preserve original environment state and install disposable in-memory RSA-2048 key fixture
+      originalJwtPrivateKey = process.env['JWT_PRIVATE_KEY'];
+      originalJwtPublicKey = process.env['JWT_PUBLIC_KEY'];
+      const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
+        modulusLength: 2048,
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      });
+      process.env['JWT_PRIVATE_KEY'] = privateKey;
+      process.env['JWT_PUBLIC_KEY'] = publicKey;
+
       // Mock repository calls in-memory so test runs isolated without DB dependency
       originalListProducts = productRepo.listProducts;
       originalGetProductById = productRepo.getProductById;
@@ -296,6 +282,18 @@ describe('REL-3 / REL-4C: Product Cost Data Protection & HTTP Endpoint Tests', (
       // Restore repository functions
       (productRepo as any).listProducts = originalListProducts;
       (productRepo as any).getProductById = originalGetProductById;
+
+      // Restore original environment state
+      if (originalJwtPrivateKey !== undefined) {
+        process.env['JWT_PRIVATE_KEY'] = originalJwtPrivateKey;
+      } else {
+        delete process.env['JWT_PRIVATE_KEY'];
+      }
+      if (originalJwtPublicKey !== undefined) {
+        process.env['JWT_PUBLIC_KEY'] = originalJwtPublicKey;
+      } else {
+        delete process.env['JWT_PUBLIC_KEY'];
+      }
 
       if (server) {
         await new Promise<void>((resolve) => server.close(() => resolve()));
