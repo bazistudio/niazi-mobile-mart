@@ -40,7 +40,7 @@ export const ShopAdminDashboardLayout = ({ children }: ShopAdminDashboardLayoutP
         )}
 
         {/* Scrollable Content Container (The ONLY container that scrolls) */}
-        <DashboardShell variant={pathname?.includes('/pos') ? 'pos' : 'default'}>
+        <DashboardShell variant={pathname?.includes('/pos') || pathname?.endsWith('/mobiles/sale') ? 'pos' : 'default'}>
           {children || <Outlet />}
         </DashboardShell>
 

@@ -605,4 +605,57 @@ export const mobileApi = {
     );
   },
 
+  /**
+   * Complete a Mobile POS Sale transaction.
+   * Atomically transfers status to SOLD, generates invoice, posts ledger & cash.
+   */
+  completeMobileSale: async (payload: {
+    items: Array<{ deviceId: string; salePrice: number }>;
+    payments: Array<{
+      method: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'EASYPAISA' | 'JAZZCASH' | 'OTHER' | 'CREDIT';
+      amount: number;
+      referenceNumber?: string | null;
+      notes?: string | null;
+    }>;
+    customerId?: string | null;
+    branchId?: string | null;
+    notes?: string | null;
+  }): Promise<{
+    saleId: string;
+    invoiceNumber: string;
+    branchId: string;
+    customerId: string | null;
+    customerName: string | null;
+    subtotal: number;
+    discount: number;
+    totalAmount: number;
+    paidAmount: number;
+    changeAmount: number;
+    creditAmount: number;
+    paymentStatus: 'PAID' | 'PARTIALLY_PAID' | 'UNPAID';
+    devices: Array<{
+      deviceId: string;
+      brand: string;
+      model: string;
+      imei1: string;
+      imei2: string | null;
+      salePrice: number;
+      costPrice: number;
+    }>;
+    payments: Array<{
+      id: string;
+      method: string;
+      amount: number;
+    }>;
+    cashier: {
+      userId: string;
+      name: string;
+      role: string;
+    };
+    customerBalanceAfter: number | null;
+    createdAt: string;
+  }> => {
+    return httpClient.post('/api/mobiles/sales', payload);
+  },
+
 };

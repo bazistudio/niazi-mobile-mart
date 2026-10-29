@@ -49,6 +49,11 @@ import {
   RequestIdentity,
 } from '../auth';
 import {
+  executeMobileSale,
+  CompleteMobileSaleDto,
+  MobileSaleRepoError,
+} from '../repositories/mobile_sale.repo';
+import {
   MobileRepo,
   MobileRepoError,
   SellerSearchResult,
@@ -504,6 +509,55 @@ export function buildMobileRouter(pool: Pool): Router {
       res.status(200).json({ next_sr_no, branch_id: branchId });
     } catch (err) {
       handleMobileError(res, err, 'next-sr-no');
+    }
+  });
+
+  // ── POST /api/mobiles/sales ──────────────────────────────────────────────
+  // Dedicated transactional Mobile Inventory Sale POS endpoint
+  router.post('/sales', async (req: Request, res: Response) => {
+    const identity = req.identity as RequestIdentity;
+    if (!identity) {
+      res.status(401).json({ error: 'Unauthenticated' });
+      return;
+    }
+
+    const posDenied = authorizePermission(identity, 'pos', 'pos:sale');
+    const mobileDenied = authorizePermission(identity, 'mobiles', 'inventory:edit');
+    if (posDenied && mobileDenied && !isBranchAdmin(identity)) {
+      res.status(403).json({ error: posDenied || mobileDenied || 'Insufficient permissions for mobile sale' });
+      return;
+    }
+
+    try {
+      const dto = req.body as CompleteMobileSaleDto;
+      const callerIsOrgAdmin = isOrgAdmin(identity);
+
+      if (dto.branchId && !canAccessBranch(identity, dto.branchId)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to sell on behalf of another branch' });
+        return;
+      }
+
+      const result = await executeMobileSale(
+        pool,
+        dto,
+        {
+          userId: identity.user_id,
+          username: identity.username,
+          role: identity.role,
+          organizationId: identity.organization_id,
+          branchId: identity.branch_id,
+        },
+        callerIsOrgAdmin
+      );
+
+      res.status(201).json(result);
+    } catch (err: unknown) {
+      if (err instanceof MobileSaleRepoError) {
+        res.status(err.statusCode).json({ error: err.message });
+        return;
+      }
+      const message = err instanceof Error ? err.message : 'Failed to complete mobile sale';
+      res.status(500).json({ error: message });
     }
   });
 

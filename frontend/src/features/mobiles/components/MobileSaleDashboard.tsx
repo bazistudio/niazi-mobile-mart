@@ -1,23 +1,23 @@
 'use client';
 
 /**
- * MobileSaleDashboard — Frontend Preview Workspace
+ * MobileSaleDashboard — On-Page Mobile Inventory POS & Multi-Payment Terminal
+ * Follows the exact same layout & pattern as the working Products POS page:
+ *  1. Top POS Header with Mobile Omnibox Search (mobiles ONLY show in dropdown after search/scan, never pre-listed in a grid)
+ *  2. Left 8 Columns: Mobile POS Cart Table + Multi-Payment Split Checkout Summary
+ *  3. Right 4 Columns: Customer Search + Customer Details Card + Live Customer Ledger Statement
  *
  * ⚠️  FRONTEND PREVIEW — Sale Processing Not Connected ⚠️
  *
- * This page is a frontend-only preview. It does NOT:
+ * This page is a frontend-only preview of the On-Page Mobile POS Terminal. It does NOT:
  *  - POST to any sale endpoint
  *  - Update mobile_devices.status to SOLD
  *  - Create invoices, receipts, or payment records
- *  - Modify stock, cash sessions, or customer ledgers
- *
- * Backend sale integration will be authorised and implemented in a
- * separate phase. No persisted sale records are created here.
+ *  - Modify stock, cash sessions, or customer ledgers (except standalone Receive Payment modal if used)
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useLocation, Link } from 'react-router-dom';
-// Note: Lucide icons imported below; react-router and react are the only external deps needed here.
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useLocation, useNavigate, Link } from 'react-router-dom';
 import {
   Smartphone,
   Search,
@@ -29,882 +29,2047 @@ import {
   X,
   CheckCircle2,
   Loader2,
-  AlertCircle,
   ShoppingCart,
-  Tag,
-  ChevronDown,
-  ChevronUp,
+  RefreshCw,
+  RotateCcw,
+  Repeat,
+  CreditCard,
+  Printer,
+  PauseCircle,
   Info,
+  Eye,
+  EyeOff,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Receipt,
+  ExternalLink,
+  ScanBarcode,
 } from 'lucide-react';
-import { Button, Badge, Card } from '@/components/ui';
+import { Button, Card } from '@/components/ui';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 import { mobileApi } from '../services/mobile.api';
 import type { MobileDeviceRow } from '../services/mobile.api';
 import { customerApi } from '@/services/customer.api';
 import type { DBCustomer } from '@/types/db.types';
+import { useLedger } from '@/features/ledger/hooks/useLedger';
+import { LedgerSettlementModal } from '@/features/pos/components/modals/LedgerSettlementModal';
+import { DocumentService } from '@/features/pos/services/document/document.service';
+import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
+import { usePosStore } from '@/features/pos/store/usePosStore';
+import toast from 'react-hot-toast';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Local view-model types (frontend-only, no backend contract)
 // ─────────────────────────────────────────────────────────────────────────────
 
+export type MobileItemBucket = 'SALE' | 'RETURN';
+
 interface CartItem {
   device: MobileDeviceRow;
   salePrice: number;
-  discount: number;
+  bucket: MobileItemBucket;
 }
 
-type PaymentMethod = 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'JAZZCASH' | 'EASYPAISA';
+export type PaymentMethod =
+  | 'CASH'
+  | 'JAZZCASH'
+  | 'EASYPAISA'
+  | 'BANK_TRANSFER'
+  | 'CARD'
+  | 'CREDIT';
+
+export interface SplitPaymentLine {
+  id: string;
+  method: PaymentMethod;
+  amount: number;
+  reference?: string;
+}
+
+export type MobilePosMode = 'SALE' | 'RETURN' | 'REPLACE';
 
 interface SaleCustomerLocal {
   id: string;
   name: string;
   phone?: string;
   mobile?: string;
+  currentBalance: number;
+  creditLimit: number;
 }
 
 const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
-  CASH: 'Cash',
-  CARD: 'Card / POS',
-  BANK_TRANSFER: 'Bank Transfer',
-  JAZZCASH: 'JazzCash',
-  EASYPAISA: 'EasyPaisa',
+  CASH: '💵 Cash',
+  JAZZCASH: '📱 JazzCash',
+  EASYPAISA: '📲 EasyPaisa',
+  BANK_TRANSFER: '🏦 Bank Transfer',
+  CARD: '💳 Card / POS',
+  CREDIT: '📒 Credit / Ledger',
 };
+
+const MOBILE_NAV_TABS = [
+  { label: 'Inventory', href: '/dashboard/shop-admin/mobiles' },
+  { label: 'Mobile Sale (POS)', href: '/dashboard/shop-admin/mobiles/sale' },
+  { label: 'Sale History', href: '/dashboard/shop-admin/mobiles/sale-history' },
+] as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 function fmtPKR(value: number): string {
-  return `Rs. ${value.toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  return `Rs. ${value.toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
 function getPtaBadge(status: string) {
   if (status === 'PTA_APPROVED') {
     return (
-      <span className="inline-flex items-center gap-1 text-xs text-success font-medium">
-        <ShieldCheck className="w-3.5 h-3.5" /> PTA Approved
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
+        <ShieldCheck className="w-2.5 h-2.5" /> PTA
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 text-xs text-warning font-medium">
-      <AlertTriangle className="w-3.5 h-3.5" /> {status}
+    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-500 border border-amber-500/30">
+      <AlertTriangle className="w-2.5 h-2.5" /> {status.replace('_', ' ')}
     </span>
   );
 }
 
-function getStatusBadge(status: string) {
-  if (status === 'IN_STOCK') return <Badge variant="success" size="sm">In Stock</Badge>;
-  if (status === 'INSPECTION') return <Badge variant="warning" size="sm">Inspection</Badge>;
-  if (status === 'SOLD') return <Badge variant="neutral" size="sm">Sold</Badge>;
-  return <Badge variant="neutral" size="sm">{status}</Badge>;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// Customer search sub-component (decoupled from POS store)
+// Main On-Page Mobile POS Component (Matches Products POS Pattern)
 // ─────────────────────────────────────────────────────────────────────────────
-
-interface CustomerPickerProps {
-  selected: SaleCustomerLocal | null;
-  onSelect: (c: SaleCustomerLocal | null) => void;
-}
-
-const CustomerPicker: React.FC<CustomerPickerProps> = ({ selected, onSelect }) => {
-  const [term, setTerm] = useState('');
-  const [open, setOpen] = useState(false);
-  const [results, setResults] = useState<DBCustomer[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const dropRef = useRef<HTMLDivElement>(null);
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    const q = term.trim();
-    if (!q) { setResults([]); return; }
-    setIsLoading(true);
-    searchTimerRef.current = setTimeout(async () => {
-      try {
-        const res = await customerApi.searchCustomers(q);
-        setResults(res.data || []);
-      } catch {
-        setResults([]);
-      } finally {
-        setIsLoading(false);
-      }
-    }, 300);
-    return () => {
-      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    };
-  }, [term]);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (dropRef.current && !dropRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  if (selected) {
-    return (
-      <div className="flex items-center justify-between px-3 py-2 bg-primary/5 border border-primary/20 rounded-lg">
-        <div className="flex items-center gap-2">
-          <UserCircle2 className="w-4 h-4 text-primary shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-text-primary">{selected.name}</p>
-            {(selected.phone || selected.mobile) && (
-              <p className="text-xs text-text-muted">{selected.phone || selected.mobile}</p>
-            )}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => onSelect(null)}
-          className="p-1 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition-colors"
-          title="Clear customer — revert to walk-in"
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative" ref={dropRef}>
-      <div className="relative">
-        <Search className="w-3.5 h-3.5 text-text-muted absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-        <input
-          type="text"
-          placeholder="Search customer by name or phone…"
-          value={term}
-          onChange={(e) => { setTerm(e.target.value); setOpen(true); }}
-          onFocus={() => { if (term.trim()) setOpen(true); }}
-          className="w-full pl-8 pr-3 py-2 text-sm bg-surface text-text-primary placeholder:text-text-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring"
-        />
-      </div>
-      {open && term.trim().length > 0 && (
-        <div className="absolute z-50 mt-1 w-full bg-surface border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
-          {isLoading && (
-            <div className="p-3 text-xs text-text-muted text-center flex items-center justify-center gap-2">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Searching…
-            </div>
-          )}
-          {!isLoading && results.length === 0 && (
-            <div className="p-3 text-xs text-text-muted text-center">No customers found</div>
-          )}
-          {results.map((c) => (
-            <button
-              key={c.id || (c as any)._id}
-              type="button"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onSelect({ id: c.id || (c as any)._id, name: c.name, phone: c.phone, mobile: c.mobile });
-                setTerm('');
-                setOpen(false);
-              }}
-              className="w-full text-left px-3 py-2 hover:bg-surface-hover transition-colors text-sm"
-            >
-              <span className="font-medium text-text-primary">{c.name}</span>
-              {(c.phone || c.mobile) && (
-                <span className="text-xs text-text-muted ml-2">{c.phone || c.mobile}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Main component
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─── Mobile module sub-navigation tabs ─────────────────────────────────────
-const MOBILE_NAV_TABS = [
-  { label: 'Inventory', href: '/dashboard/shop-admin/mobiles' },
-  { label: 'Mobile Sale', href: '/dashboard/shop-admin/mobiles/sale' },
-  { label: 'Sale History', href: '/dashboard/shop-admin/mobiles/sale-history' },
-] as const;
 
 export const MobileSaleDashboard: React.FC = () => {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const isOrgAdmin = user?.role === 'ADMIN';
+  const canRevealCost =
+    user?.role === 'ADMIN' ||
+    user?.role === 'SUPER_ADMIN' ||
+    user?.role === 'SHOP_ADMIN';
+
   const activeShop = useOrganizationStore((s) => s.activeShop);
   const activeShopId = useOrganizationStore((s) => s.activeShopId);
   const branchId = activeShopId || activeShop?._id || activeShop?.id || undefined;
 
-  // ── Device search ──
+  // ── POS Operational Mode: Regular Sale, Mobile Return, Mobile Replace ──
+  const [posMode, setPosMode] = useState<MobilePosMode>('SALE');
+  const [replaceBucket, setReplaceBucket] = useState<'RETURN' | 'SALE'>('RETURN');
+
+  // ── Inventory Search State (Only shown in floating dropdown on search, never pre-listed) ──
+  const [allDevices, setAllDevices] = useState<MobileDeviceRow[]>([]);
+  const [isLoadingCatalog, setIsLoadingCatalog] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<MobileDeviceRow[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [selectedDevice, setSelectedDevice] = useState<MobileDeviceRow | null>(null);
+  const [isSearchDropdownOpen, setSearchDropdownOpen] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [revealedCostId, setRevealedCostId] = useState<string | null>(null);
 
-  // ── Cart ──
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchDropdownRef = useRef<HTMLDivElement>(null);
+
+  // ── Cart State ──
   const [cart, setCart] = useState<CartItem[]>([]);
-
-  // ── Customer ──
-  const [customer, setCustomer] = useState<SaleCustomerLocal | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH');
-  const [saleNotes, setSaleNotes] = useState('');
-
-  // ── Review panel ──
-  const [showReview, setShowReview] = useState(false);
-
-  // ── Price validation errors ──
   const [priceErrors, setPriceErrors] = useState<Record<string, string>>({});
+  const [lastAddedDeviceId, setLastAddedDeviceId] = useState<string | null>(null);
+  const salePriceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
-  // Debounced device search
+  // Auto-focus and highlight/select Sale Price input immediately after adding a mobile to cart
   useEffect(() => {
-    const q = searchQuery.trim();
+    if (!lastAddedDeviceId) return;
+    const timer = setTimeout(() => {
+      const inputEl = salePriceInputRefs.current[lastAddedDeviceId];
+      if (inputEl) {
+        inputEl.focus();
+        inputEl.select();
+      }
+      setLastAddedDeviceId(null);
+    }, 40);
+    return () => clearTimeout(timer);
+  }, [lastAddedDeviceId, cart]);
+
+  // ── Customer & Ledger Panel State (Right 4 Columns, matching PosCustomerLedgerPanel) ──
+  const [customer, setCustomer] = useState<SaleCustomerLocal | null>(null);
+  const [customerSearchTerm, setCustomerSearchTerm] = useState('');
+  const [isCustomerDropdownOpen, setCustomerDropdownOpen] = useState(false);
+  const [customerResults, setCustomerResults] = useState<DBCustomer[]>([]);
+  const [isCustomersLoading, setIsCustomersLoading] = useState(false);
+  const [customerSelectedIndex, setCustomerSelectedIndex] = useState(0);
+  const [isSettlementModalOpen, setSettlementModalOpen] = useState(false);
+
+  const customerInputRef = useRef<HTMLInputElement>(null);
+  const customerDropdownRef = useRef<HTMLDivElement>(null);
+  const customerSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Multi-Payment Split State ──
+  const [payments, setPayments] = useState<SplitPaymentLine[]>([
+    { id: 'pay-1', method: 'CASH', amount: 0 },
+  ]);
+
+  // ── Review & Return/Replace Modals ──
+  const [saleNotes, setSaleNotes] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [completedSaleResult, setCompletedSaleResult] = useState<any | null>(null);
+  const { settings: printerSettings, shopHeader } = usePrinterStore();
+  const [showReview, setShowReview] = useState(false);
+  const [actionNoticeModal, setActionNoticeModal] = useState<{
+    open: boolean;
+    title: string;
+    mode: 'RETURN' | 'REPLACE';
+    referenceInvoice: string;
+    reason: string;
+  }>({
+    open: false,
+    title: '',
+    mode: 'RETURN',
+    referenceInvoice: '',
+    reason: '',
+  });
+
+  // ── Load Branch Mobile Inventory in Background for Instant Omnibox Search ──
+  const loadInventory = useCallback(async () => {
+    setIsLoadingCatalog(true);
+    try {
+      const res = await mobileApi.getMobiles({
+        branch_id: branchId,
+        limit: 250,
+      });
+      setAllDevices(res.devices || []);
+    } catch {
+      // Handled gracefully in search dropdown
+    } finally {
+      setIsLoadingCatalog(false);
+    }
+  }, [branchId]);
+
+  useEffect(() => {
+    loadInventory();
+  }, [loadInventory]);
+
+  // Auto-focus mobile search input on mount & F1 shortcut, F2 for customer search
+  useEffect(() => {
+    searchInputRef.current?.focus();
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F1') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      } else if (e.key === 'F2') {
+        e.preventDefault();
+        customerInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        searchDropdownRef.current &&
+        !searchDropdownRef.current.contains(e.target as Node)
+      ) {
+        setSearchDropdownOpen(false);
+      }
+      if (
+        customerDropdownRef.current &&
+        !customerDropdownRef.current.contains(e.target as Node)
+      ) {
+        setCustomerDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // ── Customer Search Debounce ──
+  useEffect(() => {
+    if (customerSearchTimerRef.current) clearTimeout(customerSearchTimerRef.current);
+    const q = customerSearchTerm.trim();
     if (!q) {
-      setSearchResults([]);
+      setCustomerResults([]);
       return;
     }
-
-    setIsSearching(true);
-    setSearchError(null);
-
-    const timer = setTimeout(async () => {
+    setIsCustomersLoading(true);
+    customerSearchTimerRef.current = setTimeout(async () => {
       try {
-        const res = await mobileApi.getMobiles({
-          branch_id: branchId,
-          limit: 20,
-        });
-        // Client-side filter by brand/model/IMEI/serial
-        const ql = q.toLowerCase();
-        const filtered = (res.devices || []).filter((d) => {
-          return (
-            d.brand.toLowerCase().includes(ql) ||
-            d.model.toLowerCase().includes(ql) ||
-            (d.serial_number && d.serial_number.toLowerCase().includes(ql)) ||
-            (d.imeis && d.imeis.some((i) => i.imei.includes(ql)))
-          );
-        });
-        setSearchResults(filtered);
-      } catch (err) {
-        setSearchError(err instanceof Error ? err.message : 'Failed to search devices');
+        const res = await customerApi.searchCustomers(q);
+        setCustomerResults(res.data || []);
+      } catch {
+        setCustomerResults([]);
       } finally {
-        setIsSearching(false);
+        setIsCustomersLoading(false);
       }
-    }, 350);
+    }, 250);
+    return () => {
+      if (customerSearchTimerRef.current) clearTimeout(customerSearchTimerRef.current);
+    };
+  }, [customerSearchTerm]);
 
-    return () => clearTimeout(timer);
-  }, [searchQuery, branchId]);
+  // ── Live Customer Ledger Hook (Same as PosCustomerLedgerPanel) ──
+  const ledgerQueryArg = useMemo(() => {
+    if (!customer || !customer.id) return null;
+    return {
+      id: customer.id,
+      type: 'CUSTOMER' as const,
+      name: customer.name,
+      balance: customer.currentBalance ?? 0,
+      creditLimit: customer.creditLimit ?? 0,
+    };
+  }, [customer]);
 
-  // ── Cart helpers ──
+  const { timeline, isLedgerLoading, refetchLedger } = useLedger(ledgerQueryArg);
+
+  // ── Active Bucket Determination (Matches ProductSearch.tsx) ──
+  const activeBucket: MobileItemBucket =
+    posMode === 'RETURN'
+      ? 'RETURN'
+      : posMode === 'REPLACE'
+      ? replaceBucket
+      : 'SALE';
+
+  // ── Search Results (ONLY computed when user types in search box) ──
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+
+    // For regular sale or replacement new item: search IN_STOCK devices.
+    // For return bucket: allow searching all devices (or SOLD/IN_STOCK) by IMEI/model.
+    const pool =
+      activeBucket === 'RETURN'
+        ? allDevices
+        : allDevices.filter((d) => d.status === 'IN_STOCK');
+
+    return pool
+      .filter((d) => {
+        return (
+          d.brand.toLowerCase().includes(q) ||
+          d.model.toLowerCase().includes(q) ||
+          (d.color && d.color.toLowerCase().includes(q)) ||
+          (d.storage && d.storage.toLowerCase().includes(q)) ||
+          (d.serial_number && d.serial_number.toLowerCase().includes(q)) ||
+          (d.imeis && d.imeis.some((i) => i.imei.toLowerCase().includes(q)))
+        );
+      })
+      .slice(0, 12);
+  }, [allDevices, searchQuery, activeBucket]);
+
+  // ── Cart Helpers ──
   const isInCart = useCallback(
     (deviceId: string) => cart.some((c) => c.device.id === deviceId),
     [cart]
   );
 
-  const addToCart = useCallback(
-    (device: MobileDeviceRow) => {
-      if (isInCart(device.id)) return;
-      if (device.status !== 'IN_STOCK') return; // only eligible devices
-      setCart((prev) => [
-        ...prev,
-        {
-          device,
-          salePrice: parseFloat(device.expected_sale_price ?? '0') || 0,
-          discount: 0,
-        },
-      ]);
-      setSelectedDevice(null);
-      setSearchQuery('');
-    },
-    [isInCart]
-  );
+  // Sync single-line payment helper
+  const syncDefaultPaymentToNetTotal = useCallback((nextCart: CartItem[]) => {
+    const saleNet = nextCart
+      .filter((i) => i.bucket === 'SALE')
+      .reduce((acc, item) => acc + Math.max(0, item.salePrice), 0);
+    const returnNet = nextCart
+      .filter((i) => i.bucket === 'RETURN')
+      .reduce((acc, item) => acc + Math.max(0, item.salePrice), 0);
+    const netPayable = Math.max(0, saleNet - returnNet);
 
-  const removeFromCart = useCallback((deviceId: string) => {
-    setCart((prev) => prev.filter((c) => c.device.id !== deviceId));
-    setPriceErrors((prev) => {
-      const next = { ...prev };
-      delete next[deviceId];
-      return next;
+    setPayments((currPays) => {
+      if (currPays.length === 1) {
+        return [{ ...currPays[0], amount: netPayable }];
+      }
+      return currPays;
     });
   }, []);
 
-  const updateCartItem = useCallback(
-    (deviceId: string, field: 'salePrice' | 'discount', raw: string) => {
-      const num = parseFloat(raw);
+  const addToCart = useCallback(
+    (device: MobileDeviceRow, bucketOverride?: MobileItemBucket) => {
+      const targetBucket = bucketOverride || activeBucket;
+      if (isInCart(device.id)) {
+        toast.error('This mobile device (IMEI) is already in the cart');
+        const existingInput = salePriceInputRefs.current[device.id];
+        if (existingInput) {
+          existingInput.focus();
+          existingInput.select();
+        }
+        return;
+      }
+      if (targetBucket === 'SALE' && device.status !== 'IN_STOCK') {
+        toast.error('Only IN_STOCK mobile devices can be sold');
+        return;
+      }
+
+      const price = parseFloat(device.expected_sale_price ?? '0') || 0;
+      setCart((prev) => {
+        const nextCart: CartItem[] = [
+          ...prev,
+          {
+            device,
+            salePrice: price,
+            bucket: targetBucket,
+          },
+        ];
+        syncDefaultPaymentToNetTotal(nextCart);
+        return nextCart;
+      });
+
+      setSearchQuery('');
+      setSearchDropdownOpen(false);
+      setSelectedIndex(0);
+      // Focus and highlight the newly added mobile's Sale Price input for instant negotiation edit
+      setLastAddedDeviceId(device.id);
+    },
+    [activeBucket, isInCart, syncDefaultPaymentToNetTotal]
+  );
+
+  const removeFromCart = useCallback(
+    (deviceId: string) => {
+      delete salePriceInputRefs.current[deviceId];
+      setCart((prev) => {
+        const nextCart = prev.filter((c) => c.device.id !== deviceId);
+        syncDefaultPaymentToNetTotal(nextCart);
+        return nextCart;
+      });
+      setPriceErrors((prev) => {
+        const next = { ...prev };
+        delete next[`${deviceId}_salePrice`];
+        return next;
+      });
+    },
+    [syncDefaultPaymentToNetTotal]
+  );
+
+  const clearCart = useCallback(() => {
+    salePriceInputRefs.current = {};
+    setCart([]);
+    setPriceErrors({});
+    setPayments([{ id: 'pay-1', method: 'CASH', amount: 0 }]);
+    setPosMode('SALE');
+  }, []);
+
+  const updateCartItemPrice = useCallback(
+    (deviceId: string, raw: string) => {
+      const num = raw === '' ? 0 : parseFloat(raw);
       const isValid = !isNaN(num) && num >= 0;
 
       setPriceErrors((prev) => {
         const next = { ...prev };
         if (!isValid) {
-          next[`${deviceId}_${field}`] = `${field === 'discount' ? 'Discount' : 'Price'} must be a non-negative number`;
+          next[`${deviceId}_salePrice`] = 'Invalid amount';
         } else {
-          delete next[`${deviceId}_${field}`];
+          delete next[`${deviceId}_salePrice`];
         }
         return next;
       });
 
       if (!isValid) return;
 
-      setCart((prev) =>
-        prev.map((item) => {
-          if (item.device.id !== deviceId) return item;
-          const updated: CartItem = field === 'salePrice'
-            ? { ...item, salePrice: num }
-            : { ...item, discount: num };
-          // Discount cannot exceed sale price
-          if (updated.discount > updated.salePrice) {
-            setPriceErrors((e) => ({
-              ...e,
-              [`${deviceId}_discount`]: 'Discount cannot exceed sale price',
-            }));
-          } else {
-            setPriceErrors((e) => {
-              const n = { ...e };
-              delete n[`${deviceId}_discount`];
-              return n;
-            });
-          }
-          return updated;
-        })
-      );
+      setCart((prev) => {
+        const nextCart = prev.map((item) =>
+          item.device.id === deviceId ? { ...item, salePrice: num } : item
+        );
+        syncDefaultPaymentToNetTotal(nextCart);
+        return nextCart;
+      });
     },
-    []
+    [syncDefaultPaymentToNetTotal]
   );
 
-  // ── Totals ──
-  const subtotal = cart.reduce((acc, item) => acc + item.salePrice, 0);
-  const totalDiscount = cart.reduce((acc, item) => acc + item.discount, 0);
-  const grandTotal = subtotal - totalDiscount;
+  // ── Separated Cart Buckets & Bill Totals (Matches CartTable.tsx & CartSummary.tsx) ──
+  const saleItems = useMemo(() => cart.filter((i) => i.bucket === 'SALE'), [cart]);
+  const returnItems = useMemo(() => cart.filter((i) => i.bucket === 'RETURN'), [cart]);
 
-  const hasErrors = Object.keys(priceErrors).length > 0;
+  const saleSubtotal = useMemo(
+    () => saleItems.reduce((acc, item) => acc + item.salePrice, 0),
+    [saleItems]
+  );
+  const returnCreditTotal = useMemo(
+    () => returnItems.reduce((acc, item) => acc + Math.max(0, item.salePrice), 0),
+    [returnItems]
+  );
 
-  const canReview = cart.length > 0 && !hasErrors;
+  const netSignedBalance = saleSubtotal - returnCreditTotal;
+  const grandTotal = Math.max(0, netSignedBalance);
+  const isNetRefund = netSignedBalance < 0;
 
-  // ── Review action ──
-  const handleReview = () => {
-    if (!canReview) return;
-    setShowReview(true);
+  // ── Multi-Payment Split Helpers ──
+  const totalReceived = useMemo(
+    () => payments.reduce((sum, p) => sum + (Number.isFinite(p.amount) ? p.amount : 0), 0),
+    [payments]
+  );
+
+  const remainingBalance = grandTotal - totalReceived;
+
+  const handleAddPaymentLine = (defaultMethod?: PaymentMethod) => {
+    const rem = Math.max(0, grandTotal - totalReceived);
+    const chosenMethod: PaymentMethod =
+      defaultMethod ||
+      (payments.some((p) => p.method === 'CASH') ? 'JAZZCASH' : 'CASH');
+
+    setPayments((prev) => [
+      ...prev,
+      {
+        id: `pay-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        method: chosenMethod,
+        amount: rem,
+      },
+    ]);
   };
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Review Modal (frontend-only summary, no submission)
-  // ─────────────────────────────────────────────────────────────────────────
-
-  if (showReview) {
-    return (
-      <div className="flex flex-col gap-6 w-full max-w-3xl mx-auto pb-16 px-4 sm:px-6 pt-6">
-        {/* Preview banner */}
-        <div className="flex items-center gap-3 p-4 bg-warning/10 border border-warning/30 rounded-lg">
-          <Info className="w-5 h-5 text-warning shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-warning">Frontend Preview — Sale Processing Not Connected</p>
-            <p className="text-xs text-text-muted mt-0.5">
-              This is a local review only. No sale record, invoice, or payment has been created.
-              Backend sale integration will be authorised in a future phase.
-            </p>
-          </div>
-        </div>
-
-        {/* Review header */}
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-text-primary">Sale Review</h2>
-          <button
-            type="button"
-            onClick={() => setShowReview(false)}
-            className="text-sm text-primary hover:underline"
-          >
-            ← Back to workspace
-          </button>
-        </div>
-
-        {/* Customer */}
-        <Card variant="default" padding="md" className="bg-surface border-border">
-          <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">Customer</p>
-          {customer ? (
-            <div className="flex items-center gap-2">
-              <UserCircle2 className="w-4 h-4 text-primary" />
-              <span className="font-semibold text-text-primary">{customer.name}</span>
-              {(customer.phone || customer.mobile) && (
-                <span className="text-xs text-text-muted">{customer.phone || customer.mobile}</span>
-              )}
-            </div>
-          ) : (
-            <span className="text-sm text-text-muted italic">Walk-in customer</span>
-          )}
-        </Card>
-
-        {/* Devices */}
-        <Card variant="default" padding="md" className="bg-surface border-border">
-          <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
-            Devices ({cart.length})
-          </p>
-          <div className="divide-y divide-border">
-            {cart.map((item) => {
-              const imei1 = item.device.imeis?.find((i) => i.slot === 'IMEI1')?.imei ?? '—';
-              const imei2 = item.device.imeis?.find((i) => i.slot === 'IMEI2')?.imei;
-              const lineTotal = item.salePrice - item.discount;
-              return (
-                <div key={item.device.id} className="py-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                  <div>
-                    <p className="font-semibold text-text-primary">{item.device.brand} {item.device.model}</p>
-                    <p className="text-xs text-text-muted">{item.device.storage} / {item.device.ram} · {item.device.color}</p>
-                    <p className="text-xs font-mono text-text-secondary">IMEI1: {imei1}{imei2 ? ` · IMEI2: ${imei2}` : ''}</p>
-                    <div className="mt-1">{getStatusBadge(item.device.status)}</div>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-medium text-text-secondary text-xs">Sale price: {fmtPKR(item.salePrice)}</p>
-                    {item.discount > 0 && (
-                      <p className="text-xs text-warning">Discount: −{fmtPKR(item.discount)}</p>
-                    )}
-                    <p className="font-bold text-primary">{fmtPKR(lineTotal)}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-
-        {/* Totals */}
-        <Card variant="default" padding="md" className="bg-surface border-border">
-          <div className="space-y-1.5 text-sm">
-            <div className="flex justify-between text-text-secondary">
-              <span>Subtotal</span>
-              <span>{fmtPKR(subtotal)}</span>
-            </div>
-            <div className="flex justify-between text-warning">
-              <span>Total Discount</span>
-              <span>−{fmtPKR(totalDiscount)}</span>
-            </div>
-            <div className="flex justify-between font-bold text-text-primary text-base border-t border-border pt-2">
-              <span>Grand Total</span>
-              <span className="text-primary">{fmtPKR(grandTotal)}</span>
-            </div>
-          </div>
-        </Card>
-
-        {/* Payment & Notes */}
-        <Card variant="default" padding="md" className="bg-surface border-border">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-text-secondary">Payment Method</span>
-            <span className="font-semibold text-text-primary">{PAYMENT_METHOD_LABELS[paymentMethod]}</span>
-          </div>
-          {saleNotes && (
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-text-muted">Notes: {saleNotes}</p>
-            </div>
-          )}
-        </Card>
-
-        {/* Action */}
-        <div className="flex flex-col items-center gap-3 pt-2">
-          <div className="w-full p-4 bg-surface-hover border border-border/60 rounded-lg text-center">
-            <p className="text-sm font-semibold text-text-secondary mb-1">
-              ⚠️ Sale Submission Disabled
-            </p>
-            <p className="text-xs text-text-muted max-w-sm mx-auto">
-              Backend sale processing is not yet connected. This preview confirms the sale details only.
-              No data has been saved, no status changed, no invoice created.
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="md"
-            onClick={() => setShowReview(false)}
-          >
-            ← Edit Sale Details
-          </Button>
-        </div>
-      </div>
+  const handleUpdatePaymentLine = (
+    id: string,
+    patch: Partial<Pick<SplitPaymentLine, 'method' | 'amount' | 'reference'>>
+  ) => {
+    setPayments((prev) =>
+      prev.map((line) => (line.id === id ? { ...line, ...patch } : line))
     );
-  }
+  };
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Main workspace
-  // ─────────────────────────────────────────────────────────────────────────
+  const handleRemovePaymentLine = (id: string) => {
+    setPayments((prev) => {
+      if (prev.length <= 1) {
+        return [{ ...prev[0], amount: 0 }];
+      }
+      return prev.filter((line) => line.id !== id);
+    });
+  };
+
+  // ── Execute Live Mobile POS Sale ──
+  const handleExecuteMobileSale = async () => {
+    if (cart.length === 0) {
+      toast.error("Mobile cart is empty");
+      return;
+    }
+    if (hasErrors) {
+      toast.error("Please correct price errors before submitting");
+      return;
+    }
+    if (remainingBalance > 0 && !customer) {
+      toast.error("Credit sales require a selected customer. Walk-in customers cannot have due balance.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const payload = {
+        items: cart.map((c) => ({
+          deviceId: c.device.id,
+          salePrice: c.salePrice,
+        })),
+        payments: payments.map((p) => ({
+          method: p.method,
+          amount: p.amount,
+          referenceNumber: p.reference ?? null,
+        })),
+        customerId: customer?.id ?? null,
+        branchId: branchId ?? null,
+        notes: saleNotes.trim() || null,
+      };
+
+      const res = await mobileApi.completeMobileSale(payload);
+      toast.success("Sale Completed! Invoice #" + res.invoiceNumber);
+      setCompletedSaleResult(res);
+      setShowReview(false);
+
+      // Trigger unified thermal print document
+      try {
+        const realShopProfile = {
+          name: shopHeader?.name || activeShop?.name || "Niazi Mobile Mart",
+          address: shopHeader?.address || (activeShop as any)?.address || "Main Branch",
+          phone1: shopHeader?.phone || (activeShop as any)?.phone || "",
+        };
+        const mappedTxn = {
+          transactionId: res.invoiceNumber,
+          items: res.devices.map((d) => ({
+            productName: d.brand + " " + d.model + " (IMEI: " + d.imei1 + ")",
+            quantity: 1,
+            unitPrice: d.salePrice,
+            discount: 0,
+            subtotal: d.salePrice,
+          })),
+          subtotal: res.subtotal,
+          discountTotal: res.discount,
+          grandTotal: res.totalAmount,
+          totalPaid: res.paidAmount,
+          remainingDue: res.creditAmount,
+          changeReturned: res.changeAmount,
+          paymentBreakdown: res.payments.map((p) => ({ method: p.method, amount: p.amount })),
+          createdAt: res.createdAt,
+        };
+        const invoiceExtras = {
+          customer: customer ? { id: customer.id, name: customer.name, phone: customer.phone } : null,
+          cashier: res.cashier.name + " (" + res.cashier.role + ")",
+        };
+        const builtInvoice = DocumentService.buildInvoice(mappedTxn as any, realShopProfile as any, invoiceExtras as any);
+        usePosStore.getState().setLastInvoice(builtInvoice);
+        await DocumentService.logPrint(builtInvoice.invoiceId, "PRINT");
+      } catch (printErr) {
+        console.warn("Advisory printing error:", printErr);
+      }
+
+      // Clear cart and reload inventory
+      clearCart();
+      setCustomer(null);
+      setSaleNotes("");
+      loadInventory();
+      refetchLedger();
+      window.dispatchEvent(new CustomEvent("pos:sale-completed"));
+    } catch (err: any) {
+      const msg = err?.message || err?.error || "Failed to process mobile sale";
+      toast.error(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+    const hasErrors = Object.keys(priceErrors).length > 0;
+  const canReview = cart.length > 0 && !hasErrors && totalReceived >= 0;
+
+  // ── Omnibox Keyboard Navigation (Matches ProductSearch.tsx) ──
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!isSearchDropdownOpen || searchResults.length === 0) {
+      if (e.key === 'Enter' && searchQuery.trim().length >= 4) {
+        const q = searchQuery.trim().toLowerCase();
+        const exactMatch = allDevices.find(
+          (d) =>
+            (d.imeis && d.imeis.some((i) => i.imei.toLowerCase() === q)) ||
+            (d.serial_number && d.serial_number.toLowerCase() === q)
+        );
+        if (exactMatch) {
+          e.preventDefault();
+          addToCart(exactMatch);
+        }
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedIndex((prev) => (prev < searchResults.length - 1 ? prev + 1 : prev));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedIndex((prev) => (prev > 0 ? prev - 1 : 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const target = searchResults[selectedIndex];
+      if (target) {
+        addToCart(target);
+      }
+    } else if (e.key === 'Escape') {
+      setSearchDropdownOpen(false);
+    }
+  };
+
+  // ── Customer Selector Handlers ──
+  const handleSelectCustomer = (c: DBCustomer) => {
+    setCustomer({
+      id: c.id || (c as any)._id,
+      name: c.name,
+      phone: c.phone || c.mobile,
+      mobile: c.mobile || c.phone,
+      currentBalance: c.currentBalance ?? 0,
+      creditLimit: c.creditLimit ?? 0,
+    });
+    setCustomerSearchTerm('');
+    setCustomerDropdownOpen(false);
+    setCustomerSelectedIndex(0);
+  };
+
+  const handleCustomerKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!isCustomerDropdownOpen || customerResults.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setCustomerSelectedIndex((prev) =>
+        prev < customerResults.length - 1 ? prev + 1 : prev
+      );
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setCustomerSelectedIndex((prev) => (prev > 0 ? prev - 1 : 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (customerResults[customerSelectedIndex]) {
+        handleSelectCustomer(customerResults[customerSelectedIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      setCustomerDropdownOpen(false);
+    }
+  };
+
+  // Determine border theme class matching CartPanel.tsx
+  const cartBorderClass =
+    posMode === 'RETURN'
+      ? 'border border-warning/50 rounded-2xl'
+      : posMode === 'REPLACE'
+      ? 'pos-animated-border-green'
+      : 'pos-animated-border-blue';
 
   return (
-    <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto pb-16 px-4 sm:px-6">
-      {/* Mobile module sub-nav */}
-      <div className="flex items-center gap-1 pt-4 border-b border-border pb-0 overflow-x-auto">
-        {MOBILE_NAV_TABS.map((tab) => {
-          const isActive =
-            tab.href === '/dashboard/shop-admin/mobiles'
-              ? pathname === '/dashboard/shop-admin/mobiles'
-              : pathname.startsWith(tab.href);
-          return (
-            <Link
-              key={tab.href}
-              to={tab.href}
-              className={`px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-                isActive
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border'
-              }`}
-            >
-              {tab.label}
-            </Link>
-          );
-        })}
-      </div>
+    <div className="flex flex-col flex-1 h-full w-full min-h-0 overflow-hidden bg-background select-none">
+      {/* ═════════════════════════════════════════════════════════════════════════
+          1. TOP POS HEADER BAR (Matches PosHeader.tsx + ProductSearch.tsx)
+             - Left: Brand & Module Navigation (Inventory | Mobile Sale | Sale History)
+             - Center: Mobile Omnibox Search (Mobiles ONLY show on search, never pre-listed)
+             - Right: POS Operational Mode Buttons (Regular Sale | Mobile Return | Mobile Replace)
+         ═════════════════════════════════════════════════════════════════════════ */}
+      <header className="min-h-[54px] px-3 sm:px-4 py-1.5 border-b border-border bg-surface flex flex-wrap items-center justify-between gap-2 sm:gap-3 shrink-0 z-40 shadow-xs">
+        {/* Left Section: Brand Badge & Mobile Module Nav */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-1.5">
+            <span className="w-7 h-7 rounded-lg bg-[#006970] text-white flex items-center justify-center font-black text-xs shadow-xs">
+              <Smartphone className="w-4 h-4" />
+            </span>
+            <span className="hidden md:inline font-bold text-xs tracking-tight text-text-primary">
+              Mobile<span className="text-[#006970] dark:text-[#00B4BB] font-black">POS</span>
+            </span>
+          </div>
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border pb-5">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 bg-primary/10 rounded-lg text-primary">
-            <ShoppingCart className="w-6 h-6" />
-          </div>
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-text-primary tracking-tight">
-              Mobile Sale
-            </h1>
-            <p className="text-sm text-text-secondary mt-0.5">
-              Select devices from inventory, prepare the sale cart, and review before submitting.
-            </p>
-          </div>
+          <div className="h-4 w-px bg-border hidden sm:block" />
+
+          {/* Sub-Navigation Pills */}
+          <nav className="flex items-center gap-1">
+            {MOBILE_NAV_TABS.map((tab) => {
+              const isActive =
+                tab.href === '/dashboard/shop-admin/mobiles'
+                  ? pathname === '/dashboard/shop-admin/mobiles'
+                  : pathname.startsWith(tab.href);
+              return (
+                <Link
+                  key={tab.href}
+                  to={tab.href}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${
+                    isActive
+                      ? 'bg-[#006970] text-white shadow-xs'
+                      : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover'
+                  }`}
+                >
+                  {tab.label}
+                </Link>
+              );
+            })}
+          </nav>
         </div>
 
-        {/* Preview badge */}
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-warning/10 border border-warning/30 rounded-lg self-start sm:self-auto">
-          <Info className="w-4 h-4 text-warning shrink-0" />
-          <span className="text-xs font-semibold text-warning">Frontend Preview — Sale Processing Not Connected</span>
-        </div>
-      </div>
+        {/* Center Section: Primary Mobile / IMEI Omnibox Search (Exact same pattern as ProductSearch.tsx) */}
+        <div
+          className="flex-1 min-w-[240px] sm:min-w-[300px] md:min-w-[380px] max-w-2xl relative z-50"
+          ref={searchDropdownRef}
+        >
+          <div className="pos-search-animated-border relative flex items-center w-full">
+            <Search className="h-4 w-4 text-text-muted absolute left-3.5 z-10 pointer-events-none" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setSearchDropdownOpen(true);
+                setSelectedIndex(0);
+              }}
+              onFocus={() => {
+                if (searchQuery.trim().length > 0) setSearchDropdownOpen(true);
+              }}
+              onKeyDown={handleSearchKeyDown}
+              placeholder={
+                activeBucket === 'RETURN'
+                  ? 'Scan Returned IMEI, Serial No, or search Mobile Model to return (F1)...'
+                  : 'Scan 15-digit IMEI, Serial No, or search Mobile Brand / Model to add (F1)...'
+              }
+              className="w-full h-9 pl-10 pr-24 text-xs border-none rounded-[10px] bg-surface text-text-primary placeholder:text-text-muted focus:outline-none transition-all font-medium relative z-0"
+            />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* ── Left panel: Device search ── */}
-        <div className="lg:col-span-2 flex flex-col gap-4">
-
-          {/* Device search */}
-          <Card variant="default" padding="md" className="bg-surface border-border">
-            <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
-              Search & Select Device
-            </p>
-            <div className="relative">
-              <Search className="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                type="text"
-                placeholder="Brand, model, IMEI, serial number…"
-                value={searchQuery}
-                onChange={(e) => { setSearchQuery(e.target.value); setSelectedDevice(null); }}
-                className="w-full pl-9 pr-3 py-2 text-sm bg-surface text-text-primary placeholder:text-text-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring"
-              />
-            </div>
-
-            {/* Search results */}
-            {isSearching && (
-              <div className="flex items-center gap-2 text-text-muted text-sm mt-3">
-                <Loader2 className="w-4 h-4 animate-spin" /> Searching devices…
-              </div>
-            )}
-            {searchError && (
-              <div className="flex items-center gap-2 text-danger text-sm mt-3">
-                <AlertCircle className="w-4 h-4 shrink-0" /> {searchError}
-              </div>
-            )}
-            {!isSearching && searchQuery.trim() && searchResults.length === 0 && !searchError && (
-              <p className="text-sm text-text-muted mt-3">No devices matched your search.</p>
-            )}
-
-            {searchResults.length > 0 && (
-              <div className="mt-3 divide-y divide-border border border-border rounded-lg overflow-hidden">
-                {searchResults.map((device) => {
-                  const imei1 = device.imeis?.find((i) => i.slot === 'IMEI1')?.imei ?? '—';
-                  const imei2 = device.imeis?.find((i) => i.slot === 'IMEI2')?.imei;
-                  const inCart = isInCart(device.id);
-                  const eligible = device.status === 'IN_STOCK';
-                  const isSelected = selectedDevice?.id === device.id;
-
-                  return (
-                    <div
-                      key={device.id}
-                      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-3 py-2.5 transition-colors cursor-pointer ${
-                        isSelected
-                          ? 'bg-primary/5 border-l-2 border-primary'
-                          : 'hover:bg-surface-hover'
-                      } ${!eligible || inCart ? 'opacity-60' : ''}`}
-                      onClick={() => eligible && !inCart && setSelectedDevice(isSelected ? null : device)}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-sm text-text-primary">{device.brand} {device.model}</span>
-                          <Badge variant={device.condition === 'NEW' ? 'success' : 'warning'} size="sm">
-                            {device.condition === 'NEW' ? 'New' : 'Used'}
-                          </Badge>
-                          {getStatusBadge(device.status)}
-                        </div>
-                        <div className="text-xs text-text-muted mt-0.5">
-                          {device.storage} / {device.ram} · {device.color} · IMEI1: <span className="font-mono">{imei1}</span>
-                          {imei2 && <> · IMEI2: <span className="font-mono">{imei2}</span></>}
-                        </div>
-                        <div className="mt-0.5">{getPtaBadge(device.pta_status)}</div>
-                      </div>
-                      <div className="flex items-center gap-3 shrink-0">
-                        <div className="text-right">
-                          {isOrgAdmin && (
-                            <p className="text-xs text-text-muted">
-                              Cost: {fmtPKR(parseFloat(device.cost_price) || 0)}
-                              </p>
-                              )}
-                              <p className="text-sm font-bold text-primary">{fmtPKR(parseFloat(device.expected_sale_price ?? '0') || 0)}</p>
-                        </div>
-                        <Button
-                          variant={inCart ? 'outline' : 'primary'}
-                          size="sm"
-                          disabled={!eligible || inCart}
-                          onClick={(e) => { e.stopPropagation(); addToCart(device); }}
-                          leftIcon={inCart ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-                        >
-                          {inCart ? 'Added' : 'Add to Cart'}
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
-
-          {/* Selected device detail panel */}
-          {selectedDevice && (
-            <Card variant="default" padding="md" className="bg-surface border-border">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Device Details</p>
+            {/* Right-side Search Input Controls */}
+            <div className="absolute right-2 z-10 flex items-center gap-1">
+              {searchQuery && (
                 <button
                   type="button"
-                  onClick={() => setSelectedDevice(null)}
+                  onClick={() => {
+                    setSearchQuery('');
+                    setSearchDropdownOpen(false);
+                    searchInputRef.current?.focus();
+                  }}
                   className="p-1 text-text-muted hover:text-text-primary rounded"
+                  title="Clear search"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
-                {([
-                  ['Brand', selectedDevice.brand],
-                  ['Model', selectedDevice.model],
-                  ['Storage', selectedDevice.storage],
-                  ['RAM', selectedDevice.ram],
-                  ['Color', selectedDevice.color],
-                  ['Condition', selectedDevice.condition === 'NEW' ? 'New (Boxed)' : 'Used (Pre-Owned)'],
-                  ['IMEI 1', selectedDevice.imeis?.find((i) => i.slot === 'IMEI1')?.imei ?? '—'],
-                  ['IMEI 2', selectedDevice.imeis?.find((i) => i.slot === 'IMEI2')?.imei ?? '—'],
-                  ['Serial No.', selectedDevice.serial_number ?? '—'],
-                  ['PTA Status', selectedDevice.pta_status],
-                  ['Branch', selectedDevice.branch_name ?? selectedDevice.branch_code ?? '—'],
-                  ...(isOrgAdmin ? [['Cost Price', fmtPKR(parseFloat(selectedDevice.cost_price) || 0)]] : []),
-                  ['Expected Sale Price', fmtPKR(parseFloat(selectedDevice.expected_sale_price ?? '0') || 0)],
-                ] as [string, string][])
-                  .map(([label, value]) => (
-                    <div key={label}>
-                      <p className="text-xs text-text-muted font-medium">{label}</p>
-                      <p className="font-medium text-text-primary truncate">{value}</p>
+              )}
+              <button
+                type="button"
+                onClick={loadInventory}
+                title="Refresh branch mobile inventory"
+                className="p-1 text-text-muted hover:text-text-primary rounded transition-colors cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingCatalog ? 'animate-spin' : ''}`} />
+              </button>
+              <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-bold bg-surface-hover text-text-muted rounded border border-border">
+                F1
+              </span>
+            </div>
+          </div>
+
+          {/* ── Floating Mobile Search Results Dropdown (ONLY visible when user types a search query) ── */}
+          {isSearchDropdownOpen && searchQuery.trim().length > 0 && (
+            <div className="absolute left-0 right-0 mt-1.5 w-full lg:w-[680px] bg-surface border border-border rounded-xl shadow-modal max-h-[60vh] overflow-y-auto z-50 divide-y divide-border/60">
+              {/* Dropdown Header Bar */}
+              <div className="px-3 py-2 bg-background border-b border-border flex items-center justify-between text-[11px] font-bold text-text-secondary uppercase tracking-wider sticky top-0 z-10 gap-2">
+                <span>Matching Mobile Devices ({searchResults.length})</span>
+
+                <div className="flex items-center gap-2">
+                  {/* Replace Mode Bucket Switcher (Same as ProductSearch.tsx) */}
+                  {posMode === 'REPLACE' && (
+                    <div className="flex items-center bg-surface border border-border rounded-md p-0.5 gap-0.5">
+                      <button
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setReplaceBucket('RETURN');
+                        }}
+                        className={`px-2 py-0.5 rounded text-[10px] font-black flex items-center gap-1 transition-colors ${
+                          replaceBucket === 'RETURN'
+                            ? 'bg-warning text-white'
+                            : 'text-text-muted hover:text-text-primary'
+                        }`}
+                      >
+                        <ArrowDownToLine className="w-3 h-3" /> RETURN
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setReplaceBucket('SALE');
+                        }}
+                        className={`px-2 py-0.5 rounded text-[10px] font-black flex items-center gap-1 transition-colors ${
+                          replaceBucket === 'SALE'
+                            ? 'bg-primary text-white'
+                            : 'text-text-muted hover:text-text-primary'
+                        }`}
+                      >
+                        <ArrowUpFromLine className="w-3 h-3" /> NEW
+                      </button>
                     </div>
-                  ))}
-              </div>
-              <div className="mt-4 flex justify-end">
-                <Button
-                  variant="primary"
-                  size="sm"
-                  disabled={!selectedDevice || selectedDevice.status !== 'IN_STOCK' || isInCart(selectedDevice.id)}
-                  onClick={() => addToCart(selectedDevice)}
-                  leftIcon={<Plus className="w-3.5 h-3.5" />}
-                >
-                  Add to Cart
-                </Button>
-              </div>
-            </Card>
-          )}
+                  )}
 
-          {/* Cart */}
-          <Card variant="default" padding="md" className="bg-surface border-border">
-            <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
-              Cart ({cart.length} device{cart.length !== 1 ? 's' : ''})
-            </p>
+                  {posMode === 'RETURN' && (
+                    <span className="px-2 py-0.5 rounded bg-warning/15 text-warning text-[10px] font-black border border-warning/30">
+                      ADDING AS RETURN
+                    </span>
+                  )}
 
-            {cart.length === 0 ? (
-              <div className="text-center py-8 text-text-muted">
-                <ShoppingCart className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                <p className="text-sm">No devices added yet. Search above to add a device.</p>
+                  <span className="hidden sm:inline text-[10px] font-normal text-text-muted">
+                    Use ↓↑ arrows, Enter to select, ESC to close
+                  </span>
+                </div>
               </div>
-            ) : (
-              <div className="divide-y divide-border">
-                {cart.map((item) => {
-                  const imei1 = item.device.imeis?.find((i) => i.slot === 'IMEI1')?.imei ?? '—';
-                  const imei2 = item.device.imeis?.find((i) => i.slot === 'IMEI2')?.imei;
-                  const lineTotal = item.salePrice - item.discount;
-                  const salePriceErr = priceErrors[`${item.device.id}_salePrice`];
-                  const discountErr = priceErrors[`${item.device.id}_discount`];
 
-                  return (
-                    <div key={item.device.id} className="py-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-sm text-text-primary">
-                            {item.device.brand} {item.device.model}
-                          </p>
-                          <p className="text-xs text-text-muted">
-                            {item.device.storage} / {item.device.ram} · {item.device.color}
-                          </p>
-                          <p className="text-xs font-mono text-text-secondary">
-                            IMEI1: {imei1}
-                            {imei2 && <> · IMEI2: {imei2}</>}
-                          </p>
-                          <div className="flex items-center gap-1.5 mt-1">
-                            <Badge variant={item.device.condition === 'NEW' ? 'success' : 'warning'} size="sm">
-                              {item.device.condition === 'NEW' ? 'New' : 'Used'}
-                            </Badge>
+              {isLoadingCatalog ? (
+                <div className="p-4 text-center text-xs text-text-muted flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Searching mobile inventory…
+                </div>
+              ) : searchResults.length > 0 ? (
+                <ul className="py-1">
+                  {searchResults.map((device, index) => {
+                    const isSelected = index === selectedIndex;
+                    const inCart = isInCart(device.id);
+                    const imei1 = device.imeis?.find((i) => i.slot === 'IMEI1')?.imei ?? '—';
+                    const imei2 = device.imeis?.find((i) => i.slot === 'IMEI2')?.imei;
+                    const expectedPrice = parseFloat(device.expected_sale_price ?? '0') || 0;
+                    const costPrice = parseFloat(device.cost_price ?? '0') || 0;
+                    const isCostRevealed = revealedCostId === device.id;
+
+                    return (
+                      <li
+                        key={device.id}
+                        className={`px-4 py-2.5 cursor-pointer flex items-center justify-between gap-4 transition-colors ${
+                          isSelected ? 'bg-primary/10' : 'hover:bg-surface-hover'
+                        } ${inCart ? 'opacity-60' : ''}`}
+                        onMouseDown={(e) => {
+                          const target = e.target as HTMLElement;
+                          if (target.closest('[data-cost-reveal="true"]')) return;
+                          e.preventDefault();
+                          if (!inCart) addToCart(device);
+                        }}
+                        onMouseEnter={() => setSelectedIndex(index)}
+                      >
+                        {/* Left: Mobile Brand, Model, Specs & IMEI */}
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span
+                              className={`text-sm font-bold truncate ${
+                                isSelected ? 'text-primary' : 'text-text-primary'
+                              }`}
+                            >
+                              {device.brand} {device.model}
+                            </span>
+
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                device.condition === 'NEW'
+                                  ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30'
+                                  : 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30'
+                              }`}
+                            >
+                              {device.condition === 'NEW' ? 'NEW PINPACK' : 'USED'}
+                            </span>
+
+                            {getPtaBadge(device.pta_status)}
+
+                            {inCart && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-primary/20 text-primary">
+                                In Cart
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-3 text-xs text-text-muted mt-0.5 flex-wrap">
+                            <span className="font-semibold text-text-secondary">
+                              {device.storage}
+                              {device.ram ? ` / ${device.ram}` : ''}
+                              {device.color ? ` · ${device.color}` : ''}
+                            </span>
+                            <span>•</span>
+                            <span className="font-mono text-[#006970] dark:text-[#00B4BB] font-semibold">
+                              IMEI: {imei1}
+                              {imei2 ? ` / ${imei2}` : ''}
+                            </span>
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => removeFromCart(item.device.id)}
-                          className="p-1.5 text-text-muted hover:text-danger hover:bg-danger/10 rounded transition-colors shrink-0"
-                          title="Remove from cart"
+
+                        {/* Right: Price, Hold-to-Reveal Cost & ADD Button */}
+                        <div className="flex items-center gap-4 shrink-0">
+                          {canRevealCost && costPrice > 0 && (
+                            <div className="flex flex-col items-end">
+                              <span className="text-[10px] text-text-muted uppercase">Cost</span>
+                              <div className="flex items-center gap-1">
+                                <span className="text-xs font-mono font-bold text-text-secondary tabular-nums">
+                                  {isCostRevealed ? fmtPKR(costPrice) : '••••'}
+                                </span>
+                                <button
+                                  type="button"
+                                  data-cost-reveal="true"
+                                  title="Hold to view cost price"
+                                  onMouseDown={(e) => {
+                                    e.stopPropagation();
+                                    setRevealedCostId(device.id);
+                                  }}
+                                  onMouseUp={(e) => {
+                                    e.stopPropagation();
+                                    setRevealedCostId(null);
+                                  }}
+                                  onMouseLeave={() => {
+                                    if (isCostRevealed) setRevealedCostId(null);
+                                  }}
+                                  className="p-0.5 rounded hover:bg-border/60 text-text-muted hover:text-text-primary transition-colors cursor-pointer"
+                                >
+                                  {isCostRevealed ? (
+                                    <EyeOff className="w-3.5 h-3.5 text-warning" />
+                                  ) : (
+                                    <Eye className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex flex-col items-end w-24">
+                            <span className="text-[10px] text-text-muted uppercase">Sale Price</span>
+                            <span className="text-sm font-black text-text-primary tabular-nums">
+                              {fmtPKR(expectedPrice)}
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={inCart}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (!inCart) addToCart(device);
+                            }}
+                            className={`h-8 px-3 rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer ${
+                              inCart
+                                ? 'bg-surface-hover text-text-muted cursor-not-allowed'
+                                : activeBucket === 'RETURN'
+                                ? 'bg-warning text-white shadow-sm'
+                                : isSelected
+                                ? 'bg-primary text-white shadow-sm'
+                                : 'bg-surface-hover text-text-secondary hover:bg-primary hover:text-white'
+                            }`}
+                          >
+                            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                            {inCart ? 'ADDED' : activeBucket === 'RETURN' ? 'RETURN' : 'ADD'}
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <div className="p-6 text-center text-sm text-text-muted">
+                  No matching mobile devices found for &ldquo;
+                  <span className="text-text-primary font-bold">{searchQuery}</span>&rdquo;
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Right Section: POS Mode Switcher (Regular Sale | Mobile Return | Mobile Replace) */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => setPosMode('SALE')}
+            className={`h-9 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+              posMode === 'SALE'
+                ? 'bg-[#006970] text-white shadow-xs'
+                : 'bg-surface border border-border text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            <ShoppingCart className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Regular Sale</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setPosMode('RETURN');
+              setActionNoticeModal({
+                open: true,
+                title: 'Mobile Return (Invoice / IMEI Lookup)',
+                mode: 'RETURN',
+                referenceInvoice: '',
+                reason: '',
+              });
+            }}
+            className={`h-9 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-all cursor-pointer ${
+              posMode === 'RETURN'
+                ? 'bg-amber-500 text-white border-amber-600 shadow-xs'
+                : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
+            }`}
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Mobile Return</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setPosMode('REPLACE');
+              setReplaceBucket('RETURN');
+              setActionNoticeModal({
+                open: true,
+                title: 'Mobile Replace / Exchange Device',
+                mode: 'REPLACE',
+                referenceInvoice: '',
+                reason: '',
+              });
+            }}
+            className={`h-9 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-all cursor-pointer ${
+              posMode === 'REPLACE'
+                ? 'bg-purple-600 text-white border-purple-700 shadow-xs'
+                : 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30 hover:bg-purple-500/20'
+            }`}
+          >
+            <Repeat className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Mobile Replace</span>
+          </button>
+        </div>
+      </header>
+
+      {/* ═════════════════════════════════════════════════════════════════════════
+          2. MAIN POS WORKSPACE (Exact same 8-Col Left Cart + 4-Col Right Ledger layout as SaleWorkspace.tsx)
+         ═════════════════════════════════════════════════════════════════════════ */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 p-3 min-h-0 overflow-hidden">
+        {/* ───────────────────────────────────────────────────────────────────────
+            LEFT 2/3 (8 COLUMNS): MOBILE POS CART PANEL + MULTI-PAYMENT CHECKOUT
+            (Matches CartPanel.tsx + CartTable.tsx + CartSummary.tsx)
+           ─────────────────────────────────────────────────────────────────────── */}
+        <section
+          className={`lg:col-span-8 flex flex-col h-full min-h-0 bg-surface shadow-xs overflow-hidden transition-colors ${cartBorderClass}`}
+        >
+          {/* 1. Cart Header Bar */}
+          <div className="px-4 py-2.5 border-b border-border flex items-center justify-between bg-surface shrink-0">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-black uppercase tracking-wider text-text-primary">
+                Mobile POS Cart
+              </h2>
+              <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-[#006970]/15 text-[#006970] dark:text-[#00B4BB]">
+                {cart.length} {cart.length === 1 ? 'Mobile' : 'Mobiles'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {posMode === 'RETURN' && (
+                <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-warning/15 text-warning text-xs font-bold border border-warning/30">
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Return Mode Active</span>
+                </div>
+              )}
+              {posMode === 'REPLACE' && (
+                <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-purple-500/15 text-purple-400 text-xs font-bold border border-purple-500/30">
+                  <Repeat className="w-3.5 h-3.5" />
+                  <span>Replace / Exchange Mode Active</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 2. Cart Items Table (Scrollable internally, never overflows viewport) */}
+          <div className="flex-1 min-h-0 overflow-y-auto relative">
+            {cart.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center p-6 text-text-muted select-none">
+                <div className="w-14 h-14 rounded-2xl bg-surface-hover border border-border flex items-center justify-center mb-3">
+                  <ScanBarcode className="w-7 h-7 text-[#006970] dark:text-[#00B4BB] opacity-70" />
+                </div>
+                <p className="text-sm font-bold text-text-primary">Mobile POS Cart is Empty</p>
+                <p className="text-xs text-text-muted mt-1 max-w-md text-center">
+                  Scan a 15-digit IMEI barcode or search by Brand / Model in the top search bar (
+                  <kbd className="px-1.5 py-0.5 text-[10px] font-mono bg-surface-hover border border-border rounded">
+                    F1
+                  </kbd>
+                  ) to add a mobile device to the sale cart.
+                </p>
+              </div>
+            ) : (
+              <table className="w-full text-left border-collapse select-none">
+                <thead className="sticky top-0 bg-background/95 backdrop-blur-xs shadow-2xs z-10 text-[11px] font-bold text-text-secondary uppercase tracking-wider border-b border-border">
+                  <tr>
+                    <th className="py-2.5 pl-4 pr-2 w-10">#</th>
+                    <th className="py-2.5 px-2">Mobile Brand, Model & Specs</th>
+                    <th className="py-2.5 px-2 w-48">IMEI / Serial No</th>
+                    <th className="py-2.5 px-2 w-40 text-right">Sale Price</th>
+                    <th className="py-2.5 px-2 w-36 text-right">Net Total</th>
+                    <th className="py-2.5 pl-2 pr-4 w-10 text-center"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border text-sm">
+                  {/* ── Returned Mobile Devices Section (When in Return/Replace Mode) ── */}
+                  {returnItems.length > 0 && (
+                    <>
+                      <tr className="bg-warning/10 border-y border-warning/30">
+                        <td colSpan={6} className="py-1.5 px-4">
+                          <div className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-warning">
+                            <ArrowDownToLine className="w-3.5 h-3.5" />
+                            <span>Returned Mobile Devices ({returnItems.length})</span>
+                          </div>
+                        </td>
+                      </tr>
+                      {returnItems.map((item, idx) => {
+                        const imei1 =
+                          item.device.imeis?.find((i) => i.slot === 'IMEI1')?.imei ?? '—';
+                        const imei2 = item.device.imeis?.find((i) => i.slot === 'IMEI2')?.imei;
+                        const lineTotal = Math.max(0, item.salePrice);
+
+                        return (
+                          <tr
+                            key={item.device.id}
+                            className="group bg-warning/5 hover:bg-warning/10 transition-colors"
+                          >
+                            <td className="py-2.5 pl-4 pr-2 font-mono text-xs text-warning font-bold">
+                              R{idx + 1}
+                            </td>
+                            <td className="py-2.5 px-2">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-text-primary text-xs sm:text-sm">
+                                  {item.device.brand} {item.device.model}
+                                </span>
+                                <span className="px-1.5 py-0.5 text-[9px] font-black uppercase rounded bg-warning/20 text-warning border border-warning/30">
+                                  RETURN
+                                </span>
+                                {getPtaBadge(item.device.pta_status)}
+                              </div>
+                              <div className="text-[11px] text-text-muted mt-0.5">
+                                {item.device.storage}
+                                {item.device.ram ? ` / ${item.device.ram}` : ''}
+                                {item.device.color ? ` · ${item.device.color}` : ''} ·{' '}
+                                {item.device.condition}
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-2 font-mono text-xs text-warning font-semibold">
+                              <div>{imei1}</div>
+                              {imei2 && (
+                                <div className="text-[10px] text-text-muted">{imei2}</div>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-2 text-right">
+                              <input
+                                ref={(el) => {
+                                  salePriceInputRefs.current[item.device.id] = el;
+                                }}
+                                type="number"
+                                min="0"
+                                step="100"
+                                value={item.salePrice}
+                                onFocus={(e) => e.currentTarget.select()}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    searchInputRef.current?.focus();
+                                  }
+                                }}
+                                onChange={(e) =>
+                                  updateCartItemPrice(item.device.id, e.target.value)
+                                }
+                                className="w-32 bg-background border border-warning/40 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-right text-text-primary focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30"
+                              />
+                            </td>
+                            <td className="py-2.5 px-2 text-right font-mono font-black text-warning tabular-nums">
+                              −{fmtPKR(lineTotal)}
+                            </td>
+                            <td className="py-2.5 pl-2 pr-4 text-center">
+                              <button
+                                type="button"
+                                onClick={() => removeFromCart(item.device.id)}
+                                className="text-text-muted hover:text-danger p-1 rounded-md hover:bg-danger/10 transition-colors cursor-pointer"
+                                title="Remove Returned Mobile"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </>
+                  )}
+
+                  {/* ── New / Outgoing Mobile Sale Items Section ── */}
+                  {saleItems.length > 0 && returnItems.length > 0 && (
+                    <tr className="bg-primary/10 border-y border-primary/30">
+                      <td colSpan={6} className="py-1.5 px-4">
+                        <div className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-primary">
+                          <ArrowUpFromLine className="w-3.5 h-3.5" />
+                          <span>Replacement / New Mobile Devices ({saleItems.length})</span>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+
+                  {saleItems.map((item, idx) => {
+                    const imei1 = item.device.imeis?.find((i) => i.slot === 'IMEI1')?.imei ?? '—';
+                    const imei2 = item.device.imeis?.find((i) => i.slot === 'IMEI2')?.imei;
+                    const lineTotal = Math.max(0, item.salePrice);
+                    const salePriceErr = priceErrors[`${item.device.id}_salePrice`];
+                    const expectedPrice =
+                      parseFloat(item.device.expected_sale_price ?? '0') || 0;
+                    const priceDelta = item.salePrice - expectedPrice;
+
+                    return (
+                      <tr
+                        key={item.device.id}
+                        className="group hover:bg-surface-hover/60 transition-colors"
+                      >
+                        <td className="py-2.5 pl-4 pr-2 font-mono text-xs text-text-muted">
+                          {idx + 1}
+                        </td>
+                        <td className="py-2.5 px-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-text-primary text-xs sm:text-sm">
+                              {item.device.brand} {item.device.model}
+                            </span>
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                item.device.condition === 'NEW'
+                                  ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30'
+                                  : 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30'
+                              }`}
+                            >
+                              {item.device.condition === 'NEW' ? 'NEW' : 'USED'}
+                            </span>
+                            {getPtaBadge(item.device.pta_status)}
+                          </div>
+                          <div className="text-[11px] text-text-muted mt-0.5">
+                            {item.device.storage}
+                            {item.device.ram ? ` / ${item.device.ram}` : ''}
+                            {item.device.color ? ` · ${item.device.color}` : ''}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-2 font-mono text-xs text-[#006970] dark:text-[#00B4BB] font-semibold">
+                          <div>{imei1}</div>
+                          {imei2 && <div className="text-[10px] text-text-muted">{imei2}</div>}
+                        </td>
+                        <td className="py-2.5 px-2 text-right">
+                          <div className="inline-flex flex-col items-end gap-0.5">
+                            <input
+                              ref={(el) => {
+                                salePriceInputRefs.current[item.device.id] = el;
+                              }}
+                              type="number"
+                              min="0"
+                              step="100"
+                              value={item.salePrice}
+                              onFocus={(e) => e.currentTarget.select()}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  searchInputRef.current?.focus();
+                                }
+                              }}
+                              onChange={(e) =>
+                                updateCartItemPrice(item.device.id, e.target.value)
+                              }
+                              title="Direct editable Sale Price (Press Enter to return to search)"
+                              className={`w-32 bg-background border-2 rounded-lg px-2.5 py-1.5 text-xs font-mono font-extrabold text-right text-text-primary focus:outline-none focus:border-[#006970] focus:ring-2 focus:ring-[#006970]/25 transition-all ${
+                                salePriceErr ? 'border-danger' : 'border-[#006970]/40'
+                              }`}
+                            />
+                            {expectedPrice > 0 && priceDelta !== 0 && (
+                              <span
+                                className={`text-[10px] font-mono font-semibold ${
+                                  priceDelta < 0 ? 'text-amber-500' : 'text-emerald-500'
+                                }`}
+                              >
+                                {priceDelta < 0
+                                  ? `Disc: −${fmtPKR(Math.abs(priceDelta))}`
+                                  : `Extra: +${fmtPKR(priceDelta)}`}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-2 text-right font-mono font-black text-text-primary tabular-nums">
+                          {fmtPKR(lineTotal)}
+                        </td>
+                        <td className="py-2.5 pl-2 pr-4 text-center">
+                          <button
+                            type="button"
+                            onClick={() => removeFromCart(item.device.id)}
+                            className="text-text-muted hover:text-danger p-1 rounded-md hover:bg-danger/10 transition-colors cursor-pointer"
+                            title="Remove Mobile"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* 3. Checkout & Multi-Payment Split Summary Footer (Pinned at bottom of Cart Panel) */}
+          <div className="shrink-0 border-t border-border bg-surface p-3 flex flex-col gap-2.5">
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-3 items-stretch">
+              {/* Left 5 Cols of Footer: Bill Breakdown & Net Payable Box */}
+              <div className="xl:col-span-5 flex flex-col justify-between bg-background/60 border border-border rounded-xl p-2.5 gap-1.5">
+                <div className="space-y-1 text-xs">
+                  <div className="flex items-center justify-between text-text-secondary">
+                    <span>Gross Sale Subtotal ({saleItems.length}):</span>
+                    <span className="font-mono font-bold text-text-primary tabular-nums">
+                      {fmtPKR(saleSubtotal)}
+                    </span>
+                  </div>
+
+                  {returnCreditTotal > 0 && (
+                    <div className="flex items-center justify-between text-warning">
+                      <span>Return Credit ({returnItems.length}):</span>
+                      <span className="font-mono font-bold tabular-nums">
+                        −{fmtPKR(returnCreditTotal)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  className={`p-2 rounded-lg border flex items-center justify-between ${
+                    isNetRefund
+                      ? 'bg-warning/10 border-warning/30'
+                      : 'bg-[#006970]/10 border-[#006970]/30'
+                  }`}
+                >
+                  <span className="text-xs font-black uppercase tracking-wider text-text-primary">
+                    {isNetRefund ? 'Net Refund Due' : 'Net Payable'}
+                  </span>
+                  <span
+                    className={`text-lg font-black font-mono tabular-nums ${
+                      isNetRefund ? 'text-warning' : 'text-[#006970] dark:text-[#00B4BB]'
+                    }`}
+                  >
+                    {fmtPKR(Math.abs(netSignedBalance))}
+                  </span>
+                </div>
+
+                {/* Action Buttons: Clear, Hold, Complete Sale & Print */}
+                <div className="grid grid-cols-12 gap-1.5 pt-0.5">
+                  <button
+                    type="button"
+                    disabled={cart.length === 0}
+                    onClick={clearCart}
+                    className="col-span-3 py-2 rounded-lg text-xs font-bold bg-surface border border-border hover:bg-danger/10 hover:text-danger hover:border-danger/30 text-text-secondary disabled:opacity-40 transition-colors cursor-pointer"
+                  >
+                    Clear
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={cart.length === 0}
+                    onClick={() =>
+                      toast('Mobile Sale held locally (Frontend Preview)', { icon: '🧾' })
+                    }
+                    className="col-span-3 py-2 rounded-lg text-xs font-bold bg-surface border border-border hover:bg-surface-hover text-text-primary disabled:opacity-40 flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <PauseCircle className="w-3.5 h-3.5" /> Hold
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={!canReview}
+                    onClick={() => setShowReview(true)}
+                    className="col-span-6 py-2 rounded-lg text-xs font-black bg-[#006970] hover:bg-[#005a60] disabled:opacity-40 text-white flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  >
+                    <Printer className="w-3.5 h-3.5" /> Complete & Print
+                  </button>
+                </div>
+              </div>
+
+              {/* Right 7 Cols of Footer: Multi-Payment Split Box (Cash + JazzCash / EasyPaisa / Bank / Credit) */}
+              <div className="xl:col-span-7 bg-background/80 border border-[#006970]/40 rounded-xl p-2.5 flex flex-col justify-between gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-[#006970] dark:text-[#00B4BB] flex items-center gap-1">
+                    <CreditCard className="w-3.5 h-3.5" /> Receive Payments (Multi-Method Split)
+                  </span>
+                  <div className="flex items-center gap-1">
+                    {(
+                      [
+                        ['JAZZCASH', '+ JazzCash'],
+                        ['EASYPAISA', '+ EasyPaisa'],
+                        ['BANK_TRANSFER', '+ Bank'],
+                        ['CREDIT', '+ Credit'],
+                      ] as [PaymentMethod, string][]
+                    ).map(([m, label]) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => handleAddPaymentLine(m)}
+                        className="px-1.5 py-0.5 rounded bg-surface hover:bg-surface-hover text-[10px] font-bold text-text-secondary hover:text-text-primary border border-border cursor-pointer"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Split Payment Lines List */}
+                <div className="max-h-24 overflow-y-auto space-y-1 pr-0.5">
+                  {payments.map((line) => (
+                    <div
+                      key={line.id}
+                      className="grid grid-cols-12 gap-1.5 items-center bg-surface px-2 py-1 rounded-lg border border-border"
+                    >
+                      <div className="col-span-5">
+                        <select
+                          value={line.method}
+                          onChange={(e) =>
+                            handleUpdatePaymentLine(line.id, {
+                              method: e.target.value as PaymentMethod,
+                            })
+                          }
+                          className="w-full bg-background text-text-primary text-xs font-bold rounded px-2 py-1 border border-border focus:outline-none"
                         >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                          {Object.entries(PAYMENT_METHOD_LABELS).map(([val, label]) => (
+                            <option key={val} value={val}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
                       </div>
 
-                      {/* Price inputs */}
-                      <div className="mt-2.5 grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-xs text-text-secondary font-medium block mb-1">
-                            Sale Price (Rs.)
-                          </label>
+                      <div className="col-span-6">
+                        <div className="relative flex items-center">
+                          <span className="absolute left-2 text-[10px] text-text-muted font-mono">
+                            Rs.
+                          </span>
                           <input
                             type="number"
                             min="0"
-                            step="1"
-                            value={item.salePrice}
-                            onChange={(e) => updateCartItem(item.device.id, 'salePrice', e.target.value)}
-                            className={`w-full px-2.5 py-1.5 text-sm border rounded-md bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-focus-ring ${salePriceErr ? 'border-danger' : 'border-border'}`}
+                            step="500"
+                            value={line.amount || ''}
+                            placeholder="0"
+                            onChange={(e) => {
+                              const val =
+                                e.target.value === '' ? 0 : parseFloat(e.target.value);
+                              handleUpdatePaymentLine(line.id, {
+                                amount: Number.isFinite(val) ? Math.max(0, val) : 0,
+                              });
+                            }}
+                            className="w-full bg-background border border-border rounded pl-7 pr-2 py-1 text-xs text-emerald-500 font-bold font-mono text-right focus:outline-none focus:border-[#006970]"
                           />
-                          {salePriceErr && <p className="text-xs text-danger mt-0.5">{salePriceErr}</p>}
-                        </div>
-                        <div>
-                          <label className="text-xs text-text-secondary font-medium block mb-1">
-                            Discount (Rs.)
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={item.discount}
-                            onChange={(e) => updateCartItem(item.device.id, 'discount', e.target.value)}
-                            className={`w-full px-2.5 py-1.5 text-sm border rounded-md bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-focus-ring ${discountErr ? 'border-danger' : 'border-border'}`}
-                          />
-                          {discountErr && <p className="text-xs text-danger mt-0.5">{discountErr}</p>}
                         </div>
                       </div>
-                      <div className="flex justify-end mt-1.5">
-                        <span className="text-sm font-bold text-primary">
-                          Subtotal: {fmtPKR(lineTotal)}
-                        </span>
+
+                      <div className="col-span-1 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePaymentLine(line.id)}
+                          className="text-text-muted hover:text-danger text-xs font-bold cursor-pointer"
+                          title="Remove payment method"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Live Total Received vs Remaining Footer */}
+                <div className="border-t border-border/70 pt-1 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-text-muted mr-1.5">Total Received:</span>
+                    <span className="font-mono font-extrabold text-emerald-500">
+                      {fmtPKR(totalReceived)}
+                    </span>
+                  </div>
+                  <div>
+                    {remainingBalance === 0 ? (
+                      <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 font-mono font-bold text-[11px]">
+                        Rs. 0 (Settled ✓)
+                      </span>
+                    ) : remainingBalance > 0 ? (
+                      <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30 font-mono font-bold text-[11px]">
+                        Remaining Due: {fmtPKR(remainingBalance)}
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-500 border border-cyan-500/30 font-mono font-bold text-[11px]">
+                        Change: {fmtPKR(Math.abs(remainingBalance))}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ───────────────────────────────────────────────────────────────────────
+            RIGHT 1/3 (4 COLUMNS): CUSTOMER & LEDGER PANEL
+            (Exact same structure as PosCustomerLedgerPanel.tsx in Products POS)
+           ─────────────────────────────────────────────────────────────────────── */}
+        <aside className="lg:col-span-4 flex flex-col gap-2.5 h-full min-h-0 overflow-hidden select-none">
+          {/* 1. Customer Search Surface (Same as CustomerSelector searchOnly=true) */}
+          <div
+            className="bg-surface p-2.5 rounded-2xl border border-border shadow-xs shrink-0 relative"
+            ref={customerDropdownRef}
+          >
+            <div className="flex items-center justify-between gap-1 mb-1.5">
+              <span className="text-[10px] font-black uppercase tracking-wider text-text-secondary">
+                Select Customer / Khata
+              </span>
+              <span className="text-[10px] text-text-muted font-medium">F2 to focus</span>
+            </div>
+
+            <div className="relative">
+              <Search className="h-4 w-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                ref={customerInputRef}
+                type="text"
+                value={customerSearchTerm}
+                onChange={(e) => {
+                  setCustomerSearchTerm(e.target.value);
+                  setCustomerDropdownOpen(true);
+                  setCustomerSelectedIndex(0);
+                }}
+                onFocus={() => {
+                  if (customerSearchTerm.trim().length > 0) setCustomerDropdownOpen(true);
+                }}
+                onKeyDown={handleCustomerKeyDown}
+                placeholder="Search customer (Name, Phone, Khata)..."
+                className="w-full pl-9 pr-8 py-2 text-xs border border-border rounded-xl bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-focus-ring transition-all"
+              />
+              {customerSearchTerm && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomerSearchTerm('');
+                    setCustomerDropdownOpen(false);
+                  }}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Customer Search Dropdown Results */}
+            {isCustomerDropdownOpen && customerSearchTerm.trim().length > 0 && (
+              <div className="absolute left-0 right-0 z-50 mt-1.5 bg-surface border border-border rounded-xl shadow-modal max-h-60 overflow-y-auto p-1">
+                {isCustomersLoading ? (
+                  <div className="p-3 text-xs text-text-muted text-center flex items-center justify-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Searching customers...
+                  </div>
+                ) : customerResults.length > 0 ? (
+                  <ul className="space-y-0.5">
+                    {customerResults.map((cust, index) => (
+                      <li
+                        key={cust.id || (cust as any)._id}
+                        className={`px-3 py-2 rounded-lg cursor-pointer flex justify-between items-center transition-colors ${
+                          index === customerSelectedIndex
+                            ? 'bg-primary/10 text-primary font-bold'
+                            : 'hover:bg-surface-hover text-text-primary'
+                        }`}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          handleSelectCustomer(cust);
+                        }}
+                      >
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-xs font-bold truncate">{cust.name}</span>
+                          <span className="text-[10px] text-text-muted">
+                            {cust.phone || cust.mobile || 'No phone'}
+                          </span>
+                        </div>
+                        <div className="text-xs font-black tabular-nums text-text-secondary shrink-0">
+                          Rs {(cust.currentBalance || 0).toLocaleString()}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="p-3 text-xs text-text-muted text-center">
+                    No customers found
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 2. Customer Details + Live Customer Ledger Statement Card (Matches PosCustomerLedgerPanel.tsx) */}
+          <div className="flex-1 flex flex-col min-h-0 bg-surface rounded-2xl border border-border shadow-xs overflow-hidden">
+            {/* Customer Details Header */}
+            <div className="p-3 border-b border-border bg-background/40 shrink-0">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-black uppercase tracking-wider text-text-secondary flex items-center gap-1.5">
+                  <UserCircle2 className="w-3.5 h-3.5 text-primary" />
+                  Customer Details
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {customer && (
+                    <>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          customer.currentBalance > 0
+                            ? 'bg-danger/10 text-danger border border-danger/20'
+                            : 'bg-success/10 text-success border border-success/20'
+                        }`}
+                      >
+                        {customer.currentBalance > 0 ? 'Outstanding' : 'Clear'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setCustomer(null)}
+                        className="text-[10px] text-text-muted hover:text-danger px-1.5 py-0.5 rounded border border-border hover:border-danger/30 transition-colors cursor-pointer"
+                        title="Reset to Walk-In Customer"
+                      >
+                        Reset
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-y-2 gap-x-3 text-xs">
+                <div>
+                  <span className="text-[10px] text-text-muted block">Customer Name</span>
+                  <span className="font-bold text-text-primary truncate block">
+                    {customer ? customer.name : 'Walk-In Customer'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-text-muted block">Phone</span>
+                  <span className="font-mono font-semibold text-text-secondary truncate block">
+                    {customer?.phone || customer?.mobile || '—'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-text-muted block">Credit Limit</span>
+                  <span className="font-mono font-semibold text-text-secondary tabular-nums block">
+                    Rs {(customer?.creditLimit ?? 0).toLocaleString()}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-text-muted block">Current Balance</span>
+                  <span
+                    className={`font-mono font-black tabular-nums block ${
+                      (customer?.currentBalance ?? 0) > 0 ? 'text-danger' : 'text-emerald-600'
+                    }`}
+                  >
+                    Rs {(customer?.currentBalance ?? 0).toLocaleString()}{' '}
+                    {(customer?.currentBalance ?? 0) > 0 ? 'Dr' : ''}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Customer Ledger Statement Header */}
+            <div className="px-3 py-2 border-b border-border flex items-center justify-between bg-surface shrink-0">
+              <span className="text-[11px] font-black uppercase tracking-wider text-text-secondary">
+                Customer Ledger Statement
+              </span>
+              {customer && (
+                <button
+                  type="button"
+                  onClick={() => refetchLedger()}
+                  className="text-[10px] font-semibold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <RefreshCw className="w-3 h-3" /> Refresh
+                </button>
+              )}
+            </div>
+
+            {/* Ledger Mini-Statement Table */}
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              {!customer ? (
+                <div className="h-full flex flex-col items-center justify-center p-4 text-center text-text-muted">
+                  <Receipt className="w-7 h-7 stroke-[1.5] mb-1.5 opacity-40" />
+                  <p className="text-xs font-medium">Walk-In Customer Active</p>
+                  <p className="text-[11px] opacity-75 mt-0.5">
+                    Select a customer above to view their live ledger statement and credit history.
+                  </p>
+                </div>
+              ) : isLedgerLoading ? (
+                <div className="h-full flex items-center justify-center p-4 text-xs text-text-muted">
+                  Loading ledger entries...
+                </div>
+              ) : timeline.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center p-4 text-center text-text-muted">
+                  <p className="text-xs font-medium">No ledger transactions found</p>
+                </div>
+              ) : (
+                <table className="w-full text-left border-collapse text-[11px]">
+                  <thead className="sticky top-0 bg-background/95 backdrop-blur-xs text-[10px] font-bold text-text-muted uppercase border-b border-border">
+                    <tr>
+                      <th className="py-1.5 pl-3 pr-1.5">Date</th>
+                      <th className="py-1.5 px-1.5">Ref #</th>
+                      <th className="py-1.5 px-1.5 text-right">Debit</th>
+                      <th className="py-1.5 px-1.5 text-right">Credit</th>
+                      <th className="py-1.5 pl-1.5 pr-3 text-right">Bal</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60 font-mono">
+                    {timeline.slice(0, 10).map((entry, idx) => (
+                      <tr key={entry.id || `${entry.transactionId}-${idx}`} className="hover:bg-surface-hover/50">
+                        <td className="py-1.5 pl-3 pr-1.5 text-text-secondary whitespace-nowrap">
+                          {new Date(entry.timestamp).toLocaleDateString('en-PK', {
+                            day: '2-digit',
+                            month: 'short',
+                          })}
+                        </td>
+                        <td className="py-1.5 px-1.5 text-text-primary font-sans font-medium truncate max-w-[80px]" title={entry.transactionId}>
+                          {entry.transactionId}
+                        </td>
+                        <td className="py-1.5 px-1.5 text-right text-danger tabular-nums">
+                          {entry.debit > 0 ? entry.debit.toLocaleString() : '—'}
+                        </td>
+                        <td className="py-1.5 px-1.5 text-right text-emerald-600 tabular-nums">
+                          {entry.credit > 0 ? entry.credit.toLocaleString() : '—'}
+                        </td>
+                        <td className="py-1.5 pl-1.5 pr-3 text-right font-bold text-text-primary tabular-nums">
+                          {entry.runningBalance.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Bottom Ledger Actions: Receive Payment & View Full Statement */}
+            <div className="p-2.5 border-t border-border bg-background/40 grid grid-cols-2 gap-2 shrink-0">
+              <button
+                type="button"
+                disabled={!customer}
+                onClick={() => setSettlementModalOpen(true)}
+                className="h-9 px-3 rounded-xl bg-primary text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs hover:bg-primary-hover disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer"
+              >
+                <Receipt className="w-3.5 h-3.5" />
+                Receive Payment
+              </button>
+              <button
+                type="button"
+                disabled={!customer}
+                onClick={() => {
+                  if (customer) {
+                    navigate('/dashboard/shop-admin/customers');
+                  }
+                }}
+                className="h-9 px-3 rounded-xl border border-border bg-surface text-text-primary font-bold text-xs flex items-center justify-center gap-1.5 hover:bg-surface-hover disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                Full Statement
+              </button>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          MODAL 1: Standalone Customer Payment Collection (Matches PosCustomerLedgerPanel)
+         ═══════════════════════════════════════════════════════════════════════ */}
+      {isSettlementModalOpen && customer && (
+        <LedgerSettlementModal
+          customer={customer as any}
+          invoiceTotal={0}
+          standaloneMode={true}
+          onClose={() => setSettlementModalOpen(false)}
+          onSuccess={(paidAmount, updatedCust) => {
+            setCustomer({
+              ...customer,
+              currentBalance: Math.max(0, (updatedCust.currentBalance ?? 0) - paidAmount),
+            });
+            refetchLedger();
+          }}
+        />
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          MODAL 2: Sale Review & Multi-Payment Confirmation (Overlay)
+         ═══════════════════════════════════════════════════════════════════════ */}
+      {showReview && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <Card
+            variant="default"
+            padding="md"
+            className="w-full max-w-lg bg-surface border border-border rounded-2xl shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto"
+          >
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                <h2 className="text-base font-bold text-text-primary">
+                  Mobile POS Sale Summary (Preview)
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReview(false)}
+                className="p-1 rounded-lg text-text-muted hover:text-text-primary"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Frontend Preview Notice */}
+            <div className="flex items-start gap-2.5 p-3 bg-warning/10 border border-warning/30 rounded-xl text-xs">
+              <Info className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-warning">
+                  Live Transaction — Status Updates to SOLD and Generates Invoice
+                </p>
+                <p className="text-text-muted mt-0.5">
+                  This confirms the multi-payment breakdown and selected IMEIs. No database write is triggered yet.
+                </p>
+              </div>
+            </div>
+
+            {/* Customer Info */}
+            <div className="bg-background/60 p-3 rounded-xl border border-border text-xs flex items-center justify-between">
+              <span className="text-text-secondary font-medium">Customer:</span>
+              <span className="font-bold text-text-primary">
+                {customer
+                  ? `${customer.name} (${customer.phone || customer.mobile || ''})`
+                  : 'Walk-In Customer'}
+              </span>
+            </div>
+
+            {/* Devices Breakdown */}
+            <div className="bg-background/60 p-3 rounded-xl border border-border space-y-2">
+              <p className="text-xs font-bold uppercase text-text-secondary">
+                Mobile Devices ({cart.length})
+              </p>
+              <div className="divide-y divide-border/60 text-xs">
+                {cart.map((item) => {
+                  const imei1 = item.device.imeis?.find((i) => i.slot === 'IMEI1')?.imei ?? '—';
+                  return (
+                    <div key={item.device.id} className="py-1.5 flex items-center justify-between">
+                      <div>
+                        <p className="font-bold text-text-primary">
+                          {item.device.brand} {item.device.model} ({item.device.storage})
+                          {item.bucket === 'RETURN' && (
+                            <span className="ml-1.5 px-1.5 py-0.5 text-[9px] rounded bg-warning/20 text-warning">
+                              RETURN
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-[11px] font-mono text-text-muted">IMEI: {imei1}</p>
+                      </div>
+                      <div className="text-right font-mono">
+                        <p
+                          className={`font-bold ${
+                            item.bucket === 'RETURN' ? 'text-warning' : 'text-text-primary'
+                          }`}
+                        >
+                          {item.bucket === 'RETURN' ? '−' : ''}
+                          {fmtPKR(item.salePrice)}
+                        </p>
                       </div>
                     </div>
                   );
                 })}
               </div>
-            )}
-          </Card>
-        </div>
+            </div>
 
-        {/* ── Right panel: Customer + Totals + Action ── */}
-        <div className="flex flex-col gap-4">
-          {/* Customer */}
-          <Card variant="default" padding="md" className="bg-surface border-border">
-            <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
-              Customer
-            </p>
-            <CustomerPicker selected={customer} onSelect={setCustomer} />
-            {!customer && (
-              <p className="text-xs text-text-muted mt-2">
-                No customer selected — will be recorded as <strong>Walk-in</strong>.
+            {/* Split Payments Breakdown */}
+            <div className="bg-background/60 p-3 rounded-xl border border-border space-y-2">
+              <p className="text-xs font-bold uppercase text-text-secondary">
+                Split Payment Breakdown
               </p>
-            )}
-          </Card>
-
-          {/* Payment Method */}
-          <Card variant="default" padding="md" className="bg-surface border-border">
-            <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
-              Payment Method
-            </p>
-            <select
-              value={paymentMethod}
-              onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
-              className="w-full px-3 py-2 text-sm bg-surface text-text-primary border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring"
-            >
-              {Object.entries(PAYMENT_METHOD_LABELS).map(([val, label]) => (
-                <option key={val} value={val}>{label}</option>
-              ))}
-            </select>
-            <p className="text-xs text-text-muted mt-1.5">
-              Credit/partial-payment allocation requires backend integration (pending).
-            </p>
-          </Card>
-
-          {/* Notes */}
-          <Card variant="default" padding="md" className="bg-surface border-border">
-            <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
-              Sale Notes (optional)
-            </p>
-            <textarea
-              rows={2}
-              value={saleNotes}
-              onChange={(e) => setSaleNotes(e.target.value)}
-              placeholder="Optional notes for this sale…"
-              className="w-full px-3 py-2 text-sm bg-surface text-text-primary placeholder:text-text-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring resize-none"
-            />
-          </Card>
-
-          {/* Sale summary totals */}
-          <Card variant="default" padding="md" className="bg-surface border-border">
-            <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
-              Sale Summary
-            </p>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between text-text-secondary">
-                <span>Items</span>
-                <span>{cart.length}</span>
-              </div>
-              <div className="flex justify-between text-text-secondary">
-                <span>Subtotal</span>
-                <span>{fmtPKR(subtotal)}</span>
-              </div>
-              <div className="flex justify-between text-warning">
-                <span>Discount</span>
-                <span>−{fmtPKR(totalDiscount)}</span>
-              </div>
-              <div className="flex justify-between font-bold text-text-primary text-base border-t border-border pt-2">
-                <span>Grand Total</span>
-                <span className="text-primary">{fmtPKR(grandTotal)}</span>
+              <div className="space-y-1 text-xs">
+                {payments.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between">
+                    <span className="text-text-secondary font-medium">
+                      {PAYMENT_METHOD_LABELS[p.method]}
+                    </span>
+                    <span className="font-mono font-bold text-emerald-500">
+                      {fmtPKR(p.amount)}
+                    </span>
+                  </div>
+                ))}
+                <div className="border-t border-border pt-1.5 flex items-center justify-between font-bold text-sm">
+                  <span className="text-text-primary">Net Payable Total</span>
+                  <span className="text-[#006970] dark:text-[#00B4BB] font-mono">
+                    {fmtPKR(grandTotal)}
+                  </span>
+                </div>
               </div>
             </div>
+
+            {/* Optional Notes */}
+            <div>
+              <label className="text-xs font-semibold text-text-secondary block mb-1">
+                Sale / Check Warranty Notes (Optional)
+              </label>
+              <input
+                type="text"
+                placeholder="Add warranty or transaction note…"
+                value={saleNotes}
+                onChange={(e) => setSaleNotes(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs bg-background border border-border rounded-lg text-text-primary focus:outline-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+              <Button variant="outline" size="sm" onClick={() => setShowReview(false)}>
+                ← Back to POS
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={isSubmitting}
+                onClick={handleExecuteMobileSale}
+              >
+                {isSubmitting ? "Processing Sale..." : "Confirm Sale and Print Receipt"}
+              </Button>
+            </div>
           </Card>
-
-          {/* Review action */}
-          <Button
-            variant="primary"
-            size="md"
-            className="w-full font-semibold shadow-sm"
-            disabled={!canReview}
-            onClick={handleReview}
-            leftIcon={<CheckCircle2 className="w-4 h-4" />}
-          >
-            Review Sale
-          </Button>
-
-          {cart.length === 0 && (
-            <p className="text-xs text-text-muted text-center">
-              Add at least one in-stock device to proceed.
-            </p>
-          )}
-          {hasErrors && cart.length > 0 && (
-            <p className="text-xs text-danger text-center">
-              Fix pricing errors above before reviewing.
-            </p>
-          )}
         </div>
-      </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          MODAL 3: Mobile Return & Mobile Replace Quick Action Dialog
+         ═══════════════════════════════════════════════════════════════════════ */}
+      {actionNoticeModal.open && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <Card
+            variant="default"
+            padding="md"
+            className="w-full max-w-md bg-surface border border-border rounded-2xl shadow-2xl flex flex-col gap-4"
+          >
+            <div className="flex items-center justify-between border-b border-border pb-2.5">
+              <div className="flex items-center gap-2">
+                {actionNoticeModal.mode === 'RETURN' ? (
+                  <RotateCcw className="w-4 h-4 text-amber-500" />
+                ) : (
+                  <Repeat className="w-4 h-4 text-purple-500" />
+                )}
+                <h3 className="text-sm font-bold text-text-primary">{actionNoticeModal.title}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActionNoticeModal((s) => ({ ...s, open: false }))}
+                className="p-1 text-text-muted hover:text-text-primary rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="font-semibold text-text-secondary block mb-1">
+                  Scan or Enter Sold IMEI / Invoice Number
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 356789123456789 or INV-1024…"
+                  value={actionNoticeModal.referenceInvoice}
+                  onChange={(e) =>
+                    setActionNoticeModal((s) => ({ ...s, referenceInvoice: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text-primary font-mono focus:outline-none focus:border-[#006970]"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-text-secondary block mb-1">
+                  {actionNoticeModal.mode === 'RETURN'
+                    ? 'Return Reason / Condition Check'
+                    : 'Replacement Reason & Difference Settlement'}
+                </label>
+                <input
+                  type="text"
+                  placeholder={
+                    actionNoticeModal.mode === 'RETURN'
+                      ? 'Customer return within check warranty…'
+                      : 'Exchange with upgraded model in cart…'
+                  }
+                  value={actionNoticeModal.reason}
+                  onChange={(e) =>
+                    setActionNoticeModal((s) => ({ ...s, reason: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text-primary focus:outline-none focus:border-[#006970]"
+                />
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-surface-hover border border-border text-text-muted">
+                {actionNoticeModal.mode === 'RETURN'
+                  ? 'In Mobile Return mode, search the returned IMEI in the top search bar to add it as a Return item. The refund can be settled via Cash, JazzCash, EasyPaisa, or Customer Ledger.'
+                  : 'In Mobile Replace mode, use the RETURN / NEW toggle inside the top search dropdown to add both the incoming returned mobile and the outgoing replacement mobile.'}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setPosMode('SALE');
+                  setActionNoticeModal((s) => ({ ...s, open: false }));
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  const refQ = actionNoticeModal.referenceInvoice.trim().toLowerCase();
+                  if (refQ) {
+                    const matched = allDevices.find(
+                      (d) =>
+                        (d.imeis && d.imeis.some((i) => i.imei.toLowerCase() === refQ)) ||
+                        (d.serial_number && d.serial_number.toLowerCase() === refQ)
+                    );
+                    if (matched && !isInCart(matched.id)) {
+                      addToCart(matched, 'RETURN');
+                    } else {
+                      setSearchQuery(actionNoticeModal.referenceInvoice.trim());
+                      setSearchDropdownOpen(true);
+                    }
+                  }
+                  toast.success(
+                    `${
+                      actionNoticeModal.mode === 'RETURN' ? 'Mobile Return' : 'Mobile Replace'
+                    } mode active — use top search bar to scan IMEI`
+                  );
+                  setActionNoticeModal((s) => ({ ...s, open: false }));
+                }}
+              >
+                Apply on POS
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 };
