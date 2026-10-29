@@ -745,7 +745,7 @@ export const MobileSaleDashboard: React.FC = () => {
              - Center: Mobile Omnibox Search (Mobiles ONLY show on search, never pre-listed)
              - Right: POS Operational Mode Buttons (Regular Sale | Mobile Return | Mobile Replace)
          ═════════════════════════════════════════════════════════════════════════ */}
-      <header className="min-h-[54px] px-3 sm:px-4 py-1.5 border-b border-border bg-surface flex flex-wrap items-center justify-between gap-2 sm:gap-3 shrink-0 z-40 shadow-xs">
+      <header className="min-h-[54px] px-3 sm:px-4 py-1.5 border-b border-border bg-surface flex flex-wrap items-center justify-between gap-2 sm:gap-3 shrink-0 z-20 shadow-xs">
         {/* Left Section: Brand Badge & Mobile Module Nav */}
         <div className="flex items-center gap-2.5 shrink-0">
           <div className="flex items-center gap-1.5">
