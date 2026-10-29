@@ -1,10 +1,10 @@
 import React from 'react';
-import { StockWidget } from '@/features/inventory/stock/StockWidget';
+import { InventoryProductsPage } from './InventoryProductsPage';
 
 export function InventoryStockPage() {
   return (
-    <div className="p-4 md:p-6 overflow-y-auto h-full">
-      <StockWidget />
+    <div className="h-full overflow-hidden">
+      <InventoryProductsPage mode="restock" />
     </div>
   );
 }
