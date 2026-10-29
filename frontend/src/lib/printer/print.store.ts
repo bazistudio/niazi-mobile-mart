@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type PrintDocumentType = 'SaleInvoice' | 'PurchaseInvoice' | 'ExpenseVoucher' | 'PaymentReceipt' | 'Generic';
+export type PrintDocumentType = 'SaleInvoice' | 'MobileSaleInvoice' | 'PurchaseInvoice' | 'ExpenseVoucher' | 'PaymentReceipt' | 'Generic';
 
 interface PrintPayload {
   html: string;

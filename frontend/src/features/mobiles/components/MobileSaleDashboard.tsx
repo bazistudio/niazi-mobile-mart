@@ -56,6 +56,9 @@ import { useLedger } from '@/features/ledger/hooks/useLedger';
 import { LedgerSettlementModal } from '@/features/pos/components/modals/LedgerSettlementModal';
 import { DocumentService } from '@/features/pos/services/document/document.service';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
+import { usePrintStore } from '@/lib/printer';
+import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
+import { Building2, User, Phone, MapPin, ReceiptText, ShieldCheck as ShieldIcon, CreditCard as CardIcon } from 'lucide-react';
 import { usePosStore } from '@/features/pos/store/usePosStore';
 import toast from 'react-hot-toast';
 
@@ -210,6 +213,7 @@ export const MobileSaleDashboard: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [completedSaleResult, setCompletedSaleResult] = useState<any | null>(null);
   const { settings: printerSettings, shopHeader } = usePrinterStore();
+  const openPrintPreview = usePrintStore((s) => s.openPreview);
   const [showReview, setShowReview] = useState(false);
   const [actionNoticeModal, setActionNoticeModal] = useState<{
     open: boolean;
@@ -566,38 +570,73 @@ export const MobileSaleDashboard: React.FC = () => {
       setCompletedSaleResult(res);
       setShowReview(false);
 
-      // Trigger unified thermal print document
+      // Trigger unified thermal print document (Type 2: Mobile Sale Invoice)
       try {
-        const realShopProfile = {
-          name: shopHeader?.name || activeShop?.name || "Niazi Mobile Mart",
-          address: shopHeader?.address || (activeShop as any)?.address || "Main Branch",
-          phone1: shopHeader?.phone || (activeShop as any)?.phone || "",
+        const effectiveShop = shopHeader || {
+          name: activeShop?.name || "Niazi Mobile Mart",
+          branchName: activeShop?.name || "Main Branch",
+          address: (activeShop as any)?.address || "",
+          phone: (activeShop as any)?.phone || "",
+          whatsapp: "",
+          email: "",
+          taxNumber: "",
+          footerText: "Thank you for shopping with Niazi Mobile Mart!",
+          returnPolicy: "Mobile handsets once sold are covered by check warranty as per invoice terms.",
         };
-        const mappedTxn = {
-          transactionId: res.invoiceNumber,
+
+        const effectiveSettings = printerSettings || {
+          enabled: true,
+          printerType: 'THERMAL_80MM',
+          connectionType: 'BROWSER_PRINT',
+          paperSize: { width: '80mm' },
+          layout: { orientation: 'portrait', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0 },
+          font: { size: 12, family: 'sans-serif' },
+          invoice: {
+            showLogo: true,
+            showShopInfo: true,
+            showBarcode: true,
+            showQR: false,
+            showTax: false,
+            showDiscount: true,
+          },
+          autoPrint: false,
+          printCopyCount: 1,
+        };
+
+        const printOrder = {
+          invoiceNumber: res.invoiceNumber,
+          createdAt: res.createdAt,
+          customer: customer ? { name: customer.name, phone: customer.phone } : { name: "Walk-In Customer" },
+          cashier: res.cashier.name + " (" + res.cashier.role + ")",
           items: res.devices.map((d) => ({
-            productName: d.brand + " " + d.model + " (IMEI: " + d.imei1 + ")",
-            quantity: 1,
-            unitPrice: d.salePrice,
-            discount: 0,
-            subtotal: d.salePrice,
+            name: d.brand + " " + d.model,
+            qty: 1,
+            price: d.salePrice,
+            total: d.salePrice,
+            imei: d.imei1,
+            specs: (() => {
+              const matchedCart = cart.find(c => c.device.id === d.deviceId);
+              return [matchedCart?.device.storage, matchedCart?.device.ram, matchedCart?.device.color].filter(Boolean).join(" • ") || undefined;
+            })(),
           })),
           subtotal: res.subtotal,
-          discountTotal: res.discount,
-          grandTotal: res.totalAmount,
-          totalPaid: res.paidAmount,
-          remainingDue: res.creditAmount,
-          changeReturned: res.changeAmount,
-          paymentBreakdown: res.payments.map((p) => ({ method: p.method, amount: p.amount })),
-          createdAt: res.createdAt,
+          discount: res.discount,
+          total: res.totalAmount,
+          paymentBreakdown: res.payments,
+          tendered: res.paidAmount,
+          change: res.changeAmount,
+          due: res.creditAmount,
         };
-        const invoiceExtras = {
-          customer: customer ? { id: customer.id, name: customer.name, phone: customer.phone } : null,
-          cashier: res.cashier.name + " (" + res.cashier.role + ")",
-        };
-        const builtInvoice = DocumentService.buildInvoice(mappedTxn as any, realShopProfile as any, invoiceExtras as any);
-        usePosStore.getState().setLastInvoice(builtInvoice);
-        await DocumentService.logPrint(builtInvoice.invoiceId, "PRINT");
+
+        const printHtml = printFormatter.formatMobileSaleInvoice(printOrder, effectiveSettings as any, effectiveShop as any);
+        openPrintPreview({
+          html: printHtml,
+          documentType: 'MobileSaleInvoice',
+          referenceId: res.invoiceNumber,
+          title: "Mobile Sale Receipt - " + res.invoiceNumber,
+        });
+
+        await DocumentService.logPrint(res.invoiceNumber, "PRINT");
       } catch (printErr) {
         console.warn("Advisory printing error:", printErr);
       }
@@ -1814,141 +1853,267 @@ export const MobileSaleDashboard: React.FC = () => {
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════════
-          MODAL 2: Sale Review & Multi-Payment Confirmation (Overlay)
+          MODAL 2: Mobile Sale Invoice (Type 2 Invoice Preview & Print)
          ═══════════════════════════════════════════════════════════════════════ */}
       {showReview && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
           <Card
             variant="default"
-            padding="md"
-            className="w-full max-w-lg bg-surface border border-border rounded-2xl shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto"
+            padding="none"
+            className="w-full max-w-xl bg-surface border border-border rounded-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden"
           >
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                <h2 className="text-base font-bold text-text-primary">
-                  Mobile POS Sale Summary (Preview)
-                </h2>
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-muted/20">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                  <ReceiptText className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-text-primary tracking-tight">
+                    Mobile Sale Invoice Preview
+                  </h2>
+                  <p className="text-[11px] text-text-muted">
+                    Official Document Type 2 • Serialized Mobile Terminal
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => setShowReview(false)}
-                className="p-1 rounded-lg text-text-muted hover:text-text-primary"
+                className="p-1 rounded-lg text-text-muted hover:text-text-primary transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Frontend Preview Notice */}
-            <div className="flex items-start gap-2.5 p-3 bg-warning/10 border border-warning/30 rounded-xl text-xs">
-              <Info className="w-4 h-4 text-warning shrink-0 mt-0.5" />
-              <div>
-                <p className="font-bold text-warning">
-                  Live Transaction — Status Updates to SOLD and Generates Invoice
+            {/* Modal Body: Styled Real Invoice Paper Container */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+
+              {/* 1. Authentic Organization / Shop Header */}
+              <div className="rounded-xl border border-border/80 bg-background/80 p-3.5 text-center relative overflow-hidden">
+                <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 via-[#006970] to-[#00B4BB]" />
+                <h3 className="font-extrabold text-base uppercase text-text-primary tracking-wide">
+                  {shopHeader?.name || activeShop?.name || 'Niazi Mobile Mart'}
+                </h3>
+                <p className="text-[11px] text-text-muted font-medium mt-0.5">
+                  {shopHeader?.branchName || activeShop?.name || 'Main Branch'}
                 </p>
-                <p className="text-text-muted mt-0.5">
-                  This confirms the multi-payment breakdown and selected IMEIs. No database write is triggered yet.
-                </p>
-              </div>
-            </div>
-
-            {/* Customer Info */}
-            <div className="bg-background/60 p-3 rounded-xl border border-border text-xs flex items-center justify-between">
-              <span className="text-text-secondary font-medium">Customer:</span>
-              <span className="font-bold text-text-primary">
-                {customer
-                  ? `${customer.name} (${customer.phone || customer.mobile || ''})`
-                  : 'Walk-In Customer'}
-              </span>
-            </div>
-
-            {/* Devices Breakdown */}
-            <div className="bg-background/60 p-3 rounded-xl border border-border space-y-2">
-              <p className="text-xs font-bold uppercase text-text-secondary">
-                Mobile Devices ({cart.length})
-              </p>
-              <div className="divide-y divide-border/60 text-xs">
-                {cart.map((item) => {
-                  const imei1 = item.device.imeis?.find((i) => i.slot === 'IMEI1')?.imei ?? '—';
-                  return (
-                    <div key={item.device.id} className="py-1.5 flex items-center justify-between">
-                      <div>
-                        <p className="font-bold text-text-primary">
-                          {item.device.brand} {item.device.model} ({item.device.storage})
-                          {item.bucket === 'RETURN' && (
-                            <span className="ml-1.5 px-1.5 py-0.5 text-[9px] rounded bg-warning/20 text-warning">
-                              RETURN
-                            </span>
-                          )}
-                        </p>
-                        <p className="text-[11px] font-mono text-text-muted">IMEI: {imei1}</p>
-                      </div>
-                      <div className="text-right font-mono">
-                        <p
-                          className={`font-bold ${
-                            item.bucket === 'RETURN' ? 'text-warning' : 'text-text-primary'
-                          }`}
-                        >
-                          {item.bucket === 'RETURN' ? '−' : ''}
-                          {fmtPKR(item.salePrice)}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Split Payments Breakdown */}
-            <div className="bg-background/60 p-3 rounded-xl border border-border space-y-2">
-              <p className="text-xs font-bold uppercase text-text-secondary">
-                Split Payment Breakdown
-              </p>
-              <div className="space-y-1 text-xs">
-                {payments.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between">
-                    <span className="text-text-secondary font-medium">
-                      {PAYMENT_METHOD_LABELS[p.method]}
+                <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[11px] text-text-secondary mt-1.5 font-mono">
+                  {(shopHeader?.address || (activeShop as any)?.address) && (
+                    <span className="flex items-center gap-1">
+                      <MapPin className="w-3 h-3 text-text-muted shrink-0" />
+                      {shopHeader?.address || (activeShop as any)?.address}
                     </span>
-                    <span className="font-mono font-bold text-emerald-500">
-                      {fmtPKR(p.amount)}
+                  )}
+                  {(shopHeader?.phone || (activeShop as any)?.phone) && (
+                    <span className="flex items-center gap-1">
+                      <Phone className="w-3 h-3 text-text-muted shrink-0" />
+                      {shopHeader?.phone || (activeShop as any)?.phone}
                     </span>
-                  </div>
-                ))}
-                <div className="border-t border-border pt-1.5 flex items-center justify-between font-bold text-sm">
-                  <span className="text-text-primary">Net Payable Total</span>
-                  <span className="text-[#006970] dark:text-[#00B4BB] font-mono">
-                    {fmtPKR(grandTotal)}
-                  </span>
+                  )}
+                  {shopHeader?.taxNumber && (
+                    <span className="font-bold text-text-primary">
+                      NTN: {shopHeader.taxNumber}
+                    </span>
+                  )}
                 </div>
               </div>
+
+              {/* 2. Invoice Meta & Cashier / User Accountability */}
+              <div className="grid grid-cols-2 gap-3">
+                {/* Cashier / User Accountability Card */}
+                <div className="rounded-xl border border-border/80 bg-background/50 p-2.5 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase text-text-muted tracking-wider">
+                      Processed By
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[#006970]/10 text-[#006970] dark:text-[#00B4BB]">
+                      {user?.role || 'CASHIER'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                    <span className="font-bold text-text-primary truncate">
+                      {user?.name || user?.username || 'Current Staff'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] font-mono text-text-muted">
+                    User ID: {user?.id ? user.id.slice(0, 8) + '...' : 'System'}
+                  </p>
+                </div>
+
+                {/* Customer Details Card */}
+                <div className="rounded-xl border border-border/80 bg-background/50 p-2.5 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase text-text-muted tracking-wider">
+                      Customer / Khata
+                    </span>
+                    {customer && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                        VERIFIED
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <UserCircle2 className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                    <span className="font-bold text-text-primary truncate">
+                      {customer ? customer.name : 'Walk-In Customer'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] font-mono text-text-muted">
+                    {customer ? (customer.phone || customer.mobile || 'No Phone') : 'General Cash Sale'}
+                    {customer && customer.currentBalance > 0 && (
+                      <span className="text-warning ml-1">
+                        (Due: {fmtPKR(customer.currentBalance)})
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {/* 3. Serialized Mobile Handsets Table */}
+              <div className="rounded-xl border border-border/80 bg-background/50 overflow-hidden">
+                <div className="px-3 py-2 bg-muted/30 border-b border-border/60 flex items-center justify-between">
+                  <span className="text-[10px] font-extrabold uppercase text-text-secondary tracking-wider">
+                    Mobile Inventory Items ({cart.length})
+                  </span>
+                  <span className="text-[10px] font-medium text-text-muted">
+                    Serial & IMEI Tracked
+                  </span>
+                </div>
+                <div className="divide-y divide-border/60">
+                  {cart.map((item, idx) => {
+                    const imei1 = item.device.imeis?.find((i) => i.slot === 'IMEI1')?.imei ?? '—';
+                    const imei2 = item.device.imeis?.find((i) => i.slot === 'IMEI2')?.imei;
+                    const specs = [item.device.storage, item.device.ram, item.device.color].filter(Boolean).join(' • ');
+
+                    return (
+                      <div key={item.device.id} className="p-2.5 flex items-start justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-bold text-text-muted">#{idx + 1}</span>
+                            <span className="font-bold text-text-primary">
+                              {item.device.brand} {item.device.model}
+                            </span>
+                            {specs && (
+                              <span className="text-[10px] text-text-secondary font-medium">
+                                ({specs})
+                              </span>
+                            )}
+                            {item.bucket === 'RETURN' && (
+                              <span className="px-1.5 py-0.5 text-[9px] rounded font-bold bg-warning/20 text-warning">
+                                RETURN
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-[10.5px] font-mono text-text-muted">
+                            <span>IMEI 1: <strong className="text-text-secondary">{imei1}</strong></span>
+                            {imei2 && <span>| IMEI 2: {imei2}</span>}
+                          </div>
+                        </div>
+                        <div className="text-right font-mono shrink-0">
+                          <p className={`font-bold ${item.bucket === 'RETURN' ? 'text-warning' : 'text-text-primary'}`}>
+                            {item.bucket === 'RETURN' ? '−' : ''}{fmtPKR(item.salePrice)}
+                          </p>
+                          <span className="text-[9px] text-text-muted">Qty: 1</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 4. Payment Breakdown & Financial Totals */}
+              <div className="rounded-xl border border-border/80 bg-background/50 p-3 space-y-2">
+                <div className="flex items-center justify-between pb-1.5 border-b border-border/60">
+                  <span className="text-[10px] font-extrabold uppercase text-text-secondary tracking-wider">
+                    Payment Method Split
+                  </span>
+                  <span className="text-[10px] font-medium text-text-muted">
+                    Instant Tender Settlement
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {payments.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between text-xs">
+                      <span className="text-text-secondary font-medium flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        {PAYMENT_METHOD_LABELS[p.method]}
+                        {p.reference && <span className="text-[10px] text-text-muted">({p.reference})</span>}
+                      </span>
+                      <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                        {fmtPKR(p.amount)}
+                      </span>
+                    </div>
+                  ))}
+
+                  <div className="border-t border-border/80 pt-2 space-y-1">
+                    <div className="flex items-center justify-between text-xs font-medium text-text-secondary">
+                      <span>Total Tendered:</span>
+                      <span className="font-mono font-bold text-text-primary">{fmtPKR(totalReceived)}</span>
+                    </div>
+                    {totalReceived > grandTotal && (
+                      <div className="flex items-center justify-between text-xs font-medium text-emerald-500">
+                        <span>Change Return:</span>
+                        <span className="font-mono font-bold">{fmtPKR(totalReceived - grandTotal)}</span>
+                      </div>
+                    )}
+                    {remainingBalance > 0 && (
+                      <div className="flex items-center justify-between text-xs font-bold text-warning">
+                        <span>Remaining Due (Customer Ledger):</span>
+                        <span className="font-mono">{fmtPKR(remainingBalance)}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between font-extrabold text-sm pt-1 border-t border-dashed border-border/80">
+                      <span className="text-text-primary">Net Total Payable:</span>
+                      <span className="text-[#006970] dark:text-[#00B4BB] font-mono text-base">
+                        {fmtPKR(grandTotal)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 5. Check Warranty & Sale Notes */}
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-text-secondary flex items-center gap-1">
+                  <ShieldIcon className="w-3.5 h-3.5 text-text-muted" />
+                  Check Warranty & Terms Notes
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 7 Days Check Warranty / Original accessories included"
+                  value={saleNotes}
+                  onChange={(e) => setSaleNotes(e.target.value)}
+                  className="w-full px-3 py-1.5 text-xs bg-background border border-border rounded-lg text-text-primary focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+
             </div>
 
-            {/* Optional Notes */}
-            <div>
-              <label className="text-xs font-semibold text-text-secondary block mb-1">
-                Sale / Check Warranty Notes (Optional)
-              </label>
-              <input
-                type="text"
-                placeholder="Add warranty or transaction note…"
-                value={saleNotes}
-                onChange={(e) => setSaleNotes(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs bg-background border border-border rounded-lg text-text-primary focus:outline-none"
-              />
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+            {/* Modal Footer Controls */}
+            <div className="flex items-center justify-between px-5 py-3.5 border-t border-border bg-muted/20">
               <Button variant="outline" size="sm" onClick={() => setShowReview(false)}>
-                ← Back to POS
+                ← Back to POS Cart
               </Button>
               <Button
                 variant="primary"
                 size="sm"
                 disabled={isSubmitting}
                 onClick={handleExecuteMobileSale}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5 shadow-sm"
               >
-                {isSubmitting ? "Processing Sale..." : "Confirm Sale and Print Receipt"}
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Processing & Printing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Printer className="w-4 h-4" />
+                    <span>Confirm Sale & Print Invoice (F12)</span>
+                  </>
+                )}
               </Button>
             </div>
           </Card>

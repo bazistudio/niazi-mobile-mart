@@ -2,15 +2,21 @@ import { create } from 'zustand';
 import { PrinterSettings, ShopHeader } from '../types/printer.types';
 import toast from 'react-hot-toast';
 
+export type InvoiceTemplateKey = 'SaleInvoice' | 'MobileSaleInvoice' | 'PurchaseInvoice' | 'PaymentReceipt';
+
 interface PrinterState {
   settings: PrinterSettings | null;
   shopHeader: ShopHeader | null;
+  selectedBranchId: string | null;
+  activeTemplate: InvoiceTemplateKey;
   isLoading: boolean;
   error: string | null;
-  fetchSettings: () => Promise<void>;
+  fetchSettings: (branchId?: string | null) => Promise<void>;
+  setSelectedBranchId: (branchId: string | null) => void;
+  setActiveTemplate: (template: InvoiceTemplateKey) => void;
   updateSettings: (updates: Partial<PrinterSettings>) => void;
   updateShopHeader: (updates: Partial<ShopHeader>) => void;
-  saveSettings: () => Promise<void>;
+  saveSettings: (targetBranchId?: string | null) => Promise<void>;
 }
 
 const DEFAULT_SETTINGS: PrinterSettings = {
@@ -47,19 +53,47 @@ const DEFAULT_SHOP_HEADER: ShopHeader = {
   logoUrl: '',
 };
 
+// Request sequence counter to prevent race conditions where a slow response for Branch A overwrites Branch B
+let currentFetchSequence = 0;
+
 export const usePrinterStore = create<PrinterState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
   shopHeader: DEFAULT_SHOP_HEADER,
+  selectedBranchId: null,
+  activeTemplate: 'SaleInvoice',
   isLoading: false,
   error: null,
 
-  fetchSettings: async () => {
+  setSelectedBranchId: (branchId) => {
+    set({ selectedBranchId: branchId });
+  },
+
+  setActiveTemplate: (template) => {
+    set({ activeTemplate: template });
+  },
+
+  fetchSettings: async (branchId?: string | null) => {
+    const fetchId = ++currentFetchSequence;
     try {
       set({ isLoading: true, error: null });
 
-      // Try fetching persistent settings from backend DB
+      const resolvedBranch = branchId !== undefined ? branchId : get().selectedBranchId;
+      if (branchId !== undefined) {
+        set({ selectedBranchId: branchId });
+      }
+
+      // Try fetching persistent settings from backend DB with optional branch_id query parameter
       const { httpFetch } = await import('@/lib/tauri/tauriClient');
-      const dbData: any = await httpFetch('/api/settings/invoice-printer');
+      const url = resolvedBranch
+        ? `/api/settings/invoice-printer?branch_id=${encodeURIComponent(resolvedBranch)}`
+        : '/api/settings/invoice-printer';
+
+      const dbData: any = await httpFetch(url);
+
+      // Discard response if a newer fetch was initiated in the meantime (race-condition protection)
+      if (fetchId !== currentFetchSequence) {
+        return;
+      }
 
       if (dbData && dbData.shop_name) {
         const pSettings: PrinterSettings = {
@@ -108,17 +142,21 @@ export const usePrinterStore = create<PrinterState>((set, get) => ({
         set({ settings: pSettings, shopHeader: header, isLoading: false });
 
         if (typeof window !== 'undefined') {
-          localStorage.setItem('niazi_printer_settings', JSON.stringify({ printer: pSettings, shopHeader: header }));
+          const cacheKey = resolvedBranch ? `niazi_printer_settings_${resolvedBranch}` : 'niazi_printer_settings';
+          localStorage.setItem(cacheKey, JSON.stringify({ printer: pSettings, shopHeader: header }));
         }
         return;
       }
     } catch (backendErr) {
+      if (fetchId !== currentFetchSequence) return;
       console.warn('[printer.store] Backend settings fetch failed, falling back to localStorage:', backendErr);
     }
 
     // Fallback to localStorage
     try {
-      const saved = typeof window !== 'undefined' ? localStorage.getItem('niazi_printer_settings') : null;
+      const resolvedBranch = branchId !== undefined ? branchId : get().selectedBranchId;
+      const cacheKey = resolvedBranch ? `niazi_printer_settings_${resolvedBranch}` : 'niazi_printer_settings';
+      const saved = typeof window !== 'undefined' ? localStorage.getItem(cacheKey) || localStorage.getItem('niazi_printer_settings') : null;
       if (saved) {
         const parsed = JSON.parse(saved);
         set({
@@ -144,54 +182,63 @@ export const usePrinterStore = create<PrinterState>((set, get) => ({
     set({ shopHeader: { ...current, ...updates } });
   },
 
-  saveSettings: async () => {
+  saveSettings: async (targetBranchId?: string | null) => {
     try {
       set({ isLoading: true, error: null });
-      const { settings, shopHeader } = get();
+      const { settings, shopHeader, selectedBranchId } = get();
 
       const pSettings = settings || DEFAULT_SETTINGS;
       const header = shopHeader || DEFAULT_SHOP_HEADER;
+      const resolvedBranch = targetBranchId !== undefined ? targetBranchId : selectedBranchId;
 
       // Save to local storage first for immediate offline availability
       if (typeof window !== 'undefined') {
+        const cacheKey = resolvedBranch ? `niazi_printer_settings_${resolvedBranch}` : 'niazi_printer_settings';
+        localStorage.setItem(cacheKey, JSON.stringify({ printer: pSettings, shopHeader: header }));
         localStorage.setItem('niazi_printer_settings', JSON.stringify({ printer: pSettings, shopHeader: header }));
       }
 
       // Save persistently to PostgreSQL database
       const { httpFetch } = await import('@/lib/tauri/tauriClient');
+      const payload: Record<string, unknown> = {
+        shop_name: header.name,
+        branch_name: header.branchName,
+        address: header.address,
+        phone: header.phone,
+        secondary_phone: header.secondaryPhone,
+        whatsapp: header.whatsapp,
+        email: header.email,
+        logo_url: header.logoUrl,
+        tax_number: header.taxNumber,
+        printer_type: pSettings.printerType,
+        connection_type: pSettings.connectionType,
+        paper_width: pSettings.paperSize?.width || '80mm',
+        font_family: pSettings.font?.family || 'sans-serif',
+        font_size: pSettings.font?.size || 12,
+        margin_top: pSettings.layout?.marginTop || 0,
+        margin_bottom: pSettings.layout?.marginBottom || 0,
+        margin_left: pSettings.layout?.marginLeft || 0,
+        margin_right: pSettings.layout?.marginRight || 0,
+        show_logo: pSettings.invoice?.showLogo,
+        show_shop_info: pSettings.invoice?.showShopInfo,
+        show_barcode: pSettings.invoice?.showBarcode,
+        show_qr: pSettings.invoice?.showQR,
+        show_tax: pSettings.invoice?.showTax,
+        show_discount: pSettings.invoice?.showDiscount,
+        auto_print: pSettings.autoPrint,
+        print_copy_count: pSettings.printCopyCount,
+        return_policy: header.returnPolicy,
+        warranty_instructions: header.warrantyInstructions,
+        footer_text: header.footerText,
+      };
+
+      if (resolvedBranch) {
+        payload.branch_id = resolvedBranch;
+      }
+
       await httpFetch('/api/settings/invoice-printer', {
         method: 'PUT',
-        body: JSON.stringify({
-          shop_name: header.name,
-          branch_name: header.branchName,
-          address: header.address,
-          phone: header.phone,
-          secondary_phone: header.secondaryPhone,
-          whatsapp: header.whatsapp,
-          email: header.email,
-          logo_url: header.logoUrl,
-          tax_number: header.taxNumber,
-          printer_type: pSettings.printerType,
-          connection_type: pSettings.connectionType,
-          paper_width: pSettings.paperSize?.width || '80mm',
-          font_family: pSettings.font?.family || 'sans-serif',
-          font_size: pSettings.font?.size || 12,
-          margin_top: pSettings.layout?.marginTop || 0,
-          margin_bottom: pSettings.layout?.marginBottom || 0,
-          margin_left: pSettings.layout?.marginLeft || 0,
-          margin_right: pSettings.layout?.marginRight || 0,
-          show_logo: pSettings.invoice?.showLogo,
-          show_shop_info: pSettings.invoice?.showShopInfo,
-          show_barcode: pSettings.invoice?.showBarcode,
-          show_qr: pSettings.invoice?.showQR,
-          show_tax: pSettings.invoice?.showTax,
-          show_discount: pSettings.invoice?.showDiscount,
-          auto_print: pSettings.autoPrint,
-          print_copy_count: pSettings.printCopyCount,
-          return_policy: header.returnPolicy,
-          warranty_instructions: header.warrantyInstructions,
-          footer_text: header.footerText,
-        }),
+        body: JSON.stringify(payload),
       });
 
       set({ isLoading: false });

@@ -104,7 +104,38 @@ export const generateBarcodeSvg = (data: string, maxWidth: number = 200, height:
 
 // Print Strategy Layer
 export const printFormatter = {
-  formatSaleInvoice: (order: any, settings: PrinterSettings, shop: ShopHeader): string => {
+  /**
+   * Mobile Sale Invoice (Type 2 Invoice) Formatter
+   * Specialized invoice layout for serialized mobile devices with prominent IMEI, specs & cashier accountability
+   */
+  formatMobileSaleInvoice: (order: any, settings: PrinterSettings, shop: ShopHeader): string => {
+    const invoice: UnifiedInvoice = {
+      invoiceNo: order.invoiceNumber || order.displayNumber || order.transactionId || 'INV-M-' + Date.now().toString().slice(-6),
+      date: new Date(order.createdAt || Date.now()).toLocaleString(),
+      customer: order.customer ? { name: order.customer.name, phone: order.customer.phone } : { name: 'Walk-In Customer' },
+      cashier: order.cashier || order.cashierName || 'Cashier',
+      items: (order.items || []).map((i: any) => ({
+        name: i.name || i.productName || 'Mobile Handset',
+        qty: i.qty || i.quantity || 1,
+        price: i.price ?? i.salePrice ?? 0,
+        total: i.total ?? i.subtotal ?? 0,
+        imei: i.imei || i.imei1 || i.serialNumber,
+        specs: i.specs || i.storage || undefined,
+      })),
+      subtotal: order.subtotal ?? order.totalAmount ?? 0,
+      discount: order.discount ?? 0,
+      tax: 0,
+      total: order.total ?? order.totalAmount ?? order.grandTotal ?? 0,
+      paymentMethod: order.paymentMethod || order.paymentBreakdown?.[0]?.method || 'CASH',
+      tendered: order.tendered ?? order.paidAmount ?? order.totalPaid ?? 0,
+      change: order.change ?? order.changeAmount ?? 0,
+      due: order.due ?? order.creditAmount ?? order.remainingDue ?? 0,
+      shop,
+      returnPolicy: 'Mobile handsets once sold are covered by check warranty as per invoice terms.'
+    };
+    return renderDocument(invoice, settings, 'Mobile Sale Invoice');
+  },
+    formatSaleInvoice: (order: any, settings: PrinterSettings, shop: ShopHeader): string => {
     const invoice: UnifiedInvoice = {
       invoiceNo: order.displayNumber || order.orderNumber || order.transactionId || (order._id ? `TP-${order._id.slice(-6).toUpperCase()}` : `TP-${Date.now().toString().slice(-6)}`),
       date: new Date(order.createdAt || Date.now()).toLocaleString(),
