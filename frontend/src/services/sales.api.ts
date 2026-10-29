@@ -123,6 +123,9 @@ export function mapSaleToOrder(s: Sale, lines: any[] = [], payments: any[] = [])
       discount: l.discount,
       subtotal: l.line_total,
       lineTotal: l.line_total,
+      imei: l.imei1 || (l.sku_snapshot && l.sku_snapshot !== 'MOBILE' && l.sku_snapshot !== 'DEFAULT' ? l.sku_snapshot : undefined),
+      specs: l.specs,
+      lineType: l.line_type || 'PRODUCT',
     })),
     payments,
   };

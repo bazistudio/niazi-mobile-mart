@@ -62,8 +62,12 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
       footerText: 'Thank you!'
     };
 
-    const html = printFormatter.formatSaleInvoice(order, defaultSettings, defaultHeader);
-    openPreview({ html, documentType: 'SaleInvoice', referenceId: order._id, title: `Invoice - ${order.orderNumber || order.displayNumber}` });
+    const hasMobileLines = order.items && order.items.some((i: any) => i.lineType === 'MOBILE' || i.imei);
+    const html = hasMobileLines
+      ? printFormatter.formatMobileSaleInvoice(order, defaultSettings, defaultHeader)
+      : printFormatter.formatSaleInvoice(order, defaultSettings, defaultHeader);
+    const docType = hasMobileLines ? 'MobileSaleInvoice' : 'SaleInvoice';
+    openPreview({ html, documentType: docType as any, referenceId: order._id, title: `Invoice - ${order.orderNumber || order.displayNumber}` });
   };
 
   useEffect(() => {
@@ -318,7 +322,15 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
                                   <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                                     {order.items?.map((item: any, idx: number) => (
                                       <tr key={idx}>
-                                        <td className="px-4 py-2 text-gray-900 dark:text-gray-100">{item.productName || item.name}</td>
+                                        <td className="px-4 py-2 text-gray-900 dark:text-gray-100">
+                                          <div>{item.productName || item.name}</div>
+                                          {item.specs && (
+                                            <div className="text-xs text-gray-500 dark:text-gray-400">{item.specs}</div>
+                                          )}
+                                          {item.imei && (
+                                            <div className="text-xs font-mono text-gray-500 dark:text-gray-400">IMEI: {item.imei}</div>
+                                          )}
+                                        </td>
                                         <td className="px-4 py-2 text-center text-gray-700 dark:text-gray-300">{item.quantity}</td>
                                         <td className="px-4 py-2 text-right text-gray-700 dark:text-gray-300">Rs. {(item.salePrice || item.price || 0).toLocaleString()}</td>
                                         <td className="px-4 py-2 text-right font-medium text-gray-900 dark:text-white">Rs. {(item.quantity * (item.salePrice || item.price || 0)).toLocaleString()}</td>

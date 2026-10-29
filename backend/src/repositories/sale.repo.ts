@@ -46,6 +46,12 @@ export interface SaleLine {
   discount: number;
   line_total: number;
   created_at: string;
+  // Optional enriched fields for serialized mobile device lines
+  line_type?: 'PRODUCT' | 'MOBILE';
+  device_id?: string;
+  imei1?: string;
+  imei2?: string | null;
+  specs?: string;
 }
 
 export interface SalePayment {
@@ -1073,7 +1079,7 @@ export async function getSaleLines(pool: Pool, saleId: string): Promise<SaleLine
                       unit_price, cost_price_snapshot, quantity, discount, line_total, created_at
                FROM sale_lines WHERE sale_id = $1 ORDER BY created_at ASC, id ASC`;
   const result = await pool.query(sql, [saleId]);
-  return result.rows.map((row) => {
+  const productLines: SaleLine[] = result.rows.map((row) => {
     const r = row as Record<string, unknown>;
     return {
       id: r['id'] as string,
@@ -1087,8 +1093,61 @@ export async function getSaleLines(pool: Pool, saleId: string): Promise<SaleLine
       discount: Number(r['discount']),
       line_total: Number(r['line_total']),
       created_at: r['created_at'] as string,
+      line_type: 'PRODUCT',
     };
   });
+
+  // Query mobile_sale_items to seamlessly retrieve serialized mobile lines if present
+  try {
+    const mobileSql = `
+      SELECT msi.id, msi.sale_id, msi.device_id, msi.brand_snapshot, msi.model_snapshot,
+             msi.imei1_snapshot, msi.imei2_snapshot, msi.cost_price_snapshot, msi.sale_price,
+             msi.created_at, md.storage, md.ram, md.color, md.condition, md.pta_status
+      FROM mobile_sale_items msi
+      LEFT JOIN mobile_devices md ON md.id = msi.device_id
+      WHERE msi.sale_id = $1
+      ORDER BY msi.created_at ASC, msi.id ASC
+    `;
+    const mobileResult = await pool.query(mobileSql, [saleId]);
+    for (const row of mobileResult.rows) {
+      const r = row as Record<string, unknown>;
+      const brand = (r['brand_snapshot'] as string) || '';
+      const model = (r['model_snapshot'] as string) || '';
+      const storage = (r['storage'] as string | null) || '';
+      const ram = (r['ram'] as string | null) || '';
+      const color = (r['color'] as string | null) || '';
+      const condition = (r['condition'] as string | null) || '';
+      const ptaStatus = (r['pta_status'] as string | null) || '';
+
+      const specParts = [storage, ram, color, condition, ptaStatus].filter((p) => p && p.trim().length > 0);
+      const specs = specParts.length > 0 ? specParts.join(' • ') : undefined;
+      const imei1 = (r['imei1_snapshot'] as string) || '';
+      const imei2 = (r['imei2_snapshot'] as string | null) || null;
+
+      productLines.push({
+        id: r['id'] as string,
+        sale_id: r['sale_id'] as string,
+        product_id: r['device_id'] as string,
+        product_name_snapshot: `${brand} ${model}`.trim() || 'Mobile Handset',
+        sku_snapshot: imei1 || 'MOBILE',
+        unit_price: Number(r['sale_price']),
+        cost_price_snapshot: Number(r['cost_price_snapshot']),
+        quantity: 1,
+        discount: 0,
+        line_total: Number(r['sale_price']),
+        created_at: r['created_at'] as string,
+        line_type: 'MOBILE',
+        device_id: r['device_id'] as string,
+        imei1,
+        imei2,
+        specs,
+      });
+    }
+  } catch (_mobileQueryErr) {
+    // If mobile_sale_items table does not exist or fails, return productLines without throwing
+  }
+
+  return productLines;
 }
 
 export async function getSalePayments(pool: Pool, saleId: string): Promise<SalePayment[]> {

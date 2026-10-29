@@ -50,8 +50,14 @@ export const HistoryRowActions: React.FC<Props> = ({ item }) => {
         toast.error('Failed to load sale details for printing. Please try again.');
         return;
       }
-      html = printFormatter.formatSaleInvoice(orderSource, settings, shopHeader);
-      docType = 'SaleInvoice';
+      const hasMobileLines = orderSource.items && orderSource.items.some((i: any) => i.lineType === 'MOBILE' || i.imei);
+      if (hasMobileLines) {
+        html = printFormatter.formatMobileSaleInvoice(orderSource, settings, shopHeader);
+        docType = 'MobileSaleInvoice';
+      } else {
+        html = printFormatter.formatSaleInvoice(orderSource, settings, shopHeader);
+        docType = 'SaleInvoice';
+      }
     } else if (item.type === 'purchase') {
       // FINDING-06-A: Fail-closed purchase reprint.
       // Fetch authoritative purchase record and line items. If either request fails,

@@ -338,10 +338,14 @@ export async function executeMobileSale(
        VALUES ($1, $2, $3, 2)
        ON CONFLICT (branch_id, user_id, period_yyyymm)
        DO UPDATE SET next_value = user_invoice_counters.next_value + 1
-       RETURNING next_value - 1`,
+       RETURNING (user_invoice_counters.next_value - 1) AS seq_value`,
       [branchId, effectiveUserId, periodYYYYMM]
     );
-    const seqValue = Number(seqRow.rows[0].next_value - 1);
+    const rawVal = seqRow.rows[0]?.seq_value ?? seqRow.rows[0]?.next_value;
+    const seqValue = Number(rawVal);
+    if (isNaN(seqValue) || seqValue <= 0) {
+      throw new MobileSaleRepoError('Failed to generate valid sequential invoice counter.', 500);
+    }
     const invoiceNumber = `${branchCode}-${userCode}-${periodYYYYMM}-${String(seqValue).padStart(6, '0')}`;
     const saleId = uuidv4();
 
