@@ -26,6 +26,8 @@ import {
   Pencil,
 } from 'lucide-react';
 import { Button, Card, Badge } from '@/components/ui';
+import { KeypadSpecsSection, INITIAL_KEYPAD_FORM_DATA, KeypadFormData } from './KeypadSpecsSection';
+import { Keyboard } from 'lucide-react';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { mobileApi, transformFormDataToApiPayload } from '../services/mobile.api';
 import type { SellerSearchResult } from '../services/mobile.api';
@@ -120,7 +122,9 @@ export const AddMobileForm: React.FC = () => {
   const activeShopId = useOrganizationStore((s) => s.activeShopId);
   const branchId = activeShopId || activeShop?._id || activeShop?.id || undefined;
 
+  const [deviceCategory, setDeviceCategory] = useState<'SMARTPHONE' | 'KEYPAD'>('SMARTPHONE');
   const [formData, setFormData] = useState<MobileFormData>(INITIAL_FORM_DATA);
+  const [keypadData, setKeypadData] = useState<KeypadFormData>(INITIAL_KEYPAD_FORM_DATA);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
@@ -766,7 +770,83 @@ export const AddMobileForm: React.FC = () => {
       )}
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-8">
-        {/* 1. PRIMARY CONDITION SELECTOR (NEW vs USED) */}
+        {/* STEP 0: SELECT DEVICE CATEGORY */}
+        <Card variant="default" padding="md" className="bg-surface border-border">
+          <div className="flex flex-col gap-3">
+            <div>
+              <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">
+                Step 1: Select Device Category
+              </span>
+              <h2 className="text-lg font-bold text-text-primary mt-0.5">
+                What type of mobile device is being entered?
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-1">
+              {/* Option: Smartphone */}
+              <button
+                type="button"
+                onClick={() => setDeviceCategory('SMARTPHONE')}
+                className={`p-4 rounded-lg border text-left transition-all cursor-pointer flex items-start gap-3.5 ${
+                  deviceCategory === 'SMARTPHONE'
+                    ? 'border-primary bg-primary/5 ring-2 ring-primary/20 shadow-xs'
+                    : 'border-border bg-surface hover:bg-surface-hover'
+                }`}
+              >
+                <div
+                  className={`p-2.5 rounded-lg shrink-0 ${
+                    deviceCategory === 'SMARTPHONE' ? 'bg-primary text-white' : 'bg-surface-hover text-text-muted'
+                  }`}
+                >
+                  <Smartphone className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-text-primary text-base">Smartphone</span>
+                    <Badge variant="primary" size="sm">
+                      Touchscreen / Android / iOS
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-text-secondary mt-1">
+                    Modern touchscreen devices with RAM, internal storage, operating systems, cameras, and biometrics.
+                  </p>
+                </div>
+              </button>
+
+              {/* Option: Keypad Phone */}
+              <button
+                type="button"
+                onClick={() => setDeviceCategory('KEYPAD')}
+                className={`p-4 rounded-lg border text-left transition-all cursor-pointer flex items-start gap-3.5 ${
+                  deviceCategory === 'KEYPAD'
+                    ? 'border-primary bg-primary/5 ring-2 ring-primary/20 shadow-xs'
+                    : 'border-border bg-surface hover:bg-surface-hover'
+                }`}
+              >
+                <div
+                  className={`p-2.5 rounded-lg shrink-0 ${
+                    deviceCategory === 'KEYPAD' ? 'bg-primary text-white' : 'bg-surface-hover text-text-muted'
+                  }`}
+                >
+                  <Keyboard className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-text-primary text-base">Keypad / Feature Phone</span>
+                    <Badge variant="warning" size="sm">
+                      Button Phone
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-text-secondary mt-1">
+                    Basic feature phones with physical numeric buttons, torch, long battery backup, and dual SIMs (e.g. Nokia, Itel, QMobile).
+                  </p>
+                </div>
+              </button>
+            </div>
+          </div>
+        </Card>
+
+        {/* STEP 2: PRIMARY CONDITION SELECTOR (NEW vs USED) */}
         <Card variant="default" padding="md" className="bg-surface border-border">
           <div className="flex flex-col gap-3">
             <div>
