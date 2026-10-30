@@ -1,6 +1,4 @@
-'use client';
-
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import {
   Smartphone,
@@ -19,6 +17,10 @@ import {
   AlertCircle,
   TrendingUp,
   Package,
+  ArrowRightLeft,
+  AlertOctagon,
+  Boxes,
+  Info,
 } from 'lucide-react';
 import { Button, Badge, Card } from '@/components/ui';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
@@ -27,6 +29,7 @@ import { mobileApi, mapDeviceRowToItem } from '../services/mobile.api';
 import { MobileDetailModal } from './MobileDetailModal';
 import { EditMobileModal } from './EditMobileModal';
 import { buildUsedMobileA4Html, buildUsedMobilePdfFilename } from '../templates/usedMobileA4Template';
+import { StockTransferTab } from './StockTransferTab';
 import { usePrintStore } from '@/lib/printer/print.store';
 import { downloadHtmlAsPdf } from '@/lib/printer/pdfExport';
 import type { BranchInvestmentSummary } from '../services/mobile.api';
@@ -48,6 +51,9 @@ export const MobileInventoryDashboard: React.FC = () => {
   const activeShop = useOrganizationStore((s) => s.activeShop);
   const activeShopId = useOrganizationStore((s) => s.activeShopId);
   const branchId = activeShopId || activeShop?._id || activeShop?.id || undefined;
+
+  // Active top view section: 'INSTOCK' (default) | 'LOWSTOCK' | 'TRANSFER'
+  const [inventorySection, setInventorySection] = useState<'INSTOCK' | 'LOWSTOCK' | 'TRANSFER'>('INSTOCK');
 
   const [items, setItems] = useState<MobileInventoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -84,13 +90,15 @@ export const MobileInventoryDashboard: React.FC = () => {
     }
   }, []);
 
+  // Fetch only available IN_STOCK mobile inventory for this branch
   const fetchMobiles = useCallback(async () => {
     setIsLoading(true);
     setFetchError(null);
     try {
       const res = await mobileApi.getMobiles({
         branch_id: branchId,
-        limit: 200,
+        status: 'IN_STOCK',
+        limit: 250,
       });
       const mapped = (res.devices || []).map(mapDeviceRowToItem);
       setItems(mapped);
@@ -124,28 +132,40 @@ export const MobileInventoryDashboard: React.FC = () => {
     fetchInvestment();
   }, [fetchInvestment]);
 
+  // Derive per-model stock quantities across currently available in-stock devices
+  const modelStockMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of items) {
+      const key = `${item.brand.trim()} ${item.model.trim()}`.toLowerCase();
+      map.set(key, (map.get(key) || 0) + 1);
+    }
+    return map;
+  }, [items]);
+
   // Filter items based on active tab and search
-  const filteredItems = items.filter((item) => {
-    // Condition tab filter
-    if (activeTab !== 'ALL' && item.condition !== activeTab) {
-      return false;
-    }
-    // PTA filter
-    if (ptaFilter !== 'ALL' && item.ptaStatus !== ptaFilter) {
-      return false;
-    }
-    // Search filter
-    if (searchTerm.trim()) {
-      const q = searchTerm.toLowerCase();
-      const matchBrand = item.brand.toLowerCase().includes(q);
-      const matchModel = item.model.toLowerCase().includes(q);
-      const matchImei = item.imei1.includes(q);
-      const matchSeller = item.sellerName?.toLowerCase().includes(q) ?? false;
-      const matchVoucher = item.voucherNo?.toLowerCase().includes(q) ?? false;
-      return matchBrand || matchModel || matchImei || matchSeller || matchVoucher;
-    }
-    return true;
-  });
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      // Condition tab filter
+      if (activeTab !== 'ALL' && item.condition !== activeTab) {
+        return false;
+      }
+      // PTA filter
+      if (ptaFilter !== 'ALL' && item.ptaStatus !== ptaFilter) {
+        return false;
+      }
+      // Search filter
+      if (searchTerm.trim()) {
+        const q = searchTerm.toLowerCase();
+        const matchBrand = item.brand.toLowerCase().includes(q);
+        const matchModel = item.model.toLowerCase().includes(q);
+        const matchImei = item.imei1.includes(q);
+        const matchSeller = item.sellerName?.toLowerCase().includes(q) ?? false;
+        const matchVoucher = item.voucherNo?.toLowerCase().includes(q) ?? false;
+        return matchBrand || matchModel || matchImei || matchSeller || matchVoucher;
+      }
+      return true;
+    });
+  }, [items, activeTab, ptaFilter, searchTerm]);
 
   const allCount = items.length;
   const newCount = items.filter((m) => m.condition === 'NEW').length;
@@ -317,248 +337,335 @@ export const MobileInventoryDashboard: React.FC = () => {
         );
       })()}
 
-      {/* Tabs & Search Filter Bar */}
-      <Card variant="default" padding="sm" className="bg-surface border-border">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          {/* Condition Filter Tabs */}
-          <div className="flex items-center gap-1.5 p-1 bg-surface-hover rounded-lg border border-border/60 self-start md:self-auto">
-            <button
-              type="button"
-              onClick={() => setActiveTab('ALL')}
-              className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all cursor-pointer flex items-center gap-2 ${
-                activeTab === 'ALL'
-                  ? 'bg-surface text-primary font-semibold shadow-xs border border-border'
-                  : 'text-text-secondary hover:text-text-primary'
-              }`}
-            >
-              All Mobiles
-              <Badge variant={activeTab === 'ALL' ? 'primary' : 'neutral'} size="sm">
-                {allCount}
-              </Badge>
-            </button>
+      {/* Master Inventory Section Switcher Tabs: In Stock (Active) | Low Stock (0) | Stock Transfer */}
+      <div className="flex items-center gap-2 p-1.5 bg-surface-hover/80 rounded-xl border border-border w-fit shadow-xs">
+        <button
+          type="button"
+          onClick={() => setInventorySection('INSTOCK')}
+          className={`px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+            inventorySection === 'INSTOCK'
+              ? 'bg-surface text-primary shadow-xs border border-border'
+              : 'text-text-secondary hover:text-text-primary'
+          }`}
+        >
+          <Package className="w-4 h-4 text-success" />
+          <span>In Stock</span>
+          <Badge variant={inventorySection === 'INSTOCK' ? 'success' : 'neutral'} size="sm">
+            {allCount}
+          </Badge>
+        </button>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('NEW')}
-              className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all cursor-pointer flex items-center gap-2 ${
-                activeTab === 'NEW'
-                  ? 'bg-surface text-primary font-semibold shadow-xs border border-border'
-                  : 'text-text-secondary hover:text-text-primary'
-              }`}
-            >
-              New Mobiles
-              <Badge variant={activeTab === 'NEW' ? 'success' : 'neutral'} size="sm">
-                {newCount}
-              </Badge>
-            </button>
+        <button
+          type="button"
+          onClick={() => setInventorySection('LOWSTOCK')}
+          className={`px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+            inventorySection === 'LOWSTOCK'
+              ? 'bg-surface text-primary shadow-xs border border-border'
+              : 'text-text-secondary hover:text-text-primary'
+          }`}
+        >
+          <AlertOctagon className="w-4 h-4 text-warning" />
+          <span>Low Stock (0 Stock)</span>
+          <Badge variant={inventorySection === 'LOWSTOCK' ? 'warning' : 'neutral'} size="sm">
+            0
+          </Badge>
+        </button>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('USED')}
-              className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all cursor-pointer flex items-center gap-2 ${
-                activeTab === 'USED'
-                  ? 'bg-surface text-primary font-semibold shadow-xs border border-border'
-                  : 'text-text-secondary hover:text-text-primary'
-              }`}
-            >
-              Used Mobiles
-              <Badge variant={activeTab === 'USED' ? 'warning' : 'neutral'} size="sm">
-                {usedCount}
-              </Badge>
-            </button>
-          </div>
+        <button
+          type="button"
+          onClick={() => setInventorySection('TRANSFER')}
+          className={`px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+            inventorySection === 'TRANSFER'
+              ? 'bg-surface text-primary shadow-xs border border-border'
+              : 'text-text-secondary hover:text-text-primary'
+          }`}
+        >
+          <ArrowRightLeft className="w-4 h-4 text-primary" />
+          <span>Stock Transfer</span>
+          <Badge variant="neutral" size="sm">Preview</Badge>
+        </button>
+      </div>
 
-          {/* Search & PTA Status Filter */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-            <div className="relative min-w-[240px]">
-              <Search className="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                type="text"
-                placeholder="Search Brand, Model, IMEI, Seller..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 text-sm bg-surface text-text-primary placeholder:text-text-muted border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <select
-                value={ptaFilter}
-                onChange={(e) => setPtaFilter(e.target.value)}
-                aria-label="Filter by PTA Registration Status"
-                className="px-3 py-1.5 text-sm bg-surface text-text-primary border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring cursor-pointer"
-              >
-                <option value="ALL">All PTA Statuses</option>
-                <option value="PTA_APPROVED">PTA Approved</option>
-                <option value="NON_PTA">Non-PTA</option>
-                <option value="JV">JV</option>
-                <option value="GEVEY">Gevey</option>
-              </select>
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      {/* Inventory Table Layout */}
-      {filteredItems.length > 0 ? (
-        <div className="bg-surface rounded-lg border border-border shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-surface-hover/80 text-text-secondary text-xs uppercase font-semibold border-b border-border">
-                <tr>
-                  <th className="py-3 px-4">Device / Model</th>
-                  <th className="py-3 px-4">Condition</th>
-                  <th className="py-3 px-4">Specs & Color</th>
-                  <th className="py-3 px-4">IMEI Identifier</th>
-                  <th className="py-3 px-4">PTA Status</th>
-                  <th className="py-3 px-4 text-right">Cost (Rs)</th>
-                  <th className="py-3 px-4 text-right">Sale Price (Rs)</th>
-                  <th className="py-3 px-4 text-center">Status</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {filteredItems.map((item) => (
-                  <tr
-                    key={item.id}
-                    className="hover:bg-surface-hover/50 transition-colors group"
-                  >
-                    {/* Device / Model */}
-                    <td className="py-3.5 px-4">
-                      <div className="font-semibold text-text-primary">{item.brand} {item.model}</div>
-                      {item.voucherNo && (
-                        <div className="text-xs text-text-muted flex items-center gap-1 mt-0.5">
-                          <FileText className="w-3 h-3 text-primary" />
-                          <span>Voucher #{item.voucherNo}</span>
-                          {item.sellerName && (
-                            <span className="text-text-secondary">({item.sellerName})</span>
-                          )}
-                        </div>
-                      )}
-                    </td>
-
-                    {/* Condition */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      {item.condition === 'NEW' ? (
-                        <Badge variant="success" size="sm">
-                          New (Boxed)
-                        </Badge>
-                      ) : (
-                        <Badge variant="warning" size="sm">
-                          Used (Pre-Owned)
-                        </Badge>
-                      )}
-                    </td>
-
-                    {/* Specs & Color */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      <div className="text-text-primary font-medium">{item.storage} / {item.ram} RAM</div>
-                      <div className="text-xs text-text-muted">{item.color}</div>
-                    </td>
-
-                    {/* IMEI Identifier */}
-                    <td className="py-3.5 px-4 whitespace-nowrap font-mono text-xs text-text-primary">
-                      {item.imei1}
-                    </td>
-
-                    {/* PTA Status */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      {item.ptaStatus === 'PTA_APPROVED' ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-success font-medium">
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          PTA Approved
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-xs text-warning font-medium">
-                          <AlertTriangle className="w-3.5 h-3.5" />
-                          {item.ptaStatus}
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Purchase Cost */}
-                    <td className="py-3.5 px-4 text-right font-medium text-text-secondary whitespace-nowrap">
-                      Rs. {item.purchaseCost.toLocaleString()}
-                    </td>
-
-                    {/* Sale Price */}
-                    <td className="py-3.5 px-4 text-right font-semibold text-primary whitespace-nowrap">
-                      Rs. {item.salePrice.toLocaleString()}
-                    </td>
-
-                    {/* Status */}
-                    <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                      <Badge variant="primary" size="sm" dot>
-                        In Stock
-                      </Badge>
-                    </td>
-
-                    {/* Actions */}
-                    <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedDeviceId(item.id)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/10 rounded transition-colors cursor-pointer"
-                        title="View details"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        Details
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Directory Footer Info */}
-          <div className="px-4 py-3 bg-surface-hover/40 border-t border-border flex flex-col sm:flex-row items-center justify-between text-xs text-text-muted gap-2">
-            <span>
-              Showing {filteredItems.length} of {items.length} mobile records
-            </span>
-            <span className="text-text-secondary">
-              Serialized device records are decoupled from regular spare parts inventory.
-            </span>
-          </div>
-        </div>
-      ) : (
-        /* Empty State */
-        <Card variant="default" padding="lg" className="text-center py-16 bg-surface border-border">
+      {/* Render Selected Section View */}
+      {inventorySection === 'TRANSFER' ? (
+        <StockTransferTab currentBranchId={branchId} availableDevices={items} />
+      ) : inventorySection === 'LOWSTOCK' ? (
+        /* Low Stock (0 Available) View */
+        <Card variant="default" padding="lg" className="bg-surface border-border text-center py-14">
           <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-primary/10 text-primary flex items-center justify-center">
-            <Smartphone className="w-7 h-7" />
+            <AlertOctagon className="w-7 h-7 text-primary" />
           </div>
-          <h3 className="text-lg font-semibold text-text-primary mb-1">
-            No mobile phones found
+          <h3 className="text-lg font-bold text-text-primary mb-1">
+            Zero-Stock Mobile Models
           </h3>
-          <p className="text-sm text-text-muted max-w-md mx-auto mb-6">
-            {searchTerm || ptaFilter !== 'ALL' || activeTab !== 'ALL'
-              ? 'No mobile records match your current filter criteria. Try clearing filters or adjusting your search keyword.'
-              : 'Start logging your smartphone stock. New units and used devices with purchase paperwork affidavits will appear here.'}
+          <p className="text-sm text-text-muted max-w-xl mx-auto mb-4 leading-relaxed">
+            Zero-stock model tracking requires a master mobile catalogue or backend aggregation endpoint. The current inventory records individual handsets, so a model with no remaining devices may not appear in the available inventory data. Complete depleted-model reporting will be enabled in a future backend phase.
           </p>
-          <div className="flex items-center justify-center gap-3">
-            {(searchTerm || ptaFilter !== 'ALL' || activeTab !== 'ALL') && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setSearchTerm('');
-                  setPtaFilter('ALL');
-                  setActiveTab('ALL');
-                }}
-              >
-                Clear Filters
-              </Button>
-            )}
-            <Button
-              variant="primary"
-              size="sm"
-              leftIcon={<Plus className="w-4 h-4" />}
-              onClick={() => navigate('/dashboard/shop-admin/mobiles/add')}
-            >
-              Add Mobile
-            </Button>
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-surface-hover rounded-lg border border-border text-xs text-text-secondary">
+            <Info className="w-4 h-4 text-primary" />
+            <span>Catalog Depletion Reporting — Awaiting Backend Integration</span>
           </div>
         </Card>
+      ) : (
+        /* Main IN-STOCK Mobile Inventory Table & Filters */
+        <>
+          {/* Tabs & Search Filter Bar */}
+          <Card variant="default" padding="sm" className="bg-surface border-border">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              {/* Condition Filter Tabs */}
+              <div className="flex items-center gap-1.5 p-1 bg-surface-hover rounded-lg border border-border/60 self-start md:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('ALL')}
+                  className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all cursor-pointer flex items-center gap-2 ${
+                    activeTab === 'ALL'
+                      ? 'bg-surface text-primary font-semibold shadow-xs border border-border'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  All Mobiles
+                  <Badge variant={activeTab === 'ALL' ? 'primary' : 'neutral'} size="sm">
+                    {allCount}
+                  </Badge>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('NEW')}
+                  className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all cursor-pointer flex items-center gap-2 ${
+                    activeTab === 'NEW'
+                      ? 'bg-surface text-primary font-semibold shadow-xs border border-border'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  New Mobiles
+                  <Badge variant={activeTab === 'NEW' ? 'success' : 'neutral'} size="sm">
+                    {newCount}
+                  </Badge>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('USED')}
+                  className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all cursor-pointer flex items-center gap-2 ${
+                    activeTab === 'USED'
+                      ? 'bg-surface text-primary font-semibold shadow-xs border border-border'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  Used Mobiles
+                  <Badge variant={activeTab === 'USED' ? 'warning' : 'neutral'} size="sm">
+                    {usedCount}
+                  </Badge>
+                </button>
+              </div>
+
+              {/* Search & PTA Status Filter */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                <div className="relative min-w-[240px]">
+                  <Search className="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Search Brand, Model, IMEI, Seller..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-9 pr-3 py-1.5 text-sm bg-surface text-text-primary placeholder:text-text-muted border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <select
+                    value={ptaFilter}
+                    onChange={(e) => setPtaFilter(e.target.value)}
+                    aria-label="Filter by PTA Registration Status"
+                    className="px-3 py-1.5 text-sm bg-surface text-text-primary border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring cursor-pointer"
+                  >
+                    <option value="ALL">All PTA Statuses</option>
+                    <option value="PTA_APPROVED">PTA Approved</option>
+                    <option value="NON_PTA">Non-PTA</option>
+                    <option value="JV">JV</option>
+                    <option value="GEVEY">Gevey</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          {/* Inventory Table Layout */}
+          {filteredItems.length > 0 ? (
+            <div className="bg-surface rounded-lg border border-border shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-surface-hover/80 text-text-secondary text-xs uppercase font-semibold border-b border-border">
+                    <tr>
+                      <th className="py-3 px-4">Device / Model</th>
+                      <th className="py-3 px-4 text-center">Available Stock</th>
+                      <th className="py-3 px-4">Condition</th>
+                      <th className="py-3 px-4">Specs & Color</th>
+                      <th className="py-3 px-4">IMEI Identifier</th>
+                      <th className="py-3 px-4">PTA Status</th>
+                      <th className="py-3 px-4 text-right">Cost (Rs)</th>
+                      <th className="py-3 px-4 text-right">Sale Price (Rs)</th>
+                      <th className="py-3 px-4 text-center">Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {filteredItems.map((item) => {
+                      const modelKey = `${item.brand.trim()} ${item.model.trim()}`.toLowerCase();
+                      const modelStock = modelStockMap.get(modelKey) || 1;
+                      return (
+                        <tr
+                          key={item.id}
+                          className="hover:bg-surface-hover/50 transition-colors group"
+                        >
+                          {/* Device / Model */}
+                          <td className="py-3.5 px-4">
+                            <div className="font-semibold text-text-primary">{item.brand} {item.model}</div>
+                            {item.voucherNo && (
+                              <div className="text-xs text-text-muted flex items-center gap-1 mt-0.5">
+                                <FileText className="w-3 h-3 text-primary" />
+                                <span>Voucher #{item.voucherNo}</span>
+                                {item.sellerName && (
+                                  <span className="text-text-secondary">({item.sellerName})</span>
+                                )}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Available Stock Quantity Display */}
+                          <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-success/15 text-success border border-success/30">
+                              <Package className="w-3.5 h-3.5" />
+                              {modelStock} in stock
+                            </span>
+                          </td>
+
+                          {/* Condition */}
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            {item.condition === 'NEW' ? (
+                              <Badge variant="success" size="sm">
+                                New (Boxed)
+                              </Badge>
+                            ) : (
+                              <Badge variant="warning" size="sm">
+                                Used (Pre-Owned)
+                              </Badge>
+                            )}
+                          </td>
+
+                          {/* Specs & Color */}
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            <div className="text-text-primary font-medium">{item.storage} / {item.ram} RAM</div>
+                            <div className="text-xs text-text-muted">{item.color}</div>
+                          </td>
+
+                          {/* IMEI Identifier */}
+                          <td className="py-3.5 px-4 whitespace-nowrap font-mono text-xs text-text-primary">
+                            {item.imei1}
+                          </td>
+
+                          {/* PTA Status */}
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            {item.ptaStatus === 'PTA_APPROVED' ? (
+                              <span className="inline-flex items-center gap-1 text-xs text-success font-medium">
+                                <ShieldCheck className="w-3.5 h-3.5" />
+                                PTA Approved
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-xs text-warning font-medium">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                {item.ptaStatus}
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Purchase Cost */}
+                          <td className="py-3.5 px-4 text-right font-medium text-text-secondary whitespace-nowrap">
+                            Rs. {item.purchaseCost.toLocaleString()}
+                          </td>
+
+                          {/* Sale Price */}
+                          <td className="py-3.5 px-4 text-right font-semibold text-primary whitespace-nowrap">
+                            Rs. {item.salePrice.toLocaleString()}
+                          </td>
+
+                          {/* Status */}
+                          <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                            <Badge variant="primary" size="sm" dot>
+                              In Stock
+                            </Badge>
+                          </td>
+
+                          {/* Actions */}
+                          <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedDeviceId(item.id)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/10 rounded transition-colors cursor-pointer"
+                              title="View details"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              Details
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Directory Footer Info */}
+              <div className="px-4 py-3 bg-surface-hover/40 border-t border-border flex flex-col sm:flex-row items-center justify-between text-xs text-text-muted gap-2">
+                <span>
+                  Showing {filteredItems.length} of {items.length} in-stock handsets
+                </span>
+                <span className="text-text-secondary">
+                  Serialized device records are decoupled from regular spare parts inventory.
+                </span>
+              </div>
+            </div>
+          ) : (
+            /* Empty State */
+            <Card variant="default" padding="lg" className="text-center py-16 bg-surface border-border">
+              <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-primary/10 text-primary flex items-center justify-center">
+                <Smartphone className="w-7 h-7" />
+              </div>
+              <h3 className="text-lg font-semibold text-text-primary mb-1">
+                No in-stock mobile phones found
+              </h3>
+              <p className="text-sm text-text-muted max-w-md mx-auto mb-6">
+                {searchTerm || ptaFilter !== 'ALL' || activeTab !== 'ALL'
+                  ? 'No mobile records match your current filter criteria. Try clearing filters or adjusting your search keyword.'
+                  : 'Start logging your smartphone stock. New units and used devices with purchase paperwork affidavits will appear here.'}
+              </p>
+              <div className="flex items-center justify-center gap-3">
+                {(searchTerm || ptaFilter !== 'ALL' || activeTab !== 'ALL') && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSearchTerm('');
+                      setPtaFilter('ALL');
+                      setActiveTab('ALL');
+                    }}
+                  >
+                    Clear Filters
+                  </Button>
+                )}
+                <Button
+                  variant="primary"
+                  size="sm"
+                  leftIcon={<Plus className="w-4 h-4" />}
+                  onClick={() => navigate('/dashboard/shop-admin/mobiles/add')}
+                >
+                  Add Mobile
+                </Button>
+              </div>
+            </Card>
+          )}
+        </>
       )}
     </div>
 
