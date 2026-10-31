@@ -10,6 +10,7 @@ import { useUpdateStaffStatus, useChangeStaffRole } from '../hooks/useStaff';
 import { UserFormDrawer } from './UserFormDrawer';
 import { ChangePinModal } from './ChangePinModal';
 import { DeleteUserModal } from './DeleteUserModal';
+import { UserPermissionsModal } from './UserPermissionsModal';
 import {
   Users,
   Plus,
@@ -37,6 +38,7 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
   const [openActionsId, setOpenActionsId] = useState<string | null>(null);
   const [changePinStaff, setChangePinStaff] = useState<StaffUser | null>(null);
   const [deleteTargetStaff, setDeleteTargetStaff] = useState<StaffUser | null>(null);
+  const [permissionsTargetStaff, setPermissionsTargetStaff] = useState<StaffUser | null>(null);
   const [branchMap, setBranchMap] = useState<Record<string, string>>({});
 
   React.useEffect(() => {
@@ -63,9 +65,9 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
     setOpenActionsId(null);
   };
 
-  const handleNavigatePermissions = () => {
+  const handleOpenPermissions = (user: StaffUser) => {
     setOpenActionsId(null);
-    navigate('/dashboard/organization/settings?tab=roles');
+    setPermissionsTargetStaff(user);
   };
 
   const handleStatusToggle = async (user: StaffUser) => {
@@ -226,9 +228,9 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
                         icon={<Shield className="w-4 h-4" />}
                         variant="ghost"
                         size="sm"
-                        aria-label={`Manage role permissions for ${user.name}`}
-                        title="Manage role permissions"
-                        onClick={handleNavigatePermissions}
+                        aria-label={`Manage permissions for ${user.name}`}
+                        title="Manage permissions"
+                        onClick={() => handleOpenPermissions(user)}
                       />
                       <IconButton
                         icon={<Edit3 className="w-4 h-4" />}
@@ -261,11 +263,11 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
                               {/* Manage Role Permissions */}
                               <button
                                 type="button"
-                                onClick={handleNavigatePermissions}
+                                onClick={() => handleOpenPermissions(user)}
                                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-primary hover:bg-surface-hover rounded-md transition-colors"
                               >
                                 <Shield className="w-4 h-4 text-primary" />
-                                Role Permissions
+                                User Permissions
                               </button>
 
                               <div className="my-1 border-t border-border" />
@@ -340,6 +342,12 @@ export const UserList: React.FC<UserListProps> = ({ staff, isLoading }) => {
         isOpen={deleteTargetStaff !== null}
         onClose={() => setDeleteTargetStaff(null)}
         staff={deleteTargetStaff}
+      />
+
+      <UserPermissionsModal
+        isOpen={permissionsTargetStaff !== null}
+        onClose={() => setPermissionsTargetStaff(null)}
+        staff={permissionsTargetStaff}
       />
     </>
   );

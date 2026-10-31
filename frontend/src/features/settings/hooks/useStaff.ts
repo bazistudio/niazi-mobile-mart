@@ -138,3 +138,19 @@ export function useResetStaffPassword() {
     },
   });
 }
+export function useUpdateUserPermissions() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      userId,
+      permissions,
+    }: {
+      userId: string;
+      permissions: { allowed_pages: string[]; allowed_actions: string[] };
+    }) => settingsApi.updateUserPermissions(userId, permissions),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: STAFF_QUERY_KEY });
+    },
+  });
+}

@@ -702,4 +702,26 @@ export const settingsApi = {
     const modules = new Set(Object.values(PERMISSION_METADATA).map((m) => m.module));
     return Array.from(modules);
   },
+
+  // ─── Per-User Permissions (Phase 4 / Checkpoint D) ───────────────────────────
+  getUserPermissions: async (userId: string): Promise<{
+    user: any;
+    access_profile: any;
+  }> => {
+    const user = await httpClient.get<any>('/api/v1/users/' + encodeURIComponent(userId));
+    return {
+      user,
+      access_profile: user.access_profile || { allowed_pages: [], allowed_actions: [] },
+    };
+  },
+
+  updateUserPermissions: async (
+    userId: string,
+    permissions: { allowed_pages: string[]; allowed_actions: string[] }
+  ): Promise<{ message: string; user: any }> => {
+    return await httpClient.put<{ message: string; user: any }>(
+      '/api/v1/users/' + encodeURIComponent(userId) + '/permissions',
+      permissions
+    );
+  },
 };
