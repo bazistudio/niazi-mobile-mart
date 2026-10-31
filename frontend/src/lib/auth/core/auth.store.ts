@@ -6,6 +6,8 @@ import { AuthSession } from "@/types/auth/session";
 import { setSession, clearSession } from "@/lib/auth/core/auth.session";
 import { getQueryClient } from "@/components/providers/ReactQueryProvider";
 import { isTauriEnvironment, tauriClient } from "@/lib/tauri/tauriClient";
+import { nmmWsClient } from "@/lib/ws/wsClient";
+import { useTerminalStore } from "@/store/useTerminalStore";
 
 interface AuthState {
   user: AuthUser | null;
@@ -47,18 +49,38 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   // LOGOUT (sync — for interceptor hard-logout)
   // -------------------------
   logout: () => {
+    // 1. Native desktop session destruction
     if (isTauriEnvironment()) {
       tauriClient.authLogout().catch(console.error);
     }
+
+    // 2. Terminate real-time WebSocket connection and stop heartbeats
+    try {
+      nmmWsClient.dispose();
+    } catch (wsErr) {
+      console.warn("[AuthStore] WS dispose error:", wsErr);
+    }
+
+    // 3. Clear terminal lock persistent state
+    try {
+      useTerminalStore.getState().unlockTerminal();
+    } catch {}
+
+    // 4. Purge browser authentication storage & credentials
     clearSession();
+
+    // 5. Purge all cached queries (customer records, inventory, finances)
     getQueryClient().clear();
+
+    // 6. Reset in-memory auth state
     set({ user: null, session: null, isAuthenticated: false, isHydrated: true });
   },
 
   // -------------------------
-  // LOGOUT ASYNC — for UI logout button
+  // LOGOUT ASYNC — for UI logout button & workstation handoff
   // -------------------------
   logoutAsync: async () => {
+    // 1. Native desktop session destruction
     if (isTauriEnvironment()) {
       try {
         await tauriClient.authLogout();
@@ -66,9 +88,29 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         console.warn("[Tauri authLogout error]", err);
       }
     }
+
+    // 2. Terminate real-time WebSocket connection and stop heartbeats
+    try {
+      nmmWsClient.dispose();
+    } catch (wsErr) {
+      console.warn("[AuthStore] WS dispose error:", wsErr);
+    }
+
+    // 3. Clear terminal lock persistent state
+    try {
+      useTerminalStore.getState().unlockTerminal();
+    } catch {}
+
+    // 4. Purge browser authentication storage & credentials
     clearSession();
+
+    // 5. Purge all cached queries (customer records, inventory, finances)
     getQueryClient().clear();
+
+    // 6. Reset in-memory auth state
     set({ user: null, session: null, isAuthenticated: false });
+
+    // 7. Route cleanly to login screen
     window.location.href = "/auth/login";
   },
 
