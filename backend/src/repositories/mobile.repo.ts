@@ -168,6 +168,8 @@ export interface MobileDeviceRow {
   imeis?: Array<{ id: string; imei: string; slot: MobileSlot }>;
   branch_name?: string | null;
   branch_code?: string | null;
+  purchase_date?: string | null;
+  voucher_no?: string | null;
 }
 
 /** Paperwork row — includes sensitive fields; only the paperwork endpoint returns this. */
@@ -245,6 +247,8 @@ export interface ListMobileDevicesFilter {
   brand?: string;
   limit?: number;
   offset?: number;
+  start_date?: string;
+  end_date?: string;
 }
 
 export interface MobileBranchSummaryItem {
@@ -945,9 +949,18 @@ export class MobileRepo {
       where += ` AND lower(d.brand) = lower($${paramIdx++})`;
       params.push(filter.brand);
     }
+    // Effective purchase date: paperwork.purchase_date for USED, created_at (YYYY-MM-DD) for NEW
+    if (filter.start_date) {
+      where += ` AND (CASE WHEN d.condition = 'USED' AND pw.purchase_date IS NOT NULL THEN pw.purchase_date ELSE substring(d.created_at from 1 for 10) END) >= $` + (paramIdx++);
+      params.push(filter.start_date);
+    }
+    if (filter.end_date) {
+      where += ` AND (CASE WHEN d.condition = 'USED' AND pw.purchase_date IS NOT NULL THEN pw.purchase_date ELSE substring(d.created_at from 1 for 10) END) <= $` + (paramIdx++);
+      params.push(filter.end_date);
+    }
 
     const countResult = await this.pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM mobile_devices d WHERE ${where}`,
+      `SELECT COUNT(*) AS count FROM mobile_devices d LEFT JOIN mobile_purchase_paperwork pw ON pw.device_id = d.id WHERE ${where}`,
       params
     );
     const total = parseInt(countResult.rows[0]?.count ?? '0', 10);
@@ -963,12 +976,15 @@ export class MobileRepo {
          d.created_by, d.updated_by, d.created_at, d.updated_at,
          b.name AS branch_name,
          b.code AS branch_code,
+         pw.purchase_date AS pw_purchase_date,
+         pw.voucher_no AS pw_voucher_no,
          (SELECT imei FROM mobile_imei_identifiers
           WHERE device_id = d.id AND slot = 'IMEI1' LIMIT 1) AS imei1,
          (SELECT imei FROM mobile_imei_identifiers
           WHERE device_id = d.id AND slot = 'IMEI2' LIMIT 1) AS imei2
        FROM mobile_devices d
        LEFT JOIN branches b ON b.id = d.branch_id
+       LEFT JOIN mobile_purchase_paperwork pw ON pw.device_id = d.id
        WHERE ${where}
        ORDER BY d.created_at DESC
        LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
@@ -979,8 +995,13 @@ export class MobileRepo {
       const imeis: Array<{ id: string; imei: string; slot: MobileSlot }> = [];
       if (row.imei1) imeis.push({ id: '', imei: row.imei1, slot: 'IMEI1' });
       if (row.imei2) imeis.push({ id: '', imei: row.imei2, slot: 'IMEI2' });
-      const { imei1: _i1, imei2: _i2, ...device } = row as typeof row;
-      return { ...device, imeis } as MobileDeviceRow;
+      const { imei1: _i1, imei2: _i2, pw_purchase_date, pw_voucher_no, ...device } = row as typeof row & { pw_purchase_date?: string | null; pw_voucher_no?: string | null };
+      return {
+        ...device,
+        purchase_date: row.condition === 'USED' ? (pw_purchase_date || null) : row.created_at.slice(0, 10),
+        voucher_no: pw_voucher_no || null,
+        imeis,
+      } as MobileDeviceRow;
     });
 
     return { devices, total };

@@ -46,6 +46,8 @@ export interface MobileDeviceRow {
   imeis?: MobileImeiIdentifier[];
   branch_name?: string | null;
   branch_code?: string | null;
+  purchase_date?: string | null;
+  voucher_no?: string | null;
 }
 
 export interface MobileBranchSummaryItem {
@@ -188,6 +190,8 @@ export interface ListMobilesParams {
   brand?: string;
   limit?: number;
   offset?: number;
+  start_date?: string;
+  end_date?: string;
 }
 
 /**
@@ -311,6 +315,8 @@ export function mapDeviceRowToItem(row: MobileDeviceRow): MobileInventoryItem {
     branchCode: row.branch_code || undefined,
     status: row.status,
     createdAt: row.created_at,
+    purchaseDate: row.purchase_date || (row.condition === "NEW" ? row.created_at.slice(0, 10) : null),
+    voucherNo: row.voucher_no || undefined,
   };
 }
 
@@ -436,10 +442,38 @@ export const mobileApi = {
     if (params.brand) searchParams.set('brand', params.brand);
     if (params.limit) searchParams.set('limit', String(params.limit));
     if (params.offset !== undefined) searchParams.set('offset', String(params.offset));
+    if (params.start_date) searchParams.set('start_date', params.start_date);
+    if (params.end_date) searchParams.set('end_date', params.end_date);
 
     const qs = searchParams.toString();
     const endpoint = qs ? `/api/mobiles?${qs}` : '/api/mobiles';
     return httpClient.get<ListMobilesResult>(endpoint);
+  },
+
+  /**
+   * Fetch all matching mobile devices across all pages safely without truncation.
+   * Uses consecutive pages of limit 500 until all matching records are gathered.
+   */
+  getAllMobiles: async (params: Omit<ListMobilesParams, "limit" | "offset"> = {}): Promise<MobileDeviceRow[]> => {
+    const PAGE_SIZE = 500;
+    let offset = 0;
+    let allDevices: MobileDeviceRow[] = [];
+    let total = Infinity;
+
+    while (allDevices.length < total) {
+      const res = await mobileApi.getMobiles({
+        ...params,
+        limit: PAGE_SIZE,
+        offset,
+      });
+      total = res.total;
+      const batch = res.devices || [];
+      if (batch.length === 0) break;
+      allDevices = allDevices.concat(batch);
+      offset += batch.length;
+      if (batch.length < PAGE_SIZE) break;
+    }
+    return allDevices;
   },
 
   /**

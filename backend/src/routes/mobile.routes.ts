@@ -835,12 +835,21 @@ export function buildMobileRouter(pool: Pool): Router {
     }
 
     try {
+    const startDate = typeof req.query.start_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.start_date.trim())
+      ? req.query.start_date.trim()
+      : undefined;
+    const endDate = typeof req.query.end_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.end_date.trim())
+      ? req.query.end_date.trim()
+      : undefined;
+
       const result = await repo.listMobileDevices({
         organization_id: identity.organization_id,
         branch_id:       branchId,
         condition:       condition as MobileCondition | undefined,
         status:          status as MobileStatus | undefined,
         brand:           isNonBlankString(req.query.brand) ? (req.query.brand as string) : undefined,
+        start_date:      startDate,
+        end_date:        endDate,
         limit,
         offset,
       });
