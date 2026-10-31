@@ -13,6 +13,7 @@ import {
   Receipt,
 } from 'lucide-react';
 import { useCashStore } from '../store/cash.store';
+import { BusinessAccountsStrip } from './BusinessAccountsStrip';
 import { usePermissions } from '@/lib/auth/usePermissions';
 import { PERMISSIONS } from '@/constants/permissions';
 
@@ -28,6 +29,8 @@ interface CashSessionActiveCardProps {
   onAddExpense: () => void;
   onPaySupplier: () => void;
   branchSelector?: React.ReactNode;
+  currentBranchId?: string | null;
+  currentBranchName?: string | null;
 }
 
 export const CashSessionActiveCard: React.FC<CashSessionActiveCardProps> = ({
@@ -38,6 +41,8 @@ export const CashSessionActiveCard: React.FC<CashSessionActiveCardProps> = ({
   onAddExpense,
   onPaySupplier,
   branchSelector,
+  currentBranchId,
+  currentBranchName,
 }) => {
   const { currentSession: session, summary, isLoading } = useCashStore();
   const { hasPermission } = usePermissions();
@@ -92,17 +97,40 @@ export const CashSessionActiveCard: React.FC<CashSessionActiveCardProps> = ({
         </span>
       </div>
 
-      {/* Expected Cash */}
-      <div className="mb-6">
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">Expected Cash</p>
-        <p className="text-3xl font-bold text-neutral-900 dark:text-white">
-          {summary ? formatCurrency(summary.expected_closing_cash) : '—'}
-        </p>
-        {summary && (
-          <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">
-            Opening: {formatCurrency(summary.opening_cash)}
-          </p>
-        )}
+      {/* Expected Cash Drawer & Business Accounts Section */}
+      <div className="mb-6 grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+        {/* Physical Drawer Cash Tile */}
+        <div className="lg:col-span-4 rounded-xl border border-neutral-200/80 dark:border-neutral-700/80 bg-gradient-to-br from-neutral-50 to-white dark:from-neutral-800/80 dark:to-neutral-900/60 p-4 flex flex-col justify-between shadow-sm">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
+                Expected Cash Drawer
+              </p>
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+                Physical Float
+              </span>
+            </div>
+            <p className="text-3xl font-extrabold text-neutral-900 dark:text-white tabular-nums tracking-tight mt-1">
+              {summary ? formatCurrency(summary.expected_closing_cash) : '—'}
+            </p>
+          </div>
+          {summary && (
+            <div className="mt-3 pt-2.5 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
+              <span>Opening Float:</span>
+              <span className="font-semibold text-neutral-700 dark:text-neutral-300">
+                {formatCurrency(summary.opening_cash)}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Digital Business Accounts Strip (EasyPaisa, JazzCash, Bank) */}
+        <div className="lg:col-span-8 flex flex-col justify-between">
+          <BusinessAccountsStrip
+            currentBranchId={currentBranchId}
+            currentBranchName={currentBranchName}
+          />
+        </div>
       </div>
 
       {/* KPI grid */}

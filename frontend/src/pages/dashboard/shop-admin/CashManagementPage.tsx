@@ -11,6 +11,7 @@ import {
   CashSessionHistoryTable,
 } from '@/features/cash';
 import { CashVoucherModal } from '@/features/cash/components/CashVoucherModal';
+import { BusinessAccountsStrip } from '@/features/cash/components/BusinessAccountsStrip';
 import { ExpenseCreateModal } from '@/features/expenses/components/ExpenseCreateModal';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
@@ -394,6 +395,19 @@ const OrgCashOverview: React.FC<{
         </div>
       )}
 
+      {/* Organization Consolidated Digital Business Accounts */}
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
+            Digital Business Accounts Overview (All Branches Breakdown)
+          </h2>
+          <span className="text-xs text-neutral-400">
+            Click any account to see all branch sendings & on-hold status
+          </span>
+        </div>
+        <BusinessAccountsStrip isAdminAllBranchesMode={true} />
+      </div>
+
       {/* Organization-wide totals summary strip */}
       {totals && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -593,6 +607,12 @@ const BranchCashView: React.FC<BranchCashViewProps> = ({
 
       {/* Active Cash Session Card with embedded branch selector header */}
       <CashSessionActiveCard
+        currentBranchId={effectiveBranchId || null}
+        currentBranchName={
+          orgSummary?.branches?.find((b) => b.branch_id === effectiveBranchId)?.branch_name ||
+          activeShop?.name ||
+          'branch alfa'
+        }
         branchSelector={
           isOrgAdmin && onSelectBranch && orgSummary?.branches ? (
             <BranchQuickSelector
