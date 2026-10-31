@@ -18,6 +18,7 @@ import { httpClient } from '@/lib/http/httpClient';
 export interface LedgerStatementEntry {
   id: string;
   date: string;
+  reference_id?: string | null;
   reference_number: string | null;
   description: string;
   entry_type: string;          // 'SALE' | 'PAYMENT' | 'ADJUSTMENT' | 'PURCHASE' | …
@@ -54,6 +55,7 @@ export interface SupplierStatementDto {
 export interface LedgerTimelineEntry {
   id: string;
   transactionId: string;
+  reference_id?: string | null;
   type: 'payment' | 'invoice' | 'supplier_invoice' | 'sale' | 'opening_balance';
   amount: number;
   runningBalance: number;
@@ -143,6 +145,7 @@ function mapCustomerEntry(entry: LedgerStatementEntry): LedgerTimelineEntry {
   return {
     id: entry.id,
     transactionId: entry.reference_number || entry.id,
+    reference_id: entry.reference_id ?? null,
     type,
     amount,
     runningBalance: entry.balance,

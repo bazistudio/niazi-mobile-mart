@@ -8,6 +8,7 @@ import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { createHash } from 'crypto';
 import { writeChangeLogEntry } from './change_log.repo';
+import { getSchemaCaps } from './product.repo';
 
 // ─── Domain Types ─────────────────────────────────────────────────────────────
 
@@ -1075,12 +1076,39 @@ export async function getSaleByInvoice(pool: Pool, invoiceNumber: string): Promi
 }
 
 export async function getSaleLines(pool: Pool, saleId: string): Promise<SaleLine[]> {
-  const sql = `SELECT id, sale_id, product_id, product_name_snapshot, sku_snapshot,
-                      unit_price, cost_price_snapshot, quantity, discount, line_total, created_at
-               FROM sale_lines WHERE sale_id = $1 ORDER BY created_at ASC, id ASC`;
+  const caps = await getSchemaCaps(pool);
+  const sql = `
+    SELECT sl.id, sl.sale_id, sl.product_id, sl.product_name_snapshot, sl.sku_snapshot,
+           sl.unit_price, sl.cost_price_snapshot, sl.quantity, sl.discount, sl.line_total, sl.created_at,
+           b.name AS brand_name,
+           cmp.name AS company_name,
+           q.name AS quality_name,
+           c.name AS color_name,
+           cat.name AS category_name
+    FROM sale_lines sl
+    LEFT JOIN products p ON sl.product_id = p.id
+    LEFT JOIN brands b ON p.brand_id = b.id
+    LEFT JOIN companies cmp ON p.company_id = cmp.id
+    LEFT JOIN qualities q ON p.quality_id = q.id
+    LEFT JOIN colors c ON p.color_id = c.id
+    LEFT JOIN ${caps.catTable} cat ON p.${caps.catCol} = cat.id
+    WHERE sl.sale_id = $1
+    ORDER BY sl.created_at ASC, sl.id ASC
+  `;
   const result = await pool.query(sql, [saleId]);
   const productLines: SaleLine[] = result.rows.map((row) => {
     const r = row as Record<string, unknown>;
+    const categoryName = (r['category_name'] as string | null) || '';
+    const qualityName = (r['quality_name'] as string | null) || '';
+    const colorName = (r['color_name'] as string | null) || '';
+    const brandName = (r['brand_name'] as string | null) || '';
+    const companyName = (r['company_name'] as string | null) || '';
+
+    const specParts = [categoryName, qualityName, colorName, brandName, companyName].filter(
+      (p) => p && p.trim().length > 0
+    );
+    const specs = specParts.length > 0 ? specParts.join(' • ') : undefined;
+
     return {
       id: r['id'] as string,
       sale_id: r['sale_id'] as string,
@@ -1094,6 +1122,7 @@ export async function getSaleLines(pool: Pool, saleId: string): Promise<SaleLine
       line_total: Number(r['line_total']),
       created_at: r['created_at'] as string,
       line_type: 'PRODUCT',
+      specs,
     };
   });
 

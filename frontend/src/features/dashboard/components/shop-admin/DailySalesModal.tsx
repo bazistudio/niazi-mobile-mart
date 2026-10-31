@@ -27,6 +27,9 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [orderDetailsMap, setOrderDetailsMap] = useState<Record<string, any>>({});
+  const [loadingOrderId, setLoadingOrderId] = useState<string | null>(null);
+  const [orderErrorMap, setOrderErrorMap] = useState<Record<string, string>>({});
   
   const [searchParams] = useSearchParams();
   const searchInvoice = searchParams.get('invoice');
@@ -40,7 +43,54 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
     }
   }, [isOpen, settings, fetchSettings]);
 
-  const handleReprint = (order: any) => {
+  const fetchOrderDetails = async (orderId: string): Promise<any | null> => {
+    if (orderDetailsMap[orderId]) return orderDetailsMap[orderId];
+    try {
+      setLoadingOrderId(orderId);
+      setOrderErrorMap(prev => {
+        const next = { ...prev };
+        delete next[orderId];
+        return next;
+      });
+      const res = await salesApi.getOrderById(orderId);
+      if (res?.success && res.order) {
+        setOrderDetailsMap(prev => ({ ...prev, [orderId]: res.order }));
+        return res.order;
+      } else {
+        setOrderErrorMap(prev => ({ ...prev, [orderId]: 'Failed to load line items.' }));
+        return null;
+      }
+    } catch (err: any) {
+      setOrderErrorMap(prev => ({ ...prev, [orderId]: err?.message || 'Error loading invoice lines.' }));
+      return null;
+    } finally {
+      setLoadingOrderId(null);
+    }
+  };
+
+  const toggleExpandOrder = async (orderId: string) => {
+    if (expandedOrderId === orderId) {
+      setExpandedOrderId(null);
+      return;
+    }
+    setExpandedOrderId(orderId);
+    if (!orderDetailsMap[orderId]) {
+      await fetchOrderDetails(orderId);
+    }
+  };
+
+  const handleReprint = async (order: any) => {
+    let orderToPrint = orderDetailsMap[order._id || order.id];
+    if (!orderToPrint || !orderToPrint.items || orderToPrint.items.length === 0) {
+      toast.loading('Fetching invoice lines for reprint...', { id: 'reprint-load' });
+      orderToPrint = await fetchOrderDetails(order._id || order.id);
+      toast.dismiss('reprint-load');
+      if (!orderToPrint) {
+        toast.error('Could not load complete invoice for reprint.');
+        return;
+      }
+    }
+
     const defaultSettings: any = settings || {
       enabled: true,
       printerType: 'THERMAL_80MM',
@@ -62,12 +112,12 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
       footerText: 'Thank you!'
     };
 
-    const hasMobileLines = order.items && order.items.some((i: any) => i.lineType === 'MOBILE' || i.imei);
+    const hasMobileLines = orderToPrint.items && orderToPrint.items.some((i: any) => i.lineType === 'MOBILE' || i.imei);
     const html = hasMobileLines
-      ? printFormatter.formatMobileSaleInvoice(order, defaultSettings, defaultHeader)
-      : printFormatter.formatSaleInvoice(order, defaultSettings, defaultHeader);
+      ? printFormatter.formatMobileSaleInvoice(orderToPrint, defaultSettings, defaultHeader)
+      : printFormatter.formatSaleInvoice(orderToPrint, defaultSettings, defaultHeader);
     const docType = hasMobileLines ? 'MobileSaleInvoice' : 'SaleInvoice';
-    openPreview({ html, documentType: docType as any, referenceId: order._id, title: `Invoice - ${order.orderNumber || order.displayNumber}` });
+    openPreview({ html, documentType: docType as any, referenceId: orderToPrint._id || orderToPrint.id, title: `Invoice - ${orderToPrint.orderNumber || orderToPrint.displayNumber}` });
   };
 
   useEffect(() => {
@@ -236,7 +286,7 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
                     return (
                       <React.Fragment key={order._id}>
                         <tr 
-                          onClick={() => setExpandedOrderId(isExpanded ? null : order._id)}
+                          onClick={() => toggleExpandOrder(order._id || order.id)}
                           className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors cursor-pointer"
                         >
                           <td className="px-4 py-3 text-sm">
@@ -296,52 +346,92 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
                           </td>
                         </tr>
                         
-                        {isExpanded && (
+                        {isExpanded && (() => {
+                          const oid = order._id || order.id;
+                          const detail = orderDetailsMap[oid];
+                          const isLoadingDetail = loadingOrderId === oid;
+                          const errorDetail = orderErrorMap[oid];
+                          const items = detail?.items || [];
+
+                          return (
                           <tr className="bg-gray-50/80 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
                             <td colSpan={7} className="px-6 py-4">
                               <div className="flex justify-between items-start mb-3">
-                                <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Invoice Details</h4>
+                                <h4 className="text-sm font-semibold text-gray-900 dark:text-white">
+                                  Invoice Details {detail?.orderNumber ? `(${detail.orderNumber})` : ''}
+                                </h4>
                                 <button 
-                                  onClick={() => handleReprint(order)}
-                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors shadow-sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleReprint(order);
+                                  }}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors shadow-sm cursor-pointer"
                                 >
                                   <Printer className="w-4 h-4" />
                                   Reprint Invoice
                                 </button>
                               </div>
-                              <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                                <table className="w-full text-sm">
-                                  <thead className="bg-gray-50 dark:bg-gray-800/50">
-                                    <tr>
-                                      <th className="px-4 py-2 text-left font-medium text-gray-500 dark:text-gray-400">Item</th>
-                                      <th className="px-4 py-2 text-center font-medium text-gray-500 dark:text-gray-400">Qty</th>
-                                      <th className="px-4 py-2 text-right font-medium text-gray-500 dark:text-gray-400">Price</th>
-                                      <th className="px-4 py-2 text-right font-medium text-gray-500 dark:text-gray-400">Subtotal</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                                    {order.items?.map((item: any, idx: number) => (
-                                      <tr key={idx}>
-                                        <td className="px-4 py-2 text-gray-900 dark:text-gray-100">
-                                          <div>{item.productName || item.name}</div>
-                                          {item.specs && (
-                                            <div className="text-xs text-gray-500 dark:text-gray-400">{item.specs}</div>
-                                          )}
-                                          {item.imei && (
-                                            <div className="text-xs font-mono text-gray-500 dark:text-gray-400">IMEI: {item.imei}</div>
-                                          )}
-                                        </td>
-                                        <td className="px-4 py-2 text-center text-gray-700 dark:text-gray-300">{item.quantity}</td>
-                                        <td className="px-4 py-2 text-right text-gray-700 dark:text-gray-300">Rs. {(item.salePrice || item.price || 0).toLocaleString()}</td>
-                                        <td className="px-4 py-2 text-right font-medium text-gray-900 dark:text-white">Rs. {(item.quantity * (item.salePrice || item.price || 0)).toLocaleString()}</td>
+
+                              {isLoadingDetail && (
+                                <div className="text-center py-6 text-sm text-gray-500 dark:text-gray-400 italic bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
+                                  Loading complete invoice lines...
+                                </div>
+                              )}
+
+                              {errorDetail && !isLoadingDetail && (
+                                <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 text-xs border border-amber-200 dark:border-amber-900">
+                                  <AlertCircle className="w-4 h-4 shrink-0" />
+                                  <span>{errorDetail}</span>
+                                </div>
+                              )}
+
+                              {!isLoadingDetail && !errorDetail && items.length === 0 && (
+                                <div className="text-center py-6 text-sm text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
+                                  No line items found for this invoice.
+                                </div>
+                              )}
+
+                              {!isLoadingDetail && items.length > 0 && (
+                                <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                                  <table className="w-full text-sm">
+                                    <thead className="bg-gray-50 dark:bg-gray-800/50">
+                                      <tr>
+                                        <th className="px-4 py-2 text-left font-medium text-gray-500 dark:text-gray-400">Item</th>
+                                        <th className="px-4 py-2 text-center font-medium text-gray-500 dark:text-gray-400">Qty</th>
+                                        <th className="px-4 py-2 text-right font-medium text-gray-500 dark:text-gray-400">Price</th>
+                                        <th className="px-4 py-2 text-right font-medium text-gray-500 dark:text-gray-400">Subtotal</th>
                                       </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                                      {items.map((item: any, idx: number) => {
+                                        const qty = item.quantity || item.qty || 1;
+                                        const price = item.salePrice ?? item.price ?? item.unitPrice ?? 0;
+                                        const lineTotal = item.subtotal ?? item.lineTotal ?? (qty * price);
+                                        return (
+                                          <tr key={item.id || idx}>
+                                            <td className="px-4 py-2 text-gray-900 dark:text-gray-100">
+                                              <div className="font-semibold">{item.productName || item.name || 'Mobile Handset / Item'}</div>
+                                              {item.specs && (
+                                                <div className="text-xs text-gray-500 dark:text-gray-400">{item.specs}</div>
+                                              )}
+                                              {item.imei && (
+                                                <div className="text-xs font-mono text-gray-500 dark:text-gray-400">IMEI: {item.imei}</div>
+                                              )}
+                                            </td>
+                                            <td className="px-4 py-2 text-center text-gray-700 dark:text-gray-300">{qty}</td>
+                                            <td className="px-4 py-2 text-right text-gray-700 dark:text-gray-300">Rs. {price.toLocaleString()}</td>
+                                            <td className="px-4 py-2 text-right font-medium text-gray-900 dark:text-white">Rs. {lineTotal.toLocaleString()}</td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
                             </td>
                           </tr>
-                        )}
+                          );
+                        })()}
                       </React.Fragment>
                     );
                   })}

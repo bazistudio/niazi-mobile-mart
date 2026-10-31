@@ -151,7 +151,8 @@ export const printFormatter = {
           qty, 
           price, 
           total: i.subtotal ?? (qty * price),
-          imei: i.imei || i.serialNumber
+          imei: i.imei || i.serialNumber,
+          specs: i.specs || undefined
         };
       }),
       subtotal: order.subTotal ?? order.subtotal ?? order.grandTotal ?? order.totalAmount ?? 0,

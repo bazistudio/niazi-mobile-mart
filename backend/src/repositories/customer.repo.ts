@@ -120,6 +120,7 @@ export interface CustomerLedgerEntry {
 export interface CustomerStatementRowDto {
   id: string;
   date: string;
+  reference_id?: string | null;
   reference_number: string | null;
   description: string;
   entry_type: string;
@@ -591,7 +592,7 @@ export async function getCustomerStatement(
   }
 
   const result = await pool.query(
-    `SELECT cle.id, cle.created_at AS date, cle.reference_number, cle.description, cle.entry_type,
+    `SELECT cle.id, cle.created_at AS date, cle.reference_id, cle.reference_number, cle.description, cle.entry_type,
             cle.debit, cle.credit, cle.balance_after AS balance,
             COALESCE(s.branch_id, cm.branch_id, sr.branch_id, u.branch_id) AS branch_id,
             b.name AS branch_name,
@@ -611,6 +612,7 @@ export async function getCustomerStatement(
     (row: Record<string, unknown>): CustomerStatementRowDto => ({
       id: row['id'] as string,
       date: row['date'] as string,
+      reference_id: (row['reference_id'] as string | null) ?? null,
       reference_number: (row['reference_number'] as string | null) ?? null,
       description: row['description'] as string,
       entry_type: row['entry_type'] as string,

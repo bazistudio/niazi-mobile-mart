@@ -11,6 +11,9 @@ import { usePrinterStore } from '@/features/settings/printer/store/printer.store
 import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
 import { downloadHtmlAsPdf } from '@/lib/printer/pdfExport';
 import { SelectedParty } from '../hooks/useLedger';
+import { InvoicePreviewModal } from '@/features/history/components/InvoicePreviewModal';
+import { HistoryItem } from '@/features/history/types/history.types';
+import { Eye } from 'lucide-react';
 import { ReceivePaymentModal } from '@/features/customers/components/ledger/ReceivePaymentModal';
 import { MakeSupplierPaymentModal } from '@/features/suppliers/components/modals/MakeSupplierPaymentModal';
 
@@ -88,6 +91,7 @@ export const LedgerBook: React.FC<LedgerBookProps> = ({ initialParty, readonly }
   const { settings, shopHeader, fetchSettings } = usePrinterStore();
   const [expandedRows, setExpandedRows]       = useState<Record<string, boolean>>({});
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [previewInvoiceItem, setPreviewInvoiceItem] = useState<HistoryItem | null>(null);
 
   React.useEffect(() => {
     if (!settings || !shopHeader) fetchSettings();
@@ -282,7 +286,7 @@ export const LedgerBook: React.FC<LedgerBookProps> = ({ initialParty, readonly }
                     {isCustomer ? 'Credit (Cr)' : 'Credit (Cr)'}
                   </th>
                   <th className="px-5 py-3 text-right">Balance</th>
-                  <th className="px-5 py-3 text-center w-12" />
+                  <th className="px-5 py-3 text-center min-w-[120px]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
