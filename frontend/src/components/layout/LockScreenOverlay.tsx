@@ -5,6 +5,7 @@ import { Lock, Delete, LogOut, ShieldAlert } from 'lucide-react';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 import { useTerminalStore } from '@/store/useTerminalStore';
 import { isTauriEnvironment, tauriClient } from '@/lib/tauri/tauriClient';
+import { loginUser } from '@/lib/auth/core/auth.client';
 
 /**
  * Extract 1-2 letter uppercase initials from display name
@@ -26,6 +27,7 @@ export const LockScreenOverlay: React.FC = () => {
   const [pin, setPin] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [isShaking, setIsShaking] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
 
   const displayName = (user as any)?.name || (user as any)?.username || 'Active Cashier';
@@ -38,45 +40,79 @@ export const LockScreenOverlay: React.FC = () => {
       setPin('');
       setError(null);
       setIsShaking(false);
+      setIsVerifying(false);
     }
   }, [isTerminalLocked]);
 
+  const triggerErrorShake = useCallback((errorMessage: string) => {
+    setError(errorMessage);
+    setIsShaking(true);
+    setPin('');
+    setTimeout(() => setIsShaking(false), 500);
+  }, []);
+
   const handleVerifyPin = useCallback(
     async (pinToVerify: string) => {
+      const cleanPin = pinToVerify.trim();
+      if (!cleanPin) {
+        triggerErrorShake('PIN cannot be empty.');
+        return;
+      }
+
+      if (cleanPin.length !== 4) {
+        triggerErrorShake('PIN must be 4 digits.');
+        return;
+      }
+
+      setIsVerifying(true);
+      setError(null);
+
+      // Path A: Tauri Native Desktop IPC Verification
       if (isTauriEnvironment()) {
         try {
-          await tauriClient.authUnlock(pinToVerify);
+          await tauriClient.authUnlock(cleanPin);
           setError(null);
           setPin('');
           unlockTerminal();
         } catch (err: any) {
-          setError(err?.message || 'Incorrect PIN. Please try again.');
-          setIsShaking(true);
-          setPin('');
-          setTimeout(() => setIsShaking(false), 500);
+          triggerErrorShake(err?.message || 'Incorrect PIN. Please try again.');
+        } finally {
+          setIsVerifying(false);
         }
         return;
       }
 
-      // Web dev fallback
-      const userPin = (user as any)?.pin || '1234';
-      if (pinToVerify === String(userPin) || pinToVerify === '1234') {
+      // Path B: Central Web / Online Mode Verification
+      // Verify against Central Backend auth authority.
+      // If user session is missing, fail closed immediately.
+      const username = user?.username;
+      if (!username) {
+        setIsVerifying(false);
+        triggerErrorShake('Session user not identified. Please sign out and log in again.');
+        return;
+      }
+
+      try {
+        await loginUser(username, cleanPin);
         setError(null);
         setPin('');
         unlockTerminal();
-      } else {
-        setError('Incorrect PIN. Please try again.');
-        setIsShaking(true);
-        setPin('');
-        setTimeout(() => setIsShaking(false), 500);
+      } catch (err: any) {
+        const errorMsg =
+          err?.status === 429
+            ? err?.message || 'Too many attempts. Account locked temporarily.'
+            : 'Incorrect PIN. Please try again.';
+        triggerErrorShake(errorMsg);
+      } finally {
+        setIsVerifying(false);
       }
     },
-    [user, unlockTerminal]
+    [user?.username, unlockTerminal, triggerErrorShake]
   );
 
   const handleDigitPress = useCallback(
     (digit: string) => {
-      if (pin.length >= 4) return;
+      if (isVerifying || pin.length >= 4) return;
       const nextPin = pin + digit;
       setPin(nextPin);
       setError(null);
@@ -86,18 +122,20 @@ export const LockScreenOverlay: React.FC = () => {
         setTimeout(() => handleVerifyPin(nextPin), 80);
       }
     },
-    [pin, handleVerifyPin]
+    [pin, isVerifying, handleVerifyPin]
   );
 
   const handleBackspace = useCallback(() => {
+    if (isVerifying) return;
     setPin((prev) => prev.slice(0, -1));
     setError(null);
-  }, []);
+  }, [isVerifying]);
 
   const handleClear = useCallback(() => {
+    if (isVerifying) return;
     setPin('');
     setError(null);
-  }, []);
+  }, [isVerifying]);
 
   // Handle physical keyboard input while terminal is locked
   useEffect(() => {
@@ -192,14 +230,22 @@ export const LockScreenOverlay: React.FC = () => {
           </div>
         )}
 
+        {/* Verifying Indicator */}
+        {isVerifying && (
+          <div className="text-xs text-primary font-medium mb-4 animate-pulse">
+            Verifying security PIN...
+          </div>
+        )}
+
         {/* Numeric Keypad */}
         <div className="grid grid-cols-3 gap-2.5 sm:gap-3 mb-5 max-w-[280px] mx-auto">
           {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
             <button
               key={digit}
               type="button"
+              disabled={isVerifying}
               onClick={() => handleDigitPress(digit)}
-              className="h-12 sm:h-13 rounded-xl border border-border bg-surface hover:bg-surface-hover active:bg-primary/10 active:border-primary text-base sm:text-lg font-bold text-text-primary shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="h-12 sm:h-13 rounded-xl border border-border bg-surface hover:bg-surface-hover active:bg-primary/10 active:border-primary text-base sm:text-lg font-bold text-text-primary shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50"
             >
               {digit}
             </button>
@@ -208,8 +254,9 @@ export const LockScreenOverlay: React.FC = () => {
           {/* Clear Button */}
           <button
             type="button"
+            disabled={isVerifying}
             onClick={handleClear}
-            className="h-12 sm:h-13 rounded-xl border border-border bg-surface hover:bg-surface-hover active:bg-surface text-xs font-semibold text-text-secondary shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="h-12 sm:h-13 rounded-xl border border-border bg-surface hover:bg-surface-hover active:bg-surface text-xs font-semibold text-text-secondary shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50"
           >
             Clear
           </button>
@@ -217,8 +264,9 @@ export const LockScreenOverlay: React.FC = () => {
           {/* 0 Button */}
           <button
             type="button"
+            disabled={isVerifying}
             onClick={() => handleDigitPress('0')}
-            className="h-12 sm:h-13 rounded-xl border border-border bg-surface hover:bg-surface-hover active:bg-primary/10 active:border-primary text-base sm:text-lg font-bold text-text-primary shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="h-12 sm:h-13 rounded-xl border border-border bg-surface hover:bg-surface-hover active:bg-primary/10 active:border-primary text-base sm:text-lg font-bold text-text-primary shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50"
           >
             0
           </button>
@@ -226,9 +274,10 @@ export const LockScreenOverlay: React.FC = () => {
           {/* Backspace Button */}
           <button
             type="button"
+            disabled={isVerifying}
             onClick={handleBackspace}
             aria-label="Backspace"
-            className="h-12 sm:h-13 rounded-xl border border-border bg-surface hover:bg-surface-hover active:bg-surface flex items-center justify-center text-text-secondary shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            className="h-12 sm:h-13 rounded-xl border border-border bg-surface hover:bg-surface-hover active:bg-surface flex items-center justify-center text-text-secondary shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50"
           >
             <Delete className="h-5 w-5" />
           </button>
@@ -238,7 +287,7 @@ export const LockScreenOverlay: React.FC = () => {
         <div className="pt-2 border-t border-border flex items-center justify-between gap-2 text-xs">
           <button
             type="button"
-            disabled={isSigningOut}
+            disabled={isSigningOut || isVerifying}
             onClick={async () => {
               if (isSigningOut) return;
               setIsSigningOut(true);
