@@ -37,13 +37,33 @@ export class AuthService {
       if (response) {
         if (!response.ok) {
           let errMessage = "Invalid credentials or central authentication failure";
+          let errCode: string | undefined;
+          let retryAfterMs: number | undefined;
+
           try {
             const errData = await response.json();
-            if (errData && errData.message) {
-              errMessage = errData.message;
+            if (errData) {
+              errMessage = errData.error || errData.message || errMessage;
+              errCode = errData.code;
+              if (errData.retry_after_ms !== undefined) {
+                retryAfterMs = Number(errData.retry_after_ms);
+              }
             }
           } catch {}
-          throw new Error(errMessage);
+
+          if (response.status === 429 && !retryAfterMs) {
+            const retryHeader = response.headers.get("Retry-After");
+            if (retryHeader) {
+              const seconds = parseInt(retryHeader, 10);
+              if (!isNaN(seconds)) retryAfterMs = seconds * 1000;
+            }
+          }
+
+          const errorObj: any = new Error(errMessage);
+          errorObj.status = response.status;
+          errorObj.code = errCode;
+          errorObj.retryAfterMs = retryAfterMs;
+          throw errorObj;
         }
 
         const data = await response.json();

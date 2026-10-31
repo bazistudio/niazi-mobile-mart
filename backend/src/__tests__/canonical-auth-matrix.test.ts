@@ -370,4 +370,20 @@ describe('Phase 2 — Canonical Authorization Matrix Suite', () => {
       );
     }
   });
+
+  test('14. Unit: Unknown username triggers constant-time dummy verification without throwing error', async () => {
+    const authModule = await import('../services/auth.service.js');
+    const argon2Module = await import('../services/argon2.service.js');
+
+    assert.ok(authModule.DUMMY_ARGON2_HASH, 'DUMMY_ARGON2_HASH must be defined');
+    assert.strictEqual(
+      authModule.DUMMY_ARGON2_HASH.startsWith('$argon2id$v=19$m=65536,t=3,p=4$'),
+      true,
+      'Dummy hash must follow valid Argon2id parameter schema'
+    );
+
+    // Verifying against the dummy hash with any password must return false without throwing an exception
+    const matchWrong = await argon2Module.verifyArgon2('arbitrary_password', authModule.DUMMY_ARGON2_HASH);
+    assert.strictEqual(matchWrong, false, 'Dummy hash verification against wrong password must safely evaluate to false');
+  });
 });

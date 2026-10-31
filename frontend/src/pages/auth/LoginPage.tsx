@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Settings,
+  Clock,
 } from "lucide-react";
 
 export function LoginForm() {
@@ -35,12 +36,28 @@ export function LoginForm() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lockoutSecondsRemaining, setLockoutSecondsRemaining] = useState<number | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
   const [isServerUnreachable, setIsServerUnreachable] = useState(false);
   const [isRetryingServer, setIsRetryingServer] = useState(false);
   const [showUrlConfig, setShowUrlConfig] = useState(false);
   const [customServerUrl, setCustomServerUrl] = useState("");
+
+  // Countdown timer effect for lockout
+  useEffect(() => {
+    if (lockoutSecondsRemaining === null || lockoutSecondsRemaining <= 0) return;
+    const interval = setInterval(() => {
+      setLockoutSecondsRemaining((prev) => {
+        if (prev === null || prev <= 1) {
+          clearInterval(interval);
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [lockoutSecondsRemaining]);
 
   // Check if system requires initial administrator bootstrap using Three-State Model
   const checkCentralBootstrap = async () => {
@@ -71,6 +88,7 @@ export function LoginForm() {
 
   const onSubmitLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (lockoutSecondsRemaining && lockoutSecondsRemaining > 0) return;
     setIsLoading(true);
     setError(null);
 
@@ -86,7 +104,8 @@ export function LoginForm() {
       navigate(from, { replace: true });
     } catch (err: any) {
       const msg = (err.message || "").toLowerCase();
-      const code = err.response?.data?.code;
+      const code = err.code || err.response?.data?.code;
+
       if (code === "ACCOUNT_PENDING" || msg.includes("pending approval") || msg.includes("pending")) {
         navigate("/auth/pending");
         return;
@@ -99,6 +118,16 @@ export function LoginForm() {
         navigate("/auth/suspended");
         return;
       }
+
+      // Check for HTTP 429 / LOCKED_OUT lockout
+      if (err.status === 429 || code === "LOCKED_OUT" || msg.includes("locked")) {
+        const retryMs = err.retryAfterMs || err.response?.data?.retry_after_ms;
+        const seconds = retryMs ? Math.ceil(retryMs / 1000) : 900;
+        setLockoutSecondsRemaining(seconds);
+        setError("Account temporarily locked due to multiple failed login attempts.");
+        return;
+      }
+
       setError(
         err.response?.data?.message || err.message || "Login failed. Please verify your credentials."
       );
@@ -263,15 +292,34 @@ export function LoginForm() {
               </div>
             </div>
 
-            {/* Error Message */}
-            {error && (
+            {/* Lockout Countdown Alert or Standard Error Message */}
+            {lockoutSecondsRemaining !== null && lockoutSecondsRemaining > 0 ? (
               <div
                 role="alert"
-                className="p-3 rounded-xl bg-danger/10 border border-danger/20 flex items-start gap-2.5 text-xs text-danger shadow-sm"
+                className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-2.5 text-xs text-amber-800 dark:text-amber-200 shadow-sm animate-in fade-in"
               >
-                <AlertCircle className="w-4 h-4 text-danger shrink-0 mt-0.5" />
-                <span>{error}</span>
+                <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5 animate-pulse" />
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-bold">Account Temporarily Locked</span>
+                  <span>
+                    Too many failed login attempts. Please wait{" "}
+                    <span className="font-mono font-bold text-amber-700 dark:text-amber-300">
+                      {Math.floor(lockoutSecondsRemaining / 60)}m {lockoutSecondsRemaining % 60}s
+                    </span>{" "}
+                    before retrying.
+                  </span>
+                </div>
               </div>
+            ) : (
+              error && (
+                <div
+                  role="alert"
+                  className="p-3 rounded-xl bg-danger/10 border border-danger/20 flex items-start gap-2.5 text-xs text-danger shadow-sm"
+                >
+                  <AlertCircle className="w-4 h-4 text-danger shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+              )
             )}
 
             {/* 3D Tactile Submit Button */}

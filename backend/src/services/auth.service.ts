@@ -36,6 +36,9 @@ const LOGIN_LOCKOUT_MS = 15 * 60 * 1_000;  // 15 minutes
 const MAX_PIN_ATTEMPTS = 5;
 const PIN_LOCKOUT_MS = 5 * 60 * 1_000;     // 5 minutes
 
+export const DUMMY_ARGON2_HASH =
+  '$argon2id$v=19$m=65536,t=3,p=4$gGLUmjJpv3skSCJrTv6vA$LCy/AYMfidUhpW3cNDWFqkjdzmTGodQEGTrlkIXwpf0';
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -132,7 +135,7 @@ export class AuthService {
     if (!user) {
       // Constant-time-safe: still perform a dummy hash check to prevent
       // timing-based username enumeration
-      await verifyArgon2(password, '$argon2id$v=19$m=19456,t=2,p=1$invalid$invalid');
+      await verifyArgon2(password, DUMMY_ARGON2_HASH);
       throw new AuthServiceError(
         'Invalid username or password',
         'INVALID_CREDENTIALS',
