@@ -85,9 +85,14 @@ export const CartSummary: React.FC = () => {
         e.preventDefault();
         handleCashSale();
       }
-      // Ctrl + P or F12 : Pay & Print
+      // Ctrl + P or F12 : Pay & Print / POS Sale
       if ((e.ctrlKey && e.key.toLowerCase() === 'p') || e.key === 'F12') {
         e.preventDefault();
+        e.stopPropagation();
+        const targetEl = e.target as HTMLElement | null;
+        if (targetEl && (targetEl.tagName === 'INPUT' || targetEl.tagName === 'TEXTAREA' || targetEl.isContentEditable)) {
+          return;
+        }
         handlePayAndPrint();
       }
       // Ctrl + L : Handled globally by lock terminal

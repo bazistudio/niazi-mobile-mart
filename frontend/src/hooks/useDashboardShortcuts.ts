@@ -47,9 +47,11 @@ export const useDashboardShortcuts = () => {
             useTerminalStore.getState().setTerminalLocked(true);
             break;
           case 'p':
-            // Fast Navigate to POS
+            // Fast Navigate to POS (outside POS only)
             e.preventDefault();
-            navigate('/dashboard/shop-admin/pos');
+            if (window.location.pathname !== '/dashboard/shop-admin/pos') {
+              navigate('/dashboard/shop-admin/pos');
+            }
             break;
           case 'm':
             // Fast Navigate to Mobile POS

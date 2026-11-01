@@ -57,7 +57,14 @@ export const ProductSearch = () => {
     }
 
     const lowerTerm = debouncedTerm.toLowerCase();
+    const isReturn = targetBucket === 'return';
+
     const filtered = products.filter(p => {
+      // In standard SALE mode: strictly exclude products with stock <= 0.
+      // In RETURN mode: keep products searchable for returns.
+      if (!isReturn && (p.stock ?? 0) <= 0) {
+        return false;
+      }
       const matchName = p.name.toLowerCase().includes(lowerTerm);
       const matchSku = p.sku.toLowerCase().includes(lowerTerm);
       const matchBarcode = (p.barcode || '').toLowerCase().includes(lowerTerm);
@@ -74,7 +81,7 @@ export const ProductSearch = () => {
     setResults(filtered);
     setSelectedIndex(0);
     setIsDropdownOpen(true);
-  }, [debouncedTerm, products]);
+  }, [debouncedTerm, products, targetBucket]);
 
   // Scroll to selected item
   useEffect(() => {
@@ -132,7 +139,9 @@ export const ProductSearch = () => {
       const searchTarget = searchTerm.trim().toLowerCase();
       if (!searchTarget) return;
 
+      const isReturn = targetBucket === 'return';
       const exactMatch = products.find(p =>
+        (isReturn || (p.stock ?? 0) > 0) && (
         (p.barcode || '').toLowerCase() === searchTarget ||
         (p.sku || '').toLowerCase() === searchTarget ||
         p.name.toLowerCase() === searchTarget ||
@@ -141,7 +150,7 @@ export const ProductSearch = () => {
         (p.brand || '').toLowerCase() === searchTarget ||
         (p.company || '').toLowerCase() === searchTarget ||
         (Array.isArray(p.compatibleModels) && p.compatibleModels.some((m: string) => m.toLowerCase() === searchTarget))
-      );
+      ));
 
       if (exactMatch && (exactMatch.stock > 0 || targetBucket === 'return')) {
         handleAdd(exactMatch);

@@ -450,12 +450,18 @@ export async function completeSaleTx(
   let creditAmount: number;
   let paymentStatus: PaymentStatus;
 
+  let excessTenderedForSettlement = 0;
   if (totalTendered >= totalAmount) {
-    const change = totalTendered - totalAmount;
+    const excess = totalTendered - totalAmount;
     recordedPaid = totalAmount;
-    changeAmount = change;
     creditAmount = 0;
     paymentStatus = 'PAID';
+    if (excess > 0 && customerOpt !== null) {
+      excessTenderedForSettlement = excess;
+      changeAmount = 0;
+    } else {
+      changeAmount = excess;
+    }
   } else {
     const credit = totalAmount - totalTendered;
     recordedPaid = totalTendered;
@@ -583,10 +589,10 @@ export async function completeSaleTx(
       ? saleIdOverride.trim()
       : uuidv4();
 
-  // Step 11: Handle Customer Credit & Ledger Entry
+  // Step 11: Handle Customer Credit & Ledger Entry / Excess Settlement
   let customerBalanceAfter: number | null = null;
-  if (creditAmount > 0) {
-    const cid = customerId!;
+  if (customerId && (creditAmount > 0 || excessTenderedForSettlement > 0)) {
+    const cid = customerId;
     const outstandingRow = await client.query(
       'SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT FROM customer_ledger_entries WHERE customer_id = $1',
       [cid]
@@ -594,26 +600,40 @@ export async function completeSaleTx(
     const outstandingData = outstandingRow.rows[0] as Record<string, unknown>;
     const currentOutstanding = Number(Object.values(outstandingData)[0] ?? 0);
 
-    if (customerCreditLimit > 0) {
-      const potentialOutstanding = currentOutstanding + creditAmount;
-      if (potentialOutstanding > customerCreditLimit) {
-        throw new SaleRepoError(
-          `Credit limit exceeded: current outstanding Rs ${currentOutstanding}, new credit Rs ${creditAmount}, credit limit Rs ${customerCreditLimit}`,
-          400
-        );
+    if (creditAmount > 0) {
+      if (customerCreditLimit > 0) {
+        const potentialOutstanding = currentOutstanding + creditAmount;
+        if (potentialOutstanding > customerCreditLimit) {
+          throw new SaleRepoError(
+            `Credit limit exceeded: current outstanding Rs ${currentOutstanding}, new credit Rs ${creditAmount}, credit limit Rs ${customerCreditLimit}`,
+            400
+          );
+        }
       }
+      const newBalance = currentOutstanding + creditAmount;
+      customerBalanceAfter = newBalance;
+      const ledgerId = uuidv4();
+      const desc = paymentStatus === 'PARTIALLY_PAID' && recordedPaid > 0
+        ? `Credit Sale ${invoiceNumber} (Partial Cash Paid: Rs ${recordedPaid.toLocaleString()}, Remaining Due: Rs ${creditAmount.toLocaleString()})`
+        : `Credit Sale ${invoiceNumber}`;
+
+      await client.query(
+        `INSERT INTO customer_ledger_entries (id, customer_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at)
+         VALUES ($1, $2, $3, $4, 'SALE', $5, 0, $6, $7, $8, $9)`,
+        [ledgerId, cid, saleId, invoiceNumber, creditAmount, newBalance, desc, uid, now]
+      );
+    } else if (excessTenderedForSettlement > 0) {
+      const newBalance = currentOutstanding - excessTenderedForSettlement;
+      customerBalanceAfter = newBalance;
+      const ledgerId = uuidv4();
+      const desc = `Payment received (CASH) - Previous balance settlement with Invoice ${invoiceNumber}`;
+
+      await client.query(
+        `INSERT INTO customer_ledger_entries (id, customer_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at)
+         VALUES ($1, $2, $3, $4, 'PAYMENT', 0, $5, $6, $7, $8, $9)`,
+        [ledgerId, cid, saleId, invoiceNumber, excessTenderedForSettlement, newBalance, desc, uid, now]
+      );
     }
-
-    const newBalance = currentOutstanding + creditAmount;
-    customerBalanceAfter = newBalance;
-    const ledgerId = uuidv4();
-    const desc = `Credit Sale ${invoiceNumber}`;
-
-    await client.query(
-      `INSERT INTO customer_ledger_entries (id, customer_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at)
-       VALUES ($1, $2, $3, $4, 'SALE', $5, 0, $6, $7, $8, $9)`,
-      [ledgerId, cid, saleId, invoiceNumber, creditAmount, newBalance, desc, uid, now]
-    );
   }
 
   // Step 12: Insert Sale Header
@@ -765,14 +785,16 @@ export async function completeSaleTx(
     }
 
     const cashMvId = uuidv4();
-    const desc = `Retail Sale Payment ${invoiceNumber}`;
+    const totalCashMovement = allocatedCash + excessTenderedForSettlement;
+    const desc = excessTenderedForSettlement > 0
+      ? `Retail Sale Payment & Customer Settlement ${invoiceNumber}`
+      : `Retail Sale Payment ${invoiceNumber}`;
 
     await client.query(
       `INSERT INTO cash_movements (id, session_id, branch_id, movement_type, direction, amount, reference_id, reference_number, payment_method, description, performed_by, created_at)
        VALUES ($1, $2, $3, 'SALE_PAYMENT', 'IN', $4, $5, $6, 'CASH', $7, $8, $9)`,
-      [cashMvId, openSessionId, branchId, allocatedCash, saleId, invoiceNumber, desc, uid, now]
-    );
-  }
+      [cashMvId, openSessionId, branchId, totalCashMovement, saleId, invoiceNumber, desc, uid, now]
+    );  }
 
   const finalCreditAmount = Math.max(sale.total_amount - sale.paid_amount, 0);
 
