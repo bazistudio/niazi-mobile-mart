@@ -25,6 +25,20 @@ export const CANONICAL_PAYMENT_METHODS: readonly CanonicalPaymentMethod[] = [
   'OTHER',
 ] as const;
 
+/**
+ * Digital payment methods eligible for direct digital refund payouts.
+ * Excludes CASH, which is tracked separately as physical cash movements.
+ */
+export type DigitalPaymentMethod = Exclude<CanonicalPaymentMethod, 'CASH'>;
+
+export const DIGITAL_PAYMENT_METHODS: readonly DigitalPaymentMethod[] = [
+  'CARD',
+  'BANK_TRANSFER',
+  'EASYPAISA',
+  'JAZZCASH',
+  'OTHER',
+] as const;
+
 export interface TenderInputLine {
   method: CanonicalPaymentMethod;
   amount: number; // Integer minor unit: whole PKR
@@ -95,7 +109,7 @@ export interface PriorRefundComponents {
   unpaidCreditCancelled?: number;
   advanceRestored?: number;
   cashRefunded?: number;
-  digitalRefundedByMethod?: Partial<Record<CanonicalPaymentMethod, number>>;
+  digitalRefundedByMethod?: Partial<Record<DigitalPaymentMethod, number>>;
   customerCreditIssued?: number; // Aggregate total credit issued for reconciliation
 
   // Source-level prior allocations (by tender line id or method)
@@ -109,7 +123,7 @@ export interface PriorRefundComponents {
  */
 export interface RequestedRefundPayout {
   cashAmount?: number;
-  digitalPayouts?: Partial<Record<CanonicalPaymentMethod, number>>;
+  digitalPayouts?: Partial<Record<DigitalPaymentMethod, number>>;
   customerCreditAmount?: number;
 }
 
@@ -144,7 +158,7 @@ export interface RefundAllocationResult {
   readonly unpaidInvoiceCreditCancelled: number;
   readonly existingAdvanceRestored: number;
   readonly cashRefunded: number;
-  readonly digitalRefundedByMethod: Readonly<Partial<Record<CanonicalPaymentMethod, number>>>;
+  readonly digitalRefundedByMethod: Readonly<Partial<Record<DigitalPaymentMethod, number>>>;
   readonly customerCreditIssued: number;
 
   // Source-level tender line allocations (FIFO order)

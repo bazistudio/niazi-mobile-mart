@@ -14,6 +14,8 @@
 import {
   CanonicalPaymentMethod,
   CANONICAL_PAYMENT_METHODS,
+  DigitalPaymentMethod,
+  DIGITAL_PAYMENT_METHODS,
   PaymentAllocationRequest,
   PaymentAllocationResult,
   RefundAllocationRequest,
@@ -534,23 +536,37 @@ export function calculateRefundAllocation(request: RefundAllocationRequest): Ref
     }
 
     // Attribute prior direct digital payouts per method
-    for (const [m, amt] of Object.entries(priorDigital) as [CanonicalPaymentMethod, number][]) {
-      if (amt && amt > 0) {
-        assertSafeInteger(amt, `Prior digital refund for ${m}`, true);
-        let unallocatedMethod = amt;
-        for (const state of lineStates) {
-          if (state.method === m && unallocatedMethod > 0) {
-            const canTake = safeSub(state.originalAmount, state.priorDirectRefunded, 'Remaining line capacity');
-            const take = Math.min(unallocatedMethod, canTake);
-            state.priorDirectRefunded = safeAdd(state.priorDirectRefunded, take, `Line prior direct ${m}`);
-            unallocatedMethod = safeSub(unallocatedMethod, take, `Unallocated prior ${m}`);
-          }
-        }
-        if (unallocatedMethod > 0) {
+    for (const [m, amt] of Object.entries(priorDigital) as [string, number | undefined][]) {
+      if (amt !== undefined) {
+        if (m === 'CASH') {
           throw new PaymentDomainError(
-            `Prior digital refund for ${m} (Rs ${amt.toLocaleString()}) exceeds total original ${m} tenders.`,
-            'PRIOR_DIGITAL_EXCEEDS_TENDER'
+            'CASH cannot be supplied in digitalRefundedByMethod. Use cashRefunded for direct cash refunds.',
+            'CASH_IN_DIGITAL_REFUND'
           );
+        }
+        if (!DIGITAL_PAYMENT_METHODS.includes(m as DigitalPaymentMethod)) {
+          throw new PaymentDomainError(
+            `Unsupported digital refund payment method "${m}". Valid digital methods: ${DIGITAL_PAYMENT_METHODS.join(', ')}.`,
+            'UNSUPPORTED_DIGITAL_REFUND_METHOD'
+          );
+        }
+        if (amt > 0) {
+          assertSafeInteger(amt, `Prior digital refund for ${m}`, true);
+          let unallocatedMethod = amt;
+          for (const state of lineStates) {
+            if (state.method === m && unallocatedMethod > 0) {
+              const canTake = safeSub(state.originalAmount, state.priorDirectRefunded, 'Remaining line capacity');
+              const take = Math.min(unallocatedMethod, canTake);
+              state.priorDirectRefunded = safeAdd(state.priorDirectRefunded, take, `Line prior direct ${m}`);
+              unallocatedMethod = safeSub(unallocatedMethod, take, `Unallocated prior ${m}`);
+            }
+          }
+          if (unallocatedMethod > 0) {
+            throw new PaymentDomainError(
+              `Prior digital refund for ${m} (Rs ${amt.toLocaleString()}) exceeds total original ${m} tenders.`,
+              'PRIOR_DIGITAL_EXCEEDS_TENDER'
+            );
+          }
         }
       }
     }
@@ -618,8 +634,20 @@ export function calculateRefundAllocation(request: RefundAllocationRequest): Ref
 
     // 2. Validate digital aggregates per method if supplied
     if (priorRefunds.digitalRefundedByMethod !== undefined) {
-      for (const [m, amt] of Object.entries(priorRefunds.digitalRefundedByMethod) as [CanonicalPaymentMethod, number | undefined][]) {
+      for (const [m, amt] of Object.entries(priorRefunds.digitalRefundedByMethod) as [string, number | undefined][]) {
         if (amt !== undefined) {
+          if (m === 'CASH') {
+            throw new PaymentDomainError(
+              'CASH cannot be supplied in digitalRefundedByMethod. Use cashRefunded for direct cash refunds.',
+              'CASH_IN_DIGITAL_REFUND'
+            );
+          }
+          if (!DIGITAL_PAYMENT_METHODS.includes(m as DigitalPaymentMethod)) {
+            throw new PaymentDomainError(
+              `Unsupported digital refund payment method "${m}". Valid digital methods: ${DIGITAL_PAYMENT_METHODS.join(', ')}.`,
+              'UNSUPPORTED_DIGITAL_REFUND_METHOD'
+            );
+          }
           assertSafeInteger(amt, `Supplied prior digital aggregate for ${m}`, true);
           let sumLineDigital = 0;
           for (const state of lineStates) {
@@ -714,46 +742,60 @@ export function calculateRefundAllocation(request: RefundAllocationRequest): Ref
     }
 
     // Direct Digital Payouts
-    for (const [m, amt] of Object.entries(reqDigital) as [CanonicalPaymentMethod, number][]) {
-      if (amt && amt > 0) {
-        assertSafeInteger(amt, `Requested digital refund for ${m}`, true);
-        let availableDigitalFunding = 0;
-        for (const state of lineStates) {
-          if (state.method === m) {
-            const used = safeAdd(state.priorDirectRefunded, state.priorCreditFunded, 'Line used');
-            const avail = Math.max(0, safeSub(state.originalAmount, used, 'Line available'));
-            availableDigitalFunding = safeAdd(availableDigitalFunding, avail, `Available ${m} sum`);
-          }
-        }
-
-        if (amt > availableDigitalFunding) {
+    for (const [m, amt] of Object.entries(reqDigital) as [string, number | undefined][]) {
+      if (amt !== undefined) {
+        if (m === 'CASH') {
           throw new PaymentDomainError(
-            `Requested digital refund for ${m} (Rs ${amt.toLocaleString()}) exceeds eligible original tender funding Rs ${availableDigitalFunding.toLocaleString()}.`,
-            'DIGITAL_REFUND_EXCEEDS_TENDER'
+            'CASH cannot be requested in digitalPayouts. Use cashAmount for direct cash refunds.',
+            'CASH_IN_DIGITAL_REFUND'
           );
         }
-
-        if (amt > remainingToAllocate) {
+        if (!DIGITAL_PAYMENT_METHODS.includes(m as DigitalPaymentMethod)) {
           throw new PaymentDomainError(
-            `Requested digital refund for ${m} (Rs ${amt.toLocaleString()}) exceeds remaining refund amount Rs ${remainingToAllocate.toLocaleString()}.`,
-            'PAYOUT_EXCEEDS_REFUND'
+            `Unsupported digital refund payment method "${m}". Valid digital methods: ${DIGITAL_PAYMENT_METHODS.join(', ')}.`,
+            'UNSUPPORTED_DIGITAL_REFUND_METHOD'
           );
         }
-
-        // Reserve direct digital across lines of this method (FIFO)
-        let unallocatedDigital = amt;
-        for (const state of lineStates) {
-          if (state.method === m && unallocatedDigital > 0) {
-            const used = safeAdd(state.priorDirectRefunded, state.priorCreditFunded, 'Line used');
-            const avail = Math.max(0, safeSub(state.originalAmount, used, 'Line available'));
-            const take = Math.min(unallocatedDigital, avail);
-            state.currentDirectRefunded = safeAdd(state.currentDirectRefunded, take, `Current direct ${m} line`);
-            unallocatedDigital = safeSub(unallocatedDigital, take, 'Unallocated digital');
+        if (amt > 0) {
+          assertSafeInteger(amt, `Requested digital refund for ${m}`, true);
+          let availableDigitalFunding = 0;
+          for (const state of lineStates) {
+            if (state.method === m) {
+              const used = safeAdd(state.priorDirectRefunded, state.priorCreditFunded, 'Line used');
+              const avail = Math.max(0, safeSub(state.originalAmount, used, 'Line available'));
+              availableDigitalFunding = safeAdd(availableDigitalFunding, avail, `Available ${m} sum`);
+            }
           }
-        }
 
-        digitalRefundedByMethod[m] = amt;
-        remainingToAllocate = safeSub(remainingToAllocate, amt, `Remaining after ${m} digital payout`);
+          if (amt > availableDigitalFunding) {
+            throw new PaymentDomainError(
+              `Requested digital refund for ${m} (Rs ${amt.toLocaleString()}) exceeds eligible original tender funding Rs ${availableDigitalFunding.toLocaleString()}.`,
+              'DIGITAL_REFUND_EXCEEDS_TENDER'
+            );
+          }
+
+          if (amt > remainingToAllocate) {
+            throw new PaymentDomainError(
+              `Requested digital refund for ${m} (Rs ${amt.toLocaleString()}) exceeds remaining refund amount Rs ${remainingToAllocate.toLocaleString()}.`,
+              'PAYOUT_EXCEEDS_REFUND'
+            );
+          }
+
+          // Reserve direct digital across lines of this method (FIFO)
+          let unallocatedDigital = amt;
+          for (const state of lineStates) {
+            if (state.method === m && unallocatedDigital > 0) {
+              const used = safeAdd(state.priorDirectRefunded, state.priorCreditFunded, 'Line used');
+              const avail = Math.max(0, safeSub(state.originalAmount, used, 'Line available'));
+              const take = Math.min(unallocatedDigital, avail);
+              state.currentDirectRefunded = safeAdd(state.currentDirectRefunded, take, `Current direct ${m} line`);
+              unallocatedDigital = safeSub(unallocatedDigital, take, 'Unallocated digital');
+            }
+          }
+
+          digitalRefundedByMethod[m as DigitalPaymentMethod] = amt;
+          remainingToAllocate = safeSub(remainingToAllocate, amt, `Remaining after ${m} digital payout`);
+        }
       }
     }
 

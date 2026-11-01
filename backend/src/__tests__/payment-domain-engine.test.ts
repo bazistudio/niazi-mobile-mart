@@ -1529,4 +1529,145 @@ describe('Shared Payment Domain Engine — Unit Test Suite', () => {
     assert.equal(res.tenderLineAllocations[0].remainingEligibleAmount, 0);
     assert.equal(res.tenderLineAllocations[1].remainingEligibleAmount, 100); // 400 - 100 - 200 = 100
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // PART 8: PHASE 3A.2.6 REFUND AGGREGATE CONTRACT HARDENING TESTS
+  // ───────────────────────────────────────────────────────────────────────────
+
+  it('Phase 3A.2.6 Test 1: Omitted digital method remains unasserted', () => {
+    // Original sale: EasyPaisa 500, JazzCash 300, Cash 1,000 (Total: 1,800)
+    // Detailed prior direct: EasyPaisa 100, JazzCash 50.
+    // Supplied aggregate: { EASYPAISA: 100 } (JazzCash omitted)
+    const tenders = [
+      { id: 'c1', method: 'CASH' as const, amount: 1000 },
+      { id: 'ep1', method: 'EASYPAISA' as const, amount: 500 },
+      { id: 'jc1', method: 'JAZZCASH' as const, amount: 300 },
+    ];
+
+    const res = calculateRefundAllocation({
+      refundAmount: 100,
+      originalInvoiceTotal: 1800,
+      originalAdvanceApplied: 0,
+      originalCreditAllocated: 0,
+      originalTenders: tenders,
+      priorRefunds: {
+        directRefundByLine: { ep1: 100, jc1: 50 },
+        digitalRefundedByMethod: { EASYPAISA: 100 }, // JazzCash omitted!
+      },
+      requestedPayout: { digitalPayouts: { EASYPAISA: 100 } },
+    });
+
+    assert.equal(res.digitalRefundedByMethod.EASYPAISA, 100);
+    assert.equal(res.tenderLineAllocations[1].remainingEligibleAmount, 300); // 500 - 100 - 100 = 300
+    assert.equal(res.tenderLineAllocations[2].remainingEligibleAmount, 250); // 300 - 50 = 250
+  });
+
+  it('Phase 3A.2.6 Test 2: Explicit zero contradicting detailed history is rejected', () => {
+    // Detailed prior: EasyPaisa 100, JazzCash 50.
+    // Supplied aggregate: { EASYPAISA: 100, JAZZCASH: 0 } (0 contradicts detailed 50)
+    const tenders = [
+      { id: 'ep1', method: 'EASYPAISA' as const, amount: 500 },
+      { id: 'jc1', method: 'JAZZCASH' as const, amount: 300 },
+    ];
+
+    assert.throws(
+      () => {
+        calculateRefundAllocation({
+          refundAmount: 100,
+          originalInvoiceTotal: 800,
+          originalAdvanceApplied: 0,
+          originalCreditAllocated: 0,
+          originalTenders: tenders,
+          priorRefunds: {
+            directRefundByLine: { ep1: 100, jc1: 50 },
+            digitalRefundedByMethod: { EASYPAISA: 100, JAZZCASH: 0 },
+          },
+        });
+      },
+      (err: any) => err.code === 'PRIOR_DIGITAL_AGGREGATE_MISMATCH'
+    );
+  });
+
+  it('Phase 3A.2.6 Test 3: CASH is rejected in digital aggregate (nonzero and zero)', () => {
+    const tenders = [
+      { id: 'c1', method: 'CASH' as const, amount: 1000 },
+      { id: 'ep1', method: 'EASYPAISA' as const, amount: 500 },
+    ];
+
+    // Subtest 3A: Nonzero CASH in digitalRefundedByMethod
+    assert.throws(
+      () => {
+        calculateRefundAllocation({
+          refundAmount: 100,
+          originalInvoiceTotal: 1500,
+          originalAdvanceApplied: 0,
+          originalCreditAllocated: 0,
+          originalTenders: tenders,
+          priorRefunds: {
+            directRefundByLine: { c1: 200, ep1: 100 },
+            digitalRefundedByMethod: { CASH: 200 } as any,
+          },
+        });
+      },
+      (err: any) => err.code === 'CASH_IN_DIGITAL_REFUND'
+    );
+
+    // Subtest 3B: Zero CASH in digitalRefundedByMethod
+    assert.throws(
+      () => {
+        calculateRefundAllocation({
+          refundAmount: 100,
+          originalInvoiceTotal: 1500,
+          originalAdvanceApplied: 0,
+          originalCreditAllocated: 0,
+          originalTenders: tenders,
+          priorRefunds: {
+            directRefundByLine: { c1: 200, ep1: 100 },
+            digitalRefundedByMethod: { CASH: 0 } as any,
+          },
+        });
+      },
+      (err: any) => err.code === 'CASH_IN_DIGITAL_REFUND'
+    );
+  });
+
+  it('Phase 3A.2.6 Test 4: Unknown runtime key is rejected even with zero amount', () => {
+    const tenders = [{ id: 'ep1', method: 'EASYPAISA' as const, amount: 500 }];
+
+    // Subtest 4A: Unknown method with zero amount ({ UNKNOWN: 0 })
+    assert.throws(
+      () => {
+        calculateRefundAllocation({
+          refundAmount: 100,
+          originalInvoiceTotal: 500,
+          originalAdvanceApplied: 0,
+          originalCreditAllocated: 0,
+          originalTenders: tenders,
+          priorRefunds: {
+            directRefundByLine: { ep1: 50 },
+            digitalRefundedByMethod: { UNKNOWN: 0 } as any,
+          },
+        });
+      },
+      (err: any) => err.code === 'UNSUPPORTED_DIGITAL_REFUND_METHOD'
+    );
+
+    // Subtest 4B: Unknown method with nonzero amount ({ BITCOIN: 50 })
+    assert.throws(
+      () => {
+        calculateRefundAllocation({
+          refundAmount: 100,
+          originalInvoiceTotal: 500,
+          originalAdvanceApplied: 0,
+          originalCreditAllocated: 0,
+          originalTenders: tenders,
+          priorRefunds: {
+            directRefundByLine: { ep1: 50 },
+            digitalRefundedByMethod: { BITCOIN: 50 } as any,
+          },
+        });
+      },
+      (err: any) => err.code === 'UNSUPPORTED_DIGITAL_REFUND_METHOD'
+    );
+  });
 });
