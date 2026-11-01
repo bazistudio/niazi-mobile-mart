@@ -512,6 +512,37 @@ export function buildMobileRouter(pool: Pool): Router {
     }
   });
 
+  // ── Idempotency Key Validation Helper ────────────────────────────────────
+  function validateMobileIdempotencyKey(key?: string | null): string | null {
+    if (key === undefined || key === null) {
+      return null;
+    }
+    if (typeof key !== 'string') {
+      throw new MobileSaleRepoError('Invalid idempotency key: must be a string.', 400);
+    }
+    if (key.length === 0) {
+      throw new MobileSaleRepoError('Invalid idempotency key: cannot be empty string.', 400);
+    }
+    if (key !== key.trim()) {
+      throw new MobileSaleRepoError('Invalid idempotency key: leading or trailing whitespace is not permitted.', 400);
+    }
+    if (key.length > 128) {
+      throw new MobileSaleRepoError('Invalid idempotency key: exceeds maximum length of 128 characters.', 400);
+    }
+    if (key.includes(':')) {
+      throw new MobileSaleRepoError('Invalid idempotency key: colon character is reserved and not permitted.', 400);
+    }
+    if (
+      key.startsWith('pos_txn_') ||
+      key.startsWith('pos_exchange_') ||
+      key.startsWith('exchange:') ||
+      key.startsWith('mobiles:')
+    ) {
+      throw new MobileSaleRepoError('Invalid idempotency key: reserved workflow prefix.', 400);
+    }
+    return key;
+  }
+
   // ── POST /api/mobiles/sales ──────────────────────────────────────────────
   // Dedicated transactional Mobile Inventory Sale POS endpoint
   router.post('/sales', async (req: Request, res: Response) => {
@@ -531,6 +562,10 @@ export function buildMobileRouter(pool: Pool): Router {
     try {
       const dto = req.body as CompleteMobileSaleDto;
       const callerIsOrgAdmin = isOrgAdmin(identity);
+
+      // Validate Idempotency Key (Phase 2)
+      const validatedIdempotencyKey = validateMobileIdempotencyKey(dto.idempotencyKey);
+      dto.idempotencyKey = validatedIdempotencyKey;
 
       // Phase 1: HTTP Boundary Whole-PKR Safe-Integer Validation
       if (!dto.items || !Array.isArray(dto.items) || dto.items.length === 0) {

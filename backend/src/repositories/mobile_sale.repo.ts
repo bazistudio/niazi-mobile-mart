@@ -17,6 +17,7 @@
  */
 
 import { Pool, PoolClient } from 'pg';
+import { createHash } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { writeChangeLogEntry } from './change_log.repo';
 
@@ -96,6 +97,212 @@ function getPeriodYYYYMM(): string {
   return `${year}${month}`;
 }
 
+
+// ─── Idempotency Helpers (Phase 2) ──────────────────────────────────────────
+
+/**
+ * Validates idempotency key according to strict Phase 2 security contract.
+ * Rejects whitespace, colons, alien prefixes, and length > 128.
+ * Preserves null/undefined for backward compatibility.
+ */
+export function validateMobileIdempotencyKey(key?: string | null): string | null {
+  if (key === undefined || key === null) {
+    return null;
+  }
+  if (typeof key !== 'string') {
+    throw new MobileSaleRepoError('Invalid idempotency key: must be a string.', 400);
+  }
+  if (key.length === 0) {
+    throw new MobileSaleRepoError('Invalid idempotency key: cannot be empty string.', 400);
+  }
+  if (key !== key.trim()) {
+    throw new MobileSaleRepoError('Invalid idempotency key: leading or trailing whitespace is not permitted.', 400);
+  }
+  if (key.length > 128) {
+    throw new MobileSaleRepoError('Invalid idempotency key: exceeds maximum length of 128 characters.', 400);
+  }
+  if (key.includes(':')) {
+    throw new MobileSaleRepoError('Invalid idempotency key: colon character is reserved and not permitted.', 400);
+  }
+  if (
+    key.startsWith('pos_txn_') ||
+    key.startsWith('pos_exchange_') ||
+    key.startsWith('exchange:') ||
+    key.startsWith('mobiles:')
+  ) {
+    throw new MobileSaleRepoError('Invalid idempotency key: reserved workflow prefix.', 400);
+  }
+  return key;
+}
+
+/**
+ * Computes deterministic canonical SHA-256 hash of the financially binding fields.
+ * Items are canonically sorted by deviceId using locale-independent ASCII comparison.
+ * Payments preserve exact submission order because order dictates allocation.
+ * Informational metadata (notes, references) is excluded.
+ */
+function computeMobilePayloadHash(dto: CompleteMobileSaleDto, authoritativeBranchId: string): string {
+  const canonical = {
+    branch_id: authoritativeBranchId,
+    customer_id: dto.customerId ?? null,
+    items: [...dto.items]
+      .sort((a, b) => (a.deviceId < b.deviceId ? -1 : a.deviceId > b.deviceId ? 1 : 0))
+      .map((i) => ({
+        deviceId: i.deviceId,
+        salePrice: i.salePrice,
+      })),
+    payments: dto.payments
+      ? dto.payments.map((p) => ({
+          method: p.method,
+          amount: p.amount,
+        }))
+      : [],
+  };
+  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+}
+
+/**
+ * Derives deterministic 32-bit signed integer pair for PostgreSQL pg_advisory_xact_lock.
+ * Scoped to workflow namespace 'mobiles', branch_id, and rawKey.
+ */
+function computeMobileAdvisoryLockKeys(branchId: string, rawKey: string): [number, number] {
+  const hash = createHash('sha256').update(`mobiles:${branchId}:${rawKey}`).digest();
+  const k1 = hash.readInt32BE(0);
+  const k2 = hash.readInt32BE(4);
+  return [k1, k2];
+}
+
+/**
+ * Reconstructs original MobileSaleResult from committed immutable database records.
+ * Verifies workflow ownership via mobile_sale_items existence.
+ */
+async function reconstructMobileSaleResult(
+  pool: Pool,
+  saleId: string,
+  authoritativeBranchId: string
+): Promise<MobileSaleResult | null> {
+  const saleRes = await pool.query(
+    `SELECT id, invoice_number, branch_id, customer_id, customer_name_snapshot,
+            subtotal, discount, total_amount, paid_amount, change_amount,
+            payment_status, performed_by, created_at
+     FROM sales
+     WHERE id = $1`,
+    [saleId]
+  );
+  if (saleRes.rows.length === 0) {
+    return null;
+  }
+  const s = saleRes.rows[0];
+
+  // Verify branch match
+  if (s.branch_id !== authoritativeBranchId) {
+    throw new MobileSaleRepoError('Cross-branch sale access denied during idempotency replay.', 403);
+  }
+
+  // 1. Query mobile_sale_items and verify workflow ownership
+  const itemsRes = await pool.query(
+    `SELECT device_id, brand_snapshot, model_snapshot, imei1_snapshot, imei2_snapshot,
+            sale_price, cost_price_snapshot
+     FROM mobile_sale_items
+     WHERE sale_id = $1
+     ORDER BY created_at ASC, id ASC`,
+    [saleId]
+  );
+  if (itemsRes.rows.length === 0) {
+    throw new MobileSaleRepoError('Idempotency key collision detected with non-mobile workflow.', 409);
+  }
+
+  const devices: MobileSaleResult['devices'] = itemsRes.rows.map((r: any) => ({
+    deviceId: r.device_id,
+    brand: r.brand_snapshot,
+    model: r.model_snapshot,
+    imei1: r.imei1_snapshot,
+    imei2: r.imei2_snapshot,
+    salePrice: Number(r.sale_price),
+    costPrice: Number(r.cost_price_snapshot),
+  }));
+
+  // 2. Query original sale_payments
+  const paymentsRes = await pool.query(
+    `SELECT id, payment_method, amount
+     FROM sale_payments
+     WHERE sale_id = $1
+     ORDER BY created_at ASC, id ASC`,
+    [saleId]
+  );
+  const payments: MobileSaleResult['payments'] = paymentsRes.rows.map((r: any) => ({
+    id: r.id,
+    method: r.payment_method,
+    amount: Number(r.amount),
+  }));
+
+  // 3. Query cashier attribution
+  let cashier = {
+    userId: s.performed_by || '',
+    name: 'Unknown Cashier',
+    role: 'STAFF',
+  };
+  if (s.performed_by) {
+    const userRes = await pool.query(
+      `SELECT id, username, role FROM users WHERE id = $1`,
+      [s.performed_by]
+    );
+    if (userRes.rows.length > 0) {
+      cashier = {
+        userId: userRes.rows[0].id,
+        name: userRes.rows[0].username,
+        role: userRes.rows[0].role,
+      };
+    }
+  }
+
+  const subtotal = Number(s.subtotal);
+  const discount = Number(s.discount);
+  const totalAmount = Number(s.total_amount);
+  const paidAmount = Number(s.paid_amount);
+  const changeAmount = Number(s.change_amount);
+  const creditAmount = Math.max(0, totalAmount - paidAmount);
+
+  // 4. Query customerBalanceAfter with defensive consistency check
+  let customerBalanceAfter: number | null = null;
+  if (creditAmount > 0 && s.customer_id) {
+    const balRes = await pool.query(
+      `SELECT balance_after
+       FROM customer_ledger_entries
+       WHERE reference_id = $1 AND entry_type = 'SALE'
+       ORDER BY created_at ASC, id ASC`,
+      [saleId]
+    );
+    if (balRes.rows.length === 1) {
+      customerBalanceAfter = Number(balRes.rows[0].balance_after);
+    } else if (balRes.rows.length === 0) {
+      throw new MobileSaleRepoError('Ledger entry for credit sale is missing during idempotency replay.', 500);
+    } else {
+      throw new MobileSaleRepoError('Duplicate ledger entries detected for sale during idempotency replay.', 500);
+    }
+  }
+
+  return {
+    saleId: s.id,
+    invoiceNumber: s.invoice_number,
+    branchId: s.branch_id,
+    customerId: s.customer_id ?? null,
+    customerName: s.customer_name_snapshot ?? 'Walk-In Customer',
+    subtotal,
+    discount,
+    totalAmount,
+    paidAmount,
+    changeAmount,
+    creditAmount,
+    paymentStatus: s.payment_status,
+    devices,
+    payments,
+    cashier,
+    customerBalanceAfter,
+    createdAt: s.created_at,
+  };
+}
+
 // ─── Core Transactional Sale Execution ─────────────────────────────────────────
 
 export async function executeMobileSale(
@@ -172,10 +379,90 @@ export async function executeMobileSale(
     }
   }
 
+  // Defense-in-depth: Validate idempotency key contract directly inside repository
+  const rawIdempotencyKey = validateMobileIdempotencyKey(dto.idempotencyKey);
+  const storageKey = rawIdempotencyKey ? `mobiles:${rawIdempotencyKey}` : null;
+  let incomingHash: string | null = null;
+  if (rawIdempotencyKey) {
+    incomingHash = computeMobilePayloadHash(dto, branchId);
+    // ── Tier 1: Fast-Path Read-Only Check (No transaction client acquired) ──
+    let existingRow: Record<string, unknown> | null = null;
+    try {
+      const existingRes = await pool.query(
+        'SELECT sale_id, payload_hash FROM sale_idempotency_keys WHERE idempotency_key = $1 AND branch_id = $2',
+        [storageKey, branchId]
+      );
+      if (existingRes.rows.length > 0) {
+        existingRow = existingRes.rows[0] as Record<string, unknown>;
+      }
+    } catch (lookupErr: unknown) {
+      const msg = (lookupErr as Error).message || String(lookupErr);
+      if (
+        msg.includes('sale_idempotency_keys') ||
+        msg.includes('does not exist') ||
+        (lookupErr as { code?: string }).code === '42P01'
+      ) {
+        console.error('[mobile_sale.repo] sale_idempotency_keys table missing. Failing closed.');
+        throw new MobileSaleRepoError(
+          'Sale service is temporarily unavailable: required idempotency schema has not been applied. Contact system administrator.',
+          500
+        );
+      }
+      throw lookupErr;
+    }
+
+    if (existingRow) {
+      const storedHash = existingRow['payload_hash'] as string | null;
+      if (storedHash === null || storedHash !== incomingHash) {
+        throw new MobileSaleRepoError(
+          `Idempotency key '${rawIdempotencyKey}' was already used for a different payload. Submit a new request with a unique idempotency key.`,
+          409
+        );
+      }
+      const existingSaleId = existingRow['sale_id'] as string;
+      const replayedResult = await reconstructMobileSaleResult(pool, existingSaleId, branchId);
+      if (replayedResult) {
+        return replayedResult;
+      }
+      throw new MobileSaleRepoError('Original sale record could not be resolved during idempotency replay.', 500);
+    }
+  }
+
   const client: PoolClient = await pool.connect();
 
   try {
     await client.query('BEGIN');
+
+    // ── Tier 2: Transaction-Scoped Advisory Lock & Re-Check Under Lock ──
+    if (rawIdempotencyKey && storageKey && incomingHash) {
+      const [k1, k2] = computeMobileAdvisoryLockKeys(branchId, rawIdempotencyKey);
+      await client.query('SELECT pg_advisory_xact_lock($1, $2)', [k1, k2]);
+
+      // Re-check under exclusive lock
+      const recheck = await client.query(
+        'SELECT sale_id, payload_hash FROM sale_idempotency_keys WHERE idempotency_key = $1 AND branch_id = $2',
+        [storageKey, branchId]
+      );
+
+      if (recheck.rows.length > 0) {
+        // Another concurrent transaction committed while we waited!
+        await client.query('ROLLBACK');
+        const row = recheck.rows[0] as Record<string, unknown>;
+        const storedHash = row['payload_hash'] as string | null;
+        if (storedHash === null || storedHash !== incomingHash) {
+          throw new MobileSaleRepoError(
+            `Idempotency key '${rawIdempotencyKey}' was already used for a different payload. Submit a new request with a unique idempotency key.`,
+            409
+          );
+        }
+        const existingSaleId = row['sale_id'] as string;
+        const replayedResult = await reconstructMobileSaleResult(pool, existingSaleId, branchId);
+        if (replayedResult) {
+          return replayedResult;
+        }
+        throw new MobileSaleRepoError('Original sale record could not be resolved during idempotency replay.', 500);
+      }
+    }
 
     // 1. Fetch & Lock Customer if specified
     let customerOpt: { id: string; name: string; credit_limit: number; is_active: number } | null = null;
@@ -610,6 +897,27 @@ export async function executeMobileSale(
         performedByRole: authIdentity.role,
       }),
     });
+
+    // Persist Idempotency Record atomically (Strict plain INSERT without ON CONFLICT DO NOTHING)
+    if (rawIdempotencyKey && storageKey && incomingHash) {
+      try {
+        await client.query(
+          `INSERT INTO sale_idempotency_keys (idempotency_key, branch_id, sale_id, payload_hash, created_at)
+           VALUES ($1, $2, $3, $4, now())`,
+          [storageKey, branchId, saleId, incomingHash]
+        );
+      } catch (insertErr: unknown) {
+        const errCode = (insertErr as { code?: string })?.code;
+        if (errCode === '23505') {
+          // PostgreSQL unique violation: key already exists
+          throw new MobileSaleRepoError(
+            `Idempotency key '${rawIdempotencyKey}' was already used. Submit a new request with a unique idempotency key.`,
+            409
+          );
+        }
+        throw insertErr;
+      }
+    }
 
     await client.query('COMMIT');
 
