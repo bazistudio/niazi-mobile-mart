@@ -48,7 +48,7 @@ export const InvoicePreviewModal: React.FC<Props> = ({ item, onClose }) => {
         try {
           let res = await salesApi.getOrderById(item.id);
           if (!res?.success && item.referenceId) {
-            const byInv = await salesApi.getSales({ orderNumber: item.referenceId });
+            const byInv = await salesApi.getOrders({ orderNumber: item.referenceId });
             if (byInv?.success && byInv.data && byInv.data.length > 0) {
               res = await salesApi.getOrderById(byInv.data[0].id);
             }

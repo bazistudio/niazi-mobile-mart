@@ -111,6 +111,8 @@ export const ShopSwitcher = () => {
           setActiveShop({
             _id: matchedBranch.id,
             name: matchedBranch.name,
+            branch_name: matchedBranch.name,
+            code: matchedBranch.code,
             organizationId: matchedBranch.organization_id,
             status: matchedBranch.is_active ? 'active' : 'inactive',
           });
@@ -182,6 +184,8 @@ export const ShopSwitcher = () => {
       setActiveShop({
         _id: branch.id,
         name: branch.name,
+        branch_name: branch.name,
+        code: branch.code,
         organizationId: branch.organization_id,
         status: branch.is_active ? 'active' : 'inactive',
       });

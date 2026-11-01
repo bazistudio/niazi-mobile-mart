@@ -85,7 +85,7 @@ export const UserPermissionsModal: React.FC<UserPermissionsModalProps> = ({
       groups[moduleName].push({
         key: meta.key,
         label: meta.label,
-        description: meta.description,
+        description: meta.description || '',
         module: moduleName,
         decision: roleDecisions[key as keyof typeof roleDecisions],
       });

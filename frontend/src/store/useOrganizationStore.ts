@@ -13,6 +13,8 @@ export interface Shop {
   _id: string;
   id?: string;
   name: string;
+  branch_name?: string;
+  code?: string;
   organizationId: string;
   status: string;
   address?: string;
