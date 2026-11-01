@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { Search } from 'lucide-react';
+import { Search, FileText } from 'lucide-react';
+import { InvoicePreviewModal } from '@/features/history/components/InvoicePreviewModal';
+import { HistoryItem } from '@/features/history/types/history.types';
 import { DBLedgerEntry } from '@/types/db.types';
 import { format } from 'date-fns';
 
@@ -9,6 +11,7 @@ interface LedgerTableProps {
 
 export const LedgerTable = ({ entries }: LedgerTableProps) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [previewItem, setPreviewItem] = useState<HistoryItem | null>(null);
 
   // Calculate Running Balance
   // Assuming opening balance is 0 for now (or handled by an initial entry)
@@ -84,6 +87,7 @@ export const LedgerTable = ({ entries }: LedgerTableProps) => {
               <th scope="col" className="px-6 py-1.5 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-red-600 dark:text-red-400">Debit (You Gave)</th>
               <th scope="col" className="px-6 py-1.5 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider text-green-600 dark:text-green-400">Credit (You Got)</th>
               <th scope="col" className="px-6 py-1.5 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Balance</th>
+              <th scope="col" className="px-4 py-1.5 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
           <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-800">
@@ -100,11 +104,40 @@ export const LedgerTable = ({ entries }: LedgerTableProps) => {
                 <td className="px-6 py-1.5 whitespace-nowrap text-sm text-right font-bold text-gray-900 dark:text-white">
                   {entry.balance.toLocaleString()}
                 </td>
+                <td className="px-4 py-1.5 whitespace-nowrap text-center text-sm">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const isSale = entry.type !== "payment" && entry.debitAccount === "receivable";
+                      const currentBal = typeof entry.balance === 'number' ? entry.balance : 0;
+                      const payAmt = entry.amount || 0;
+                      const prevBal = isSale ? (currentBal - payAmt) : (currentBal + payAmt);
+                      setPreviewItem({
+                        id: (entry as any).reference_id || entry.transactionId || entry.id,
+                        referenceId: entry.transactionId || entry.id,
+                        type: isSale ? "sale" : "payment",
+                        party: { id: entry.customerId || "", name: "", type: "customer" },
+                        amount: payAmt,
+                        status: "paid",
+                        source: "pos",
+                        createdAt: new Date(entry.timestamp).toISOString(),
+                        previousBalance: prevBal,
+                        currentBalance: currentBal,
+                        paymentMethod: entry.debitAccount || 'CASH',
+                      });
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-[#006970] bg-[#006970]/10 hover:bg-[#006970]/20 dark:text-teal-400 dark:bg-teal-900/30 rounded-md transition-colors"
+                    title="View Invoice Details"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Invoice Details</span>
+                  </button>
+                </td>
               </tr>
             ))}
             {displayEntries.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-6 py-1.5 text-center text-sm text-gray-500 dark:text-gray-400">
+                <td colSpan={6} className="px-6 py-1.5 text-center text-sm text-gray-500 dark:text-gray-400">
                   No ledger entries found.
                 </td>
               </tr>
@@ -115,6 +148,12 @@ export const LedgerTable = ({ entries }: LedgerTableProps) => {
       <div className="bg-gray-50 dark:bg-gray-800/50 p-4 border-t border-gray-200 dark:border-gray-800 text-sm text-gray-500 dark:text-gray-400 text-center">
         Showing ledger for the selected month. Expand the selector above to view past months.
       </div>
+      {previewItem && (
+        <InvoicePreviewModal
+          item={previewItem}
+          onClose={() => setPreviewItem(null)}
+        />
+      )}
     </div>
   );
 };

@@ -219,6 +219,8 @@ export const printFormatter = {
       tax: 0,
       total: ledger.amount || 0,
       paymentMethod: ledger.debitAccount || 'cash',
+      previousBalance: typeof ledger.previousBalance === 'number' ? ledger.previousBalance : undefined,
+      currentBalance: typeof ledger.currentBalance === 'number' ? ledger.currentBalance : (typeof ledger.newBalance === 'number' ? ledger.newBalance : undefined),
       shop
     };
     return renderDocument(invoice, settings, 'Payment Receipt');
@@ -438,6 +440,21 @@ const formatA4 = (invoice: UnifiedInvoice, settings: PrinterSettings, title: str
           <span>Payment Method:</span>
           <span style="text-transform: uppercase;">${invoice.paymentMethod || 'Cash'}</span>
         </div>
+        ${typeof invoice.previousBalance === 'number' ? `
+        <div style="margin-top: 10px; border-top: 1px dashed #444; padding-top: 6px;">
+          <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px; color: #c0392b;">
+            <span>Previous Remaining Balance:</span>
+            <span style="font-weight: bold;">Rs ${Math.abs(invoice.previousBalance).toLocaleString()} ${invoice.previousBalance < 0 ? 'CR' : 'DR'}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px; color: #27ae60;">
+            <span>Payment Received:</span>
+            <span style="font-weight: bold;">- Rs ${(invoice.total || 0).toLocaleString()}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 900; color: #2980b9; border-top: 1px solid #000; padding-top: 4px;">
+            <span>Current Remaining Balance:</span>
+            <span>Rs ${Math.abs(typeof invoice.currentBalance === 'number' ? invoice.currentBalance : (invoice.previousBalance - (invoice.total || 0))).toLocaleString()} ${(typeof invoice.currentBalance === 'number' ? invoice.currentBalance : (invoice.previousBalance - (invoice.total || 0))) < 0 ? 'CR' : 'DR'}</span>
+          </div>
+        </div>` : ''}
         ${invoice.due && invoice.due > 0 ? `
         <div style="display: flex; justify-content: space-between; margin-top: 6px; font-weight: bold; color: #c0392b; font-size: 13px; border-top: 1px dashed #000; padding-top: 4px;">
           <span>Balance Due:</span>
@@ -575,6 +592,21 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, _widt
           <span>Payment Method:</span>
           <span style="font-weight: bold; text-transform: uppercase;">${invoice.paymentMethod || 'Cash'}</span>
         </div>
+        ${typeof invoice.previousBalance === 'number' ? `
+        <div style="border-top: 1px dashed #000; margin-top: 6px; padding-top: 5px; font-size: 12px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 2px; color: #000;">
+            <span>Previous Remaining Balance:</span>
+            <span style="font-weight: 900;">Rs ${Math.abs(invoice.previousBalance).toLocaleString()} ${invoice.previousBalance < 0 ? 'CR' : 'DR'}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 2px; color: #000;">
+            <span>Payment Received:</span>
+            <span style="font-weight: 900;">Rs ${(invoice.total || 0).toLocaleString()}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 900; border-top: 1px solid #000; margin-top: 3px; padding-top: 3px;">
+            <span>Current Remaining Balance:</span>
+            <span>Rs ${Math.abs(typeof invoice.currentBalance === 'number' ? invoice.currentBalance : (invoice.previousBalance - (invoice.total || 0))).toLocaleString()} ${(typeof invoice.currentBalance === 'number' ? invoice.currentBalance : (invoice.previousBalance - (invoice.total || 0))) < 0 ? 'CR' : 'DR'}</span>
+          </div>
+        </div>` : ''}
         
         ${invoice.tendered && invoice.tendered > 0 ? `
         <div style="display: flex; justify-content: space-between; font-size: 11.5px;">

@@ -6,6 +6,8 @@ import { usePosStore } from '../store/usePosStore';
 import { useLedger } from '@/features/ledger/hooks/useLedger';
 import { CustomerSelector } from './CustomerSelector';
 import { LedgerSettlementModal } from './modals/LedgerSettlementModal';
+import { InvoicePreviewModal } from '@/features/history/components/InvoicePreviewModal';
+import { HistoryItem } from '@/features/history/types/history.types';
 import { useNavigate } from 'react-router-dom';
 
 interface PosCustomerLedgerPanelProps {
@@ -25,6 +27,7 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
   const customerSearchInputRef = useRef<HTMLInputElement>(null);
 
   const [isReceivePaymentOpen, setReceivePaymentOpen] = useState(false);
+  const [previewItem, setPreviewItem] = useState<HistoryItem | null>(null);
 
   // Fetch real ledger timeline for selected customer
   const ledgerQueryArg = selectedCustomer
@@ -174,8 +177,35 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
                     className="grid grid-cols-12 px-2.5 py-1.5 text-[11px] items-center hover:bg-surface-hover/50 transition-colors"
                   >
                     <div className="col-span-3 text-text-muted font-medium">{dateFormatted}</div>
-                    <div className="col-span-3 font-mono font-bold text-primary truncate" title={row.transactionId}>
-                      {row.transactionId}
+                    <div className="col-span-3 flex items-center gap-1 truncate" title={row.transactionId}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const isSale = row.type !== "payment" && row.debitAccount === "receivable";
+                          const currentBal = typeof row.runningBalance === 'number' ? row.runningBalance : 0;
+                          const payAmt = row.amount || 0;
+                          const prevBal = isSale ? (currentBal - payAmt) : (currentBal + payAmt);
+                          setPreviewItem({
+                            id: row.reference_id || row.transactionId || row.id,
+                            referenceId: row.transactionId || row.id,
+                            type: isSale ? "sale" : "payment",
+                            party: { id: selectedCustomer?.id || "", name: selectedCustomer?.name || "", type: "customer" },
+                            amount: payAmt,
+                            status: "paid",
+                            source: "pos",
+                            createdAt: new Date(row.timestamp).toISOString(),
+                            previousBalance: prevBal,
+                            currentBalance: currentBal,
+                            paymentMethod: row.debitAccount || 'CASH',
+                          });
+                        }}
+                        className="font-mono font-bold text-primary hover:underline hover:text-primary-focus flex items-center gap-0.5 text-[10px]"
+                        title="Click for Invoice Details"
+                      >
+                        <FileText className="w-3 h-3 shrink-0 text-text-muted hover:text-primary" />
+                        <span className="truncate">{row.transactionId}</span>
+                      </button>
                     </div>
                     <div className="col-span-2 text-right font-semibold text-text-primary tabular-nums">
                       {row.debit > 0 ? row.debit.toLocaleString() : '—'}
@@ -193,6 +223,13 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
           )}
         </div>
       </div>
+
+      {previewItem && (
+        <InvoicePreviewModal
+          item={previewItem}
+          onClose={() => setPreviewItem(null)}
+        />
+      )}
 
       {/* 4. Bottom Panel Actions */}
       <div className="grid grid-cols-2 gap-2 pt-1 shrink-0">

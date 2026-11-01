@@ -5,6 +5,7 @@ import { X, Printer, Download, AlertCircle } from 'lucide-react';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { salesApi } from '@/services/sales.api';
 import { purchaseApi } from '@/services/purchase.api';
+import { ledgerApi } from '@/services/ledger.api';
 import { usePrintStore } from '@/lib/printer';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
 import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
@@ -35,6 +36,7 @@ export const InvoicePreviewModal: React.FC<Props> = ({ item, onClose }) => {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [fetchedOrderSource, setFetchedOrderSource] = useState<any | null>(null);
   const [fetchedPurchaseSource, setFetchedPurchaseSource] = useState<any | null>(null);
+  const [paymentBalance, setPaymentBalance] = useState<{ previousBalance?: number; currentBalance?: number; paymentMethod?: string } | null>(null);
 
   useEffect(() => {
     let isCancelled = false;
@@ -44,7 +46,13 @@ export const InvoicePreviewModal: React.FC<Props> = ({ item, onClose }) => {
         setIsLoadingLines(true);
         setLoadError(null);
         try {
-          const res = await salesApi.getOrderById(item.id);
+          let res = await salesApi.getOrderById(item.id);
+          if (!res?.success && item.referenceId) {
+            const byInv = await salesApi.getSales({ orderNumber: item.referenceId });
+            if (byInv?.success && byInv.data && byInv.data.length > 0) {
+              res = await salesApi.getOrderById(byInv.data[0].id);
+            }
+          }
           if (isCancelled) return;
           if (res?.success && res.order) {
             setFetchedOrderSource(res.order);
@@ -68,6 +76,47 @@ export const InvoicePreviewModal: React.FC<Props> = ({ item, onClose }) => {
           }
         } finally {
           if (!isCancelled) setIsLoadingLines(false);
+        }
+      } else if (item.type === 'payment') {
+        if (typeof item.previousBalance === 'number') {
+          setPaymentBalance({
+            previousBalance: item.previousBalance,
+            currentBalance: item.currentBalance,
+            paymentMethod: item.paymentMethod,
+          });
+        } else if (item.party?.id) {
+          setIsLoadingLines(true);
+          try {
+            const partyType = (item.party.type || 'CUSTOMER').toUpperCase() as 'CUSTOMER' | 'SUPPLIER';
+            const res = await ledgerApi.getPartyLedger(item.party.id, partyType);
+            if (isCancelled) return;
+            if (res?.data?.timeline) {
+              const match = res.data.timeline.find((t: any) => 
+                t.id === item.id || 
+                t.transactionId === item.referenceId || 
+                t.reference_id === item.id ||
+                (t.amount === item.amount && Math.abs(t.timestamp - new Date(item.createdAt).getTime()) < 3600000)
+              );
+              if (match) {
+                const currentBal = match.runningBalance ?? 0;
+                const prevBal = currentBal + (match.credit || match.amount || item.amount);
+                let method = 'CASH';
+                if (match.description) {
+                  const m = match.description.match(/\(([^)]+)\)/);
+                  if (m) method = m[1];
+                }
+                setPaymentBalance({
+                  previousBalance: prevBal,
+                  currentBalance: currentBal,
+                  paymentMethod: method,
+                });
+              }
+            }
+          } catch (err: any) {
+            console.error('Failed to load ledger payment balance breakdown in History:', err);
+          } finally {
+            if (!isCancelled) setIsLoadingLines(false);
+          }
         }
       } else if (item.type === 'purchase') {
         setIsLoadingLines(true);
@@ -200,7 +249,19 @@ export const InvoicePreviewModal: React.FC<Props> = ({ item, onClose }) => {
       html = printFormatter.formatExpenseVoucher({ ...item, _id: item.id, amount: item.amount, title: item.referenceId }, settings, shopHeader);
       docType = 'ExpenseVoucher';
     } else if (item.type === 'payment') {
-      html = printFormatter.formatPaymentReceipt({ ...item, transactionId: item.referenceId, amount: item.amount, debitAccount: 'cash' }, settings, shopHeader);
+      const prevBal = paymentBalance?.previousBalance ?? item.previousBalance;
+      const currBal = paymentBalance?.currentBalance ?? item.currentBalance;
+      const method = paymentBalance?.paymentMethod ?? item.paymentMethod ?? 'cash';
+      html = printFormatter.formatPaymentReceipt({
+        ...item,
+        transactionId: item.referenceId,
+        amount: item.amount,
+        debitAccount: method,
+        customerName: item.party?.name,
+        customer: item.party,
+        previousBalance: prevBal,
+        currentBalance: currBal,
+      }, settings, shopHeader);
       docType = 'PaymentReceipt';
     }
 
@@ -374,7 +435,7 @@ export const InvoicePreviewModal: React.FC<Props> = ({ item, onClose }) => {
 
             {/* Invoice Totals Summary */}
             <div className="flex justify-end mt-6 border-t border-gray-100 dark:border-gray-700 pt-6">
-              <div className="w-64 space-y-3">
+              <div className="w-80 space-y-3">
                 <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
                   <span>Subtotal</span>
                   <span>Rs {computedSubtotal.toLocaleString()}</span>
@@ -384,9 +445,34 @@ export const InvoicePreviewModal: React.FC<Props> = ({ item, onClose }) => {
                   <span>Rs 0.00</span>
                 </div>
                 <div className="flex justify-between text-lg font-bold text-gray-900 dark:text-white pt-2 border-t border-gray-200 dark:border-gray-700">
-                  <span>Total</span>
+                  <span>Total {item.type === 'payment' ? 'Received' : ''}</span>
                   <span>Rs {(hasLines ? computedSubtotal : item.amount).toLocaleString()}</span>
                 </div>
+
+                {item.type === 'payment' && (typeof (paymentBalance?.previousBalance ?? item.previousBalance) === 'number') && (
+                  (() => {
+                    const prev = paymentBalance?.previousBalance ?? item.previousBalance!;
+                    const curr = typeof (paymentBalance?.currentBalance ?? item.currentBalance) === 'number'
+                      ? (paymentBalance?.currentBalance ?? item.currentBalance!)
+                      : (prev - item.amount);
+                    return (
+                      <div className="mt-4 pt-4 border-t-2 border-dashed border-gray-200 dark:border-gray-700 space-y-2">
+                        <div className="flex justify-between text-xs font-bold text-red-600 dark:text-red-400">
+                          <span>Previous Remaining Balance:</span>
+                          <span>Rs {Math.abs(prev).toLocaleString()} {prev < 0 ? 'CR' : 'DR'}</span>
+                        </div>
+                        <div className="flex justify-between text-xs font-bold text-green-600 dark:text-green-400">
+                          <span>Payment Received:</span>
+                          <span>- Rs {item.amount.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between text-sm font-black text-blue-600 dark:text-blue-400 pt-2 border-t border-gray-200 dark:border-gray-700">
+                          <span>Current Remaining Balance:</span>
+                          <span>Rs {Math.abs(curr).toLocaleString()} {curr < 0 ? 'CR' : 'DR'}</span>
+                        </div>
+                      </div>
+                    );
+                  })()
+                )}
               </div>
             </div>
             

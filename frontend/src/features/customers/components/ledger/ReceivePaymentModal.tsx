@@ -41,14 +41,28 @@ export const ReceivePaymentModal = ({ isOpen, onClose, customer, onPaymentSucces
       if (settings && shopHeader && data?.data?.paymentId) {
         // Construct a mock ledger object since the backend just returns IDs right now
         // Ideally we fetch the full ledger object, or construct it from the inputs
-        const mockLedger = {
-          transactionId: data.data.paymentId,
-          createdAt: new Date().toISOString(),
-          customerId: customer,
-          type: 'payment',
-          amount: Number(amount),
-          debitAccount: method.toLowerCase() === 'bank transfer' ? 'bank' : method.toLowerCase(),
-          description: `Payment Received - ${method}`
+        const payAmount = Number(amount) || 0;
+        const newBal = typeof data?.data?.newBalance === 'number'
+          ? data.data.newBalance
+          : (typeof (customer as any)?.balance === 'number' ? (customer as any).balance - payAmount : ((customer as any)?.currentBalance ?? 0));
+        const prevBal = typeof data?.data?.newBalance === 'number'
+          ? data.data.newBalance + payAmount
+          : ((customer as any)?.balance ?? (customer as any)?.currentBalance ?? (newBal + payAmount));
+
+        const mockLedger = {
+          transactionId: data.data.receiptNumber || data.data.paymentId,
+          receiptNumber: data.data.receiptNumber,
+          createdAt: new Date().toISOString(),
+          customerId: customer,
+          customerName: customer?.name,
+          customer: customer,
+          type: 'payment',
+          amount: payAmount,
+          debitAccount: method.toLowerCase() === 'bank transfer' ? 'bank' : method.toLowerCase(),
+          description: `Payment Received (${method})`,
+          previousBalance: prevBal,
+          currentBalance: newBal,
+          newBalance: newBal,
         };
         const html = printFormatter.formatPaymentReceipt(mockLedger, settings, shopHeader);
         openPreview({ html, documentType: 'PaymentReceipt', referenceId: data.data.paymentId, title: 'Payment Receipt' });

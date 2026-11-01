@@ -111,10 +111,22 @@ export const LedgerBook: React.FC<LedgerBookProps> = ({ initialParty, readonly }
   const handlePrintReceipt = (e: React.MouseEvent, entry: any) => {
     e.stopPropagation();
     if (!settings || !shopHeader) return;
+    const currentBal = typeof entry.runningBalance === 'number' ? entry.runningBalance : (typeof entry.balance === 'number' ? entry.balance : 0);
+    const payAmt = entry.amount || 0;
+    const prevBal = currentBal + payAmt;
     const payload = {
       ...entry,
+      transactionId: entry.transactionId || entry.reference_number || entry.id,
+      amount: payAmt,
       customerId: isCustomer ? selectedParty : null,
       supplierId: !isCustomer ? selectedParty : null,
+      customerName: selectedParty?.name,
+      customer: selectedParty,
+      previousBalance: prevBal,
+      currentBalance: currentBal,
+      debitAccount: (entry.description && entry.description.includes('('))
+        ? (entry.description.match(/\(([^)]+)\)/)?.[1] || entry.debitAccount || 'CASH')
+        : (entry.debitAccount || 'CASH'),
     };
     const html = printFormatter.formatPaymentReceipt(payload, settings, shopHeader);
     openPreview({ html, documentType: 'PaymentReceipt', referenceId: entry.id, title: `Payment Receipt – ${entry.transactionId}` });
@@ -274,19 +286,19 @@ export const LedgerBook: React.FC<LedgerBookProps> = ({ initialParty, readonly }
             <table className="w-full text-sm text-left">
               <thead className="bg-gray-100 dark:bg-gray-900 text-xs font-black uppercase tracking-wider text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
                 <tr>
-                  <th className="px-5 py-3 w-6" />
-                  <th className="px-5 py-3">Date</th>
-                  <th className="px-5 py-3">Reference</th>
-                  <th className="px-5 py-3">Type</th>
-                  <th className="px-5 py-3 hidden md:table-cell">Description</th>
-                  <th className="px-5 py-3 text-right">
+                  <th className="px-2.5 py-2.5 w-6" />
+                  <th className="px-3 py-2.5">Date</th>
+                  <th className="px-3 py-2.5">Reference</th>
+                  <th className="px-2.5 py-2.5">Type</th>
+                  <th className="px-3 py-2.5 hidden md:table-cell">Description</th>
+                  <th className="px-3 py-2.5 text-right">
                     {isCustomer ? 'Debit (Dr)' : 'Debit (Dr)'}
                   </th>
-                  <th className="px-5 py-3 text-right">
+                  <th className="px-3 py-2.5 text-right">
                     {isCustomer ? 'Credit (Cr)' : 'Credit (Cr)'}
                   </th>
-                  <th className="px-5 py-3 text-right">Balance</th>
-                  <th className="px-5 py-3 text-center min-w-[120px]">Actions</th>
+                  <th className="px-3 py-2.5 text-right">Balance</th>
+                  <th className="px-3 py-2.5 text-center min-w-[100px]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -311,7 +323,7 @@ export const LedgerBook: React.FC<LedgerBookProps> = ({ initialParty, readonly }
                         onClick={() => hasDetails && toggleRow(entry.id)}
                       >
                         {/* Expand toggle */}
-                        <td className="px-3 py-4 text-center">
+                        <td className="px-2 py-2.5 text-center">
                           {hasDetails && (
                             <button
                               className="text-gray-400 group-hover:text-blue-500 transition-colors"
@@ -323,13 +335,13 @@ export const LedgerBook: React.FC<LedgerBookProps> = ({ initialParty, readonly }
                         </td>
 
                         {/* Date */}
-                        <td className="px-5 py-4 text-gray-500 dark:text-gray-400 whitespace-nowrap text-xs font-semibold">
+                        <td className="px-3 py-2.5 text-gray-500 dark:text-gray-400 whitespace-nowrap text-xs font-semibold">
                           {format(new Date(entry.timestamp), 'dd MMM yyyy')}<br />
                           <span className="text-[10px] opacity-70">{format(new Date(entry.timestamp), 'hh:mm a')}</span>
                         </td>
 
                         {/* Reference */}
-                        <td className="px-5 py-4">
+                        <td className="px-3 py-2.5">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             {rowIcon}
                             <span className="font-black text-gray-900 dark:text-white text-sm">
@@ -344,17 +356,17 @@ export const LedgerBook: React.FC<LedgerBookProps> = ({ initialParty, readonly }
                         </td>
 
                         {/* Type badge */}
-                        <td className="px-5 py-4">
+                        <td className="px-2.5 py-2.5">
                           <EntryTypeBadge entryType={entryType} />
                         </td>
 
                         {/* Description */}
-                        <td className="px-5 py-4 hidden md:table-cell text-gray-600 dark:text-gray-300 max-w-[220px] truncate">
+                        <td className="px-3 py-2.5 hidden md:table-cell text-gray-600 dark:text-gray-300 max-w-[200px] truncate text-xs">
                           {highlightText(entry.description, searchQuery)}
                         </td>
 
                         {/* Debit */}
-                        <td className="px-5 py-4 text-right">
+                        <td className="px-3 py-2.5 text-right whitespace-nowrap">
                           {debitAmt > 0 ? (
                             <span className="font-black text-red-600 dark:text-red-400">
                               {formatRs(debitAmt)}
@@ -365,7 +377,7 @@ export const LedgerBook: React.FC<LedgerBookProps> = ({ initialParty, readonly }
                         </td>
 
                         {/* Credit */}
-                        <td className="px-5 py-4 text-right">
+                        <td className="px-3 py-2.5 text-right whitespace-nowrap">
                           {creditAmt > 0 ? (
                             <span className="font-black text-green-600 dark:text-green-400">
                               {formatRs(creditAmt)}
@@ -386,7 +398,36 @@ export const LedgerBook: React.FC<LedgerBookProps> = ({ initialParty, readonly }
                         </td>
 
                         {/* Actions */}
-                        <td className="px-3 py-4 text-center">
+                        <td className="px-2.5 py-2.5 text-center whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const isSale = !isPayment && entry.debitAccount === "receivable";
+                              const currentBal = typeof entry.runningBalance === 'number' ? entry.runningBalance : (typeof entry.balance === 'number' ? entry.balance : 0);
+                              const payAmt = entry.amount || 0;
+                              const prevBal = isSale ? (currentBal - payAmt) : (currentBal + payAmt);
+                              setPreviewInvoiceItem({
+                                id: entry.reference_id || entry.transactionId || entry.id,
+                                referenceId: entry.transactionId || entry.id,
+                                type: isSale ? "sale" : "payment",
+                                party: { id: selectedParty.id || "", name: selectedParty.name || "", type: isCustomer ? "customer" : "supplier" },
+                                amount: payAmt,
+                                status: "paid",
+                                source: "pos",
+                                createdAt: new Date(entry.timestamp).toISOString(),
+                                previousBalance: prevBal,
+                                currentBalance: currentBal,
+                                paymentMethod: (entry.description && entry.description.includes('(')) 
+                                  ? (entry.description.match(/\(([^)]+)\)/)?.[1] || entry.debitAccount || 'CASH')
+                                  : (entry.debitAccount || 'CASH'),
+                              });
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-bold text-[#006970] bg-[#006970]/10 hover:bg-[#006970]/20 dark:text-teal-400 dark:bg-teal-900/30 rounded-md transition-colors mr-1"
+                            title="View Invoice Details"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>Invoice Details</span>
+                          </button>
                           {isPayment && (
                             <button
                               onClick={e => handlePrintReceipt(e, entry)}
@@ -460,6 +501,13 @@ export const LedgerBook: React.FC<LedgerBookProps> = ({ initialParty, readonly }
           )}
         </div>
       </div>
+
+      {previewInvoiceItem && (
+        <InvoicePreviewModal
+          item={previewInvoiceItem}
+          onClose={() => setPreviewInvoiceItem(null)}
+        />
+      )}
 
       {/* ── Payment modals ── */}
       {isCustomer && (

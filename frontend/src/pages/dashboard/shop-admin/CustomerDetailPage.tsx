@@ -6,7 +6,7 @@ export function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
 
   return (
-    <div className="p-4 md:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+    <div className="p-2 sm:p-4 md:p-5 lg:p-6 space-y-4 w-full">
       {id ? <CustomerProfile id={id} /> : <p className="text-gray-500">Customer ID not specified</p>}
     </div>
   );

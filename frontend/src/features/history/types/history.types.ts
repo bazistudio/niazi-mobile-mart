@@ -15,6 +15,9 @@ export type HistoryItem = {
   source: "pos" | "manual" | "import" | "whatsapp";
 
   createdAt: string;
+  previousBalance?: number;
+  currentBalance?: number;
+  paymentMethod?: string;
 };
 
 export type HistoryStats = {

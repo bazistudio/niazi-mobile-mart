@@ -11,6 +11,7 @@ import { printFormatter, formatExchangeReceipt, ExchangeReceiptData } from '@/fe
 import { salesApi } from '@/services/sales.api';
 import { tauriClient } from '@/lib/tauri/tauriClient';
 import { purchaseApi } from '@/services/purchase.api';
+import { ledgerApi } from '@/services/ledger.api';
 import { toast } from 'react-hot-toast';
 
 interface Props {
@@ -97,7 +98,45 @@ export const HistoryRowActions: React.FC<Props> = ({ item }) => {
       html = printFormatter.formatExpenseVoucher({ ...item, _id: item.id, amount: item.amount, title: item.referenceId }, settings, shopHeader);
       docType = 'ExpenseVoucher';
     } else if (item.type === 'payment') {
-      html = printFormatter.formatPaymentReceipt({ ...item, transactionId: item.referenceId, amount: item.amount, debitAccount: 'cash' }, settings, shopHeader);
+      let prevBal = item.previousBalance;
+      let currBal = item.currentBalance;
+      let method = item.paymentMethod || 'cash';
+
+      if (typeof prevBal !== 'number' && item.party?.id) {
+        try {
+          const partyType = (item.party.type || 'CUSTOMER').toUpperCase() as 'CUSTOMER' | 'SUPPLIER';
+          const res = await ledgerApi.getPartyLedger(item.party.id, partyType);
+          if (res?.data?.timeline) {
+            const match = res.data.timeline.find((t: any) =>
+              t.id === item.id ||
+              t.transactionId === item.referenceId ||
+              t.reference_id === item.id ||
+              (t.amount === item.amount && Math.abs(t.timestamp - new Date(item.createdAt).getTime()) < 3600000)
+            );
+            if (match) {
+              currBal = match.runningBalance ?? 0;
+              prevBal = currBal + (match.credit || match.amount || item.amount);
+              if (match.description) {
+                const m = match.description.match(/\(([^)]+)\)/);
+                if (m) method = m[1];
+              }
+            }
+          }
+        } catch (err: any) {
+          console.error('Failed to load ledger payment balance breakdown in History reprint:', err);
+        }
+      }
+
+      html = printFormatter.formatPaymentReceipt({
+        ...item,
+        transactionId: item.referenceId,
+        amount: item.amount,
+        debitAccount: method,
+        customerName: item.party?.name,
+        customer: item.party,
+        previousBalance: prevBal,
+        currentBalance: currBal,
+      }, settings, shopHeader);
       docType = 'PaymentReceipt';
     } else if (item.type === 'return') {
       // Task 5.3: fetch the sales return detail and render a dedicated exchange receipt.

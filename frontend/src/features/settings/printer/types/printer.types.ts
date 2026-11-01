@@ -74,6 +74,8 @@ export interface UnifiedInvoice {
   change?: number;
   /** FINDING-02: outstanding balance owed by the customer after this sale (0 for fully paid sales). */
   due?: number;
+  previousBalance?: number;
+  currentBalance?: number;
   shop: ShopHeader;
   returnPolicy?: string;
   warrantyInstructions?: string;

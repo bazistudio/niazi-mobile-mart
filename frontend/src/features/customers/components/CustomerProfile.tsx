@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { customerApi } from '@/services/customer.api';
 import { LedgerBook } from '@/features/ledger/components/LedgerBook';
+import { InvoicePreviewModal } from '@/features/history/components/InvoicePreviewModal';
+import { HistoryItem } from '@/features/history/types/history.types';
 import { Phone, MapPin, FileText, ShoppingCart, DollarSign, Calendar, Printer, Edit, Plus, CreditCard, ArrowLeft, ChevronDown, ChevronUp, Download, Loader2, Scale } from 'lucide-react';
 import { usePrintStore } from '@/lib/printer';
 import { downloadHtmlAsPdf } from '@/lib/printer/pdfExport';
@@ -29,6 +31,7 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
   const [expandedInvoices, setExpandedInvoices] = useState<Record<string, boolean>>({});
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isOpeningBalanceModalOpen, setIsOpeningBalanceModalOpen] = useState(false);
+  const [previewHistoryItem, setPreviewHistoryItem] = useState<HistoryItem | null>(null);
 
   const { user } = useAuthStore();
   const isOrgAdmin = user?.role === 'ADMIN';
@@ -129,7 +132,7 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
     'w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring';
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-[30px]">
+    <div className="space-y-4 w-full -mt-[20px] px-1 sm:px-2">
       {/* Top Bar */}
       <div className="flex items-center gap-3">
         <button
@@ -143,10 +146,10 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
         <h1 className="text-2xl font-bold text-text-primary">Customer Profile</h1>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-5">
 
         {/* Left Column: Details & Quick Actions */}
-        <div className="lg:col-span-1 space-y-4">
+        <div className="lg:col-span-4 xl:col-span-3 space-y-4">
 
           {/* Profile Card */}
           <div className={`${cardClass} p-5 flex flex-col items-center text-center`}>
@@ -262,6 +265,27 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
                         </div>
                         <button
                           type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPreviewHistoryItem({
+                              id: inv._id || inv.orderNumber,
+                              referenceId: inv.orderNumber,
+                              type: "sale",
+                              party: { id: customer.id, name: customer.name, type: "customer" },
+                              amount: inv.totalAmount || 0,
+                              status: inv.status === "paid" ? "paid" : "pending",
+                              source: "pos",
+                              createdAt: inv.createdAt || new Date().toISOString(),
+                            });
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-bold text-[#006970] bg-[#006970]/10 hover:bg-[#006970]/20 dark:text-teal-400 dark:bg-teal-900/30 rounded transition-colors"
+                          title="Invoice Details"
+                        >
+                          <FileText className="w-3 h-3" />
+                          <span>Details</span>
+                        </button>
+                        <button
+                          type="button"
                           onClick={(e) => handlePrintInvoice(e, inv)}
                           className="p-1 text-text-muted hover:text-primary hover:bg-primary/10 rounded transition-colors"
                           title="Print/PDF"
@@ -297,7 +321,7 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
         </div>
 
         {/* Right Column: KPIs & Ledger */}
-        <div className="lg:col-span-3 space-y-5">
+        <div className="lg:col-span-8 xl:col-span-9 space-y-4">
           {/* KPI Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {/* Total Sales */}
@@ -352,6 +376,13 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
           />
         </div>
       </div>
+
+      {previewHistoryItem && (
+        <InvoicePreviewModal
+          item={previewHistoryItem}
+          onClose={() => setPreviewHistoryItem(null)}
+        />
+      )}
 
       <ReceivePaymentModal
         isOpen={isPaymentModalOpen}
