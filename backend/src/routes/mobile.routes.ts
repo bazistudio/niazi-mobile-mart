@@ -532,6 +532,56 @@ export function buildMobileRouter(pool: Pool): Router {
       const dto = req.body as CompleteMobileSaleDto;
       const callerIsOrgAdmin = isOrgAdmin(identity);
 
+      // Phase 1: HTTP Boundary Whole-PKR Safe-Integer Validation
+      if (!dto.items || !Array.isArray(dto.items) || dto.items.length === 0) {
+        res.status(400).json({ error: 'Cart cannot be empty. At least one mobile device must be selected.' });
+        return;
+      }
+
+      let httpSubtotal = 0;
+      for (const item of dto.items) {
+        if (!item.deviceId || typeof item.deviceId !== 'string') {
+          res.status(400).json({ error: 'Invalid device ID in sale cart.' });
+          return;
+        }
+        if (
+          typeof item.salePrice !== 'number' ||
+          !Number.isSafeInteger(item.salePrice) ||
+          item.salePrice < 0
+        ) {
+          res.status(400).json({
+            error: `Invalid sale price for device ${item.deviceId}. Price must be a non-negative whole PKR integer.`
+          });
+          return;
+        }
+        httpSubtotal += item.salePrice;
+        if (!Number.isSafeInteger(httpSubtotal)) {
+          res.status(400).json({ error: 'Aggregate sale subtotal exceeds safe integer bounds.' });
+          return;
+        }
+      }
+
+      if (dto.payments && Array.isArray(dto.payments)) {
+        let httpTenderSum = 0;
+        for (const p of dto.payments) {
+          if (
+            typeof p.amount !== 'number' ||
+            !Number.isSafeInteger(p.amount) ||
+            p.amount < 0
+          ) {
+            res.status(400).json({
+              error: `Invalid payment amount for ${p.method || 'tender'}. Amount must be a non-negative whole PKR integer.`
+            });
+            return;
+          }
+          httpTenderSum += p.amount;
+          if (!Number.isSafeInteger(httpTenderSum)) {
+            res.status(400).json({ error: 'Aggregate payment tender exceeds safe integer bounds.' });
+            return;
+          }
+        }
+      }
+
       if (dto.branchId && !canAccessBranch(identity, dto.branchId)) {
         res.status(403).json({ error: 'Access denied: You do not have permission to sell on behalf of another branch' });
         return;

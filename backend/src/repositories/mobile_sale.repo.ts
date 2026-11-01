@@ -122,13 +122,25 @@ export async function executeMobileSale(
   const organizationId = authIdentity.organizationId;
   const uid = authIdentity.userId;
 
-  // Validate item prices
+  // Phase 1: Defensive validation for item prices (Safe Integer Whole PKR)
+  let subtotalSum = 0;
   for (const item of dto.items) {
     if (!item.deviceId || typeof item.deviceId !== 'string') {
       throw new MobileSaleRepoError('Invalid device ID in sale cart.', 400);
     }
-    if (typeof item.salePrice !== 'number' || isNaN(item.salePrice) || item.salePrice < 0) {
-      throw new MobileSaleRepoError(`Invalid sale price for device ${item.deviceId}. Price cannot be negative.`, 400);
+    if (
+      typeof item.salePrice !== 'number' ||
+      !Number.isSafeInteger(item.salePrice) ||
+      item.salePrice < 0
+    ) {
+      throw new MobileSaleRepoError(
+        `Invalid sale price for device ${item.deviceId}. Price must be a non-negative whole PKR integer.`,
+        400
+      );
+    }
+    subtotalSum += item.salePrice;
+    if (!Number.isSafeInteger(subtotalSum)) {
+      throw new MobileSaleRepoError('Aggregate sale subtotal exceeds safe integer bounds.', 400);
     }
   }
 
@@ -136,6 +148,28 @@ export async function executeMobileSale(
   const uniqueDeviceIds = new Set(dto.items.map((i) => i.deviceId));
   if (uniqueDeviceIds.size !== dto.items.length) {
     throw new MobileSaleRepoError('Duplicate mobile device entries found in the cart.', 400);
+  }
+
+  // Phase 1: Defensive validation for payment tender lines before database acquisition
+  const paymentsList = dto.payments || [];
+  let tenderCheckSum = 0;
+  for (const p of paymentsList) {
+    if (
+      typeof p.amount !== 'number' ||
+      !Number.isSafeInteger(p.amount) ||
+      p.amount < 0
+    ) {
+      throw new MobileSaleRepoError(
+        `Invalid payment amount for ${p.method || 'tender'}. Amount must be a non-negative whole PKR integer.`,
+        400
+      );
+    }
+    if (p.amount > 0 && p.method !== 'CREDIT') {
+      tenderCheckSum += p.amount;
+      if (!Number.isSafeInteger(tenderCheckSum)) {
+        throw new MobileSaleRepoError('Aggregate payment tender exceeds safe integer bounds.', 400);
+      }
+    }
   }
 
   const client: PoolClient = await pool.connect();
@@ -264,8 +298,15 @@ export async function executeMobileSale(
     }> = [];
 
     for (const p of paymentsList) {
-      if (typeof p.amount !== 'number' || isNaN(p.amount) || p.amount < 0) {
-        throw new MobileSaleRepoError(`Invalid payment amount: ${p.amount}.`, 400);
+      if (
+        typeof p.amount !== 'number' ||
+        !Number.isSafeInteger(p.amount) ||
+        p.amount < 0
+      ) {
+        throw new MobileSaleRepoError(
+          `Invalid payment amount for ${p.method || 'tender'}. Amount must be a non-negative whole PKR integer.`,
+          400
+        );
       }
       if (p.amount > 0) {
         if (p.method === 'CREDIT') {
@@ -273,6 +314,9 @@ export async function executeMobileSale(
           continue;
         }
         totalTendered += p.amount;
+        if (!Number.isSafeInteger(totalTendered)) {
+          throw new MobileSaleRepoError('Aggregate payment tender exceeds safe integer bounds.', 400);
+        }
         cleanPayments.push({
           id: uuidv4(),
           method: p.method,
