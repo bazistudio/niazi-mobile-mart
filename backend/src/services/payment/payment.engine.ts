@@ -247,8 +247,36 @@ export function calculatePaymentAllocation(request: PaymentAllocationRequest): P
   const existingAdvanceApplied = Math.min(existingAdvanceAvailable, invoiceTotal);
   const remainingInvoiceAfterAdvance = safeSub(invoiceTotal, existingAdvanceApplied, 'Remaining invoice after advance');
 
-  // 3. Walk-In Specific Invariants & Deterministic Allocation
+  // 3. Universal Digital Overpayment Guard — ALL customer types
+  // Enforced BEFORE the walk-in / registered branch split so no code path can bypass it.
+  // Digital tender (card, bank transfer, easypaisa, jazzcash, etc.) represents an exact
+  // off-channel payment whose amount cannot be physically returned as cash change or silently
+  // converted into a customer advance. If the digital total exceeds the remaining invoice
+  // (after any existing advance has been applied), the entire transaction must be rejected.
+  //
+  // This closes the weakness identified in Phase 4 Stage A:
+  //   Previously the check was scoped only to the walk-in branch (Step 3). A registered
+  //   customer could supply bank Rs 12,000 for an invoice of Rs 10,000 and the excess
+  //   Rs 2,000 would silently flow into previousBalanceSettled / customerAdvanceCreated.
+  //   That behaviour violates Policy 4.3 and the approved accounting model.
+  //
+  // Cash excess remains fully supported: if the CASH tender exceeds the invoice the excess
+  // flows through the normal debt-settlement / advance path (registered) or is returned as
+  // physical change (walk-in). Only non-cash tender is prohibited from exceeding the invoice.
+  if (nonCashTenderReceived > remainingInvoiceAfterAdvance) {
+    throw new PaymentDomainError(
+      `Digital tender (Rs ${nonCashTenderReceived.toLocaleString()}) cannot exceed the invoice amount (Rs ${remainingInvoiceAfterAdvance.toLocaleString()}). ` +
+      'Digital overpayment is not permitted for any customer type. ' +
+      'Exact amounts are required for card, bank transfer and online payments.',
+      'DIGITAL_OVERPAYMENT_PROHIBITED'
+    );
+  }
+
+  // 4. Walk-In Specific Invariants & Deterministic Allocation
   if (!isRegisteredCustomer) {
+    // Note: the digital overpayment guard above already fires for walk-in customers,
+    // so the condition below is now unreachable. It is preserved as defence-in-depth
+    // and to document the original walk-in-only check for audit trail purposes.
     if (nonCashTenderReceived > remainingInvoiceAfterAdvance) {
       throw new PaymentDomainError(
         `Walk-in digital tender (Rs ${nonCashTenderReceived.toLocaleString()}) cannot exceed the invoice amount (Rs ${remainingInvoiceAfterAdvance.toLocaleString()}). Digital overpayment cannot be converted to cash change.`,
@@ -306,7 +334,7 @@ export function calculatePaymentAllocation(request: PaymentAllocationRequest): P
     };
   }
 
-  // 4. Registered Customer Allocation
+  // 5. Registered Customer Allocation
   const tenderAppliedToInvoice = Math.min(actualTenderReceived, remainingInvoiceAfterAdvance);
   const invoiceAllocated = safeAdd(existingAdvanceApplied, tenderAppliedToInvoice, 'Invoice allocated');
   const creditAllocated = safeSub(invoiceTotal, invoiceAllocated, 'Credit allocated'); // Remaining unpaid invoice due
@@ -323,7 +351,7 @@ export function calculatePaymentAllocation(request: PaymentAllocationRequest): P
   const changeReturned = 0;
   const cashToDrawer = cashTenderReceived;
 
-  // 5. Projected Customer Balances & Credit Limit Verification
+  // 6. Projected Customer Balances & Credit Limit Verification
   const projected = calculateProjectedCustomerBalance(previousCustomerBalance, invoiceTotal, actualTenderReceived);
 
   // Credit Limit Enforcement:
@@ -343,7 +371,7 @@ export function calculatePaymentAllocation(request: PaymentAllocationRequest): P
     );
   }
 
-  // 6. Payment Status
+  // 7. Payment Status
   const paymentStatus =
     invoiceAllocated >= invoiceTotal ? 'PAID' :
     invoiceAllocated > 0 ? 'PARTIALLY_PAID' : 'UNPAID';
