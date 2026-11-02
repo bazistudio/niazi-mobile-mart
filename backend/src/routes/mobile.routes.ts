@@ -617,6 +617,33 @@ export function buildMobileRouter(pool: Pool): Router {
         }
       }
 
+      // Phase 4 Stage C — advanceApplied HTTP boundary validation
+      if (dto.advanceApplied !== undefined && dto.advanceApplied !== null) {
+        const adv = dto.advanceApplied;
+        if (
+          typeof adv !== 'number' ||
+          !Number.isSafeInteger(adv) ||
+          adv < 0
+        ) {
+          res.status(400).json({
+            error: 'advanceApplied must be a non-negative whole PKR integer.',
+          });
+          return;
+        }
+        // Walk-in isolation: advance cannot be applied without a registered customer
+        if (adv > 0 && (!dto.customerId || typeof dto.customerId !== 'string' || !dto.customerId.trim())) {
+          res.status(400).json({
+            error: 'advanceApplied cannot be used for walk-in sales. A registered customer is required.',
+          });
+          return;
+        }
+        // Normalise: sanitize to safe integer
+        dto.advanceApplied = adv;
+      } else {
+        // Omitted or null → treat as 0 (backward compatibility)
+        dto.advanceApplied = 0;
+      }
+
       if (dto.branchId && !canAccessBranch(identity, dto.branchId)) {
         res.status(403).json({ error: 'Access denied: You do not have permission to sell on behalf of another branch' });
         return;

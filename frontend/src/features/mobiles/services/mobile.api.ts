@@ -642,6 +642,12 @@ export const mobileApi = {
   /**
    * Complete a Mobile POS Sale transaction.
    * Atomically transfers status to SOLD, generates invoice, posts ledger & cash.
+   *
+   * Phase 4 Stage C — advanceApplied (optional, whole PKR integer >= 0):
+   *   Amount of existing customer advance to apply to this invoice.
+   *   Omitting the field is equivalent to advanceApplied = 0.
+   *   Only valid for registered customers (customerId != null).
+   *   Backend validates against the live locked customer ledger balance.
    */
   completeMobileSale: async (payload: {
     items: Array<{ deviceId: string; salePrice: number }>;
@@ -654,6 +660,8 @@ export const mobileApi = {
     customerId?: string | null;
     branchId?: string | null;
     notes?: string | null;
+    /** Whole-PKR advance amount to apply from customer balance. 0 if omitted. */
+    advanceApplied?: number;
   }): Promise<{
     saleId: string;
     invoiceNumber: string;
@@ -663,10 +671,13 @@ export const mobileApi = {
     subtotal: number;
     discount: number;
     totalAmount: number;
+    /** Amount covered by advance application + new tender allocated to invoice. */
     paidAmount: number;
     changeAmount: number;
     creditAmount: number;
     paymentStatus: 'PAID' | 'PARTIALLY_PAID' | 'UNPAID';
+    /** Advance amount applied to this invoice (0 when not used). */
+    advanceApplied: number;
     devices: Array<{
       deviceId: string;
       brand: string;

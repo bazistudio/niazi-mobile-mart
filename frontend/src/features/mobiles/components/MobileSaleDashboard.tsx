@@ -207,6 +207,7 @@ export const MobileSaleDashboard: React.FC = () => {
   const [payments, setPayments] = useState<SplitPaymentLine[]>([
     { id: 'pay-1', method: 'CASH', amount: 0 },
   ]);
+  const [advanceApplied, setAdvanceApplied] = useState<number>(0);
 
   // ── Review & Return/Replace Modals ──
   const [saleNotes, setSaleNotes] = useState('');
@@ -443,6 +444,7 @@ export const MobileSaleDashboard: React.FC = () => {
     setCart([]);
     setPriceErrors({});
     setPayments([{ id: 'pay-1', method: 'CASH', amount: 0 }]);
+    setAdvanceApplied(0);
     setPosMode('SALE');
   }, []);
 
@@ -497,10 +499,21 @@ export const MobileSaleDashboard: React.FC = () => {
     [payments]
   );
 
-  const remainingBalance = grandTotal - totalReceived;
+  const availableAdvance = Math.max(0, -(customer?.currentBalance ?? 0));
+  const maxApplicable = Math.min(availableAdvance, grandTotal);
+
+  // Correction A: Automatically clamp advanceApplied whenever maxApplicable decreases
+  useEffect(() => {
+    if (advanceApplied > maxApplicable) {
+      setAdvanceApplied(maxApplicable);
+    }
+  }, [maxApplicable, advanceApplied]);
+
+  const remainingBalance = grandTotal - advanceApplied - totalReceived;
 
   const handleAddPaymentLine = (defaultMethod?: PaymentMethod) => {
-    const rem = Math.max(0, grandTotal - totalReceived);
+    // Correction B: Default suggested payment amount to remainingBalance after advance
+    const rem = Math.max(0, remainingBalance);
     const chosenMethod: PaymentMethod =
       defaultMethod ||
       (payments.some((p) => p.method === 'CASH') ? 'JAZZCASH' : 'CASH');
@@ -550,6 +563,12 @@ export const MobileSaleDashboard: React.FC = () => {
 
     setIsSubmitting(true);
     try {
+      // Correction C: Enforce final safe advance amount at submission boundary
+      const safeAdvanceApplied = Math.min(
+        Math.max(0, Math.floor(advanceApplied)),
+        maxApplicable
+      );
+
       const payload = {
         items: cart.map((c) => ({
           deviceId: c.device.id,
@@ -563,6 +582,7 @@ export const MobileSaleDashboard: React.FC = () => {
         customerId: customer?.id ?? null,
         branchId: branchId ?? null,
         notes: saleNotes.trim() || null,
+        advanceApplied: safeAdvanceApplied > 0 ? safeAdvanceApplied : undefined,
       };
 
       const res = await mobileApi.completeMobileSale(payload);
@@ -644,6 +664,7 @@ export const MobileSaleDashboard: React.FC = () => {
       // Clear cart and reload inventory
       clearCart();
       setCustomer(null);
+      setAdvanceApplied(0);
       setSaleNotes("");
       loadInventory();
       refetchLedger();
@@ -704,6 +725,7 @@ export const MobileSaleDashboard: React.FC = () => {
       currentBalance: c.currentBalance ?? 0,
       creditLimit: c.creditLimit ?? 0,
     });
+    setAdvanceApplied(0);
     setCustomerSearchTerm('');
     setCustomerDropdownOpen(false);
     setCustomerSelectedIndex(0);
@@ -1481,6 +1503,59 @@ export const MobileSaleDashboard: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Advance Allocation Control — shown when customer has available advance */}
+                {availableAdvance > 0 && cart.length > 0 && (
+                  <div className="border border-emerald-500/30 bg-emerald-500/5 rounded-xl p-2.5 flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                        Customer Advance
+                      </span>
+                      <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400">
+                        Available: {fmtPKR(availableAdvance)} · Max: {fmtPKR(maxApplicable)}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-12 gap-1.5 items-center">
+                      <div className="col-span-6 relative flex items-center">
+                        <span className="absolute left-2 text-[10px] text-text-muted font-mono">Rs.</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max={maxApplicable}
+                          step="100"
+                          value={advanceApplied || ''}
+                          placeholder="0"
+                          onChange={(e) => {
+                            const raw = e.target.value === '' ? 0 : Math.floor(Number(e.target.value));
+                            const safe = Number.isFinite(raw) && raw >= 0 ? Math.min(raw, maxApplicable) : 0;
+                            setAdvanceApplied(safe);
+                          }}
+                          className="w-full bg-background border border-emerald-500/40 rounded pl-7 pr-2 py-1 text-xs text-emerald-600 font-bold font-mono text-right focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setAdvanceApplied(maxApplicable)}
+                        className="col-span-3 py-1 rounded-lg text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 transition-colors cursor-pointer"
+                      >
+                        Apply Full
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAdvanceApplied(0)}
+                        className="col-span-3 py-1 rounded-lg text-[10px] font-bold bg-surface text-text-secondary border border-border hover:bg-surface-hover transition-colors cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    {advanceApplied > 0 && (
+                      <div className="text-[10px] font-mono text-text-secondary flex items-center justify-between">
+                        <span>Remaining after advance:</span>
+                        <span className="font-bold text-text-primary">{fmtPKR(Math.max(0, grandTotal - advanceApplied))}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Split Payment Lines List */}
                 <div className="max-h-24 overflow-y-auto space-y-1 pr-0.5">
                   {payments.map((line) => (
@@ -1680,14 +1755,16 @@ export const MobileSaleDashboard: React.FC = () => {
                         className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                           customer.currentBalance > 0
                             ? 'bg-danger/10 text-danger border border-danger/20'
+                            : customer.currentBalance < 0
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                             : 'bg-success/10 text-success border border-success/20'
                         }`}
                       >
-                        {customer.currentBalance > 0 ? 'Outstanding' : 'Clear'}
+                        {customer.currentBalance > 0 ? 'Outstanding' : customer.currentBalance < 0 ? 'Advance' : 'Clear'}
                       </span>
                       <button
                         type="button"
-                        onClick={() => setCustomer(null)}
+                        onClick={() => { setCustomer(null); setAdvanceApplied(0); }}
                         className="text-[10px] text-text-muted hover:text-danger px-1.5 py-0.5 rounded border border-border hover:border-danger/30 transition-colors cursor-pointer"
                         title="Reset to Walk-In Customer"
                       >
@@ -1721,11 +1798,18 @@ export const MobileSaleDashboard: React.FC = () => {
                   <span className="text-[10px] text-text-muted block">Current Balance</span>
                   <span
                     className={`font-mono font-black tabular-nums block ${
-                      (customer?.currentBalance ?? 0) > 0 ? 'text-danger' : 'text-emerald-600'
+                      (customer?.currentBalance ?? 0) > 0
+                        ? 'text-danger'
+                        : (customer?.currentBalance ?? 0) < 0
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-text-muted'
                     }`}
                   >
-                    Rs {(customer?.currentBalance ?? 0).toLocaleString()}{' '}
-                    {(customer?.currentBalance ?? 0) > 0 ? 'Dr' : ''}
+                    {(customer?.currentBalance ?? 0) > 0
+                      ? `Due: ${fmtPKR(customer?.currentBalance ?? 0)}`
+                      : (customer?.currentBalance ?? 0) < 0
+                      ? `Available Advance: ${fmtPKR(Math.abs(customer?.currentBalance ?? 0))}`
+                      : 'Settled'}
                   </span>
                 </div>
               </div>
@@ -1962,9 +2046,11 @@ export const MobileSaleDashboard: React.FC = () => {
                   </div>
                   <p className="text-[10px] font-mono text-text-muted">
                     {customer ? (customer.phone || customer.mobile || 'No Phone') : 'General Cash Sale'}
-                    {customer && customer.currentBalance > 0 && (
-                      <span className="text-warning ml-1">
-                        (Due: {fmtPKR(customer.currentBalance)})
+                    {customer && customer.currentBalance !== 0 && (
+                      <span className={customer.currentBalance > 0 ? 'text-warning ml-1' : 'text-emerald-500 ml-1'}>
+                        {customer.currentBalance > 0
+                          ? `(Due: ${fmtPKR(customer.currentBalance)})`
+                          : `(Advance: ${fmtPKR(Math.abs(customer.currentBalance))})`}
                       </span>
                     )}
                   </p>
@@ -2046,6 +2132,18 @@ export const MobileSaleDashboard: React.FC = () => {
                       </span>
                     </div>
                   ))}
+
+                  {advanceApplied > 0 && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-text-secondary font-medium flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        Customer Advance Applied
+                      </span>
+                      <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                        {fmtPKR(advanceApplied)}
+                      </span>
+                    </div>
+                  )}
 
                   <div className="border-t border-border/80 pt-2 space-y-1">
                     <div className="flex items-center justify-between text-xs font-medium text-text-secondary">
