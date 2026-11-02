@@ -1,16 +1,26 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { InventoryTable, TableColumn } from '@/features/inventory/components/InventoryTable';
 import { useInventoryFilters } from '@/features/inventory/components/InventoryFilterContext';
 import { useProducts } from '@/features/inventory/hooks/useProducts';
+import { productService } from '@/features/inventory/services/product.service';
 import { InventoryProduct, StockStatus } from '@/features/inventory/types';
 import { ProductEditModal } from '@/features/inventory/product/components/ProductEditModal';
 import { ProductDeleteDialog } from '@/features/inventory/product/components/ProductDeleteDialog';
 import { QuickStockAdjustModal } from '@/features/inventory/components/QuickStockAdjustModal';
-import { Loader2, Edit, Trash2, Plus } from 'lucide-react';
+import { Loader2, Edit, Trash2, Plus, Printer, Download } from 'lucide-react';
 import { usePermissions } from '@/lib/auth/usePermissions';
 import { PERMISSIONS } from '@/constants/permissions';
 import { useQueryClient } from '@tanstack/react-query';
 import { useInventoryStore } from '@/features/inventory/core/inventory.store';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
+import { useAuthStore } from '@/lib/auth/core/auth.store';
+import { usePrintStore } from '@/lib/printer/print.store';
+import { downloadHtmlAsPdf } from '@/lib/printer/pdfExport';
+import {
+  buildProductInventoryA4Html,
+  buildProductInventoryPdfFilename,
+} from '@/features/inventory/templates/productInventoryA4Template';
+import { useMasterData } from '@/features/inventory/hooks/useMasterData';
 
 interface InventoryProductsPageProps {
   mode?: 'products' | 'restock';
@@ -41,6 +51,151 @@ export function InventoryProductsPage({ mode = 'products' }: InventoryProductsPa
     colorId: filters.colorId,
     qualityId: filters.qualityId,
   });
+
+  // Export state & context for A4 reporting
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const activeShop = useOrganizationStore((s) => s.activeShop);
+  const currentUser = useAuthStore((s) => s.user);
+
+  // Master data lookups for readable filter labels in report header
+  const { options: categories } = useMasterData('category');
+  const { options: brands } = useMasterData('brand');
+  const { options: companies } = useMasterData('company');
+  const { options: colors } = useMasterData('color');
+  const { options: qualities } = useMasterData('quality');
+
+  // Fetch complete filtered product dataset on demand (preserves active filters & branch context)
+  const fetchCompleteFilteredProducts = useCallback(async (): Promise<{
+    items: InventoryProduct[];
+    categoryLabel?: string;
+    brandLabel?: string;
+    companyLabel?: string;
+    colorLabel?: string;
+    qualityLabel?: string;
+    searchKeyword?: string;
+  }> => {
+    // Capture snapshot of current filters to prevent race conditions
+    const filterSnapshot = {
+      search: filters.search ? String(filters.search).trim() : undefined,
+      categoryId: filters.categoryId || undefined,
+      brandId: filters.brandId || undefined,
+      companyId: filters.companyId || undefined,
+      colorId: filters.colorId || undefined,
+      qualityId: filters.qualityId || undefined,
+    };
+
+    const res = await productService.getProducts({
+      page: 1,
+      limit: 10000,
+      search: filterSnapshot.search,
+      categoryId: filterSnapshot.categoryId,
+      brandId: filterSnapshot.brandId,
+      companyId: filterSnapshot.companyId,
+      colorId: filterSnapshot.colorId,
+      qualityId: filterSnapshot.qualityId,
+    });
+
+    // Resolve human-readable filter names
+    const categoryLabel = filterSnapshot.categoryId
+      ? categories.find((c: any) => c.id === filterSnapshot.categoryId)?.name || filterSnapshot.categoryId
+      : undefined;
+    const brandLabel = filterSnapshot.brandId
+      ? brands.find((b: any) => b.id === filterSnapshot.brandId)?.name || filterSnapshot.brandId
+      : undefined;
+    const companyLabel = filterSnapshot.companyId
+      ? companies.find((c: any) => c.id === filterSnapshot.companyId)?.name || filterSnapshot.companyId
+      : undefined;
+    const colorLabel = filterSnapshot.colorId
+      ? colors.find((c: any) => c.id === filterSnapshot.colorId)?.name || filterSnapshot.colorId
+      : undefined;
+    const qualityLabel = filterSnapshot.qualityId
+      ? qualities.find((q: any) => q.id === filterSnapshot.qualityId)?.name || filterSnapshot.qualityId
+      : undefined;
+
+    return {
+      items: res.products || [],
+      categoryLabel,
+      brandLabel,
+      companyLabel,
+      colorLabel,
+      qualityLabel,
+      searchKeyword: filterSnapshot.search,
+    };
+  }, [filters, categories, brands, companies, colors, qualities]);
+
+  // Handle Print A4 action
+  const handlePrintA4 = useCallback(async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    setExportError(null);
+
+    try {
+      const { items, categoryLabel, brandLabel, companyLabel, colorLabel, qualityLabel, searchKeyword } =
+        await fetchCompleteFilteredProducts();
+
+      const branchName = activeShop?.branch_name || (activeShop?.code ? `Branch ${activeShop.code}` : undefined);
+      const html = buildProductInventoryA4Html(items, {
+        shopName: activeShop?.name || 'Niazi Mobile Mart',
+        branchName,
+        categoryFilter: categoryLabel,
+        brandFilter: brandLabel,
+        companyFilter: companyLabel,
+        colorFilter: colorLabel,
+        qualityFilter: qualityLabel,
+        searchKeyword: searchKeyword,
+        generatedBy: currentUser?.name || currentUser?.username || 'Authorized Staff',
+        canViewCost: canViewCost,
+      });
+
+      usePrintStore.getState().openPreview({
+        html,
+        documentType: 'Generic',
+        referenceId: `prod_inv_${Date.now()}`,
+        title: `Product Inventory Report (${items.length} Records)`,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to generate A4 print preview';
+      setExportError(msg);
+    } finally {
+      setIsExporting(false);
+    }
+  }, [isExporting, fetchCompleteFilteredProducts, activeShop, currentUser, canViewCost]);
+
+  // Handle Export PDF action
+  const handleExportPdf = useCallback(async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    setExportError(null);
+
+    try {
+      const { items, categoryLabel, brandLabel, companyLabel, colorLabel, qualityLabel, searchKeyword } =
+        await fetchCompleteFilteredProducts();
+
+      const branchName = activeShop?.branch_name || (activeShop?.code ? `Branch ${activeShop.code}` : undefined);
+      const html = buildProductInventoryA4Html(items, {
+        shopName: activeShop?.name || 'Niazi Mobile Mart',
+        branchName,
+        categoryFilter: categoryLabel,
+        brandFilter: brandLabel,
+        companyFilter: companyLabel,
+        colorFilter: colorLabel,
+        qualityFilter: qualityLabel,
+        searchKeyword: searchKeyword,
+        generatedBy: currentUser?.name || currentUser?.username || 'Authorized Staff',
+        canViewCost: canViewCost,
+      });
+
+      const filename = buildProductInventoryPdfFilename(activeShop?.name || 'product_inventory');
+      await downloadHtmlAsPdf(html, filename);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to export A4 PDF document';
+      setExportError(msg);
+    } finally {
+      setIsExporting(false);
+    }
+  }, [isExporting, fetchCompleteFilteredProducts, activeShop, currentUser, canViewCost]);
 
   const isRestockMode = mode === 'restock';
 
@@ -147,7 +302,42 @@ export function InventoryProductsPage({ mode = 'products' }: InventoryProductsPa
             {isRestockMode ? `Restock Directory (${products.length})` : `Products Directory (${products.length})`}
           </span>
         </div>
+
+        {/* On-Demand Print & PDF Actions */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handlePrintA4}
+            disabled={isExporting}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/60 disabled:opacity-50 transition-colors shadow-xs cursor-pointer"
+            title="Print A4 report of current filtered inventory"
+          >
+            {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5 text-gray-600 dark:text-gray-400" />}
+            <span>Print A4</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportPdf}
+            disabled={isExporting}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/60 disabled:opacity-50 transition-colors shadow-xs cursor-pointer"
+            title="Download A4 PDF of current filtered inventory"
+          >
+            {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />}
+            <span>{isExporting ? 'Exporting...' : 'Export PDF'}</span>
+          </button>
+        </div>
       </div>
+
+      {/* Export Error Banner */}
+      {exportError && (
+        <div className="mx-4 mt-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 rounded-lg text-xs text-red-600 dark:text-red-400 flex items-center justify-between" role="alert">
+          <span>{exportError}</span>
+          <button type="button" onClick={() => setExportError(null)} className="underline hover:no-underline cursor-pointer ml-3 font-semibold">
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-hidden relative p-4">
         {isLoading ? (
