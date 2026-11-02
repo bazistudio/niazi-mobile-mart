@@ -9,6 +9,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { createHash } from 'crypto';
 import { writeChangeLogEntry } from './change_log.repo';
 import { getSchemaCaps } from './product.repo';
+import { calculatePaymentAllocation, PaymentDomainError } from '../services/payment/payment.engine';
+import type { TenderInputLine } from '../services/payment/payment.types';
 
 // ─── Domain Types ─────────────────────────────────────────────────────────────
 
@@ -444,30 +446,109 @@ export async function completeSaleTx(
 
   const totalTendered = tenderInputs.reduce((sum, t) => sum + t.amount, 0);
 
-  // Step 7: Determine payment status
+  // R-02 Defence-in-depth (repository boundary guard) — preserved before engine invocation.
+  // This check runs BEFORE any database connection, transaction start, stock mutation,
+  // ledger write, or cash movement. The shared payment engine also enforces this invariant
+  // (Stage B2 hardening), so this acts as an additional safety boundary at the repo layer.
+  //
+  // Only actual CASH method tender can become change or customer advance.
+  // Digital tender (CARD, BANK_TRANSFER, EASYPAISA, JAZZCASH) must never
+  // be added to the physical cash drawer or credited as a cash advance.
+  const cashTenderTotal = tenderInputs
+    .filter((t) => t.method === 'CASH')
+    .reduce((sum, t) => sum + t.amount, 0);
+  const nonCashTenderTotal = totalTendered - cashTenderTotal;
+
+  // R-02: Determine cash-only excess for settlement/advance (cash-only; digital never enters).
+  // cashCoveredAmount = max(0, totalAmount - nonCashTenderTotal)
+  //   = the portion of the invoice that cash actually needed to cover.
+  // cashExcessForSettlement = cashTenderTotal - cashCoveredAmount
+  //   = actual physical cash received beyond the invoice.
+  const cashCoveredAmount = Math.max(0, totalAmount - nonCashTenderTotal);
+  const cashExcessForSettlement = Math.max(0, cashTenderTotal - cashCoveredAmount);
+  const nonCashExcess = Math.max(0, nonCashTenderTotal - totalAmount);
+
+  if (nonCashExcess > 0) {
+    // R-02: Digital tender exceeds the invoice. No mechanism exists to refund
+    // digital excess as a cash advance. Reject before any financial writes.
+    throw new SaleRepoError(
+      `Digital tender exceeds invoice amount by Rs ${nonCashExcess}. ` +
+      'Exact amounts are required for card, bank transfer and online payments. ' +
+      'Please adjust the payment amount to match the invoice total.',
+      400
+    );
+  }
+
+  // Step 7: Invoke shared payment engine for authoritative payment allocation.
+  //
+  // The engine is a pure domain calculation layer (no DB I/O, no side effects).
+  // It enforces all approved accounting policies including:
+  //   - Universal digital overpayment rejection (Stage B2 hardening)
+  //   - Registered customer: advance application → invoice → debt settlement → new advance
+  //   - Walk-in customer: invoice first, digital capped at invoice, cash excess = change
+  //
+  // Credit-limit reconciliation:
+  //   The repo treats customerCreditLimit = 0 / null as UNLIMITED (established behaviour).
+  //   The engine treats customerCreditLimit = 0 as "no credit allowed".
+  //   To prevent false CREDIT_LIMIT_ZERO_EXCEEDED errors for unlimited customers,
+  //   we pass Number.MAX_SAFE_INTEGER to the engine when the repo limit is 0 or null.
+  //   The repo's own authoritative credit-limit SQL check (Step 11) remains the binding
+  //   enforcement; the engine's check acts as a secondary guard only for finite limits.
+  // customerOpt is the locked row from Step 3; customerId and customerCreditLimit
+  // are declared after Step 8 as const from customerOpt. We use customerOpt directly
+  // here to avoid a temporal dead zone reference error.
+  const engineCustomerId: string | null = customerOpt?.id ?? null;
+  const engineCustomerCreditLimitRaw: number = customerOpt?.credit_limit ?? 0;
+  const engineCreditLimit: number =
+    engineCustomerCreditLimitRaw > 0
+      ? engineCustomerCreditLimitRaw
+      : Number.MAX_SAFE_INTEGER;
+
+  // Build engine tender input lines (method must be CanonicalPaymentMethod).
+  // normalizePaymentMethod above already maps inputs to canonical values, and
+  // CREDIT method lines are excluded from tenderInputs, so the cast is safe.
+  const engineTenders: TenderInputLine[] = tenderInputs.map((t) => ({
+    method: t.method as TenderInputLine['method'],
+    amount: t.amount,
+    referenceNumber: t.reference_number ?? null,
+    notes: t.notes ?? null,
+  }));
+
   let recordedPaid: number;
   let changeAmount: number;
   let creditAmount: number;
   let paymentStatus: PaymentStatus;
-
   let excessTenderedForSettlement = 0;
-  if (totalTendered >= totalAmount) {
-    const excess = totalTendered - totalAmount;
-    recordedPaid = totalAmount;
-    creditAmount = 0;
-    paymentStatus = 'PAID';
-    if (excess > 0 && customerOpt !== null) {
-      excessTenderedForSettlement = excess;
-      changeAmount = 0;
-    } else {
-      changeAmount = excess;
+
+  try {
+    const engineResult = calculatePaymentAllocation({
+      invoiceTotal: totalAmount,
+      tenders: engineTenders,
+      customerId: engineCustomerId,
+      previousCustomerBalance: 0, // placeholder; actual DB balance read in Step 11 under lock
+      customerCreditLimit: engineCreditLimit,
+    });
+
+    // Map engine allocation results to repo variables.
+    // Note: previousCustomerBalance was passed as 0 above because the actual locked
+    // balance is read in Step 11 (inside the transaction, after FOR UPDATE). The engine
+    // is used here only to validate tender structure and derive payment status/change/credit.
+    // The full advance/settlement accounting is performed in Step 11 using the live DB balance.
+    recordedPaid    = engineResult.invoiceAllocated > totalAmount
+                        ? totalAmount
+                        : engineResult.invoiceAllocated;
+    changeAmount    = engineResult.changeReturned;
+    creditAmount    = engineResult.creditAllocated;
+    paymentStatus   = engineResult.paymentStatus;
+    // Cash excess for debt settlement / advance (cash-only, validated by engine + R-02 guard above).
+    // For walk-in customers changeReturned is already set; excessTenderedForSettlement stays 0.
+    excessTenderedForSettlement = customerOpt !== null ? cashExcessForSettlement : 0;
+  } catch (err) {
+    if (err instanceof PaymentDomainError) {
+      // Re-throw engine domain errors as SaleRepoError with the same HTTP status
+      throw new SaleRepoError(err.message, err.statusCode);
     }
-  } else {
-    const credit = totalAmount - totalTendered;
-    recordedPaid = totalTendered;
-    changeAmount = 0;
-    creditAmount = credit;
-    paymentStatus = totalTendered > 0 ? 'PARTIALLY_PAID' : 'UNPAID';
+    throw err;
   }
 
   // Step 8: Enforce credit sale constraint
@@ -623,16 +704,60 @@ export async function completeSaleTx(
         [ledgerId, cid, saleId, invoiceNumber, creditAmount, newBalance, desc, uid, now]
       );
     } else if (excessTenderedForSettlement > 0) {
-      const newBalance = currentOutstanding - excessTenderedForSettlement;
-      customerBalanceAfter = newBalance;
-      const ledgerId = uuidv4();
-      const desc = `Payment received (CASH) - Previous balance settlement with Invoice ${invoiceNumber}`;
+    // Phase 3 — Policy 1.2: Split cash excess tendered into two separate ledger entries:
+    //   1. PAYMENT: settles as much existing debt as possible (never below zero).
+    //   2. PAYMENT (advance): any remaining cash excess becomes a negative-balance advance.
+    //
+    // R-01 fix: Use entry_type = 'PAYMENT' for BOTH entries (not 'CUSTOMER_ADVANCE').
+    // The database CHECK constraint (migration 040) only permits:
+    //   ('SALE', 'PAYMENT', 'ADJUSTMENT', 'RETURN', 'OPENING_BALANCE')
+    // 'CUSTOMER_ADVANCE' is NOT a valid entry_type. The established convention
+    // (confirmed by migration 027 comment) represents advances as PAYMENT entries
+    // with negative balance_after, distinguished by their description field.
+    //
+    // R-02 fix: excessTenderedForSettlement is now cash-only (computed in Step 7).
+    // 'Payment received (CASH)' label removed from desc1 — method is in the tender record.
+      //
+    // Owner example: prior debt Rs 10,000 + invoice Rs 5,000 + cash Rs 18,000
+    //   excessTenderedForSettlement = 18,000 - 5,000 = 13,000  (cash-only)
+    //   debtSettled    = min(13,000, max(10,000, 0)) = 10,000  → PAYMENT entry  → balance 0
+    //   advanceCreated = 13,000 - 10,000 = 3,000               → PAYMENT entry  → balance -3,000
+    //
+    // If customer has NO prior debt (currentOutstanding <= 0):
+    //   debtSettled = 0, advanceCreated = full excess → one PAYMENT (advance) entry.
+    const debtSettled    = Math.min(excessTenderedForSettlement, Math.max(currentOutstanding, 0));
+    const advanceCreated = excessTenderedForSettlement - debtSettled;
 
+    if (debtSettled > 0) {
+        const balanceAfterSettlement = currentOutstanding - debtSettled;
+      const ledgerId1 = uuidv4();
+    const desc1 = `Payment received - Debt settlement with Invoice ${invoiceNumber}`;
+    await client.query(
+      `INSERT INTO customer_ledger_entries (id, customer_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at)
+       VALUES ($1, $2, $3, $4, 'PAYMENT', 0, $5, $6, $7, $8, $9)`,
+      [ledgerId1, cid, saleId, invoiceNumber, debtSettled, balanceAfterSettlement, desc1, uid, now]
+    );
+    customerBalanceAfter = balanceAfterSettlement;
+    }
+
+    if (advanceCreated > 0) {
+      const balanceBeforeAdvance = debtSettled > 0 ? currentOutstanding - debtSettled : currentOutstanding;
+        const balanceAfterAdvance  = balanceBeforeAdvance - advanceCreated;
+      const ledgerId2 = uuidv4();
+    // R-01 fix: 'PAYMENT' (not 'CUSTOMER_ADVANCE') — see comment block above.
+    const desc2 = `Customer advance received with Invoice ${invoiceNumber}`;
       await client.query(
-        `INSERT INTO customer_ledger_entries (id, customer_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at)
-         VALUES ($1, $2, $3, $4, 'PAYMENT', 0, $5, $6, $7, $8, $9)`,
-        [ledgerId, cid, saleId, invoiceNumber, excessTenderedForSettlement, newBalance, desc, uid, now]
-      );
+          `INSERT INTO customer_ledger_entries (id, customer_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at)
+           VALUES ($1, $2, $3, $4, 'PAYMENT', 0, $5, $6, $7, $8, $9)`,
+          [ledgerId2, cid, saleId, invoiceNumber, advanceCreated, balanceAfterAdvance, desc2, uid, now]
+        );
+        customerBalanceAfter = balanceAfterAdvance;
+      }
+
+      if (debtSettled === 0 && advanceCreated === 0) {
+        // excessTenderedForSettlement was 0 — should not reach here, but guard defensively.
+        customerBalanceAfter = currentOutstanding;
+      }
     }
   }
 
@@ -767,16 +892,24 @@ export async function completeSaleTx(
     .filter((p) => p.payment_method === 'CASH')
     .reduce((sum, p) => sum + p.amount, 0);
 
-  if (allocatedCash > 0) {
+  // R-02 fix: Cash movement must include genuine cash excess (customer advance),
+  // but must NEVER include digital tender allocated to the invoice.
+  // After R-02 fix, excessTenderedForSettlement is strictly cash-only, so:
+  //   totalCashMovement = allocatedCash + excessTenderedForSettlement
+  //   = (cash portion of invoice) + (genuine cash advance)
+  //   = total physical cash received and retained by the drawer.
+  //
+  // Guard: also trigger when allocatedCash = 0 but cash excess exists
+  // (edge case: invoice fully covered by digital, but customer also tendered cash advance).
+  if (allocatedCash > 0 || excessTenderedForSettlement > 0) {
     const openSessionRow = await client.query(
       "SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' LIMIT 1",
       [branchId]
     );
     const openSessionId: string | null = ((openSessionRow.rows[0] as Record<string, unknown>)?.['id'] as string) ?? null;
 
-    // Enforce: a CASH payment requires an open cash session. Without one, the cash movement
-    // cannot be tied to a session for reconciliation. Reject with a clear message so the
-    // cashier opens a session before accepting cash.
+    // Enforce: a CASH payment or cash advance requires an open cash session.
+    // Without one, the cash movement cannot be tied to a session for reconciliation.
     if (!openSessionId) {
       throw new SaleRepoError(
         'No open cash session found for this branch. Please open a cash session before accepting cash payments.',
@@ -794,7 +927,8 @@ export async function completeSaleTx(
       `INSERT INTO cash_movements (id, session_id, branch_id, movement_type, direction, amount, reference_id, reference_number, payment_method, description, performed_by, created_at)
        VALUES ($1, $2, $3, 'SALE_PAYMENT', 'IN', $4, $5, $6, 'CASH', $7, $8, $9)`,
       [cashMvId, openSessionId, branchId, totalCashMovement, saleId, invoiceNumber, desc, uid, now]
-    );  }
+    );
+  }
 
   const finalCreditAmount = Math.max(sale.total_amount - sale.paid_amount, 0);
 
