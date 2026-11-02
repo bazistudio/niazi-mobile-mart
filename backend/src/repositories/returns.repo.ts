@@ -374,6 +374,15 @@ export async function createSalesReturn(
     let cashRefunded: number | null = null;
 
     if (refundMethod === 'CREDIT' && customerId) {
+      // Lock customer row FOR UPDATE to serialize concurrent balance mutations & validate existence
+      const custLockRes = await client.query(
+        'SELECT id, name, is_active FROM customers WHERE id = $1 FOR UPDATE',
+        [customerId]
+      );
+      if (custLockRes.rows.length === 0) {
+        throw new ReturnsRepoError(`Customer '${customerId}' not found for credit refund`, 404);
+      }
+
       const outRes = await client.query(
         'SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT AS bal FROM customer_ledger_entries WHERE customer_id = $1',
         [customerId]
