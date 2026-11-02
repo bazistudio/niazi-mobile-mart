@@ -380,6 +380,19 @@ export async function processAtomicExchange(
     const customerId = (origSale['customer_id'] as string | null) ?? null;
     const customerName = (origSale['customer_name_snapshot'] as string | null) ?? null;
 
+    // Phase C3: Lock customer row before any ledger reads or stock operations.
+    // Lock order: Advisory lock → Sale row (FOR UPDATE above) → Customer row → Stock FOR UPDATE.
+    // This serializes concurrent balance mutations (sales, returns, payments) for this customer.
+    if (customerId) {
+      const custLockRes = await client.query(
+        'SELECT id FROM customers WHERE id = $1 FOR UPDATE',
+        [customerId]
+      );
+      if (custLockRes.rows.length === 0) {
+        throw new SaleRepoError(`Customer '${customerId}' not found`, 404);
+      }
+    }
+
     // 2. Validate return lines against remaining returnable quantity
     let totalReturnAmount = 0;
     const preparedReturnLines: Array<{

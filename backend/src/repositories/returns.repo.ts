@@ -99,11 +99,41 @@ export class ReturnsRepoError extends Error {
   }
 }
 
-function normalizeRefundMethod(method: string): RefundMethod {
-  const m = method.trim().toUpperCase();
-  if (m === 'CREDIT') return 'CREDIT';
+/**
+ * Phase 1 — Policy 1.5: Strict refund method validation.
+ * Replaces the former normalizeRefundMethod() which silently mapped
+ * ORIGINAL, EXCHANGE, and unknown values to CASH.
+ *
+ * CASH   → accepted (requires open cash session — enforced separately).
+ * CREDIT → accepted (posts as customer ledger credit).
+ * ORIGINAL → rejected until implemented.
+ * EXCHANGE → rejected until implemented.
+ * Unknown  → rejected explicitly.
+ *
+ * MUST be called at the very start of createSalesReturn(), before any DB writes,
+ * so that an unsupported method fails fast — before stock restoration, ledger
+ * entries, return header INSERT, or any cash movement.
+ */
+function validateRefundMethod(method: string): RefundMethod {
+  const m = (method ?? '').trim().toUpperCase();
   if (m === 'CASH') return 'CASH';
-  return 'CASH';
+  if (m === 'CREDIT') return 'CREDIT';
+  if (m === 'ORIGINAL') {
+    throw new ReturnsRepoError(
+      "Refund method 'ORIGINAL' is not yet supported. Supported methods: CASH, CREDIT.",
+      400
+    );
+  }
+  if (m === 'EXCHANGE') {
+    throw new ReturnsRepoError(
+      "Refund method 'EXCHANGE' is not yet supported. Supported methods: CASH, CREDIT.",
+      400
+    );
+  }
+  throw new ReturnsRepoError(
+    `Unknown refund method '${method}'. Supported methods: CASH, CREDIT.`,
+    400
+  );
 }
 
 function getPeriodYYYYMM(): string {
@@ -171,6 +201,12 @@ export async function createSalesReturn(
     throw new ReturnsRepoError('Cannot process return with no items selected', 400);
   }
 
+  // Phase 1 — Policy 1.5: Validate refund method BEFORE acquiring a DB connection
+  // or executing any write. An unsupported method (ORIGINAL, EXCHANGE, unknown) must
+  // fail-fast here so that NO return header, return line, stock movement, ledger entry,
+  // or cash movement is committed.
+  const refundMethod = validateRefundMethod(dto.refund_method);
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -195,6 +231,19 @@ export async function createSalesReturn(
 
     const customerId = (sale['customer_id'] as string | null) ?? null;
     const customerName = (sale['customer_name_snapshot'] as string | null) ?? null;
+
+    // Phase C3: Lock customer row before any stock writes to serialize concurrent ledger mutations.
+    // Placed here (immediately after extracting customerId from the locked sale) so the lock order is:
+    // Advisory lock → Sale row (FOR UPDATE above) → Customer row → Stock/inventory writes.
+    if (customerId) {
+      const custLockRes = await client.query(
+        'SELECT id FROM customers WHERE id = $1 FOR UPDATE',
+        [customerId]
+      );
+      if (custLockRes.rows.length === 0) {
+        throw new ReturnsRepoError(`Customer '${customerId}' not found`, 404);
+      }
+    }
 
     // 2. Validate return lines against returnable quantities
     let totalReturnAmount = 0;
@@ -271,7 +320,8 @@ export async function createSalesReturn(
 
     const returnId = uuidv4();
     const now = new Date().toISOString();
-    const refundMethod = normalizeRefundMethod(dto.refund_method);
+    // Note: refundMethod is resolved at the top of createSalesReturn() via validateRefundMethod()
+    // (Phase 1 fix — moved before any DB writes to ensure fail-fast on unsupported methods)
 
     // 4. Insert sales_returns header
     await client.query(
@@ -374,15 +424,7 @@ export async function createSalesReturn(
     let cashRefunded: number | null = null;
 
     if (refundMethod === 'CREDIT' && customerId) {
-      // Lock customer row FOR UPDATE to serialize concurrent balance mutations & validate existence
-      const custLockRes = await client.query(
-        'SELECT id, name, is_active FROM customers WHERE id = $1 FOR UPDATE',
-        [customerId]
-      );
-      if (custLockRes.rows.length === 0) {
-        throw new ReturnsRepoError(`Customer '${customerId}' not found for credit refund`, 404);
-      }
-
+      // Customer row is already locked FOR UPDATE above (Phase C3).
       const outRes = await client.query(
         'SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT AS bal FROM customer_ledger_entries WHERE customer_id = $1',
         [customerId]
@@ -407,6 +449,16 @@ export async function createSalesReturn(
         [branchId]
       );
       const sessionId = ((openSessRes.rows[0] as Record<string, unknown>)?.['id'] as string) ?? null;
+
+      // Phase 1 — Policy 1.5: CASH refund requires an open cash session.
+      // Without a valid session_id the cash_movements row cannot be tied to a session
+      // for reconciliation. The entire transaction rolls back at this point.
+      if (!sessionId) {
+        throw new ReturnsRepoError(
+          'No open cash session found for this branch. Please open a cash session before processing cash refunds.',
+          400
+        );
+      }
 
       const cashMvId = uuidv4();
       const desc = `Sales Return Cash Refund ${returnNumber}`;
