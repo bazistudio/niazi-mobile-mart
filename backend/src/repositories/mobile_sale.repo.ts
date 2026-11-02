@@ -52,6 +52,13 @@ export interface CompleteMobileSaleDto {
   branchId?: string | null;
   notes?: string | null;
   idempotencyKey?: string | null;
+  /**
+   * Phase 4 Stage C — Cashier-controlled advance application.
+   * Whole PKR integer >= 0. Omitting is equivalent to 0.
+   * Walk-in sales (customerId = null) must omit or pass 0.
+   * Backend validates against live locked customer ledger balance.
+   */
+  advanceApplied?: number | null;
 }
 
 export interface MobileSaleResult {
@@ -67,6 +74,8 @@ export interface MobileSaleResult {
   changeAmount: number;
   creditAmount: number;
   paymentStatus: 'PAID' | 'PARTIALLY_PAID' | 'UNPAID';
+  /** Phase 4 Stage C — Advance amount applied to this invoice (0 when not used). */
+  advanceApplied: number;
   devices: Array<{
     deviceId: string;
     brand: string;
@@ -263,22 +272,66 @@ async function reconstructMobileSaleResult(
   const changeAmount = Number(s.change_amount);
   const creditAmount = Math.max(0, totalAmount - paidAmount);
 
-  // 4. Query customerBalanceAfter with defensive consistency check
+  // 4. Phase 4.C — Deterministic description-based ledger replay (ORDER BY removed)
+  // Both mobile-sale ledger entries share the same `now` timestamp and have UUIDv4 ids
+  // stored as TEXT — neither created_at nor id ordering is reliable for identifying the
+  // final balance row. Entries are identified exclusively by their description prefix,
+  // which is stable and written atomically by the same transaction.
   let customerBalanceAfter: number | null = null;
-  if (creditAmount > 0 && s.customer_id) {
-    const balRes = await pool.query(
-      `SELECT balance_after
+  let advanceApplied = 0;
+
+  if (s.customer_id) {
+    const ledgerEntries = await pool.query(
+      `SELECT entry_type, debit, credit, balance_after, description
        FROM customer_ledger_entries
-       WHERE reference_id = $1 AND entry_type = 'SALE'
-       ORDER BY created_at ASC, id ASC`,
+       WHERE reference_id = $1`,
       [saleId]
     );
-    if (balRes.rows.length === 1) {
-      customerBalanceAfter = Number(balRes.rows[0].balance_after);
-    } else if (balRes.rows.length === 0) {
-      throw new MobileSaleRepoError('Ledger entry for credit sale is missing during idempotency replay.', 500);
-    } else {
-      throw new MobileSaleRepoError('Duplicate ledger entries detected for sale during idempotency replay.', 500);
+
+    if (ledgerEntries.rows.length > 0) {
+      // Identify entries by description prefix — the only stable discriminator.
+      // Advance-consumption entry: description starts with 'Advance applied'
+      // Unpaid-credit entry:       description starts with 'Mobile Sale Credit'
+      const advanceRows = ledgerEntries.rows.filter(
+        (row: any) =>
+          typeof row.description === 'string' &&
+          row.description.startsWith('Advance applied')
+      );
+      const creditRows = ledgerEntries.rows.filter(
+        (row: any) =>
+          typeof row.description === 'string' &&
+          row.description.startsWith('Mobile Sale Credit')
+      );
+
+      // Defensive: multiple entries with the same description prefix indicates corruption.
+      if (advanceRows.length > 1) {
+        throw new MobileSaleRepoError(
+          `Ledger integrity error: multiple advance-consumption entries found for sale '${saleId}'. Manual investigation required.`,
+          500
+        );
+      }
+      if (creditRows.length > 1) {
+        throw new MobileSaleRepoError(
+          `Ledger integrity error: multiple credit-debt entries found for sale '${saleId}'. Manual investigation required.`,
+          500
+        );
+      }
+
+      const advanceRow = advanceRows[0] ?? null;
+      const creditRow = creditRows[0] ?? null;
+
+      // advanceApplied is the debit amount of the advance-consumption entry, or 0.
+      advanceApplied = advanceRow ? Number(advanceRow.debit) : 0;
+
+      // customerBalanceAfter: prefer the credit-debt entry's balance (it is posted last
+      // and reflects the final state). Fall back to the advance-entry balance if only
+      // advance was applied. Return null if no ledger mutation occurred for this sale.
+      if (creditRow !== null) {
+        customerBalanceAfter = Number(creditRow.balance_after);
+      } else if (advanceRow !== null) {
+        customerBalanceAfter = Number(advanceRow.balance_after);
+      }
+      // else: customerBalanceAfter remains null (fully paid walk-in or no ledger entries)
     }
   }
 
@@ -295,6 +348,7 @@ async function reconstructMobileSaleResult(
     changeAmount,
     creditAmount,
     paymentStatus: s.payment_status,
+    advanceApplied,
     devices,
     payments,
     cashier,
@@ -486,6 +540,55 @@ export async function executeMobileSale(
       };
     }
 
+    // Phase C2: Validate and resolve customer advance application
+    // Must occur inside the FOR UPDATE customer lock to serialize concurrent balance reads.
+    const rawAdvance = dto.advanceApplied;
+    let safeAdvanceApplied = 0;
+
+    if (rawAdvance !== undefined && rawAdvance !== null && rawAdvance !== 0) {
+      // Walk-in sales cannot carry an advance (route layer also enforces this, but fail defensively here)
+      if (!customerOpt) {
+        throw new MobileSaleRepoError(
+          'Advance application requires a registered customer. Walk-in sales cannot use advance credit.',
+          400
+        );
+      }
+      // Reject non-integer, non-finite, negative, or non-safe values
+      if (
+        typeof rawAdvance !== 'number' ||
+        !Number.isSafeInteger(rawAdvance) ||
+        rawAdvance < 0
+      ) {
+        throw new MobileSaleRepoError(
+          'Invalid advanceApplied: must be a non-negative whole PKR integer.',
+          400
+        );
+      }
+      // Read live authoritative customer ledger balance under the FOR UPDATE lock
+      const advBalRes = await client.query(
+        'SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT AS bal FROM customer_ledger_entries WHERE customer_id = $1',
+        [customerOpt.id]
+      );
+      const liveBalance = Number(advBalRes.rows[0]?.bal ?? 0);
+      // availableAdvance is positive only when balance is negative (customer has credit)
+      const availableAdvance = Math.max(0, -liveBalance);
+
+      if (rawAdvance > availableAdvance) {
+        throw new MobileSaleRepoError(
+          `Insufficient customer advance balance. Requested: Rs ${rawAdvance.toLocaleString()}, Available: Rs ${availableAdvance.toLocaleString()}.`,
+          400
+        );
+      }
+      // Advance cannot exceed the invoice total
+      if (rawAdvance > subtotalSum) {
+        throw new MobileSaleRepoError(
+          `Advance applied (Rs ${rawAdvance.toLocaleString()}) cannot exceed invoice total (Rs ${subtotalSum.toLocaleString()}).`,
+          400
+        );
+      }
+      safeAdvanceApplied = rawAdvance;
+    }
+
     // 2. Lock & Validate each mobile device in deterministic sorted order (Deadlock prevention)
     const sortedDeviceIds = Array.from(uniqueDeviceIds).sort();
     const lockedDevices: Array<{
@@ -619,16 +722,22 @@ export async function executeMobileSale(
     let creditAmount = 0;
     let paymentStatus: 'PAID' | 'PARTIALLY_PAID' | 'UNPAID';
 
-    if (totalTendered >= totalAmount) {
-      recordedPaid = totalAmount;
-      changeAmount = totalTendered - totalAmount;
+    // Phase C2: effectivePayable is the portion the customer must cover with tender.
+    // Advance pre-pays safeAdvanceApplied, so tender only needs to cover the remainder.
+    const effectivePayable = totalAmount - safeAdvanceApplied;
+
+    if (totalTendered >= effectivePayable) {
+      // Full tender covers effective payable; advance covers the rest.
+      recordedPaid = totalAmount; // Full invoice is paid (advance + tender)
+      changeAmount = totalTendered - effectivePayable; // Change on tender above effective payable
       creditAmount = 0;
       paymentStatus = 'PAID';
     } else {
-      recordedPaid = totalTendered;
+      // Tender is less than effective payable; remaining goes to customer credit.
+      recordedPaid = safeAdvanceApplied + totalTendered; // Advance + actual tender
       changeAmount = 0;
-      creditAmount = totalAmount - totalTendered;
-      paymentStatus = totalTendered > 0 ? 'PARTIALLY_PAID' : 'UNPAID';
+      creditAmount = effectivePayable - totalTendered; // Unpaid remainder after advance and tender
+      paymentStatus = totalTendered > 0 || safeAdvanceApplied > 0 ? 'PARTIALLY_PAID' : 'UNPAID';
     }
 
     if (creditAmount > 0 && !customerOpt) {
@@ -680,45 +789,102 @@ export async function executeMobileSale(
     const invoiceNumber = `${branchCode}-${userCode}-${periodYYYYMM}-${String(seqValue).padStart(6, '0')}`;
     const saleId = uuidv4();
 
-    // 6. Handle Customer Ledger Posting if Credit is Used
+    // 6. Handle Customer Ledger Posting
+    // Canonical Niazi Mobile Mart ledger convention:
+    // Cash / card / bank tenders paid at checkout are recorded in sale_payments and cash_movements.
+    // They are NOT posted to customer_ledger_entries (the customer does not owe what was already paid).
+    //
+    // The customer ledger is strictly adjusted for:
+    //   1. Advance Consumption (debit = safeAdvanceApplied):
+    //      Moves negative balance towards zero (reduces customer's available credit).
+    //   2. Unpaid Invoice Balance / Debt (debit = creditAmount):
+    //      Increases positive receivable balance (customer owes shop for unpaid portion).
+    //
+    // Net ledger change = safeAdvanceApplied + creditAmount
+    // Final balance = initialBalance + safeAdvanceApplied + creditAmount
     let customerBalanceAfter: number | null = null;
-    if (creditAmount > 0 && customerOpt) {
+
+    if (customerOpt && (safeAdvanceApplied > 0 || creditAmount > 0)) {
       const cid = customerOpt.id;
+
+      // Authoritative balance read under customer FOR UPDATE lock
       const outstandingRow = await client.query(
         'SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT as bal FROM customer_ledger_entries WHERE customer_id = $1',
         [cid]
       );
-      const currentOutstanding = Number(outstandingRow.rows[0]?.bal ?? 0);
+      const initialBalance = Number(outstandingRow.rows[0]?.bal ?? 0);
+      let runningBalance = initialBalance;
 
-      if (customerOpt.credit_limit > 0) {
-        if (currentOutstanding + creditAmount > customerOpt.credit_limit) {
+      // Credit limit enforcement on remaining unpaid debt
+      if (creditAmount > 0) {
+        const projectedFinalBalance = initialBalance + safeAdvanceApplied + creditAmount;
+        const projectedOutstanding = Math.max(0, projectedFinalBalance);
+
+        if (customerOpt.credit_limit === 0 && projectedOutstanding > 0) {
           throw new MobileSaleRepoError(
-            `Customer credit limit exceeded. Current outstanding: Rs ${currentOutstanding.toLocaleString()}, ` +
-            `Sale credit: Rs ${creditAmount.toLocaleString()}, Limit: Rs ${customerOpt.credit_limit.toLocaleString()}`,
+            `Credit purchase not allowed for customer '${customerOpt.name}'. Credit limit is 0, but sale leaves Rs ${creditAmount.toLocaleString()} unpaid.`,
+            400
+          );
+        }
+
+        if (customerOpt.credit_limit > 0 && projectedOutstanding > customerOpt.credit_limit) {
+          throw new MobileSaleRepoError(
+            `Customer credit limit exceeded. Current balance: Rs ${initialBalance.toLocaleString()}, ` +
+            `Projected debt: Rs ${projectedOutstanding.toLocaleString()}, Limit: Rs ${customerOpt.credit_limit.toLocaleString()}`,
             400
           );
         }
       }
 
-      customerBalanceAfter = currentOutstanding + creditAmount;
-      const ledgerEntryId = uuidv4();
-      await client.query(
-        `INSERT INTO customer_ledger_entries (
-           id, customer_id, reference_id, reference_number, entry_type,
-           debit, credit, balance_after, description, performed_by, created_at
-         ) VALUES ($1, $2, $3, $4, 'SALE', $5, 0, $6, $7, $8, $9)`,
-        [
-          ledgerEntryId,
-          cid,
-          saleId,
-          invoiceNumber,
-          creditAmount,
-          customerBalanceAfter,
-          `Mobile Sale Credit ${invoiceNumber}`,
-          uid,
-          now,
-        ]
-      );
+      // Entry 1: Advance Consumption (if advance was applied)
+      if (safeAdvanceApplied > 0) {
+        runningBalance += safeAdvanceApplied; // Increases balance from negative towards zero
+        await client.query(
+          `INSERT INTO customer_ledger_entries (
+             id, customer_id, reference_id, reference_number, entry_type,
+             debit, credit, balance_after, description, performed_by, created_at
+           ) VALUES ($1, $2, $3, $4, 'SALE', $5, 0, $6, $7, $8, $9)`,
+          [
+            uuidv4(),
+            cid,
+            saleId,
+            invoiceNumber,
+            safeAdvanceApplied,
+            runningBalance,
+            `Advance applied to Mobile Sale Invoice ${invoiceNumber}`,
+            uid,
+            now,
+          ]
+        );
+      }
+
+      // Entry 2: Remaining Unpaid Credit Debt (if sale is not fully covered)
+      if (creditAmount > 0) {
+        runningBalance += creditAmount; // Increases receivable due
+        const desc = paymentStatus === 'PARTIALLY_PAID' && recordedPaid > 0
+          ? `Mobile Sale Credit ${invoiceNumber} (Partial Paid: Rs ${recordedPaid.toLocaleString()}, Remaining Due: Rs ${creditAmount.toLocaleString()})`
+          : `Mobile Sale Credit ${invoiceNumber}`;
+
+        await client.query(
+          `INSERT INTO customer_ledger_entries (
+             id, customer_id, reference_id, reference_number, entry_type,
+             debit, credit, balance_after, description, performed_by, created_at
+           ) VALUES ($1, $2, $3, $4, 'SALE', $5, 0, $6, $7, $8, $9)`,
+          [
+            uuidv4(),
+            cid,
+            saleId,
+            invoiceNumber,
+            creditAmount,
+            runningBalance,
+            desc,
+            uid,
+            now,
+          ]
+        );
+      }
+
+      customerBalanceAfter = runningBalance;
     }
 
     // 7. Insert Master Sale Header
@@ -934,6 +1100,7 @@ export async function executeMobileSale(
       changeAmount,
       creditAmount,
       paymentStatus,
+      advanceApplied: safeAdvanceApplied,
       devices: insertedDevicesPayload,
       payments: finalPaymentsList,
       cashier: {
