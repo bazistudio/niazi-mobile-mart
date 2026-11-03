@@ -169,6 +169,11 @@ async function main(): Promise<void> {
 
   const app = express();
 
+  // Trust Cloud Run proxy headers so express-rate-limit reads the real client IP
+  // from X-Forwarded-For. Cloud Run sits behind exactly one trusted proxy layer.
+  // DO NOT set to true (= trust all proxies) — use the numeric form.
+  app.set('trust proxy', 1);
+
   // Handle CORS for browser frontend development
   app.use((req: Request, res: Response, next: NextFunction) => {
     res.header('Access-Control-Allow-Origin', '*');

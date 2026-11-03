@@ -51,7 +51,16 @@ export async function stopPgListener(): Promise<void> {
 async function connectAndListen(connectionString: string, backoff: number): Promise<void> {
   if (stopped) return;
 
-  const client = new Client({ connectionString });
+  // Cloud SQL (niazi-postgres, asia-south1) is configured as ENCRYPTED_ONLY.
+  // A plain pg.Client without SSL will be rejected with:
+  //   "pg_hba.conf rejects connection ... no encryption"
+  // We match the SSL mode used by the main connection pool: ssl.rejectUnauthorized = false
+  // because Cloud SQL uses a self-signed server certificate (the CA is Google-managed).
+  const sslEnabled = connectionString.includes('sslmode=disable') === false;
+  const client = new Client({
+    connectionString,
+    ...(sslEnabled ? { ssl: { rejectUnauthorized: false } } : {}),
+  });
   listenerClient = client;
 
   try {

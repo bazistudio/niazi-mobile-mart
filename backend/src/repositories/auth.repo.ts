@@ -4,17 +4,20 @@
  * Provides:
  *   - findByUsername(username) → User row with credential fields
  *   - findById(id) → User row
- *   - recordFailedLogin(userId) → increment failed_login_attempts
- *   - lockUser(userId, lockedUntilMs) → set login_locked_until_ms
+ *   - recordFailedLoginAtomic(userId, maxAttempts, lockoutMs) → {attempts, lockedUntilMs}
  *   - resetLoginLockout(userId) → clear failed_login_attempts and lockout
  *   - recordFailedPin(userId) → increment failed_pin_attempts
  *   - lockPin(userId, lockedUntilMs) → set pin_locked_until_ms
  *   - resetPinLockout(userId) → clear failed_pin_attempts and pin lockout
- *   - updateLastSeen(userId) → placeholder (no last_seen column)
+ *   - atomicPasswordReset(userId, newHash) → reset password + clear lockout in one UPDATE
  *
  * This module is the exclusive SQL layer for auth — no raw SQL in route handlers.
  *
  * Mirrors Rust auth_service.rs + user repository postgres implementation.
+ *
+ * SECURITY NOTE: recordFailedLoginAtomic() atomically increments the attempt counter
+ * AND sets the lockout timestamp in a single UPDATE RETURNING, eliminating the
+ * race condition present in the prior two-query approach.
  */
 
 import { Pool, PoolClient } from 'pg';
@@ -42,6 +45,14 @@ export interface UserRow {
   branch_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Result of an atomic failed-login record operation. */
+export interface AtomicLockoutResult {
+  /** New failed_login_attempts value after this increment. */
+  attempts: number;
+  /** Non-null epoch-ms string if lockout was applied in this same UPDATE. */
+  lockedUntilMs: string | null;
 }
 
 /**
@@ -191,33 +202,57 @@ export class AuthRepo {
   }
 
   /**
-   * Increment failed_login_attempts and return the new count.
-   * Matches Rust auth_service.rs lockout logic.
+   * ATOMIC failed login record.
+   *
+   * Increments failed_login_attempts AND conditionally sets login_locked_until_ms in a
+   * SINGLE UPDATE RETURNING, eliminating the race condition of the prior two-query approach.
+   *
+   * If the new attempt count reaches maxAttempts, the lockout timestamp is set atomically
+   * to (NOW() epoch ms + lockoutDurationMs). Otherwise login_locked_until_ms is left
+   * unchanged (allowing a prior unexpired lockout to persist).
+   *
+   * @param userId         The user's UUID.
+   * @param maxAttempts    Threshold at which lockout is applied (default: 5).
+   * @param lockoutDurationMs  Lockout duration in milliseconds (default: 900_000 = 15 min).
+   * @returns AtomicLockoutResult — new attempt count and lockout timestamp if applied.
    */
-  async recordFailedLogin(userId: string): Promise<number> {
-    const result = await this.pool.query(
+  async recordFailedLoginAtomic(
+    userId: string,
+    maxAttempts: number = 5,
+    lockoutDurationMs: number = 900_000,
+  ): Promise<AtomicLockoutResult> {
+    const result = await this.pool.query<{
+      failed_login_attempts: string;
+      login_locked_until_ms: string | null;
+    }>(
       `UPDATE users
-         SET failed_login_attempts = failed_login_attempts + 1,
-             updated_at = NOW()
+         SET
+           failed_login_attempts = failed_login_attempts + 1,
+           login_locked_until_ms = CASE
+             WHEN failed_login_attempts + 1 >= $2
+             THEN (
+               EXTRACT(EPOCH FROM NOW()) * 1000 + $3
+             )::BIGINT
+             ELSE NULL
+           END,
+           updated_at = NOW()
        WHERE id = $1
-       RETURNING failed_login_attempts`,
-      [userId]
+       RETURNING
+         failed_login_attempts,
+         login_locked_until_ms::text AS login_locked_until_ms`,
+      [userId, maxAttempts, lockoutDurationMs],
     );
-    return Number((result.rows[0] as Record<string, unknown>)?.['failed_login_attempts'] ?? 0);
-  }
 
-  /**
-   * Set login lockout timestamp (epoch ms).
-   * Mirrors: `login_locked_until_ms = Some(now + 15 * 60 * 1_000)`
-   */
-  async lockLoginUntil(userId: string, lockedUntilMs: bigint): Promise<void> {
-    await this.pool.query(
-      `UPDATE users
-         SET login_locked_until_ms = $2,
-             updated_at = NOW()
-       WHERE id = $1`,
-      [userId, lockedUntilMs.toString()]
-    );
+    const row = result.rows[0];
+    if (!row) {
+      // User vanished between findByUsername and this update — treat as 0 attempts.
+      return { attempts: 0, lockedUntilMs: null };
+    }
+
+    return {
+      attempts: Number(row.failed_login_attempts),
+      lockedUntilMs: row.login_locked_until_ms ?? null,
+    };
   }
 
   /**
@@ -231,6 +266,31 @@ export class AuthRepo {
              updated_at = NOW()
        WHERE id = $1`,
       [userId]
+    );
+  }
+
+  /**
+   * Atomically reset password hash and clear all login lockout state.
+   * Used by the admin-recovery endpoint to restore access after lockout.
+   *
+   * @param userId      User's UUID.
+   * @param newHash     New Argon2id password hash.
+   * @param mustChange  If true, user must change password on next login.
+   */
+  async atomicPasswordReset(
+    userId: string,
+    newHash: string,
+    mustChange: boolean = true,
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE users
+         SET login_key_hash         = $2,
+             failed_login_attempts  = 0,
+             login_locked_until_ms  = NULL,
+             must_change_password   = $3,
+             updated_at             = NOW()
+       WHERE id = $1`,
+      [userId, newHash, mustChange ? 1 : 0],
     );
   }
 

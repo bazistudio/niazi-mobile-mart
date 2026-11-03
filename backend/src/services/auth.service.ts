@@ -6,7 +6,8 @@
  *
  * Responsibilities:
  *   - Login credential verification (password or PIN)
- *   - Lockout enforcement (5 failed attempts)
+ *   - Atomic lockout enforcement (5 failed attempts → 15 min lock)
+ *   - Progressive delay on attempt 4 to slow brute-force
  *   - JWT issuance via jwt.service.ts
  *   - User status enforcement (active/disabled/pending)
  *
@@ -17,6 +18,11 @@
  * Lockout thresholds (mirrors Rust auth_service.rs exactly):
  *   - Login: 5 failed attempts → 15 min lockout (900_000 ms)
  *   - PIN:   5 failed attempts →  5 min lockout (300_000 ms)
+ *
+ * SECURITY NOTE: Login failure handling uses recordFailedLoginAtomic() which
+ * atomically increments the attempt counter AND sets the lockout timestamp in
+ * a single SQL UPDATE RETURNING, eliminating the race condition present in the
+ * prior two-query approach (recordFailedLogin + lockLoginUntil).
  *
  * Mirrors: src-tauri/src/services/auth_service.rs
  */
@@ -30,11 +36,19 @@ import { BLOCKED_LEGACY_ADMIN_ROLES } from '../auth';
 // Constants — must match Rust
 // ---------------------------------------------------------------------------
 
-const MAX_LOGIN_ATTEMPTS = 5;
-const LOGIN_LOCKOUT_MS = 15 * 60 * 1_000;  // 15 minutes
+export const MAX_LOGIN_ATTEMPTS = 5;
+export const LOGIN_LOCKOUT_MS = 15 * 60 * 1_000;  // 15 minutes = 900_000 ms
 
-const MAX_PIN_ATTEMPTS = 5;
-const PIN_LOCKOUT_MS = 5 * 60 * 1_000;     // 5 minutes
+export const MAX_PIN_ATTEMPTS = 5;
+export const PIN_LOCKOUT_MS = 5 * 60 * 1_000;     // 5 minutes = 300_000 ms
+
+/**
+ * On the 4th failed attempt, add a 2-second server-side delay before responding.
+ * This slows brute-force probing without triggering a full lockout yet, giving
+ * legitimate users a warning window before the 5th attempt locks them out.
+ */
+const PROGRESSIVE_DELAY_ATTEMPT = 4;
+const PROGRESSIVE_DELAY_MS = 2_000;
 
 export const DUMMY_ARGON2_HASH =
   '$argon2id$v=19$m=65536,t=3,p=4$gGLUmjJpv3skSCJrTv6vA$LCy/AYMfidUhpW3cNDWFqkjdzmTGodQEGTrlkIXwpf0';
@@ -113,6 +127,13 @@ function remainingLockout(lockedUntilMs: string | null): number {
   return remaining > 0 ? remaining : 0;
 }
 
+/**
+ * Async sleep — used for progressive delay on attempt 4.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ---------------------------------------------------------------------------
 // Auth Service
 // ---------------------------------------------------------------------------
@@ -126,6 +147,12 @@ export class AuthService {
    * The `password` field is tried first as a login_key (password).
    * If that fails and the user has a pin_hash, it is also tried as a PIN.
    * This mirrors Rust auth_service.rs::login() behavior exactly.
+   *
+   * SECURITY: On the 4th failed attempt, a 2-second progressive delay is
+   * applied before responding to slow brute-force attacks without yet locking
+   * the account. On the 5th attempt, an atomic SQL UPDATE sets the lockout
+   * timestamp in the same statement that increments the counter, eliminating
+   * the previous race condition.
    *
    * @throws AuthServiceError on invalid credentials, lockout, or account issues
    */
@@ -143,7 +170,8 @@ export class AuthService {
       );
     }
 
-    // 2. Check account status & legacy role deprecation
+    // 2. Check account status & legacy role deprecation (BEFORE lockout to avoid
+    //    leaking attempt state to deprecated-role accounts)
     if (BLOCKED_LEGACY_ADMIN_ROLES.has(String(user.role || '').toUpperCase())) {
       throw new AuthServiceError(
         'Account role is deprecated or blocked. Contact your administrator.',
@@ -174,7 +202,7 @@ export class AuthService {
       );
     }
 
-    // 3. Check login lockout
+    // 3. Check login lockout (from DB state at findByUsername time)
     const loginLockRemaining = remainingLockout(user.login_locked_until_ms);
     if (loginLockRemaining > 0) {
       throw new AuthServiceError(
@@ -241,20 +269,32 @@ export class AuthService {
       }
     }
 
-    // 6. Both password and PIN failed — record login failure
-    const newLoginAttempts = await this.repo.recordFailedLogin(user.id);
-    if (newLoginAttempts >= MAX_LOGIN_ATTEMPTS) {
-      const lockedUntil = BigInt(Date.now() + LOGIN_LOCKOUT_MS);
-      await this.repo.lockLoginUntil(user.id, lockedUntil);
+    // 6. Both password and PIN failed.
+    //    Use ATOMIC recordFailedLoginAtomic — single UPDATE RETURNING that
+    //    increments the counter AND conditionally sets the lockout timestamp.
+    //    This eliminates the race condition of the prior two-query approach.
+    const { attempts: newLoginAttempts, lockedUntilMs } =
+      await this.repo.recordFailedLoginAtomic(user.id, MAX_LOGIN_ATTEMPTS, LOGIN_LOCKOUT_MS);
+
+    // Progressive delay: on attempt 4 (penultimate before lockout), add a
+    // server-side 2-second pause to slow brute-force probing.
+    if (newLoginAttempts === PROGRESSIVE_DELAY_ATTEMPT) {
+      await sleep(PROGRESSIVE_DELAY_MS);
+    }
+
+    // If the atomic update applied a lockout (attempt 5+), throw LOCKED_OUT.
+    if (lockedUntilMs !== null) {
+      const lockedUntil = parseInt(lockedUntilMs, 10);
+      const retryAfterMs = isNaN(lockedUntil) ? LOGIN_LOCKOUT_MS : Math.max(0, lockedUntil - Date.now());
       throw new AuthServiceError(
         `Too many failed login attempts. Account locked for 15 minutes.`,
         'LOCKED_OUT',
         429,
-        LOGIN_LOCKOUT_MS
+        retryAfterMs
       );
     }
 
-    const attemptsRemaining = MAX_LOGIN_ATTEMPTS - newLoginAttempts;
+    const attemptsRemaining = Math.max(0, MAX_LOGIN_ATTEMPTS - newLoginAttempts);
     throw new AuthServiceError(
       `Invalid username or password. ${attemptsRemaining} attempt(s) remaining before lockout.`,
       'INVALID_CREDENTIALS',

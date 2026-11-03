@@ -15,6 +15,7 @@
   "dependencies": {
     "argon2": "^0.41.0",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.7.3",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.13.3",
     "uuid": "^11.0.3",
