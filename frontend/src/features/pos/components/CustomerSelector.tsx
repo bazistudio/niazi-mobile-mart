@@ -77,6 +77,20 @@ export const CustomerSelector: React.FC<CustomerSelectorProps> = ({ searchOnly =
     return () => clearTimeout(timer);
   }, [searchMode, searchTerm]);
 
+  // Listen for global shortcut (Ctrl+Shift+C) to focus customer search
+  useEffect(() => {
+    const handleFocusCustomer = () => {
+      setSearchMode('customer');
+      setDropdownOpen(true);
+      setTimeout(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }, 50);
+    };
+    window.addEventListener('pos:focus-customer-search', handleFocusCustomer);
+    return () => window.removeEventListener('pos:focus-customer-search', handleFocusCustomer);
+  }, []);
+
   // Click outside to close dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -275,6 +289,7 @@ export const CustomerSelector: React.FC<CustomerSelectorProps> = ({ searchOnly =
       <div className="relative">
         <Search className="h-4 w-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
         <input
+          id="pos-customer-search-input"
           ref={inputRef}
           type="text"
           className="w-full pl-9 pr-3 py-2 text-xs border border-border rounded-xl bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-focus-ring transition-all"

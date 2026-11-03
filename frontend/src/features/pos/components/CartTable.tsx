@@ -63,22 +63,65 @@ export const CartTable = () => {
 
   const handlePriceChange = (productId: string, value: string, isReturn: boolean) => {
     setLocalPrices(prev => ({ ...prev, [`${isReturn ? "ret" : "new"}-${productId}`]: value }));
-    if (value === "") return;
-    const parsed = parseFloat(value);
-    if (!isNaN(parsed) && parsed >= 0) {
-      updateUnitPrice(productId, parsed, isReturn);
-    }
   };
 
   const handlePriceBlur = (productId: string, isReturn: boolean) => {
-    setLocalPrices(prev => {
-      const next = { ...prev };
-      delete next[`${isReturn ? "ret" : "new"}-${productId}`];
-      return next;
-    });
+    const key = `${isReturn ? "ret" : "new"}-${productId}`;
+    const value = localPrices[key];
+
+    if (value !== undefined) {
+      if (value === "") {
+        setLocalPrices(prev => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+        return;
+      }
+
+      const parsed = parseFloat(value);
+      if (isNaN(parsed) || parsed < 0) {
+        setLocalPrices(prev => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+        return;
+      }
+
+      // Minimum Selling Price Security: selling price must be strictly greater than cost price
+      if (!isReturn) {
+        const item = cart.find(i => i.productId === productId);
+        const costPrice = item?.costPrice ?? 0;
+
+        if (costPrice > 0 && parsed <= costPrice) {
+          import("react-hot-toast").then(m =>
+            m.default.error(
+              `Custom price (Rs. ${parsed.toLocaleString()}) cannot be equal to or below cost price (Rs. ${costPrice.toLocaleString()}). Selling price must be strictly higher than cost.`,
+              { duration: 4500, id: `min-price-${productId}` }
+            )
+          );
+          setTimeout(() => {
+            const inputEl = priceRefs.current[key];
+            if (inputEl) {
+              inputEl.focus();
+              inputEl.select();
+            }
+          }, 50);
+          return;
+        }
+      }
+
+      updateUnitPrice(productId, parsed, isReturn);
+      setLocalPrices(prev => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
   };
 
-const handleQtyBlur = (productId: string, currentQty: number, isReturn: boolean) => {
+  const handleQtyBlur = (productId: string, currentQty: number, isReturn: boolean) => {
     setLocalQuantities(prev => {
       const next = { ...prev };
       delete next[`${isReturn ? 'ret' : 'new'}-${productId}`];
@@ -212,8 +255,18 @@ const handleQtyBlur = (productId: string, currentQty: number, isReturn: boolean)
                   updateUnitPrice(item.productId, item.unitPrice + 50, isReturn);
                 } else if (e.key === 'ArrowDown') {
                   e.preventDefault();
-                  if (item.unitPrice >= 50) {
-                    updateUnitPrice(item.productId, item.unitPrice - 50, isReturn);
+                  const targetPrice = item.unitPrice - 50;
+                  if (!isReturn && item.costPrice > 0 && targetPrice <= item.costPrice) {
+                    import('react-hot-toast').then(m =>
+                      m.default.error(
+                        `Cannot decrease price below cost (Rs. ${item.costPrice.toLocaleString()}). Selling price must be higher than cost.`,
+                        { duration: 3000, id: `min-price-${item.productId}` }
+                      )
+                    );
+                    return;
+                  }
+                  if (targetPrice >= 0) {
+                    updateUnitPrice(item.productId, targetPrice, isReturn);
                   }
                 } else if (e.key === 'Tab' && !e.shiftKey) {
                   e.preventDefault();

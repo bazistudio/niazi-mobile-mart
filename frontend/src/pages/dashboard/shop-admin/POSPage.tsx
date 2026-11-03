@@ -15,6 +15,31 @@ export function POSPage() {
   const notified = useRef(false);
 
   // Fix hydration mismatch by only rendering after mount, and handle recovery toast
+  // Global POS Keyboard Shortcuts
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // 1. Ctrl + Enter -> Focus SALE Button
+      if (e.ctrlKey && e.key === 'Enter') {
+        e.preventDefault();
+        const saleBtn = document.getElementById('pos-btn-sale');
+        if (saleBtn) {
+          saleBtn.focus();
+        }
+        return;
+      }
+
+      // 2. Ctrl + Shift + C -> Focus Customer Search & Select
+      if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('pos:focus-customer-search'));
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
+
   useEffect(() => {
     setMounted(true);
     

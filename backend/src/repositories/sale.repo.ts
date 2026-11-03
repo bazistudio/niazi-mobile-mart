@@ -374,14 +374,41 @@ export async function completeSaleTx(
     const costPrice = avgCost > 0 ? avgCost : purchasePrice;
 
     const lineDisc = Math.max(Number(item.discount ?? 0), 0);
-    const subtotalLine = salePrice * item.quantity;
+    // Custom sale price override: item.unit_price or item.price takes precedence if provided and valid.
+    const customUnitPrice = item.unit_price !== undefined && item.unit_price !== null && !isNaN(Number(item.unit_price))
+      ? Number(item.unit_price)
+      : (item.price !== undefined && item.price !== null && !isNaN(Number(item.price))
+        ? Number(item.price)
+        : null);
+
+    const effectiveUnitPrice = customUnitPrice !== null ? customUnitPrice : salePrice;
+
+    // Minimum Selling Price Protection:
+    // No user (including Organization ADMIN) may sell a product at or below its applicable cost price.
+    // Price must be strictly greater than costPrice.
+    // If costPrice <= 0 or unavailable, fail closed.
+    if (costPrice <= 0 || isNaN(costPrice)) {
+      throw new SaleRepoError(
+        `Cost price for product "${prod['name']}" is not configured or invalid (Rs. ${costPrice}). Cannot verify minimum selling price security.`,
+        400
+      );
+    }
+
+    if (effectiveUnitPrice <= costPrice) {
+      throw new SaleRepoError(
+        `Selling price (Rs. ${effectiveUnitPrice.toLocaleString()}) cannot be equal to or below product cost (Rs. ${costPrice.toLocaleString()}) for product "${prod['name']}". Selling price must be strictly higher than cost.`,
+        400
+      );
+    }
+
+    const subtotalLine = effectiveUnitPrice * item.quantity;
     const lineTotal = Math.max(subtotalLine - lineDisc, 0);
 
     preparedLines.push({
       product_id: prod['id'] as string,
       product_name: prod['name'] as string,
       sku: prod['sku'] as string,
-      unit_price: salePrice,
+      unit_price: effectiveUnitPrice,
       cost_price: costPrice,
       quantity: item.quantity,
       discount: lineDisc,

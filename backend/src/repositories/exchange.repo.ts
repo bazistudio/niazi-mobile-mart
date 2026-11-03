@@ -489,6 +489,21 @@ export async function processAtomicExchange(
       const avgCost = Number(prod['average_cost'] ?? 0);
       const costPrice = avgCost > 0 ? avgCost : purchasePrice;
 
+      // Minimum Selling Price Protection for replacement items
+      if (costPrice <= 0 || isNaN(costPrice)) {
+        throw new SaleRepoError(
+          `Cost price for product "${prod['name']}" is not configured or invalid (Rs. ${costPrice}). Cannot verify minimum selling price security.`,
+          400
+        );
+      }
+
+      if (salePrice <= costPrice) {
+        throw new SaleRepoError(
+          `Selling price (Rs. ${salePrice.toLocaleString()}) cannot be equal to or below product cost (Rs. ${costPrice.toLocaleString()}) for replacement product "${prod['name']}". Selling price must be strictly higher than cost.`,
+          400
+        );
+      }
+
       const lineDisc = Math.max(Number(item.discount ?? 0), 0);
       const subtotalLine = salePrice * item.quantity;
       const lineTotal = Math.max(subtotalLine - lineDisc, 0);

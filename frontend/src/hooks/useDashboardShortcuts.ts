@@ -24,7 +24,12 @@ export const useDashboardShortcuts = () => {
         switch (e.key.toLowerCase()) {
           case 'c':
             e.preventDefault();
-            navigate('/dashboard/shop-admin/customers?tab=customers');
+            if (window.location.pathname.includes('/pos')) {
+              // On POS page: do NOT navigate away! Focus the in-page POS Customer Search
+              window.dispatchEvent(new CustomEvent('pos:focus-customer-search'));
+            } else {
+              navigate('/dashboard/shop-admin/customers?tab=customers');
+            }
             break;
           case 'l':
             e.preventDefault();

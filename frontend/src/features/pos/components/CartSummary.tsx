@@ -585,8 +585,15 @@ export const CartSummary: React.FC = () => {
           type="button"
           onClick={handleCashSale}
           disabled={isCartEmpty || isProcessing}
-          title="Quick Cash Sale (Ctrl+S)"
-          className="col-span-4 h-11 flex items-center justify-center gap-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all shadow-xs disabled:opacity-disabled"
+          id="pos-btn-sale"
+          title="Quick Cash Sale (Ctrl+S) [Ctrl+Enter]"
+          onKeyDown={(e) => {
+            if (e.key === 'Tab' && !e.shiftKey) {
+              e.preventDefault();
+              document.getElementById('pos-btn-pay-print')?.focus();
+            }
+          }}
+          className="col-span-4 h-11 flex items-center justify-center gap-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all shadow-xs disabled:opacity-disabled focus:outline-none focus:ring-2 focus:ring-primary"
         >
           <Banknote className="h-4 w-4" />
           <span className="text-xs font-black uppercase tracking-wider">SALE</span>
@@ -597,8 +604,18 @@ export const CartSummary: React.FC = () => {
           type="button"
           onClick={handlePayAndPrint}
           disabled={isCartEmpty || isProcessing}
+          id="pos-btn-pay-print"
           title="Pay & Print / Split Tender (Ctrl+P)"
-          className="col-span-5 h-11 flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white transition-all shadow-sm hover:shadow disabled:opacity-disabled font-black"
+          onKeyDown={(e) => {
+            if (e.key === 'Tab' && !e.shiftKey) {
+              e.preventDefault();
+              document.getElementById('pos-btn-cash-return')?.focus();
+            } else if (e.key === 'Tab' && e.shiftKey) {
+              e.preventDefault();
+              document.getElementById('pos-btn-sale')?.focus();
+            }
+          }}
+          className="col-span-5 h-11 flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white transition-all shadow-sm hover:shadow disabled:opacity-disabled font-black focus:outline-none focus:ring-2 focus:ring-emerald-400"
         >
           <Printer className="h-4 w-4" />
           <span className="text-xs font-black uppercase tracking-wider">PAY & PRINT (F12)</span>
@@ -611,8 +628,18 @@ export const CartSummary: React.FC = () => {
         <button
           type="button"
           onClick={handleCashReturn}
-          className="h-9 px-2 rounded-xl bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
+          id="pos-btn-cash-return"
           title="Cash Return / Refund"
+          onKeyDown={(e) => {
+            if (e.key === 'Tab' && !e.shiftKey) {
+              e.preventDefault();
+              document.getElementById('pos-btn-product-replace')?.focus();
+            } else if (e.key === 'Tab' && e.shiftKey) {
+              e.preventDefault();
+              document.getElementById('pos-btn-pay-print')?.focus();
+            }
+          }}
+          className="h-9 px-2 rounded-xl bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400"
         >
           <Banknote className="h-3.5 w-3.5" />
           <span className="truncate">Cash Return</span>
@@ -621,6 +648,8 @@ export const CartSummary: React.FC = () => {
         {/* 2. Product Replace */}
         <button
           type="button"
+          id="pos-btn-product-replace"
+          title="Exchange / Replace Product"
           onClick={() => {
             setSessionMode(activeSession.mode === 'replace' ? 'sale' : 'replace');
             toast.success(
@@ -628,12 +657,20 @@ export const CartSummary: React.FC = () => {
               { icon: '🔁' }
             );
           }}
-          className={`h-9 px-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 ${
+          onKeyDown={(e) => {
+            if (e.key === 'Tab' && !e.shiftKey) {
+              e.preventDefault();
+              document.getElementById('pos-btn-return-invoice')?.focus();
+            } else if (e.key === 'Tab' && e.shiftKey) {
+              e.preventDefault();
+              document.getElementById('pos-btn-cash-return')?.focus();
+            }
+          }}
+          className={`h-9 px-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 ${
             activeSession.mode === 'replace'
               ? 'bg-indigo-700 text-white ring-2 ring-indigo-400'
               : 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white'
           }`}
-          title="Exchange / Replace Product"
         >
           <Sparkles className="h-3.5 w-3.5" />
           <span className="truncate">Product Replace</span>
@@ -647,7 +684,7 @@ export const CartSummary: React.FC = () => {
             window.dispatchEvent(ev);
           }}
           className="h-9 px-2 rounded-xl bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
-          title="Lookup Past Invoice for Return"
+          id="pos-btn-return-invoice" title="Lookup Past Invoice for Return"
         >
           <Tag className="h-3.5 w-3.5" />
           <span className="truncate">Return by Invoice</span>
