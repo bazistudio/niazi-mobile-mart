@@ -26,14 +26,33 @@ interface InventoryProductsPageProps {
   mode?: 'products' | 'restock';
 }
 
+/**
+ * Compute margin amount and percentage from sale price and average cost (WAC).
+ * Margin Amount = Sale Price − Average Cost
+ * Margin % = (Margin Amount / Sale Price) × 100
+ * Returns safe zero values when sale price is zero to avoid division-by-zero.
+ */
+function computeMargin(salePrice: number, averageCost: number): { marginAmount: number; marginPct: number } {
+  const sp = salePrice || 0;
+  const ac = averageCost || 0;
+  if (sp === 0) return { marginAmount: 0, marginPct: 0 };
+  const marginAmount = sp - ac;
+  const marginPct = (marginAmount / sp) * 100;
+  return { marginAmount, marginPct };
+}
+
 export function InventoryProductsPage({ mode = 'products' }: InventoryProductsPageProps) {
   const queryClient = useQueryClient();
   const fetchProductsStore = useInventoryStore((state) => state.fetchProducts);
 
   const { role, hasPermission } = usePermissions();
+  // isOrgAdmin: users with full product management authority
   const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
   const normalizedRole = (role || '').toUpperCase();
-  const canViewCost = isOrgAdmin || (!['SALESMAN', 'CASHIER'].includes(normalizedRole) && (hasPermission(PERMISSIONS.INVENTORY_VIEW) || hasPermission(PERMISSIONS.PURCHASES_VIEW)));
+  // Universal cost visibility: all authenticated internal staff.
+  // PUBLIC_USER is explicitly excluded. Backend is the enforcement layer; this
+  // mirrors the updated canViewProductCost() policy in product.routes.ts.
+  const canViewCost = normalizedRole !== '' && normalizedRole !== 'PUBLIC_USER';
   const canAdjustStock = hasPermission(PERMISSIONS.INVENTORY_EDIT);
 
   const { filters } = useInventoryFilters();
@@ -213,80 +232,149 @@ export function InventoryProductsPage({ mode = 'products' }: InventoryProductsPa
   };
 
   const columns: TableColumn<InventoryProduct>[] = [
-    { key: 'name', label: 'Name', render: (row) => (
-      <div>
-        <div className="font-medium">{row.name}</div>
-        {row.sku && <div className="text-xs text-gray-500">{row.sku}</div>}
-      </div>
-    )},
+    {
+      key: 'name',
+      label: 'Name',
+      render: (row) => (
+        <div>
+          <div className="font-bold">{row.name}</div>
+          {row.sku && <div className="text-xs text-gray-500 font-normal">{row.sku}</div>}
+        </div>
+      ),
+    },
     { key: 'category', label: 'Category' },
     { key: 'brand', label: 'Brand' },
     { key: 'company', label: 'Company' },
     { key: 'color', label: 'Color' },
     { key: 'quality', label: 'Quality' },
-    { key: 'stock', label: 'Stock', render: (row) => (
-      <div className="flex items-center gap-2">
-        <span className={`w-2 h-2 rounded-full ${
-          row.status === StockStatus.HEALTHY ? 'bg-green-500' :
-          row.status === StockStatus.LOW_STOCK ? 'bg-yellow-500' : 'bg-red-500'
-        }`}></span>
-        <span>{row.stock}</span>
-      </div>
-    )},
-    ...(canViewCost ? [
-      { key: 'purchasePrice', label: 'Purchase', render: (row: InventoryProduct) => `Rs. ${(row.purchasePrice || 0).toLocaleString()}` },
-    ] : []),
-    { key: 'price', label: 'Sale', render: (row: InventoryProduct) => `Rs. ${(row.price || 0).toLocaleString()}` },
-    ...(canViewCost ? [
-      {
-        key: 'totalValue',
-        label: 'Value',
-        render: (row: InventoryProduct) => <span className="font-medium text-[#006970] dark:text-[#00B4BB]">Rs. {((row.stock || 0) * (row.purchasePrice || 0)).toLocaleString()}</span>
-      },
-    ] : []),
+    {
+      key: 'stock',
+      label: 'Stock',
+      render: (row) => (
+        <div className="flex items-center gap-2">
+          <span
+            className={`w-2 h-2 rounded-full flex-shrink-0 ${
+              row.status === StockStatus.HEALTHY
+                ? 'bg-green-500'
+                : row.status === StockStatus.LOW_STOCK
+                ? 'bg-yellow-500'
+                : 'bg-red-500'
+            }`}
+          />
+          <span className="font-bold">{row.stock}</span>
+        </div>
+      ),
+    },
+    // ── Cost columns: visible to all authenticated internal users ──────────────
+    ...(canViewCost
+      ? [
+          {
+            key: 'purchasePrice',
+            label: 'Purchase',
+            render: (row: InventoryProduct) => (
+              <span className="font-bold text-blue-600 dark:text-blue-400">
+                Rs. {(row.purchasePrice || 0).toLocaleString()}
+              </span>
+            ),
+          },
+        ]
+      : []),
+    // ── Sale price: always visible ────────────────────────────────────────────
+    {
+      key: 'price',
+      label: 'Sale',
+      render: (row: InventoryProduct) => (
+        <span className="font-bold text-green-600 dark:text-green-400">
+          Rs. {(row.price || 0).toLocaleString()}
+        </span>
+      ),
+    },
+    // ── Average cost (WAC) + derived margin: visible to all internal users ────
+    ...(canViewCost
+      ? [
+          {
+            key: 'averageCost',
+            label: 'Avg Cost',
+            render: (row: InventoryProduct) => (
+              <span className="font-bold text-slate-900 dark:text-slate-100">
+                Rs. {(row.averageCost || 0).toLocaleString()}
+              </span>
+            ),
+          },
+          {
+            key: 'marginAmount',
+            label: 'Margin (Rs.)',
+            render: (row: InventoryProduct) => {
+              const { marginAmount } = computeMargin(row.price || 0, row.averageCost || 0);
+              return (
+                <span className="font-bold text-slate-900 dark:text-slate-100">
+                  {(row.price || 0) === 0 ? '—' : `Rs. ${marginAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+                </span>
+              );
+            },
+          },
+          {
+            key: 'totalValue',
+            label: 'Value',
+            render: (row: InventoryProduct) => (
+              <span className="font-bold text-[#006970] dark:text-[#00B4BB]">
+                Rs. {((row.stock || 0) * (row.purchasePrice || 0)).toLocaleString()}
+              </span>
+            ),
+          },
+        ]
+      : []),
+    // ── Action column: strictly permission-controlled ─────────────────────────
     ...(isRestockMode
-      ? (canAdjustStock ? [{
-          key: 'actions' as const,
-          label: 'Action',
-          render: (row: InventoryProduct) => (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setRestockProduct(row)}
-                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg bg-[#006970]/10 text-[#006970] dark:bg-[#006970]/20 dark:text-[#00B4BB] hover:bg-[#006970]/20 dark:hover:bg-[#006970]/30 transition-colors cursor-pointer"
-                title="Restock Product"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Restock</span>
-              </button>
-            </div>
-          ),
-        }] : [])
-      : (isOrgAdmin ? [{
-          key: 'actions' as const,
-          label: 'Action',
-          render: (row: InventoryProduct) => (
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setEditingProduct(row)}
-                className="inline-flex items-center gap-1 text-[#006970] dark:text-[#00B4BB] hover:underline font-semibold cursor-pointer"
-              >
-                <Edit className="w-3.5 h-3.5" />
-                Edit
-              </button>
-              <button
-                type="button"
-                onClick={() => setDeletingProduct(row)}
-                className="inline-flex items-center gap-1 text-red-600 dark:text-red-400 hover:underline font-semibold cursor-pointer"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Delete
-              </button>
-            </div>
-          )
-        }] : [])
-    ),
+      ? canAdjustStock
+        ? [
+            {
+              key: 'actions' as const,
+              label: 'Action',
+              render: (row: InventoryProduct) => (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRestockProduct(row)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg bg-[#006970]/10 text-[#006970] dark:bg-[#006970]/20 dark:text-[#00B4BB] hover:bg-[#006970]/20 dark:hover:bg-[#006970]/30 transition-colors cursor-pointer"
+                    title="Restock Product"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Restock</span>
+                  </button>
+                </div>
+              ),
+            },
+          ]
+        : []
+      : isOrgAdmin
+      ? [
+          {
+            key: 'actions' as const,
+            label: 'Action',
+            render: (row: InventoryProduct) => (
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setEditingProduct(row)}
+                  className="inline-flex items-center gap-1 text-[#006970] dark:text-[#00B4BB] hover:underline font-semibold cursor-pointer"
+                >
+                  <Edit className="w-3.5 h-3.5" />
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeletingProduct(row)}
+                  className="inline-flex items-center gap-1 text-red-600 dark:text-red-400 hover:underline font-semibold cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete
+                </button>
+              </div>
+            ),
+          },
+        ]
+      : []),
   ];
 
   if (error) {

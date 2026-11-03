@@ -138,7 +138,9 @@ export function InventoryWorkspaceLayout({ children }: { children?: React.ReactN
   const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
   const canViewStock = hasPermission(PERMISSIONS.INVENTORY_VIEW);
   const normalizedRole = (role || '').toUpperCase();
-  const canViewInvestVolume = isOrgAdmin || (!['SALESMAN', 'CASHIER'].includes(normalizedRole) && (hasPermission(PERMISSIONS.INVENTORY_VIEW) || hasPermission(PERMISSIONS.PURCHASES_VIEW)));
+  // Universal invest volume visibility: all authenticated internal staff.
+  // Mirrors canViewProductCost() policy — PUBLIC_USER and unauthenticated excluded.
+  const canViewInvestVolume = normalizedRole !== '' && normalizedRole !== 'PUBLIC_USER';
 
   // Basic check for which tab is active based on the URL path
   const isProducts = pathname === '/dashboard/shop-admin/inventory';

@@ -68,19 +68,22 @@ export function sendError(_req: Request, res: Response, err: unknown): void {
 
 /**
  * Checks if identity is authorized to inspect product purchase cost, valuation, and margin.
- * Authorized roles:
- * - Organization Admin (ADMIN)
- * - Branch Admin (SHOP_ADMIN)
- * - Operations / Accounting roles: MANAGER, ACCOUNTANT, or any user possessing 'can_view_profit: true'
- * Unauthorized roles (SALESMAN, CASHIER, STAFF, PUBLIC_USER) have purchase cost scrubbed at the data boundary.
+ *
+ * Policy (REL-3 updated 2026-11-03):
+ * All authenticated internal staff may see purchase_price and average_cost.
+ * Applicable roles: ADMIN, SHOP_ADMIN, MANAGER, ACCOUNTANT, SALESMAN, CASHIER,
+ *   REPAIR_MECHANIC, STAFF, and any authenticated user with a recognised role.
+ * Excluded: PUBLIC_USER and unauthenticated callers (identity is null/undefined).
+ *
+ * Backend is the authoritative enforcement layer — frontend visibility is secondary.
  */
 export function canViewProductCost(identity: RequestIdentity | undefined | null): boolean {
   if (!identity) return false;
-  if (isBranchAdmin(identity)) return true;
   const role = String(identity.role || '').toUpperCase();
-  if (role === 'MANAGER' || role === 'ACCOUNTANT') return true;
-  if (identity.access_profile?.limits?.can_view_profit === true) return true;
-  return false;
+  // Explicitly block PUBLIC_USER and blank/unknown role strings
+  if (role === 'PUBLIC_USER' || role === '') return false;
+  // All other authenticated identities are approved for internal cost visibility
+  return true;
 }
 
 /**

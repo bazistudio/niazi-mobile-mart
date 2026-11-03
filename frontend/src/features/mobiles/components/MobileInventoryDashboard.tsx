@@ -356,11 +356,10 @@ export const MobileInventoryDashboard: React.FC = () => {
               <Link
                 key={tab.href}
                 to={tab.href}
-                className={`px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-                  isActive
+                className={`px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${isActive
                     ? 'border-primary text-primary'
                     : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border'
-                }`}
+                  }`}
               >
                 {tab.label}
               </Link>
@@ -431,17 +430,17 @@ export const MobileInventoryDashboard: React.FC = () => {
           const displayValue = !inv
             ? 0
             : activeTab === 'NEW'
-            ? inv.new_investment
-            : activeTab === 'USED'
-            ? inv.used_investment
-            : inv.total_investment;
+              ? inv.new_investment
+              : activeTab === 'USED'
+                ? inv.used_investment
+                : inv.total_investment;
           const displayCount = !inv
             ? 0
             : activeTab === 'NEW'
-            ? inv.new_in_stock
-            : activeTab === 'USED'
-            ? inv.used_in_stock
-            : inv.total_in_stock;
+              ? inv.new_in_stock
+              : activeTab === 'USED'
+                ? inv.used_in_stock
+                : inv.total_in_stock;
           const labelSuffix = activeTab === 'NEW' ? ' (New)' : activeTab === 'USED' ? ' (Used)' : '';
           return (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -519,11 +518,10 @@ export const MobileInventoryDashboard: React.FC = () => {
           <button
             type="button"
             onClick={() => setInventorySection('INSTOCK')}
-            className={`px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
-              inventorySection === 'INSTOCK'
+            className={`px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${inventorySection === 'INSTOCK'
                 ? 'bg-surface text-primary shadow-xs border border-border'
                 : 'text-text-secondary hover:text-text-primary'
-            }`}
+              }`}
           >
             <Package className="w-4 h-4 text-success" />
             <span>In Stock</span>
@@ -535,11 +533,10 @@ export const MobileInventoryDashboard: React.FC = () => {
           <button
             type="button"
             onClick={() => setInventorySection('LOWSTOCK')}
-            className={`px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
-              inventorySection === 'LOWSTOCK'
+            className={`px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${inventorySection === 'LOWSTOCK'
                 ? 'bg-surface text-primary shadow-xs border border-border'
                 : 'text-text-secondary hover:text-text-primary'
-            }`}
+              }`}
           >
             <AlertOctagon className="w-4 h-4 text-warning" />
             <span>Low Stock (0 Stock)</span>
@@ -551,11 +548,10 @@ export const MobileInventoryDashboard: React.FC = () => {
           <button
             type="button"
             onClick={() => setInventorySection('TRANSFER')}
-            className={`px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
-              inventorySection === 'TRANSFER'
+            className={`px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${inventorySection === 'TRANSFER'
                 ? 'bg-surface text-primary shadow-xs border border-border'
                 : 'text-text-secondary hover:text-text-primary'
-            }`}
+              }`}
           >
             <ArrowRightLeft className="w-4 h-4 text-primary" />
             <span>Stock Transfer</span>
@@ -597,11 +593,10 @@ export const MobileInventoryDashboard: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setActiveTab('ALL')}
-                    className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all cursor-pointer flex items-center gap-2 ${
-                      activeTab === 'ALL'
+                    className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all cursor-pointer flex items-center gap-2 ${activeTab === 'ALL'
                         ? 'bg-surface text-primary font-semibold shadow-xs border border-border'
                         : 'text-text-secondary hover:text-text-primary'
-                    }`}
+                      }`}
                   >
                     All Mobiles
                     <Badge variant={activeTab === 'ALL' ? 'primary' : 'neutral'} size="sm">
@@ -612,11 +607,10 @@ export const MobileInventoryDashboard: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setActiveTab('NEW')}
-                    className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all cursor-pointer flex items-center gap-2 ${
-                      activeTab === 'NEW'
+                    className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all cursor-pointer flex items-center gap-2 ${activeTab === 'NEW'
                         ? 'bg-surface text-primary font-semibold shadow-xs border border-border'
                         : 'text-text-secondary hover:text-text-primary'
-                    }`}
+                      }`}
                   >
                     New Mobiles
                     <Badge variant={activeTab === 'NEW' ? 'success' : 'neutral'} size="sm">
@@ -627,11 +621,11 @@ export const MobileInventoryDashboard: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setActiveTab('USED')}
-                    className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all cursor-pointer flex items-center gap-2 ${
-                      activeTab === 'USED'
+                    className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all cursor-pointer flex items-center gap-2 ${activeTab === 'USED'
                         ? 'bg-surface text-primary font-semibold shadow-xs border border-border'
                         : 'text-text-secondary hover:text-text-primary'
-                    }`}
+                      }`}
+
                   >
                     Used Mobiles
                     <Badge variant={activeTab === 'USED' ? 'warning' : 'neutral'} size="sm">

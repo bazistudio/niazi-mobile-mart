@@ -34,7 +34,7 @@ export function InventoryTable<T extends { id?: string }>({
 }: InventoryTableProps<T>) {
   return (
     <div className="w-full h-full overflow-auto bg-surface custom-scrollbar">
-      <table className="w-full border-collapse text-sm text-left whitespace-nowrap">
+      <table className="w-full border-collapse text-base text-left whitespace-nowrap">
 
         {/* Header */}
         <thead className="sticky top-0 z-10 bg-surface-hover shadow-xs border-b border-border">
@@ -43,7 +43,7 @@ export function InventoryTable<T extends { id?: string }>({
               <th
                 key={col.key}
                 scope="col"
-                className={`px-3 py-2 text-xs font-semibold text-text-muted uppercase tracking-wider border-r border-border last:border-r-0 ${
+                className={`px-3 py-2 text-sm font-extrabold text-text-muted uppercase tracking-wider border-r border-border last:border-r-0 ${
                   index === 0 ? 'border-l-0' : ''
                 }`}
               >
@@ -87,7 +87,7 @@ export function InventoryTable<T extends { id?: string }>({
                 {columns.map((col, colIndex) => (
                   <td
                     key={`${row.id || rowIndex}-${col.key}`}
-                    className={`px-3 py-1.5 text-text-primary border-r border-border last:border-r-0 ${
+                    className={`px-3 py-1.5 font-extrabold text-text-primary border-r border-border last:border-r-0 ${
                       colIndex === 0 ? 'border-l-0' : ''
                     }`}
                   >
