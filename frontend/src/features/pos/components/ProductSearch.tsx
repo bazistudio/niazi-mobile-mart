@@ -181,10 +181,8 @@ export const ProductSearch = () => {
     addToCart(dbProduct, targetBucket === 'return');
     setSearchTerm('');
     setIsDropdownOpen(false);
-    // Auto focus back to input for rapid scanning
-    setTimeout(() => {
-      inputRef.current?.focus();
-    }, 0);
+    // Auto focus newly added product quantity input in POS Cart
+    window.dispatchEvent(new CustomEvent('pos:focus-cart-item', { detail: { productId: dbProduct.id } }));
   };
 
   return (
@@ -194,6 +192,7 @@ export const ProductSearch = () => {
           <Search className="h-5 w-5 text-gray-400" />
         </div>
         <input
+          id="pos-product-search-input"
           ref={inputRef}
           type="text"
           value={searchTerm}

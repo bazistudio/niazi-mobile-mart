@@ -12,6 +12,7 @@ export interface InventoryTableProps<T> {
   columns: TableColumn<T>[];
   data: T[];
   onRowClick?: (row: T) => void;
+  onRowDoubleClick?: (row: T) => void;
   isLoading?: boolean;
 }
 
@@ -30,6 +31,7 @@ export function InventoryTable<T extends { id?: string }>({
   columns,
   data,
   onRowClick,
+  onRowDoubleClick,
   isLoading = false,
 }: InventoryTableProps<T>) {
   return (
@@ -75,11 +77,17 @@ export function InventoryTable<T extends { id?: string }>({
               <tr
                 key={row.id || rowIndex}
                 onClick={() => onRowClick?.(row)}
-                onKeyDown={(e) => e.key === 'Enter' && onRowClick?.(row)}
-                tabIndex={onRowClick ? 0 : undefined}
-                role={onRowClick ? 'button' : undefined}
-                className={`border-b border-border transition-colors group ${
-                  onRowClick
+                onDoubleClick={() => onRowDoubleClick?.(row)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (onRowDoubleClick) onRowDoubleClick(row);
+                    else if (onRowClick) onRowClick(row);
+                  }
+                }}
+                tabIndex={onRowClick || onRowDoubleClick ? 0 : undefined}
+                role={onRowClick || onRowDoubleClick ? 'button' : undefined}
+                className={`border-b border-border transition-colors group select-none ${
+                  onRowClick || onRowDoubleClick
                     ? 'cursor-pointer hover:bg-primary/5 focus-visible:outline-none focus-visible:bg-primary/5'
                     : 'hover:bg-surface-hover'
                 }`}

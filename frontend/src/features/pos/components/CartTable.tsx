@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Minus, Plus, Trash2, ArrowDownToLine } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
 import { CartItem } from '../store/usePosStore';
@@ -7,11 +7,33 @@ import { useInventoryStore } from '@/features/inventory/core/inventory.store';
 export const CartTable = () => {
   const activeSession = usePosStore(state => state.saleTabs.find(t => t.id === state.activeTabId));
   const updateQuantity = usePosStore(state => state.updateQuantity);
+  const updateUnitPrice = usePosStore(state => state.updateUnitPrice);
   const removeFromCart = usePosStore(state => state.removeFromCart);
   const inventoryProducts = useInventoryStore(state => state.products);
 
   // Local state for quantity input to allow empty string during typing
   const [localQuantities, setLocalQuantities] = useState<Record<string, string>>({});
+  const [localPrices, setLocalPrices] = useState<Record<string, string>>({});
+  const qtyRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const priceRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  // Focus newly added cart item quantity automatically
+  useEffect(() => {
+    const handleFocusCartItem = (e: Event) => {
+      const detail = (e as CustomEvent<{ productId: string }>).detail;
+      if (detail?.productId) {
+        setTimeout(() => {
+          const input = qtyRefs.current[`new-${detail.productId}`] || qtyRefs.current[`ret-${detail.productId}`];
+          if (input) {
+            input.focus();
+            input.select();
+          }
+        }, 60);
+      }
+    };
+    window.addEventListener("pos:focus-cart-item", handleFocusCartItem);
+    return () => window.removeEventListener("pos:focus-cart-item", handleFocusCartItem);
+  }, []);
 
   if (!activeSession) return null;
   const cart = activeSession?.cart ?? [];
@@ -39,7 +61,24 @@ export const CartTable = () => {
     }
   };
 
-  const handleQtyBlur = (productId: string, currentQty: number, isReturn: boolean) => {
+  const handlePriceChange = (productId: string, value: string, isReturn: boolean) => {
+    setLocalPrices(prev => ({ ...prev, [`${isReturn ? "ret" : "new"}-${productId}`]: value }));
+    if (value === "") return;
+    const parsed = parseFloat(value);
+    if (!isNaN(parsed) && parsed >= 0) {
+      updateUnitPrice(productId, parsed, isReturn);
+    }
+  };
+
+  const handlePriceBlur = (productId: string, isReturn: boolean) => {
+    setLocalPrices(prev => {
+      const next = { ...prev };
+      delete next[`${isReturn ? "ret" : "new"}-${productId}`];
+      return next;
+    });
+  };
+
+const handleQtyBlur = (productId: string, currentQty: number, isReturn: boolean) => {
     setLocalQuantities(prev => {
       const next = { ...prev };
       delete next[`${isReturn ? 'ret' : 'new'}-${productId}`];
@@ -115,10 +154,31 @@ export const CartTable = () => {
               <Minus className="h-3 w-3" />
             </button>
             <input
+              ref={(el) => { qtyRefs.current[key] = el; }}
               type="number"
               value={inputValue}
               onChange={(e) => handleQtyChange(item.productId, e.target.value, item.maxStock, isReturn)}
               onBlur={() => handleQtyBlur(item.productId, item.quantity, isReturn)}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  if (isReturn || item.quantity < item.maxStock) {
+                    updateQuantity(item.productId, item.quantity + 1, isReturn);
+                  }
+                } else if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  if (item.quantity > 1) {
+                    updateQuantity(item.productId, item.quantity - 1, isReturn);
+                  }
+                } else if (e.key === 'Tab' && !e.shiftKey) {
+                  e.preventDefault();
+                  const priceInput = priceRefs.current[key];
+                  if (priceInput) {
+                    priceInput.focus();
+                    priceInput.select();
+                  }
+                }
+              }}
               aria-label={`Quantity for ${item.productName}`}
               className="text-xs font-black w-8 text-center tabular-nums bg-transparent text-text-primary focus:outline-none focus:bg-surface rounded no-spinners"
               min="1"
@@ -136,9 +196,48 @@ export const CartTable = () => {
           </div>
         </div>
 
-        {/* 5. Unit Price */}
-        <div className="w-24 text-right text-xs font-bold text-text-primary tabular-nums">
-          Rs {item.unitPrice.toLocaleString()}
+        {/* 5. Unit Price (Editable Custom Sale Price) */}
+        <div className="w-24 flex justify-end items-center">
+          <div className="flex items-center bg-surface-hover px-1.5 py-0.5 rounded border border-border focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20">
+            <span className="text-[10px] text-text-muted mr-1 font-bold">Rs</span>
+            <input
+              ref={(el) => { priceRefs.current[key] = el; }}
+              type="number"
+              value={localPrices[key] !== undefined ? localPrices[key] : item.unitPrice}
+              onChange={(e) => handlePriceChange(item.productId, e.target.value, isReturn)}
+              onBlur={() => handlePriceBlur(item.productId, isReturn)}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  updateUnitPrice(item.productId, item.unitPrice + 50, isReturn);
+                } else if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  if (item.unitPrice >= 50) {
+                    updateUnitPrice(item.productId, item.unitPrice - 50, isReturn);
+                  }
+                } else if (e.key === 'Tab' && !e.shiftKey) {
+                  e.preventDefault();
+                  // Focus back on POS Product Search
+                  const searchInput = document.getElementById('pos-product-search-input') as HTMLInputElement | null;
+                  if (searchInput) {
+                    searchInput.focus();
+                    searchInput.select();
+                  }
+                } else if (e.key === 'Tab' && e.shiftKey) {
+                  e.preventDefault();
+                  const qtyInput = qtyRefs.current[key];
+                  if (qtyInput) {
+                    qtyInput.focus();
+                    qtyInput.select();
+                  }
+                }
+              }}
+              aria-label={`Unit price for ${item.productName}`}
+              className="text-xs font-black w-16 text-right tabular-nums bg-transparent text-text-primary focus:outline-none no-spinners"
+              min="0"
+              step="1"
+            />
+          </div>
         </div>
 
         {/* 6. Discount */}

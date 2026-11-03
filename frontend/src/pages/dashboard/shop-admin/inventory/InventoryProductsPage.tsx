@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { InventoryTable, TableColumn } from '@/features/inventory/components/InventoryTable';
 import { useInventoryFilters } from '@/features/inventory/components/InventoryFilterContext';
 import { useProducts } from '@/features/inventory/hooks/useProducts';
@@ -21,6 +22,9 @@ import {
   buildProductInventoryPdfFilename,
 } from '@/features/inventory/templates/productInventoryA4Template';
 import { useMasterData } from '@/features/inventory/hooks/useMasterData';
+import { usePosStore } from '@/features/pos/store/usePosStore';
+import { DBInventory } from '@/types/db.types';
+import toast from 'react-hot-toast';
 
 interface InventoryProductsPageProps {
   mode?: 'products' | 'restock';
@@ -42,8 +46,10 @@ function computeMargin(salePrice: number, averageCost: number): { marginAmount: 
 }
 
 export function InventoryProductsPage({ mode = 'products' }: InventoryProductsPageProps) {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const fetchProductsStore = useInventoryStore((state) => state.fetchProducts);
+  const addToCart = usePosStore((state) => state.addToCart);
 
   const { role, hasPermission } = usePermissions();
   // isOrgAdmin: users with full product management authority
@@ -230,6 +236,30 @@ export function InventoryProductsPage({ mode = 'products' }: InventoryProductsPa
       // Store sync failure non-blocking
     }
   };
+
+  /**
+   * Double-click handler: adds product to active POS cart and navigates directly to POS.
+   */
+  const handleRowDoubleClick = useCallback((product: InventoryProduct) => {
+    const dbItem: DBInventory = {
+      id: product.id,
+      sku: product.sku || '',
+      barcode: product.barcode || '',
+      name: product.name,
+      costPrice: product.purchasePrice || product.averageCost || 0,
+      salePrice: product.price || 0,
+      stock: product.stock ?? 0,
+      reservedStock: 0,
+      lastUpdated: Date.now(),
+    };
+
+    addToCart(dbItem, false);
+    navigate('/dashboard/shop-admin/pos');
+    // Ensure the newly added item's quantity input receives focus in POS Cart
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('pos:focus-cart-item', { detail: { productId: dbItem.id } }));
+    }, 150);
+  }, [addToCart, navigate]);
 
   const columns: TableColumn<InventoryProduct>[] = [
     {
@@ -433,7 +463,11 @@ export function InventoryProductsPage({ mode = 'products' }: InventoryProductsPa
             <Loader2 className="w-8 h-8 animate-spin text-[#006970]" />
           </div>
         ) : null}
-        <InventoryTable columns={columns} data={products} />
+        <InventoryTable
+          columns={columns}
+          data={products}
+          onRowDoubleClick={handleRowDoubleClick}
+        />
       </div>
 
       {/* Product Edit Modal (Products Mode) */}

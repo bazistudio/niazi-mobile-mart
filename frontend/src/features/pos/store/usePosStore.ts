@@ -133,6 +133,7 @@ interface PosStore {
   prepareReplaceExchange: () => void;
   addToCart: (product: DBInventory, isReturn?: boolean) => void;
   updateQuantity: (productId: string, quantity: number, isReturn?: boolean) => void;
+  updateUnitPrice: (productId: string, unitPrice: number, isReturn?: boolean) => void;
   removeFromCart: (productId: string, isReturn?: boolean) => void;
   clearCart: () => void;
   loadInvoice: (invoice: any) => void;
@@ -428,6 +429,27 @@ export const usePosStore = create<PosStore>()(
               return item;
             });
             
+            return isReturn ? { ...tab, returnedItems: updatedList } : { ...tab, cart: updatedList };
+          })
+        });
+      },
+
+      updateUnitPrice: (productId: string, unitPrice: number, isReturn = false) => {
+        const { saleTabs, activeTabId } = get();
+        if (unitPrice < 0) return;
+
+        set({
+          saleTabs: saleTabs.map(tab => {
+            if (tab.id !== activeTabId) return tab;
+
+            const targetList = isReturn ? tab.returnedItems : tab.cart;
+            const updatedList = targetList.map(item => {
+              if (item.productId === productId) {
+                return { ...item, unitPrice };
+              }
+              return item;
+            });
+
             return isReturn ? { ...tab, returnedItems: updatedList } : { ...tab, cart: updatedList };
           })
         });
