@@ -1,4 +1,4 @@
-import { isTauriEnvironment, tauriClient } from '@/lib/tauri/tauriClient';
+import { isTauriEnvironment, tauriClient, SalesReturn } from '@/lib/tauri/tauriClient';
 
 export interface DashboardMetrics {
   summary: {
@@ -36,6 +36,11 @@ export interface HourlySalesData {
   hour: string;
   sales: number;
   ordersCount: number;
+  sales_amount?: number;
+  returns_amount?: number;
+  net_amount?: number;
+  sales_count?: number;
+  returns_count?: number;
 }
 
 export interface CategorySalesData {
@@ -100,16 +105,35 @@ export const dashboardApi = {
   getHourlyBreakdown: async (params?: { date?: string; branchId?: string | null }): Promise<{ success: boolean; data: HourlyBreakdownData }> => {
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const sales = await tauriClient.saleList({
-      start_date: todayStr,
-      end_date: todayStr,
-      branch_id: params?.branchId || undefined,
-      limit: 500,
-    }).catch(() => []);
 
-    const hourlyMap: Record<number, { sales: number; count: number }> = {};
+    // DASHBOARD-KPI-PHASE3: Fetch sales and completed returns in parallel so
+    // that the hourly chart reflects net revenue after cash returns.
+    const [sales, returns] = await Promise.all([
+      tauriClient.saleList({
+        start_date: todayStr,
+        end_date: todayStr,
+        branch_id: params?.branchId || undefined,
+        limit: 500,
+      }).catch(() => []),
+      tauriClient.salesReturnList({
+        start_date: todayStr,
+        end_date: todayStr,
+        branch_id: params?.branchId || undefined,
+        status: 'COMPLETED',
+        limit: 500,
+      }).catch(() => [] as SalesReturn[]),
+    ]);
+
+    interface HourlyBucket {
+      sales_amount: number;
+      returns_amount: number;
+      sales_count: number;
+      returns_count: number;
+    }
+
+    const hourlyMap: Record<number, HourlyBucket> = {};
     for (let i = 0; i < 24; i++) {
-      hourlyMap[i] = { sales: 0, count: 0 };
+      hourlyMap[i] = { sales_amount: 0, returns_amount: 0, sales_count: 0, returns_count: 0 };
     }
 
     const isSameDay = (date1: Date, date2: Date) =>
@@ -117,24 +141,50 @@ export const dashboardApi = {
       date1.getMonth() === date2.getMonth() &&
       date1.getDate() === date2.getDate();
 
+    // 1. Record completed sales at their transaction timestamp
     for (const s of sales) {
       if (s.sale_status === 'COMPLETED' && s.created_at) {
         const d = new Date(s.created_at);
         if (isSameDay(d, now)) {
           const hour = d.getHours();
           if (hourlyMap[hour]) {
-            hourlyMap[hour].sales += s.total_amount || 0;
-            hourlyMap[hour].count += 1;
+            hourlyMap[hour].sales_amount += s.total_amount || 0;
+            hourlyMap[hour].sales_count += 1;
           }
         }
       }
     }
 
-    const hourlySales: HourlySalesData[] = Array.from({ length: 24 }, (_, i) => ({
-      hour: `${i.toString().padStart(2, '0')}:00`,
-      sales: hourlyMap[i].sales,
-      ordersCount: hourlyMap[i].count,
-    }));
+    // 2. Record completed returns at their return timestamp (not sale timestamp)
+    // Transaction count (sales_count) is NOT decremented by returns; returns are tracked separately.
+    // Net amount is calculated as sales_amount - returns_amount without zero-clamping.
+    for (const r of returns) {
+      if (r.status === 'COMPLETED' && r.created_at) {
+        const d = new Date(r.created_at);
+        if (isSameDay(d, now)) {
+          const hour = d.getHours();
+          if (hourlyMap[hour]) {
+            hourlyMap[hour].returns_amount += r.total_amount || 0;
+            hourlyMap[hour].returns_count += 1;
+          }
+        }
+      }
+    }
+
+    const hourlySales: HourlySalesData[] = Array.from({ length: 24 }, (_, i) => {
+      const b = hourlyMap[i];
+      const net_amount = b.sales_amount - b.returns_amount;
+      return {
+        hour: `${i.toString().padStart(2, '0')}:00`,
+        sales: net_amount, // Net sales for backward-compatible rendering (not clamped to 0)
+        ordersCount: b.sales_count, // Sales count is NOT decremented by returns
+        sales_amount: b.sales_amount,
+        returns_amount: b.returns_amount,
+        net_amount,
+        sales_count: b.sales_count,
+        returns_count: b.returns_count,
+      };
+    });
 
     return {
       success: true,
