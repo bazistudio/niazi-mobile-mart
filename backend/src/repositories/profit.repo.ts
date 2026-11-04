@@ -1,6 +1,10 @@
 /**
  * Profit & Gross Margin PostgreSQL Repository
  * Direct TypeScript port of src-tauri/src/services/profit_service.rs.
+ *
+ * DASHBOARD-KPI-PHASE3: Added sales_returns deduction queries so that
+ * completed cash returns reduce net_sales, total_cogs, gross_profit and
+ * gross_margin exactly as the Rust profit_repository.rs reference does.
  */
 
 import { Pool } from 'pg';
@@ -20,6 +24,9 @@ export interface ProfitSummaryDto {
   gross_margin: number; // percentage
   total_invoices: number;
   total_items_sold: number;
+  returns_count: number; // DASHBOARD-KPI-PHASE3B: completed returns in period
+  returned_revenue: number;
+  returned_cogs: number;
 }
 
 export interface ProductProfitDto {
@@ -41,6 +48,8 @@ export interface ProfitMetricsDto {
   gross_profit: number;
   gross_margin: number;
   orders_count: number;
+  returns_count?: number;
+  returned_revenue?: number;
 }
 
 export interface DashboardProfitSummaryDto {
@@ -77,6 +86,7 @@ export async function getProfitSummary(
   pool: Pool,
   filter?: ProfitReportFilter
 ): Promise<ProfitSummaryDto> {
+  // ── Sales query params (Query 1) ──────────────────────────────────────────
   let salesWhere = "WHERE sale_status != 'VOIDED'";
   const params: unknown[] = [];
   let pIdx = 1;
@@ -106,6 +116,7 @@ export async function getProfitSummary(
     ${salesWhere}
   `;
 
+  // ── Sale-lines query params (Query 2) ─────────────────────────────────────
   let linesWhere = "WHERE sale_id IN (SELECT id FROM sales WHERE sale_status != 'VOIDED'";
   const lineParams: unknown[] = [];
   let lpIdx = 1;
@@ -134,35 +145,120 @@ export async function getProfitSummary(
     ${linesWhere}
   `;
 
+  // ── DASHBOARD-KPI-PHASE3: Returns revenue query params (Query 3) ──────────
+  // Uses sr.created_at (return timestamp) with the same date/branch boundaries
+  // so that a return made today reduces today's net figures regardless of when
+  // the original sale occurred.  Only status='COMPLETED' returns are counted;
+  // CANCELLED / PENDING returns do NOT affect KPIs.
+  let returnsRevenueWhere = "WHERE status = 'COMPLETED'";
+  const retRevParams: unknown[] = [];
+  let rrIdx = 1;
+
+  if (filter?.branch_id) {
+    returnsRevenueWhere += ` AND branch_id = $${rrIdx++}`;
+    retRevParams.push(filter.branch_id);
+  }
+  if (filter?.start_date) {
+    const sDate = filter.start_date.length === 10 ? parseLocalDateStart(filter.start_date) : filter.start_date;
+    returnsRevenueWhere += ` AND created_at >= $${rrIdx++}`;
+    retRevParams.push(sDate);
+  }
+  if (filter?.end_date) {
+    const eDate = filter.end_date.length === 10 ? parseLocalDateEnd(filter.end_date) : filter.end_date;
+    returnsRevenueWhere += ` AND created_at <= $${rrIdx++}`;
+    retRevParams.push(eDate);
+  }
+
+  const returnsRevenueQuery = `
+    SELECT
+      COALESCE(SUM(total_amount), 0)::BIGINT AS returned_revenue,
+      COUNT(*)::BIGINT AS returns_count
+    FROM sales_returns
+    ${returnsRevenueWhere}
+  `;
+
+  // ── DASHBOARD-KPI-PHASE3: Returns COGS query params (Query 4) ────────────
+  // Joins sales_return_lines → sale_lines to recover the original
+  // cost_price_snapshot so that COGS reversal uses historical cost, not
+  // current product cost.
+  let returnsCogsWhere = "WHERE sr.status = 'COMPLETED'";
+  const retCogsParams: unknown[] = [];
+  let rcIdx = 1;
+
+  if (filter?.branch_id) {
+    returnsCogsWhere += ` AND sr.branch_id = $${rcIdx++}`;
+    retCogsParams.push(filter.branch_id);
+  }
+  if (filter?.start_date) {
+    const sDate = filter.start_date.length === 10 ? parseLocalDateStart(filter.start_date) : filter.start_date;
+    returnsCogsWhere += ` AND sr.created_at >= $${rcIdx++}`;
+    retCogsParams.push(sDate);
+  }
+  if (filter?.end_date) {
+    const eDate = filter.end_date.length === 10 ? parseLocalDateEnd(filter.end_date) : filter.end_date;
+    returnsCogsWhere += ` AND sr.created_at <= $${rcIdx++}`;
+    retCogsParams.push(eDate);
+  }
+
+  const returnsCogsQuery = `
+    SELECT
+      COALESCE(SUM(srl.quantity * sl.cost_price_snapshot), 0)::BIGINT AS returned_cogs
+    FROM sales_return_lines srl
+    JOIN sales_returns sr ON srl.return_id = sr.id
+    JOIN sale_lines sl ON srl.sale_line_id = sl.id
+    ${returnsCogsWhere}
+  `;
+
   try {
-    const [salesRes, linesRes] = await Promise.all([
+    // Run all four queries in parallel for minimal latency
+    const [salesRes, linesRes, retRevRes, retCogsRes] = await Promise.all([
       pool.query(salesSummaryQuery, params),
       pool.query(linesSummaryQuery, lineParams),
+      pool.query(returnsRevenueQuery, retRevParams),
+      pool.query(returnsCogsQuery, retCogsParams),
     ]);
 
     const sRow = salesRes.rows[0] as Record<string, unknown>;
     const lRow = linesRes.rows[0] as Record<string, unknown>;
+    const rrRow = retRevRes.rows[0] as Record<string, unknown>;
+    const rcRow = retCogsRes.rows[0] as Record<string, unknown>;
 
-    const grossSales = Number(sRow?.['gross_sales'] ?? 0);
+    // Gross figures from sales / sale_lines
+    const grossSales    = Number(sRow?.['gross_sales']     ?? 0);
     const totalDiscounts = Number(sRow?.['total_discounts'] ?? 0);
-    const netSales = Number(sRow?.['net_sales'] ?? 0);
-    const totalInvoices = Number(sRow?.['total_invoices'] ?? 0);
-
-    const totalCogs = Number(lRow?.['total_cogs'] ?? 0);
+    const grossNetSales  = Number(sRow?.['net_sales']       ?? 0);
+    const grossInvoices  = Number(sRow?.['total_invoices']  ?? 0);
+    const grossCogs      = Number(lRow?.['total_cogs']      ?? 0);
     const totalItemsSold = Number(lRow?.['total_items_sold'] ?? 0);
+
+    // DASHBOARD-KPI-PHASE3: Return deductions
+    const returnedRevenue = Number(rrRow?.['returned_revenue'] ?? 0);
+    const returnsCount    = Number(rrRow?.['returns_count']    ?? 0);
+    const returnedCogs    = Number(rcRow?.['returned_cogs']    ?? 0);
+
+    // Phase 3B Critical Accounting: Do NOT clamp net sales or COGS to zero,
+    // as returns on a day without sales are valid negative financial events.
+    const netSales    = grossNetSales - returnedRevenue;
+    const totalCogs   = grossCogs - returnedCogs;
+    // Completed sales invoice count is kept strictly separate from returns count.
+    // One original sale can have multiple partial returns.
+    const totalInvoices = grossInvoices;
 
     const grossProfit = netSales - totalCogs;
     const grossMargin = netSales > 0 ? Number(((grossProfit / netSales) * 100).toFixed(2)) : 0;
 
     return {
-      gross_sales: grossSales,
-      total_discounts: totalDiscounts,
-      net_sales: netSales,
-      total_cogs: totalCogs,
-      gross_profit: grossProfit,
-      gross_margin: grossMargin,
-      total_invoices: totalInvoices,
+      gross_sales:      grossSales,
+      total_discounts:  totalDiscounts,
+      net_sales:        netSales,
+      total_cogs:       totalCogs,
+      gross_profit:     grossProfit,
+      gross_margin:     grossMargin,
+      total_invoices:   totalInvoices,
       total_items_sold: totalItemsSold,
+      returns_count:    returnsCount,
+      returned_revenue: returnedRevenue,
+      returned_cogs:    returnedCogs,
     };
   } catch (err) {
     console.error('[profit.repo] Error fetching profit summary:', err);
@@ -183,13 +279,15 @@ async function getPeriodProfitMetrics(
   });
 
   return {
-    gross_revenue: summary.gross_sales,
-    discounts: summary.total_discounts,
-    net_revenue: summary.net_sales,
-    cogs: summary.total_cogs,
-    gross_profit: summary.gross_profit,
-    gross_margin: summary.gross_margin,
-    orders_count: summary.total_invoices,
+    gross_revenue:    summary.gross_sales,
+    discounts:        summary.total_discounts,
+    net_revenue:      summary.net_sales,
+    cogs:             summary.total_cogs,
+    gross_profit:     summary.gross_profit,
+    gross_margin:     summary.gross_margin,
+    orders_count:     summary.total_invoices,
+    returns_count:    summary.returns_count,
+    returned_revenue: summary.returned_revenue,
   };
 }
 

@@ -116,10 +116,14 @@ export function createReturnsRouter(pool: Pool): Router {
         effectiveBranchId = identity.branch_id;
       }
 
+      const limitQuery = req.query['limit'] ? parseInt(req.query['limit'] as string, 10) : undefined;
       const returns = await listSalesReturns(pool, {
         branch_id: effectiveBranchId,
         customer_id: (req.query['customer_id'] as string) || undefined,
         sale_id: (req.query['sale_id'] as string) || undefined,
+        start_date: (req.query['start_date'] as string) || undefined,
+        end_date: (req.query['end_date'] as string) || undefined,
+        limit: isNaN(limitQuery as number) ? undefined : limitQuery,
       });
       res.status(200).json(returns);
     } catch (err) {
