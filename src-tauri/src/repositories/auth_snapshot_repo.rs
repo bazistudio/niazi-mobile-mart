@@ -62,7 +62,13 @@ impl SQLiteAuthSnapshotRepository {
         let conn_arc = self.db.inner();
         let guard = conn_arc.lock().await;
 
-        let role_str = snapshot.role.to_string();
+        let role_str = if !snapshot.role_raw.trim().is_empty()
+            && snapshot.role_raw.trim().to_uppercase() != snapshot.role.to_string().to_uppercase()
+        {
+            snapshot.role_raw.trim().to_string()
+        } else {
+            snapshot.role.to_string()
+        };
         let status_str = status_to_string(&snapshot.status);
 
         let sql = "
@@ -128,6 +134,7 @@ impl SQLiteAuthSnapshotRepository {
                     organization_id: r.get(2)?,
                     branch_id: r.get(3)?,
                     role: parse_role(&role_raw),
+                    role_raw: role_raw.clone(),
                     credential_hash: r.get(5)?,
                     access_profile_json: r.get(6)?,
                     credential_version: r.get(7)?,
@@ -168,6 +175,7 @@ impl SQLiteAuthSnapshotRepository {
                     organization_id: r.get(2)?,
                     branch_id: r.get(3)?,
                     role: parse_role(&role_raw),
+                    role_raw: role_raw.clone(),
                     credential_hash: r.get(5)?,
                     access_profile_json: r.get(6)?,
                     credential_version: r.get(7)?,
@@ -213,6 +221,7 @@ impl SQLiteAuthSnapshotRepository {
                     organization_id: r.get(2)?,
                     branch_id: r.get(3)?,
                     role: parse_role(&role_raw),
+                    role_raw: role_raw.clone(),
                     credential_hash: r.get(5)?,
                     access_profile_json: r.get(6)?,
                     credential_version: r.get(7)?,
@@ -258,6 +267,7 @@ impl SQLiteAuthSnapshotRepository {
                     organization_id: r.get(2)?,
                     branch_id: r.get(3)?,
                     role: parse_role(&role_raw),
+                    role_raw: role_raw.clone(),
                     credential_hash: r.get(5)?,
                     access_profile_json: r.get(6)?,
                     credential_version: r.get(7)?,
@@ -321,6 +331,7 @@ mod tests {
             organization_id: "00000000-0000-0000-0000-000000000001".to_string(),
             branch_id: Some("00000000-0000-0000-0000-000000000002".to_string()),
             role: UserRole::Cashier,
+            role_raw: String::new(),
             credential_hash: "$argon2id$v=19$m=19456,t=2,p=1$synthetic_salt$synthetic_hash".to_string(),
             access_profile_json: r#"{"allowed_pages":["pos","dashboard"],"allowed_actions":["pos:sale"]}"#.to_string(),
             credential_version: 1,

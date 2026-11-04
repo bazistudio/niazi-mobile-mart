@@ -11,6 +11,13 @@ pub struct AuthSnapshot {
     pub organization_id: String,
     pub branch_id: Option<String>,
     pub role: UserRole,
+    /// Raw role string as stored in SQLite before enum parsing.
+    /// Populated by the repository; not present in serialized JSON (serde skip).
+    /// Used to detect legacy blocked roles (SUPER_ADMIN, OWNER, MULTI_ADMIN, SHOPADMIN)
+    /// that are silently mapped to UserRole::Staff by parse_role() and cannot be
+    /// distinguished at the enum level.
+    #[serde(skip)]
+    pub role_raw: String,
     pub credential_hash: String,
     pub access_profile_json: String,
     pub credential_version: i32,

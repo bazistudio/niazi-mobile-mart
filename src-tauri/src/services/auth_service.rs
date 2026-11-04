@@ -161,6 +161,24 @@ impl AuthService {
             }
         }
 
+        // 2b. Reject legacy admin roles that have no valid offline login path.
+        // These roles (SUPER_ADMIN, OWNER, MULTI_ADMIN, SHOPADMIN, BRANCH_ADMIN) were
+        // deprecated in NMM v1.2 and must only authenticate via the online TypeScript API.
+        // The parse_role() mapping silently downgrades them to UserRole::Staff, so we
+        // check the raw stored string to detect and reject them here.
+        const BLOCKED_LEGACY_ROLES: &[&str] = &[
+            "SUPER_ADMIN",
+            "OWNER",
+            "MULTI_ADMIN",
+            "SHOPADMIN",
+            "BRANCH_ADMIN",
+        ];
+        if BLOCKED_LEGACY_ROLES.contains(&snapshot.role_raw.to_uppercase().as_str()) {
+            return Err(AppError::Forbidden(
+                "ACCOUNT_DISABLED: This account role is deprecated and blocked from offline login.                  Contact your administrator.".to_string(),
+            ));
+        }
+
         // 3. Verify Argon2id credential hash (supports both password and PIN hashes separated by '|')
         let hashes: Vec<&str> = snapshot.credential_hash.split('|').collect();
         let pwd_hash = hashes.first().unwrap_or(&"");
@@ -1063,6 +1081,7 @@ mod tests {
             username: username.to_string(),
             organization_id: "test-org-123".to_string(),
             branch_id,
+            role_raw: role.to_string(),
             role,
             credential_hash: hash,
             access_profile_json: profile_json,
@@ -1346,5 +1365,62 @@ mod tests {
 
         assert!(session.active_token.is_none());
         assert!(session.is_authenticated);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_auth_test_12_blocked_legacy_admin_roles() {
+        // Security: SUPER_ADMIN, OWNER, MULTI_ADMIN, SHOPADMIN, BRANCH_ADMIN must be
+        // rejected during offline login even though parse_role() maps them to Staff.
+        // We test this by directly constructing snapshots with role_raw overridden.
+        let state = AppState::in_memory("1.2.15");
+        let snapshot_repo = state.auth_snapshot_repo().unwrap();
+
+        let blocked_roles = vec![
+            "SUPER_ADMIN",
+            "OWNER",
+            "MULTI_ADMIN",
+            "SHOPADMIN",
+            "BRANCH_ADMIN",
+        ];
+
+        for role_raw in &blocked_roles {
+            // Build a snapshot where role_raw holds the blocked string.
+            // make_test_snapshot sets role_raw = role.to_string() = "STAFF",
+            // so we manually override role_raw after construction.
+            let mut snapshot = make_test_snapshot(
+                &format!("blocked-{}", role_raw.to_lowercase()),
+                &format!("blocked_{}", role_raw.to_lowercase()),
+                "ValidCred123!",
+                UserRole::Staff, // parsed role (downgraded by parse_role)
+                UserStatus::Active,
+                None,
+                None,
+            );
+            // Override role_raw to simulate the legacy value stored in SQLite
+            snapshot.role_raw = role_raw.to_string();
+            snapshot_repo.upsert(&snapshot).await.unwrap();
+
+            let result = AuthService::login_with_snapshot(
+                &snapshot_repo,
+                &state,
+                &format!("blocked_{}", role_raw.to_lowercase()),
+                "ValidCred123!",
+            )
+            .await;
+
+            assert!(
+                result.is_err(),
+                "Expected Err for blocked role {}, got Ok",
+                role_raw
+            );
+            let err = result.unwrap_err();
+            let err_str = format!("{:?}", err);
+            assert!(
+                err_str.contains("deprecated and blocked") || err_str.contains("ACCOUNT_DISABLED"),
+                "Expected ACCOUNT_DISABLED message for role {}, got: {}",
+                role_raw,
+                err_str
+            );
+        }
     }
 }
