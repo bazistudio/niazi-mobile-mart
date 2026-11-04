@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useBarcodeScanner } from '../../hooks/useBarcodeScanner';
 import { Search, X, Receipt, ArrowRight, Loader2, Calendar, User, ShoppingBag } from 'lucide-react';
 import { usePosStore } from '../../store/usePosStore';
 import { salesApi } from '@/services/sales.api';
@@ -11,9 +12,20 @@ interface InvoiceLookupModalProps {
   onClose: () => void;
   /** Optional heading override, e.g. 'Select Sale Invoice for Cash Return' */
   heading?: string;
+  /**
+   * SCANNER-FIX-02: When an invoice barcode is scanned from SaleWorkspace,
+   * the ORD-NNNNN string is passed here so the modal opens pre-filled and
+   * immediately triggers a lookup without waiting for the 400ms debounce.
+   */
+  initialSearchTerm?: string;
 }
 
-export const InvoiceLookupModal: React.FC<InvoiceLookupModalProps> = ({ isOpen, onClose, heading }) => {
+export const InvoiceLookupModal: React.FC<InvoiceLookupModalProps> = ({
+  isOpen,
+  onClose,
+  heading,
+  initialSearchTerm,
+}) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedTerm, setDebouncedTerm] = useState('');
   const [results, setResults] = useState<any[]>([]);
@@ -24,16 +36,40 @@ export const InvoiceLookupModal: React.FC<InvoiceLookupModalProps> = ({ isOpen, 
   // Restrict invoice lookup to the operator's active branch (F-03 fix)
   const activeBranchId = useOrganizationStore((s) => s.activeShopId);
 
-  // Auto-focus on open
+  // Auto-focus on open; seed initialSearchTerm when provided by scanner
   useEffect(() => {
     if (isOpen) {
       setTimeout(() => inputRef.current?.focus(), 50);
-      setSearchTerm('');
-      setResults([]);
+      if (initialSearchTerm) {
+        // SCANNER-FIX-02: Pre-fill the search box and trigger an immediate lookup
+        // by bypassing the debounce (set both terms at once).
+        setSearchTerm(initialSearchTerm);
+        setDebouncedTerm(initialSearchTerm);
+      } else {
+        setSearchTerm('');
+        setResults([]);
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, initialSearchTerm]);
 
-  // Debounce search term
+  // SCANNER-FIX-03: Secondary scanner hook inside the modal.
+  // If the operator scans another invoice barcode while the modal is already open
+  // (e.g. wrong barcode first time), this handler replaces the search term and
+  // fires an immediate lookup without waiting for the debounce.
+  const handleModalScan = useCallback(
+    (scannedCode: string) => {
+      const trimmed = scannedCode.trim().toUpperCase();
+      if (!trimmed || trimmed.length < 2) return;
+      // Only handle invoice-pattern scans inside the modal; ignore product barcodes
+      if (!/^(ORD|RET)-/i.test(trimmed)) return;
+      setSearchTerm(trimmed);
+      setDebouncedTerm(trimmed); // bypass 400ms debounce
+    },
+    []
+  );
+  useBarcodeScanner({ onScan: handleModalScan, enabled: isOpen });
+
+  // Debounce search term (manual typing path; scanner path sets debouncedTerm directly)
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedTerm(searchTerm);
@@ -65,7 +101,7 @@ export const InvoiceLookupModal: React.FC<InvoiceLookupModalProps> = ({ isOpen, 
     };
 
     fetchInvoices();
-  }, [debouncedTerm]);
+  }, [debouncedTerm, activeBranchId]);
 
   if (!isOpen) return null;
 

@@ -27,12 +27,17 @@ export const SaleWorkspace: React.FC = () => {
   const activeSession = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId));
   const isReturnMode = activeSession?.mode === 'replace';
 
-  // Listen for custom event to open invoice lookup from extra actions toolbar
+  // Track a prefill value that the scanner or external caller wants to seed into the modal
+  const [invoiceLookupPrefill, setInvoiceLookupPrefill] = useState<string | undefined>(undefined);
+
+  // Listen for custom event to open invoice lookup from extra actions toolbar or scanner
   useEffect(() => {
     const handleOpenLookup = (e: Event) => {
-      // GAP-02: read optional heading from event detail (e.g. 'Select Sale Invoice for Cash Return')
-      const detail = (e as CustomEvent<{ heading?: string }>).detail;
+      // Read optional heading and prefill from event detail
+      // SCANNER-FIX-02: detail.prefill carries the ORD-NNNNN string when scanner fires this event
+      const detail = (e as CustomEvent<{ heading?: string; prefill?: string }>).detail;
       setInvoiceLookupHeading(detail?.heading);
+      setInvoiceLookupPrefill(detail?.prefill);
       setInvoiceLookupOpen(true);
     };
     window.addEventListener('pos:open-invoice-lookup', handleOpenLookup);
@@ -54,12 +59,33 @@ export const SaleWorkspace: React.FC = () => {
     fetchProducts();
   }, [fetchProducts, activeShopId]);
 
-  // Headless hardware scanner handler
+  /**
+   * SCANNER-FIX-02: Universal barcode handler.
+   *
+   * Routing logic:
+   *  1. Invoice barcode (matches /^(ORD|RET)-/i) → open InvoiceLookupModal pre-filled
+   *     with the scanned invoice number.  The barcode on printed receipts encodes the
+   *     invoice_number field directly (e.g. "ORD-10024") via generateBarcodeSvg() in
+   *     printFormatter.ts, so the scanner delivers that exact string.
+   *  2. Product barcode / SKU → existing add-to-cart logic (unchanged).
+   */
   const handleScanComplete = useCallback(
     (scannedCode: string) => {
       const trimmed = scannedCode.trim();
       if (!trimmed || trimmed.length < 2) return;
 
+      // --- Route 1: Invoice barcode ---
+      if (/^(ORD|RET)-/i.test(trimmed)) {
+        window.dispatchEvent(
+          new CustomEvent('pos:open-invoice-lookup', {
+            detail: { prefill: trimmed.toUpperCase() },
+          })
+        );
+        toast(`Invoice barcode: ${trimmed.toUpperCase()}`, { icon: '🧾', duration: 2500 });
+        return;
+      }
+
+      // --- Route 2: Product barcode / SKU ---
       const matchedProduct = products.find(
         (p) =>
           (p.barcode && p.barcode.toLowerCase() === trimmed.toLowerCase()) ||
@@ -86,21 +112,18 @@ export const SaleWorkspace: React.FC = () => {
         };
 
         addToCart(dbProduct, isReturnMode);
-        toast.success(`Scanned: ${matchedProduct.name}`, {
-          icon: '🏷️',
-          duration: 2000,
-        });
+        toast.success(`Scanned: ${matchedProduct.name}`, { icon: '🏷️', duration: 2000 });
       } else {
-        toast.error(`Barcode not found: ${trimmed}`, {
-          duration: 3000,
-        });
+        toast.error(`Barcode not found: ${trimmed}`, { duration: 3000 });
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [products, isReturnMode, addToCart]
   );
 
   // Activate headless barcode scanner
-  useBarcodeScanner({ onScan: handleScanComplete });
+  // Activate headless barcode scanner (disabled when InvoiceLookupModal is open to prevent duplicate processing)
+  useBarcodeScanner({ onScan: handleScanComplete, enabled: !isInvoiceLookupOpen });
 
   return (
     <main className="flex-1 flex flex-col min-h-0 bg-background overflow-hidden p-2 sm:p-3 gap-2 select-none">
@@ -149,12 +172,17 @@ export const SaleWorkspace: React.FC = () => {
         </div>
       </div>
 
-      {/* Invoice Lookup Modal for Return by Invoice action */}
+      {/* Invoice Lookup Modal for Return by Invoice action and scanner invoice routing */}
       {isInvoiceLookupOpen && (
         <InvoiceLookupModal
           isOpen={isInvoiceLookupOpen}
-          onClose={() => { setInvoiceLookupOpen(false); setInvoiceLookupHeading(undefined); }}
+          onClose={() => {
+            setInvoiceLookupOpen(false);
+            setInvoiceLookupHeading(undefined);
+            setInvoiceLookupPrefill(undefined);
+          }}
           heading={invoiceLookupHeading}
+          initialSearchTerm={invoiceLookupPrefill}
         />
       )}
     </main>
