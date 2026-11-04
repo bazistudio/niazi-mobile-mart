@@ -17,7 +17,7 @@ import { usePrinterStore } from '@/features/settings/printer/store/printer.store
 import { GlobalLoadingOverlay } from '@/components/ui/GlobalLoadingOverlay';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
-import { CashSessionOpenModal } from '@/features/cash';
+import { CashSessionOpenModal, useCashStore } from '@/features/cash';
 import { ExchangeSettlementModal } from './modals/ExchangeSettlementModal';
 import { ExchangeResultSummaryModal } from './modals/ExchangeResultSummaryModal';
 
@@ -35,6 +35,13 @@ export const CartSummary: React.FC = () => {
   const setCheckoutIdempotencyKey = usePosStore((s) => s.setCheckoutIdempotencyKey);
   const setCustomer = usePosStore((s) => s.setCustomer);
   const processCashReturn = usePosStore((s) => s.processCashReturn);
+  const isReturnMode = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId)?.isReturnMode ?? false);
+  const enterCashReturnMode = usePosStore((s) => s.enterCashReturnMode);
+  const exitCashReturnMode = usePosStore((s) => s.exitCashReturnMode);
+  const returnLines = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId)?.returnLines ?? []);
+
+  // Phase 1B: Drawer cash balance for State B review banner
+  const currentDrawerCash = useCashStore((s) => s.summary?.expected_closing_cash ?? s.currentSession?.opening_cash ?? 0);
 
   const { settings, shopHeader, fetchSettings } = usePrinterStore();
 
@@ -109,11 +116,29 @@ export const CartSummary: React.FC = () => {
     activeSession?.invoiceDiscountValue,
   ]);
 
+  // Phase 1B: Window-level Escape listener — active during State B (isReturnMode=true).
+  // Fix for Defect #4: Escape must cancel return mode from anywhere on screen,
+  // not only when focus is on the Cash Return button.
+  useEffect(() => {
+    if (!isReturnMode) return;
+    const handleEscapeKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        exitCashReturnMode();
+        toast('Cash return cancelled.', { icon: '↩️' });
+      }
+    };
+    window.addEventListener('keydown', handleEscapeKey);
+    return () => window.removeEventListener('keydown', handleEscapeKey);
+  }, [isReturnMode, exitCashReturnMode]);
+
   if (!activeSession) return null;
 
   const cart = activeSession.cart ?? [];
   const returnedItems = activeSession.returnedItems ?? [];
   const isCartEmpty = cart.length === 0 && returnedItems.length === 0;
+  // Strict Minimum Selling Price Guard: cart line price must be strictly greater than product cost
+  const hasInvalidPrice = cart.some(item => item.costPrice > 0 && item.unitPrice <= item.costPrice);
   const hasCustomer = !!(activeSession.customer && activeSession.customer.id !== 'walk-in');
   const hasLinkedInvoice = !!activeSession.linkedInvoiceId;
   const hasDiscount = (activeSession.invoiceDiscountValue || 0) > 0;
@@ -132,24 +157,57 @@ export const CartSummary: React.FC = () => {
   }
   const grandTotal = preDiscountTotal - invoiceDiscountAmount;
 
-  // GAP-02: If no linked invoice, open InvoiceLookupModal so the cashier can select
-  // the original sale. If an invoice is already linked, proceed directly with cash return.
+  // Selected return lines refund amount (used when in return mode)
+  const selectedReturnLines = returnLines.filter((l) => l.selectedForReturn && l.returnableQty > 0);
+  const selectedRefundAmt = selectedReturnLines.reduce(
+    (sum, l) => sum + l.originalUnitPrice * l.returnQty,
+    0
+  );
+  const effectiveGrandTotal = isReturnMode
+    ? (returnLines.length > 0 ? selectedRefundAmt : Math.abs(grandTotal))
+    : grandTotal;
+
+  // Phase 1B: Two-stage Cash Return handler.
+  // State A (isReturnMode=false, first click):
+  //   - If no invoice: open invoice lookup.
+  //   - If no cart items: show error.
+  //   - Otherwise: call processCashReturn() which calls enterCashReturnMode() and shows prep toast.
+  // State B (isReturnMode=true, second click):
+  //   - Call processCashReturn() which submits the real API and resets state.
+  //   - ESC / clearCart cancels return mode via exitCashReturnMode (called in clearCart).
   const handleCashReturn = async () => {
     if (!activeSession) return;
-    if (!activeSession.linkedInvoiceId) {
-      // No invoice linked — guide the cashier to select one first.
-      window.dispatchEvent(new CustomEvent('pos:open-invoice-lookup', { detail: { heading: 'Select Sale Invoice for Cash Return' } }));
-      toast('Select the original sale invoice to proceed with Cash Return.', { icon: '🔍' });
+
+    // State A: not yet in return mode
+    if (!isReturnMode) {
+      if (!activeSession.linkedInvoiceId) {
+        // No invoice linked — guide the cashier to select one first.
+        window.dispatchEvent(new CustomEvent('pos:open-invoice-lookup', { detail: { heading: 'Select Sale Invoice for Cash Return' } }));
+        toast('Select the original sale invoice to proceed with Cash Return.', { icon: '🔍' });
+        return;
+      }
+      if (activeSession.cart.length === 0) {
+        toast.error('Add items to return before processing a Cash Return.');
+        return;
+      }
+      // Delegate to store: sets isReturnMode=true and shows prep toast (State A -> B)
+      try {
+        await processCashReturn();
+      } catch {
+        // processCashReturn already toasts on error
+      }
       return;
     }
-    if (activeSession.cart.length === 0 && (!activeSession.returnedItems || activeSession.returnedItems.length === 0)) {
-      toast.error('Add items to return before processing a Cash Return.');
-      return;
-    }
+
+    // State B: already in return mode — second click confirms (State B -> C)
+    if (isProcessing) return; // duplicate-click guard
+    setIsProcessing(true);
     try {
       await processCashReturn();
     } catch {
-      // processCashReturn already toasts on error
+      // processCashReturn already toasts on error; it also calls exitCashReturnMode on failure
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -165,6 +223,10 @@ export const CartSummary: React.FC = () => {
   const handleCashSale = () => {
     if (isCartEmpty) {
       toast.error('Cart is empty');
+      return;
+    }
+    if (hasInvalidPrice) {
+      toast.error('Cannot proceed with sale: One or more cart items have a selling price at or below cost price.', { duration: 4000 });
       return;
     }
 
@@ -189,6 +251,10 @@ export const CartSummary: React.FC = () => {
   const handlePayAndPrint = () => {
     if (isCartEmpty) {
       toast.error('Cart is empty');
+      return;
+    }
+    if (hasInvalidPrice) {
+      toast.error('Cannot proceed with sale: One or more cart items have a selling price at or below cost price.', { duration: 4000 });
       return;
     }
 
@@ -515,19 +581,53 @@ export const CartSummary: React.FC = () => {
         </div>
       </div>
 
+      {/* Phase 1B: Cash Return State B review banner — visible during return preparation */}
+      {isReturnMode && (() => {
+        const selectedLines = returnLines.filter(l => l.selectedForReturn && l.returnableQty > 0);
+        const totalReturnQty = selectedLines.reduce((s, l) => s + l.returnQty, 0);
+        const totalRefundAmt = selectedLines.reduce((s, l) => s + l.originalUnitPrice * l.returnQty, 0);
+        const drawerInsufficient = totalRefundAmt > currentDrawerCash;
+        return (
+          <div className="flex flex-col gap-1 px-2.5 py-2 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-300 dark:border-red-800 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-red-700 dark:text-red-400 font-black uppercase tracking-wider text-[10px]">⚠ CASH RETURN PREPARED — CONFIRM OR ESC</span>
+              <button
+                type="button"
+                onClick={() => { exitCashReturnMode(); toast('Cash return cancelled.', { icon: '↩️' }); }}
+                className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200 font-bold text-[10px] underline ml-2 shrink-0"
+              >
+                Cancel (ESC)
+              </button>
+            </div>
+            <div className="flex items-center justify-between text-[10px] text-text-secondary tabular-nums">
+              <span>
+                <span className="font-semibold">{selectedLines.length}</span> line{selectedLines.length !== 1 ? 's' : ''} · <span className="font-semibold">{totalReturnQty}</span> unit{totalReturnQty !== 1 ? 's' : ''}
+              </span>
+              <span className={`font-bold ${drawerInsufficient ? 'text-orange-600 dark:text-orange-400' : 'text-text-muted'}`}>
+                Drawer: Rs {currentDrawerCash.toLocaleString()}
+                {drawerInsufficient && <span className="ml-1 text-orange-600 dark:text-orange-400">(⚠ low)</span>}
+              </span>
+            </div>
+          </div>
+        );
+      })()}
+
+
       {/* Total Due Row: High Visual Dominance */}
       <div className="flex justify-between items-center pt-0.5">
         <div className="flex flex-col">
-          <span className="text-xs font-black uppercase tracking-widest text-text-secondary">
-            {grandTotal < 0 ? 'Refund Due' : 'Total Due'}
+          <span className={`text-xs font-black uppercase tracking-widest ${isReturnMode ? 'text-red-600 dark:text-red-400' : 'text-text-secondary'}`}>
+            {isReturnMode ? 'REFUND AMOUNT' : grandTotal < 0 ? 'Refund Due' : 'Total Due'}
           </span>
           <span className="text-[10px] text-text-muted font-medium">
             {isEditingTotal ? 'Type adjusted total & Enter' : 'Tap to adjust total'}
           </span>
         </div>
 
-        <div className={`flex items-baseline ${grandTotal < 0 ? 'text-danger' : 'text-emerald-600 dark:text-emerald-400'}`}>
-          <span className="text-sm mr-1 text-text-muted font-bold">Rs</span>
+        <div className={`flex items-baseline ${isReturnMode || grandTotal < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+          <span className="text-sm mr-1 font-bold">
+            {isReturnMode || grandTotal < 0 ? '-Rs' : 'Rs'}
+          </span>
           {isEditingTotal ? (
             <input
               ref={(input) => {
@@ -554,13 +654,18 @@ export const CartSummary: React.FC = () => {
           ) : (
             <span
               onClick={() => {
+                if (isReturnMode) return; // Disallow manual discount editing during return preparation
                 setEditedTotal(Math.abs(grandTotal).toString());
                 setIsEditingTotal(true);
               }}
-              title="Click to edit total due (auto-calculates discount)"
-              className="text-2xl sm:text-3xl font-black tabular-nums tracking-tight cursor-pointer hover:opacity-85 transition-opacity border-b-2 border-dashed border-transparent hover:border-primary/50"
+              title={isReturnMode ? 'Refund amount from selected items' : 'Click to edit total due (auto-calculates discount)'}
+              className={`text-2xl sm:text-3xl font-black tabular-nums tracking-tight transition-opacity ${
+                isReturnMode
+                  ? 'cursor-default'
+                  : 'cursor-pointer hover:opacity-85 border-b-2 border-dashed border-transparent hover:border-primary/50'
+              }`}
             >
-              {Math.abs(grandTotal).toLocaleString()}
+              {Math.abs(effectiveGrandTotal).toLocaleString()}
             </span>
           )}
         </div>
@@ -584,7 +689,7 @@ export const CartSummary: React.FC = () => {
         <button
           type="button"
           onClick={handleCashSale}
-          disabled={isCartEmpty || isProcessing}
+          disabled={isCartEmpty || isProcessing || hasInvalidPrice}
           id="pos-btn-sale"
           title="Quick Cash Sale (Ctrl+S) [Ctrl+Enter]"
           onKeyDown={(e) => {
@@ -603,7 +708,7 @@ export const CartSummary: React.FC = () => {
         <button
           type="button"
           onClick={handlePayAndPrint}
-          disabled={isCartEmpty || isProcessing}
+          disabled={isCartEmpty || isProcessing || hasInvalidPrice}
           id="pos-btn-pay-print"
           title="Pay & Print / Split Tender (Ctrl+P)"
           onKeyDown={(e) => {
@@ -624,13 +729,17 @@ export const CartSummary: React.FC = () => {
 
       {/* Extra Action Buttons Row (Directly below SALE / PAY & PRINT) */}
       <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border/60">
-        {/* 1. Cash Return */}
+        {/* 1. Cash Return — Phase 1B two-stage button */}
         <button
           type="button"
           onClick={handleCashReturn}
           id="pos-btn-cash-return"
-          title="Cash Return / Refund"
+          disabled={isProcessing}
+          title={isReturnMode ? 'Confirm Cash Return (second click submits the real transaction)' : 'Cash Return / Refund'}
           onKeyDown={(e) => {
+            // Phase 1B Defect #4 fix: ESC is now handled by the window-level listener
+            // in the useEffect above (active during isReturnMode). No button-focus
+            // dependency required — Escape cancels from anywhere on the screen.
             if (e.key === 'Tab' && !e.shiftKey) {
               e.preventDefault();
               document.getElementById('pos-btn-product-replace')?.focus();
@@ -639,10 +748,14 @@ export const CartSummary: React.FC = () => {
               document.getElementById('pos-btn-pay-print')?.focus();
             }
           }}
-          className="h-9 px-2 rounded-xl bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400"
+          className={`h-9 px-2 rounded-xl text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 focus:outline-none focus:ring-2 disabled:opacity-disabled ${
+            isReturnMode
+              ? 'bg-red-600 hover:bg-red-700 active:bg-red-800 ring-2 ring-red-400 focus:ring-red-400 animate-pulse'
+              : 'bg-amber-500 hover:bg-amber-600 active:bg-amber-700 focus:ring-amber-400'
+          }`}
         >
           <Banknote className="h-3.5 w-3.5" />
-          <span className="truncate">Cash Return</span>
+          <span className="truncate">{isReturnMode ? 'CONFIRM RETURN' : 'Cash Return'}</span>
         </button>
 
         {/* 2. Product Replace */}

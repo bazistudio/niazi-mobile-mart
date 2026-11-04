@@ -8,7 +8,7 @@ import { shopApi } from '@/services/shop.api';
 import { ledgerApi } from '@/services/ledger.api';
 import { platformAdapter } from '@/lib/platformAdapter';
 import { InvoiceDocument } from '../services/document/document.service';
-import type { ExchangeResultDto } from '@/lib/tauri/tauriClient';
+import type { ExchangeResultDto, SaleReturnableLineDto } from '@/lib/tauri/tauriClient';
 import { getQueryClient } from '@/components/providers/ReactQueryProvider';
 import { queryKeys } from '@/lib/react-query/queryKeys';
 import {
@@ -20,6 +20,7 @@ import {
   INVOICE_LOADED_CHECKOUT_BLOCKED_MESSAGE,
 } from '../services/posReturn.service';
 import { returnsApi } from '@/services/returns.api';
+import { useCashStore } from '@/features/cash';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 
 // Migrate legacy POS storage key if present
@@ -39,6 +40,22 @@ export interface CartItem {
   costPrice: number;
   maxStock: number;
   quantity: number;
+}
+
+// Phase 1B/F: Per-line return metadata populated by getSaleReturnableInfo().
+// Stored alongside the cart so CartTable can render returnable limits and
+// selection checkboxes without additional API calls.
+export interface ReturnLineItem {
+  saleLineId: string;          // Backend sale_line_id — required by CreateSalesReturnLineDto
+  productId: string;
+  productName: string;
+  sku: string;
+  originalUnitPrice: number;   // original_unit_price from the backend
+  originalSoldQty: number;     // original_quantity — the full quantity sold on the invoice
+  alreadyReturnedQty: number;  // already_returned_quantity — from prior return transactions
+  returnableQty: number;       // returnable_quantity = originalSoldQty - alreadyReturnedQty
+  selectedForReturn: boolean;  // operator checkbox — false means this line is excluded
+  returnQty: number;           // quantity the operator wants to return (bounded [1..returnableQty])
 }
 
 export type PaymentMethod = 'cash' | 'card' | 'bank' | 'easypaisa' | 'jazzcash' | 'credit';
@@ -108,6 +125,15 @@ export interface SaleSession {
   // Cleared by clearCart() when the user starts a new sale.
   checkoutIdempotencyKey?: string | null;
   linkedInvoiceId?: string;
+  // Phase 1B: two-stage Cash Return state machine.
+  // State A: isReturnMode === false (normal POS).
+  // State B: isReturnMode === true  (return prepared, prices shown negative/red, no submit yet).
+  // State C: second click on Cash Return button — real API call, then reset.
+  isReturnMode: boolean;
+  // Phase 1B/F: Return-line metadata fetched from getSaleReturnableInfo().
+  // Populated inside loadInvoice() when a linkedInvoiceId is set.
+  // Cleared by clearCart().
+  returnLines: ReturnLineItem[];
   createdAt: number;
   updatedAt: number;
 }
@@ -137,6 +163,9 @@ interface PosStore {
   removeFromCart: (productId: string, isReturn?: boolean) => void;
   clearCart: () => void;
   loadInvoice: (invoice: any) => void;
+  // Phase 1B/F: Per-line return selection/quantity controls
+  toggleReturnLine: (saleLineId: string) => void;
+  setReturnLineQty: (saleLineId: string, qty: number) => void;
   
   // Customer Action (operates on active tab)
   setCustomer: (customer: SaleCustomer | null) => void;
@@ -154,6 +183,10 @@ interface PosStore {
     paymentBreakdown?: { method: string; amount: number }[];
   }) => Promise<any>;
   setLastInvoice: (invoice: InvoiceDocument | null) => void;
+
+  // Phase 1B: Cash Return state machine actions
+  enterCashReturnMode: () => void;
+  exitCashReturnMode: () => void;
 
   // Transient exchange result — set after processExchange() succeeds,
   // cleared when operator dismisses the summary or starts a new session.
@@ -189,6 +222,7 @@ const createDefaultSession = (id: string, name: string): SaleSession => ({
   transactionType: 'sale',
   cart: [],
   returnedItems: [],
+  returnLines: [],
   invoiceDiscountType: 'fixed',
   invoiceDiscountValue: 0,
   customer: {
@@ -197,6 +231,7 @@ const createDefaultSession = (id: string, name: string): SaleSession => ({
   },
   isScanMode: false,
   transactionId: `TXN-${Date.now()}`,
+  isReturnMode: false,
   createdAt: Date.now(),
   updatedAt: Date.now(),
 });
@@ -477,12 +512,14 @@ export const usePosStore = create<PosStore>()(
               ...tab, 
               cart: [], 
               returnedItems: [],
+              returnLines: [], // Phase 1B/F: clear return metadata on cart reset
               mode: 'sale',
               transactionType: 'sale',
               transactionId: `TXN-${Date.now()}`, // Reset TXN id for next sale
               // P0 fix: reset idempotency key so the next sale gets a fresh one
               checkoutIdempotencyKey: null,
               linkedInvoiceId: undefined,
+              isReturnMode: false,
               invoiceDiscountType: 'fixed',
               invoiceDiscountValue: 0,
               customer: { id: 'walk-in', name: 'Walk-In Customer' }
@@ -491,46 +528,146 @@ export const usePosStore = create<PosStore>()(
         });
       },
 
+      // Phase 1B: Activate Cash Return preparation mode (State A -> State B).
+      // Prices will be displayed as negative/red in the UI; no API call yet.
+      enterCashReturnMode: () => {
+        const { saleTabs, activeTabId } = get();
+        set({
+          saleTabs: saleTabs.map(tab =>
+            tab.id !== activeTabId ? tab : { ...tab, isReturnMode: true }
+          ),
+        });
+      },
+
+      // Phase 1B: Cancel Cash Return preparation and return to normal POS (State B -> State A).
+      exitCashReturnMode: () => {
+        const { saleTabs, activeTabId } = get();
+        set({
+          saleTabs: saleTabs.map(tab =>
+            tab.id !== activeTabId ? tab : { ...tab, isReturnMode: false }
+          ),
+        });
+      },
+
       loadInvoice: (invoice: any) => {
         const { saleTabs, activeTabId } = get();
         
+        // Phase 1B/F fix (Defect A1-A4): Map invoice items into cart AND
+        // asynchronously fetch getSaleReturnableInfo() to populate returnLines
+        // with saleLineId, originalSoldQty, alreadyReturnedQty, returnableQty.
+        // This async call does NOT block the synchronous cart population.
+        const saleId: string = invoice._id || invoice.orderNumber || '';
+
+        const mappedItems: CartItem[] = (invoice.items || []).map((i: any) => ({
+          productId: i.productId || i.product || i._id,
+          sku: i.sku || '',
+          barcode: i.barcode || '',
+          productName: i.name || i.productName || 'Unknown Item',
+          unitPrice: i.price || i.unitPrice || 0,
+          costPrice: i.costPrice || 0,
+          maxStock: i.quantity || 1,
+          quantity: i.quantity || 1,
+        }));
+
+        const loadedCustomer = invoice.partyId || invoice.customer || invoice.customerId;
+        let finalCustomer: SaleSession['customer'] = null;
+        // Preserve existing walk-in customer if no customer on invoice
+        const existingTab = saleTabs.find(t => t.id === activeTabId);
+        if (existingTab) finalCustomer = existingTab.customer;
+
+        if (loadedCustomer) {
+          if (typeof loadedCustomer === 'object') {
+            finalCustomer = {
+              id: loadedCustomer._id || loadedCustomer.id,
+              name: loadedCustomer.name || 'Unknown',
+            };
+          } else if (typeof loadedCustomer === 'string' && loadedCustomer !== '000000000000000000000000') {
+            finalCustomer = { id: loadedCustomer, name: 'Unknown' };
+          }
+        }
+
+        // Synchronous cart update (immediate UI response)
         set({
           saleTabs: saleTabs.map(tab => {
             if (tab.id !== activeTabId) return tab;
-            
-            const mappedItems: CartItem[] = (invoice.items || []).map((i: any) => ({
-              productId: i.productId || i.product || i._id,
-              sku: i.sku || '',
-              barcode: i.barcode || '',
-              productName: i.name || i.productName || 'Unknown Item',
-              unitPrice: i.price || i.unitPrice || 0,
-              maxStock: i.quantity || 1, // Restrict return to originally purchased quantity
-              quantity: i.quantity || 1
-            }));
-
-            toast.success(`Invoice ${invoice.orderNumber || invoice._id} loaded`);
-            
-            const loadedCustomer = invoice.partyId || invoice.customer || invoice.customerId;
-            let finalCustomer = tab.customer;
-            
-            if (loadedCustomer) {
-              if (typeof loadedCustomer === 'object') {
-                finalCustomer = { 
-                  id: loadedCustomer._id || loadedCustomer.id, 
-                  name: loadedCustomer.name || 'Unknown' 
-                };
-              } else if (typeof loadedCustomer === 'string' && loadedCustomer !== '000000000000000000000000') {
-                finalCustomer = { id: loadedCustomer, name: 'Unknown' };
-              }
-            }
-            
             return {
               ...tab,
               cart: mappedItems,
-              linkedInvoiceId: invoice._id || invoice.orderNumber,
-              customer: finalCustomer
+              returnLines: [], // will be populated asynchronously below
+              linkedInvoiceId: saleId,
+              customer: finalCustomer,
             };
-          })
+          }),
+        });
+
+        toast.success(`Invoice ${invoice.orderNumber || invoice._id} loaded`);
+
+        // Asynchronous: fetch returnable info and populate returnLines
+        if (saleId) {
+          returnsApi.getSaleReturnableInfo(saleId).then((info) => {
+            const returnLines: ReturnLineItem[] = info.lines.map((line: SaleReturnableLineDto) => {
+              const returnableQty = Number(line.returnable_quantity ?? line.remaining_quantity ?? 0);
+              const alreadyReturnedQty = Number(line.already_returned_quantity ?? line.returned_quantity ?? 0);
+              const unitPrice = Number(line.unit_price ?? line.original_unit_price ?? 0);
+              return {
+                saleLineId: line.sale_line_id,
+                productId: line.product_id,
+                productName: line.product_name,
+                sku: line.sku,
+                originalUnitPrice: unitPrice,
+                originalSoldQty: Number(line.original_quantity ?? 0),
+                alreadyReturnedQty: alreadyReturnedQty,
+                returnableQty: returnableQty,
+                selectedForReturn: returnableQty > 0, // auto-select returnable lines
+                returnQty: returnableQty > 0 ? returnableQty : 0,
+              };
+            });
+
+            set((state) => ({
+              saleTabs: state.saleTabs.map((tab) =>
+                tab.id !== activeTabId ? tab : { ...tab, returnLines }
+              ),
+            }));
+          }).catch((err) => {
+            console.warn('[loadInvoice] getSaleReturnableInfo failed:', err);
+            // Non-fatal: returnLines stays [] — cart still loaded, return mode
+            // will fall back to cart items without per-line returnable metadata.
+          });
+        }
+      },
+
+      toggleReturnLine: (saleLineId: string) => {
+        const { saleTabs, activeTabId } = get();
+        set({
+          saleTabs: saleTabs.map((tab) => {
+            if (tab.id !== activeTabId) return tab;
+            return {
+              ...tab,
+              returnLines: tab.returnLines.map((line) =>
+                line.saleLineId !== saleLineId
+                  ? line
+                  : { ...line, selectedForReturn: !line.selectedForReturn }
+              ),
+            };
+          }),
+        });
+      },
+
+      setReturnLineQty: (saleLineId: string, qty: number) => {
+        const { saleTabs, activeTabId } = get();
+        set({
+          saleTabs: saleTabs.map((tab) => {
+            if (tab.id !== activeTabId) return tab;
+            return {
+              ...tab,
+              returnLines: tab.returnLines.map((line) => {
+                if (line.saleLineId !== saleLineId) return line;
+                // Clamp to [1 .. returnableQty]
+                const clamped = Math.min(Math.max(1, qty), line.returnableQty);
+                return { ...line, returnQty: clamped };
+              }),
+            };
+          }),
         });
       },
 
@@ -697,8 +834,7 @@ export const usePosStore = create<PosStore>()(
         const session = get().getActiveSession();
         if (!session) return;
 
-        // F-07 containment: a return is recorded through the sales-return service
-        // (restock + cash refund + SALES_RETURN_CREATED), never as a sale.
+        // ── State A guard: invoice must be linked before entering return mode ──
         if (!session.linkedInvoiceId) {
           toast.error(WALK_IN_RETURN_BLOCKED_MESSAGE, { duration: 6000 });
           return;
@@ -709,31 +845,75 @@ export const usePosStore = create<PosStore>()(
           return;
         }
 
-        try {
-          const result = await createCashReturnForInvoice(
-            session.linkedInvoiceId,
-            session.cart.map((item) => ({
+        // ── Phase 1B State Machine ─────────────────────────────────────────────
+        // State A -> State B: First click prepares the return (shows negative/red
+        // prices in the UI). No API call is made yet.
+        if (!session.isReturnMode) {
+          get().enterCashReturnMode();
+          toast('Cash Return prepared. Review the negative total, then click Cash Return again to confirm.', {
+            icon: '↩️',
+            duration: 5000,
+          });
+          return;
+        }
+
+        // ── State B -> State C: Second click — submit real API call ────────────
+        // Phase 1B/F fix: build payload from selected returnLines when available,
+        // fall back to full cart if returnLines not yet populated.
+        const returnLines = session.returnLines ?? [];
+        const selectedLines = returnLines.filter((l) => l.selectedForReturn && l.returnableQty > 0);
+        const cartPayload = selectedLines.length > 0
+          ? selectedLines.map((l) => ({
+              productId: l.productId,
+              productName: l.productName,
+              quantity: l.returnQty,
+            }))
+          : session.cart.map((item) => ({
               productId: item.productId,
               productName: item.productName,
               quantity: item.quantity,
-            })),
+            }));
+
+        if (cartPayload.length === 0) {
+          toast.error('No lines selected for return.');
+          return;
+        }
+
+        try {
+          const result = await createCashReturnForInvoice(
+            session.linkedInvoiceId,
+            cartPayload,
           );
 
+          // Reset state (also clears isReturnMode via clearCart)
           get().clearCart();
           platformAdapter.emitEvent('inventory-updated');
 
+          // Phase 1B fix: full cache invalidation (cash, returns, customers all added)
           try {
             const qc = getQueryClient();
             qc.invalidateQueries({ queryKey: queryKeys.dashboard.all });
             qc.invalidateQueries({ queryKey: ['sales'] });
             qc.invalidateQueries({ queryKey: ['products'] });
+            qc.invalidateQueries({ queryKey: queryKeys.customers.all });
+            qc.invalidateQueries({ queryKey: ['cash'] });
+            qc.invalidateQueries({ queryKey: ['returns'] });
           } catch (qcErr) {
-            console.warn('Query cache invalidation failed:', qcErr);
+            console.warn('Query cache invalidation failed (cash return):', qcErr);
+          }
+
+          // Phase 1B/F fix (Defect #5): refresh drawer balance after successful return
+          try {
+            await useCashStore.getState().fetchCurrentState();
+          } catch (cashErr) {
+            console.warn('[processCashReturn] fetchCurrentState failed (non-fatal):', cashErr);
           }
 
           toast.success("Return recorded. Cash refunded from the drawer.");
           return result;
         } catch (error: any) {
+          // On API failure: exit return mode so the cashier can retry cleanly
+          get().exitCashReturnMode();
           const message = error?.message || error?.toString() || "Unknown error";
           console.error("Cash Return failed", error);
           toast.error("Return failed: " + message);

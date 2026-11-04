@@ -32,13 +32,25 @@ export const INVOICE_LOADED_CHECKOUT_BLOCKED_MESSAGE =
  * A product may appear on several sale lines; quantities are allocated line by line.
  * Throws if an item is not on the invoice or more is requested than can still be returned.
  */
+/**
+ * Safely extracts the remaining returnable quantity from either Desktop (Rust) or Web (Express) API response.
+ */
+export function getReturnableQuantity(line: SaleReturnableLineDto): number {
+  const qty = line.returnable_quantity ?? line.remaining_quantity;
+  if (qty === undefined || qty === null || isNaN(Number(qty))) {
+    return 0;
+  }
+  return Math.max(0, Number(qty));
+}
+
 export function allocateReturnLines(
   cartItems: ReturnCartItem[],
   returnableLines: SaleReturnableLineDto[],
 ): CreateSalesReturnLineDto[] {
   const remaining = new Map<string, number>();
   for (const line of returnableLines) {
-    remaining.set(line.sale_line_id, line.returnable_quantity);
+    const returnable = getReturnableQuantity(line);
+    remaining.set(line.sale_line_id, returnable);
   }
 
   const allocated = new Map<string, number>();

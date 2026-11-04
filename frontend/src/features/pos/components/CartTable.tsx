@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Minus, Plus, Trash2, ArrowDownToLine } from 'lucide-react';
-import { usePosStore } from '../store/usePosStore';
+import { usePosStore, ReturnLineItem } from '../store/usePosStore';
 import { CartItem } from '../store/usePosStore';
 import { useInventoryStore } from '@/features/inventory/core/inventory.store';
 
@@ -9,6 +9,11 @@ export const CartTable = () => {
   const updateQuantity = usePosStore(state => state.updateQuantity);
   const updateUnitPrice = usePosStore(state => state.updateUnitPrice);
   const removeFromCart = usePosStore(state => state.removeFromCart);
+  // Phase 1B/F: return mode state and per-line controls
+  const isReturnMode = !!(activeSession?.isReturnMode);
+  const returnLines = activeSession?.returnLines ?? [];
+  const toggleReturnLine = usePosStore(state => state.toggleReturnLine);
+  const setReturnLineQty = usePosStore(state => state.setReturnLineQty);
   const inventoryProducts = useInventoryStore(state => state.products);
 
   // Local state for quantity input to allow empty string during typing
@@ -62,7 +67,16 @@ export const CartTable = () => {
   };
 
   const handlePriceChange = (productId: string, value: string, isReturn: boolean) => {
-    setLocalPrices(prev => ({ ...prev, [`${isReturn ? "ret" : "new"}-${productId}`]: value }));
+    const key = `${isReturn ? "ret" : "new"}-${productId}`;
+    setLocalPrices(prev => ({ ...prev, [key]: value }));
+
+    if (value === "") return;
+
+    const parsed = parseFloat(value);
+    if (!isNaN(parsed) && parsed >= 0) {
+      // Immediately update unitPrice in store so cart-wide checks and shortcuts react instantly
+      updateUnitPrice(productId, parsed, isReturn);
+    }
   };
 
   const handlePriceBlur = (productId: string, isReturn: boolean) => {
@@ -134,18 +148,41 @@ export const CartTable = () => {
     const inputValue = localQuantities[key] !== undefined ? localQuantities[key] : item.quantity;
     const lineTotal = item.unitPrice * item.quantity;
 
+    // Phase 1B/F: find matching returnLine metadata for this cart item
+    const returnLine: ReturnLineItem | undefined = isReturnMode
+      ? returnLines.find(l => l.productId === item.productId)
+      : undefined;
+    // A line is fully exhausted (already all returned) when returnableQty === 0
+    const isExhausted = isReturnMode && returnLine !== undefined && returnLine.returnableQty === 0;
+    // Effective quantity to display/constrain in return mode
+    const effectiveMaxQty = returnLine ? returnLine.returnableQty : item.maxStock;
+    // Whether this line is selected for return
+    const isSelected = returnLine ? returnLine.selectedForReturn : true;
+
     return (
       <div
         key={key}
         className={`flex items-center px-3 py-1.5 border-b last:border-b-0 transition-colors group ${
-          isReturn
+          isReturnMode && isExhausted
+            ? 'border-border/30 bg-surface/50 opacity-50'
+            : isReturn
             ? 'border-warning/20 bg-warning/5'
             : 'border-border hover:bg-surface-hover'
         }`}
       >
-        {/* 1. S.No */}
-        <div className="w-12 text-xs font-bold text-text-muted">
-          {index + 1}
+        {/* 1. S.No / Checkbox in return mode */}
+        <div className="w-12 text-xs font-bold text-text-muted flex items-center justify-start">
+          {isReturnMode && !isExhausted && returnLine ? (
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={() => toggleReturnLine(returnLine.saleLineId)}
+              aria-label={`Select ${item.productName} for return`}
+              className="w-3.5 h-3.5 accent-red-500 cursor-pointer"
+            />
+          ) : (
+            <span>{index + 1}</span>
+          )}
         </div>
 
         {/* 2. Product Name & Specifications */}
@@ -184,64 +221,124 @@ export const CartTable = () => {
           {item.barcode || item.sku || '—'}
         </div>
 
-        {/* 4. Quantity Stepper */}
+        {/* 4. Quantity Stepper — bounded to returnableQty in return mode */}
         <div className="w-28 flex justify-center px-1">
-          <div className="flex items-center gap-1 bg-surface-hover p-0.5 rounded-md border border-border">
-            <button
-              type="button"
-              onClick={() => updateQuantity(item.productId, item.quantity - 1, isReturn)}
-              disabled={item.quantity <= 1}
-              aria-label="Decrease quantity"
-              className="p-1 rounded bg-surface text-text-secondary hover:bg-border/30 transition-all disabled:opacity-30 shadow-xs"
-            >
-              <Minus className="h-3 w-3" />
-            </button>
-            <input
-              ref={(el) => { qtyRefs.current[key] = el; }}
-              type="number"
-              value={inputValue}
-              onChange={(e) => handleQtyChange(item.productId, e.target.value, item.maxStock, isReturn)}
-              onBlur={() => handleQtyBlur(item.productId, item.quantity, isReturn)}
-              onKeyDown={(e) => {
-                if (e.key === 'ArrowUp') {
-                  e.preventDefault();
-                  if (isReturn || item.quantity < item.maxStock) {
-                    updateQuantity(item.productId, item.quantity + 1, isReturn);
+          {isReturnMode && returnLine ? (
+            // Return mode: dedicated stepper using returnLine.returnQty
+            <div className="flex flex-col items-center gap-0.5">
+              <div className="flex items-center gap-1 bg-surface-hover p-0.5 rounded-md border border-red-300 dark:border-red-700">
+                <button
+                  type="button"
+                  onClick={() => setReturnLineQty(returnLine.saleLineId, returnLine.returnQty - 1)}
+                  disabled={isExhausted || !isSelected || returnLine.returnQty <= 1}
+                  aria-label="Decrease return quantity"
+                  className="p-1 rounded bg-surface text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all disabled:opacity-30 shadow-xs"
+                >
+                  <Minus className="h-3 w-3" />
+                </button>
+                <input
+                  type="number"
+                  value={returnLine.returnQty}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v)) setReturnLineQty(returnLine.saleLineId, v);
+                  }}
+                  disabled={isExhausted || !isSelected}
+                  aria-label={`Return quantity for ${item.productName}`}
+                  className="text-xs font-black w-8 text-center tabular-nums bg-transparent text-red-600 dark:text-red-400 focus:outline-none rounded no-spinners"
+                  min="1"
+                  max={returnLine.returnableQty}
+                />
+                <button
+                  type="button"
+                  onClick={() => setReturnLineQty(returnLine.saleLineId, returnLine.returnQty + 1)}
+                  disabled={isExhausted || !isSelected || returnLine.returnQty >= returnLine.returnableQty}
+                  aria-label="Increase return quantity"
+                  className="p-1 rounded bg-surface text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all disabled:opacity-30 shadow-xs"
+                >
+                  <Plus className="h-3 w-3" />
+                </button>
+              </div>
+              {/* Sold / Returned / Returnable info line */}
+              <div className="text-[9px] text-text-muted tabular-nums whitespace-nowrap leading-tight">
+                <span>Sold: <span className="font-bold text-text-secondary">{returnLine.originalSoldQty}</span></span>
+                {returnLine.alreadyReturnedQty > 0 && (
+                  <span className="ml-1 text-orange-500">Ret: {returnLine.alreadyReturnedQty}</span>
+                )}
+                <span className="ml-1 text-red-500">Left: {returnLine.returnableQty}</span>
+              </div>
+            </div>
+          ) : (
+            // Normal sale mode stepper
+            <div className="flex items-center gap-1 bg-surface-hover p-0.5 rounded-md border border-border">
+              <button
+                type="button"
+                onClick={() => updateQuantity(item.productId, item.quantity - 1, isReturn)}
+                disabled={item.quantity <= 1}
+                aria-label="Decrease quantity"
+                className="p-1 rounded bg-surface text-text-secondary hover:bg-border/30 transition-all disabled:opacity-30 shadow-xs"
+              >
+                <Minus className="h-3 w-3" />
+              </button>
+              <input
+                ref={(el) => { qtyRefs.current[key] = el; }}
+                type="number"
+                value={inputValue}
+                onChange={(e) => handleQtyChange(item.productId, e.target.value, item.maxStock, isReturn)}
+                onBlur={() => handleQtyBlur(item.productId, item.quantity, isReturn)}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (isReturn || item.quantity < item.maxStock) {
+                      updateQuantity(item.productId, item.quantity + 1, isReturn);
+                    }
+                  } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (item.quantity > 1) {
+                      updateQuantity(item.productId, item.quantity - 1, isReturn);
+                    }
+                  } else if (e.key === 'Tab' && !e.shiftKey) {
+                    e.preventDefault();
+                    const priceInput = priceRefs.current[key];
+                    if (priceInput) {
+                      priceInput.focus();
+                      priceInput.select();
+                    }
                   }
-                } else if (e.key === 'ArrowDown') {
-                  e.preventDefault();
-                  if (item.quantity > 1) {
-                    updateQuantity(item.productId, item.quantity - 1, isReturn);
-                  }
-                } else if (e.key === 'Tab' && !e.shiftKey) {
-                  e.preventDefault();
-                  const priceInput = priceRefs.current[key];
-                  if (priceInput) {
-                    priceInput.focus();
-                    priceInput.select();
-                  }
-                }
-              }}
-              aria-label={`Quantity for ${item.productName}`}
-              className="text-xs font-black w-8 text-center tabular-nums bg-transparent text-text-primary focus:outline-none focus:bg-surface rounded no-spinners"
-              min="1"
-              max={isReturn ? undefined : item.maxStock}
-            />
-            <button
-              type="button"
-              onClick={() => updateQuantity(item.productId, item.quantity + 1, isReturn)}
-              disabled={!isReturn && item.quantity >= item.maxStock}
-              aria-label="Increase quantity"
-              className="p-1 rounded bg-surface text-text-secondary hover:bg-border/30 transition-all disabled:opacity-30 shadow-xs"
-            >
-              <Plus className="h-3 w-3" />
-            </button>
-          </div>
+                }}
+                aria-label={`Quantity for ${item.productName}`}
+                className="text-xs font-black w-8 text-center tabular-nums bg-transparent text-text-primary focus:outline-none focus:bg-surface rounded no-spinners"
+                min="1"
+                max={isReturn ? undefined : item.maxStock}
+              />
+              <button
+                type="button"
+                onClick={() => updateQuantity(item.productId, item.quantity + 1, isReturn)}
+                disabled={!isReturn && item.quantity >= item.maxStock}
+                aria-label="Increase quantity"
+                className="p-1 rounded bg-surface text-text-secondary hover:bg-border/30 transition-all disabled:opacity-30 shadow-xs"
+              >
+                <Plus className="h-3 w-3" />
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* 5. Unit Price (Editable Custom Sale Price) */}
-        <div className="w-24 flex justify-end items-center">
-          <div className="flex items-center bg-surface-hover px-1.5 py-0.5 rounded border border-border focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20">
+        {/* 5. Unit Price — static red in return mode; editable in sale mode (Phase 1B/F fix Defect #2) */}
+        <div className="w-28 flex flex-col items-end justify-center">
+          {isReturnMode ? (
+            <div className="w-28 text-right text-xs font-black text-red-600 dark:text-red-400 tabular-nums pr-1">
+              {isExhausted
+                ? <span className="text-text-muted text-[10px] font-medium">—</span>
+                : <span>-Rs {item.unitPrice.toLocaleString()}</span>}
+            </div>
+          ) : (
+            <>
+              <div className={`flex items-center px-1.5 py-0.5 rounded border transition-all ${
+            !isReturn && item.costPrice > 0 && (localPrices[key] !== undefined ? (parseFloat(localPrices[key]) <= item.costPrice) : (item.unitPrice <= item.costPrice))
+              ? "bg-rose-50 dark:bg-rose-950/40 border-rose-500 ring-1 ring-rose-500/50"
+              : "bg-surface-hover border-border focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20"
+          }`}>
             <span className="text-[10px] text-text-muted mr-1 font-bold">Rs</span>
             <input
               ref={(el) => { priceRefs.current[key] = el; }}
@@ -291,6 +388,20 @@ export const CartTable = () => {
               step="1"
             />
           </div>
+          {/* Immediate Below-Cost Warning while typing/focused */}
+          {!isReturn && item.costPrice > 0 && (() => {
+            const effectiveVal = localPrices[key] !== undefined ? parseFloat(localPrices[key]) : item.unitPrice;
+            const isBelow = !isNaN(effectiveVal) && effectiveVal <= item.costPrice;
+            if (!isBelow) return null;
+            const minAllowed = item.costPrice + 1;
+            return (
+              <div className="text-[9px] text-rose-600 dark:text-rose-400 font-bold whitespace-nowrap mt-0.5 leading-tight flex items-center gap-0.5" title={`Product Cost: Rs. ${item.costPrice.toLocaleString()} | Minimum Sale Price: Rs. ${minAllowed.toLocaleString()}`}>
+                <span>Min &gt; Rs.{item.costPrice.toLocaleString()}</span>
+              </div>
+            );
+          })()}
+            </>
+          )}
         </div>
 
         {/* 6. Discount */}
@@ -298,10 +409,20 @@ export const CartTable = () => {
           0%
         </div>
 
-        {/* 7. Line Total */}
-        <div className="w-28 text-right text-xs font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
-          Rs {lineTotal.toLocaleString()}
-        </div>
+        {/* 7. Line Total — negative red in return mode (Phase 1B/F fix Defect #2) */}
+        {isReturnMode ? (
+          <div className={`w-28 text-right text-xs font-black tabular-nums ${isSelected ? 'text-red-600 dark:text-red-400' : 'text-text-muted'}`}>
+            {isExhausted
+              ? <span className="text-text-muted text-[10px] font-medium">Fully Returned</span>
+              : !isSelected
+              ? <span>-Rs 0</span>
+              : <>-Rs {(item.unitPrice * (returnLine?.returnQty ?? item.quantity)).toLocaleString()}</>}
+          </div>
+        ) : (
+          <div className="w-28 text-right text-xs font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
+            Rs {lineTotal.toLocaleString()}
+          </div>
+        )}
 
         {/* 8. Delete Icon */}
         <div className="w-12 flex justify-center">

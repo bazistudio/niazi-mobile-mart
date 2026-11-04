@@ -1813,6 +1813,10 @@ export const tauriClient = {
         if (filter.branch_id) params.set('branch_id', filter.branch_id);
         if (filter.customer_id) params.set('customer_id', filter.customer_id);
         if (filter.sale_id) params.set('sale_id', filter.sale_id);
+        if (filter.start_date) params.set('start_date', filter.start_date);
+        if (filter.end_date) params.set('end_date', filter.end_date);
+        if (filter.status) params.set('status', filter.status);
+        if (filter.limit != null) params.set('limit', String(filter.limit));
       }
       const qs = params.toString();
       return await httpFetch<SalesReturn[]>(`/api/returns${qs ? '?' + qs : ''}`);
@@ -2945,6 +2949,10 @@ export interface SaleReturnableLineDto {
   original_quantity: number;
   already_returned_quantity: number;
   returnable_quantity: number;
+  // Explicit typed backend response aliases
+  unit_price?: number;
+  returned_quantity?: number;
+  remaining_quantity?: number;
 }
 
 export interface SaleReturnableInfoDto {

@@ -69,6 +69,9 @@ export interface ReturnableLineDto {
   returned_quantity: number;
   remaining_quantity: number;
   unit_price: number;
+  already_returned_quantity?: number;
+  returnable_quantity?: number;
+  original_unit_price?: number;
 }
 
 export interface SaleReturnableInfoDto {
@@ -176,6 +179,9 @@ export async function getSaleReturnableInfo(pool: Pool, saleId: string): Promise
       returned_quantity: retQty,
       remaining_quantity: remaining,
       unit_price: Number(l['unit_price'] ?? 0),
+      already_returned_quantity: retQty,
+      returnable_quantity: remaining,
+      original_unit_price: Number(l['unit_price'] ?? 0),
     });
   }
 
