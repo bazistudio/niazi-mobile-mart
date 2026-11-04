@@ -19,7 +19,49 @@ export interface CreateOrderPayload {
   idempotencyKey?: string;
 }
 
-export function mapSaleToOrder(s: Sale, lines: any[] = [], payments: any[] = []): any {
+export interface MappedSaleOrder {
+  id: string;
+  _id: string;
+  orderNumber: string;
+  transactionId: string;
+  invoiceNumber: string;
+  displayNumber?: string;
+  branchId: string;
+  customerId?: string | { name?: string } | null;
+  customerBalanceAfter?: number | null;
+  customerName?: string | null;
+  customer?: { name: string } | null;
+  performedBy?: string | null;
+  subtotal: number;
+  discountAmount: number;
+  discountTotal: number;
+  taxAmount: number;
+  totalAmount: number;
+  grandTotal: number;
+  paidAmount: number;
+  totalPaid: number;
+  tenderedAmount: number;
+  tendered: number;
+  changeAmount: number;
+  change: number;
+  changeReturned: number;
+  creditAmount: number;
+  remainingDue: number;
+  due: number;
+  paymentStatus: string;
+  paymentMethod: string;
+  saleStatus: string;
+  status: string;
+  notes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  items?: any[];
+  payments?: any[];
+  partyId?: any;
+  customer_name_snapshot?: string | null;
+}
+
+export function mapSaleToOrder(s: Sale, lines: any[] = [], payments: any[] = []): MappedSaleOrder {
   let paymentMethod = 'cash';
   const hasPayments = payments && payments.length > 0;
 

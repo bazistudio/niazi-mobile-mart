@@ -1,7 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { X, ReceiptText, Clock, User, CreditCard, Banknote, AlertCircle, ChevronDown, ChevronUp, Printer, Search, Copy } from 'lucide-react';
+import { X, ReceiptText, Clock, User, CreditCard, Banknote, AlertCircle, ChevronDown, ChevronUp, Printer, Search, Copy, RotateCcw } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { salesApi } from '@/services/sales.api';
+import { salesApi, type MappedSaleOrder } from '@/services/sales.api';
+import { returnsApi } from '@/services/returns.api';
+import type { SalesReturn } from '@/lib/tauri/tauriClient';
 import { format, startOfWeek, startOfMonth } from 'date-fns';
 import { useSearchParams } from 'react-router-dom';
 import { usePrintStore } from '@/lib/printer';
@@ -17,6 +19,11 @@ interface DailySalesModalProps {
   onClose: () => void;
   branchId?: string | null;
 }
+
+// Unified type-safe row types for the merged sales + returns table (no any bypass)
+export type SaleRow = { kind: 'sale'; data: MappedSaleOrder };
+export type ReturnRow = { kind: 'return'; data: SalesReturn };
+export type TableRow = SaleRow | ReturnRow;
 
 export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: DailySalesModalProps) => {
   // Use prop if supplied, else fallback to store activeShopId
@@ -170,12 +177,28 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
     staleTime: 0,
   });
 
+  // DASHBOARD-KPI-PHASE3: Fetch completed cash returns for the same date range
+  // so they appear as distinct negative entries in the Daily Sales Summary.
+  const { data: returnsResponse, isLoading: isLoadingReturns } = useQuery({
+    queryKey: ['daily-sales-modal-returns', effectiveBranchId, dateFilter, startDate, endDate],
+    queryFn: () =>
+      returnsApi.listSalesReturns({
+        start_date: startDate,
+        end_date: endDate,
+        branch_id: effectiveBranchId || undefined,
+        status: 'COMPLETED',
+        limit: 500,
+      }),
+    enabled: isOpen,
+    staleTime: 0,
+  });
+
   const rawOrders = salesResponse?.data || [];
 
-  const orders = useMemo(() => {
+  const orders = useMemo<MappedSaleOrder[]>(() => {
     if (!rawOrders || rawOrders.length === 0) return [];
     if (debouncedSearch.trim()) return rawOrders;
-    return rawOrders.filter((o: any) => {
+    return (rawOrders as MappedSaleOrder[]).filter((o) => {
       if (!o.createdAt) return true;
       const d = new Date(o.createdAt);
       const orderDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -183,9 +206,34 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
     });
   }, [rawOrders, startDate, endDate, debouncedSearch]);
 
+  // DASHBOARD-KPI-PHASE3: completed returns in the period (no search filter —
+  // return numbers use a different prefix pattern than ORD- orders)
+  const returns = useMemo<SalesReturn[]>(() => {
+    if (!returnsResponse || !Array.isArray(returnsResponse)) return [];
+    return (returnsResponse as SalesReturn[]).filter((r) => r.status === 'COMPLETED');
+  }, [returnsResponse]);
+
   if (!isOpen) return null;
 
-  const totalSalesAmount = orders.reduce((sum: number, order: any) => sum + (order.grandTotal || order.totalAmount || 0), 0);
+  const totalSalesAmount = orders.reduce((sum: number, order: MappedSaleOrder) => sum + (order.grandTotal || order.totalAmount || 0), 0);
+  const totalReturnedAmount = returns.reduce((sum: number, r: SalesReturn) => sum + (r.total_amount || 0), 0);
+  const netTotal = totalSalesAmount - totalReturnedAmount;
+
+  // Merge sales and returns into a single chronological list (most-recent first)
+  const allRows: TableRow[] = useMemo(() => {
+    const rows: TableRow[] = [
+      ...orders.map((o): SaleRow => ({ kind: 'sale', data: o })),
+      ...returns.map((r): ReturnRow => ({ kind: 'return', data: r })),
+    ];
+    rows.sort((a, b) => {
+      const aTime = new Date(a.kind === 'sale' ? a.data.createdAt : a.data.created_at).getTime();
+      const bTime = new Date(b.kind === 'sale' ? b.data.createdAt : b.data.created_at).getTime();
+      return bTime - aTime; // descending
+    });
+    return rows;
+  }, [orders, returns]);
+
+  const isAnyLoading = isLoading || isLoadingReturns;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -198,8 +246,16 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
               <ReceiptText className="w-5 h-5 text-[#006970] dark:text-[#00B4BB]" />
               Sales Report
             </h3>
+            {/* DASHBOARD-KPI-PHASE3: subtitle shows sales, returns, and net total */}
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {orders.length} orders • Rs. {totalSalesAmount.toLocaleString()} total
+              {orders.length} {orders.length === 1 ? 'sale' : 'sales'}
+              {returns.length > 0 && (
+                <> • <span className="text-red-500 dark:text-red-400">{returns.length} {returns.length === 1 ? 'return' : 'returns'}</span></>
+              )}
+              {' '}• Rs.{' '}
+              <span className={netTotal < totalSalesAmount ? 'text-amber-600 dark:text-amber-400' : ''}>
+                {netTotal.toLocaleString()}
+              </span>{' '}net
             </p>
           </div>
           
@@ -240,7 +296,7 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-6 bg-gray-50/50 dark:bg-gray-900/50">
-          {isLoading ? (
+          {isAnyLoading ? (
             <div className="flex flex-col items-center justify-center h-64 text-gray-400">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#006970] dark:border-[#00B4BB] mb-4"></div>
               Loading sales data...
@@ -250,7 +306,7 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
               <AlertCircle className="w-10 h-10 mb-2 opacity-50" />
               Failed to load daily sales
             </div>
-          ) : orders.length === 0 ? (
+          ) : allRows.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-gray-500">
               <ReceiptText className="w-12 h-12 mb-4 opacity-20" />
               <p className="text-lg font-medium">{searchQuery ? 'No matching invoices found' : 'No sales yet today'}</p>
@@ -263,14 +319,76 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
                     <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Invoice #</th>
                     <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Time</th>
                     <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Customer</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Method</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
                     <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-right">Amount</th>
                     <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">Status</th>
                     <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center w-12"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {orders.map((order: any) => {
+                  {allRows.map((row: TableRow) => {
+                    // ── RETURN ROW ────────────────────────────────────────────
+                    if (row.kind === 'return') {
+                      const r = row.data;
+                      const rowKey = `ret-${r.id}`;
+                      const origOrder = orders.find((o) => (o.id || o._id) === r.sale_id);
+                      const origInvoiceNumber = origOrder?.orderNumber || origOrder?.invoiceNumber || origOrder?.displayNumber;
+                      return (
+                        <tr
+                          key={rowKey}
+                          className="bg-red-50/40 dark:bg-red-950/10 hover:bg-red-50/70 dark:hover:bg-red-950/20 transition-colors"
+                        >
+                          <td className="px-4 py-3 text-sm">
+                            <div className="flex items-center gap-1.5">
+                              <RotateCcw className="w-3.5 h-3.5 text-red-500 dark:text-red-400 shrink-0" />
+                              <div>
+                                <span className="font-medium text-red-700 dark:text-red-400 block">
+                                  {r.return_number || r.id?.slice(0, 8)}
+                                </span>
+                                {origInvoiceNumber && (
+                                  <span className="text-[11px] text-gray-500 dark:text-gray-400 block">
+                                    inv: {origInvoiceNumber.replace(/^ORD-/i, '')}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                            <div className="flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5 opacity-70" />
+                              {r.created_at ? format(new Date(r.created_at), 'hh:mm a') : '—'}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+                            <div className="flex items-center gap-1.5">
+                              <User className="w-3.5 h-3.5 opacity-50" />
+                              {r.customer_name_snapshot || 'Walk-in Customer'}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            <div className="flex items-center gap-1.5">
+                              <RotateCcw className="w-3.5 h-3.5 text-red-500 dark:text-red-400" />
+                              <span className="text-red-600 dark:text-red-400">Cash Return</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-sm font-bold text-red-600 dark:text-red-400 text-right">
+                            −Rs. {(r.total_amount || 0).toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-center">
+                            <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400">
+                              Returned
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center text-gray-300 dark:text-gray-700">
+                            {/* Returns have no expandable detail panel */}
+                            —
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    // ── SALE ROW ──────────────────────────────────────────────
+                    const order = row.data;
                     const isCredit =
                       order.paymentMethod === 'credit' ||
                       order.paymentMethod === 'CREDIT' ||
