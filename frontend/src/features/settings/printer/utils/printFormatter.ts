@@ -472,7 +472,7 @@ const formatA4 = (invoice: UnifiedInvoice, settings: PrinterSettings, title: str
 };
 
 const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, widthMm: number, title: string): string => {
-  const pxWidth = widthMm === 58 ? 192 : 272;
+  const pxWidth = widthMm === 58 ? 192 : 256;
   const baseFontSize = 13.5;
   const fontFamily = settings.font?.family === 'monospace' ? 'Courier, "Courier New", monospace' : 'Arial, sans-serif';
 
@@ -538,7 +538,7 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
       </div>
 
       <!-- Items Table: Item (1st), Qty (2nd), Price (3rd), Amount (4th) -->
-      <table style="width: 100%; text-align: left; margin-bottom: 6px; font-size: 12px; font-weight: bold; border-collapse: collapse;">
+      <table style="width: 100%; text-align: left; margin-bottom: 6px; font-size: 12px; font-weight: bold; border-collapse: collapse; table-layout: fixed; overflow-wrap: break-word;">
         <thead>
           <tr style="border-bottom: 1px dashed #000;">
             <th style="padding: 3px 2px; width: 46%; text-align: left;">Item</th>
@@ -750,7 +750,7 @@ const _formatExchangeThermal = (data: ExchangeReceiptData, settings: PrinterSett
   const fontFamily = settings.font?.family === 'monospace' ? 'Courier, "Courier New", monospace' : 'Arial, sans-serif';
   const tblHead = `<table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:4px;"><thead><tr style="border-bottom:1px dashed #000;"><th style="text-align:left;padding:3px 2px;width:46%;">Item</th><th style="text-align:center;padding:3px 0;width:10%;">Qty</th><th style="text-align:right;padding:3px 0;width:22%;">Price</th><th style="text-align:right;padding:3px 0;width:22%;">Amount</th></tr></thead><tbody>`;
 
-  return `<div style="font-family:${fontFamily};font-size:13.5px;width:272px;max-width:272px;margin:0 auto;line-height:1.3;color:#000;background:#fff;padding:10px 8px 8px 8px;box-sizing:border-box;">
+  return `<div style="font-family:${fontFamily};font-size:13.5px;width:256px;max-width:256px;margin:0 auto;line-height:1.3;color:#000;background:#fff;padding:10px 8px 8px 8px;box-sizing:border-box;">
     <style>@media print{body,html{background:#fff !important;color:#000 !important;margin:0 !important;padding:0 !important;}}</style>
     <div style="text-align:center;margin-bottom:8px;">
       ${settings.invoice?.showLogo && data.shop.logoUrl ? `<img src="${escapeHtml(data.shop.logoUrl)}" style="max-width:70%;max-height:55px;margin-bottom:4px;" />` : ''}

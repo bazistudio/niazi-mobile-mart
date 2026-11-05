@@ -1311,6 +1311,92 @@ export function buildMobileRouter(pool: Pool): Router {
     }
   });
 
+  // -------------------------------------------------------------------------
+  // GET /transfers — List Mobile Handset Transfer Movements
+  // NOTE: Must precede GET /:id so 'transfers' is not treated as a device ID!
+  // -------------------------------------------------------------------------
+  router.get('/transfers', async (req: Request, res: Response) => {
+    if (!requireInventoryView(req, res)) return;
+
+    const identity = req.identity!;
+    const queryBranch = typeof req.query.branch_id === 'string' ? req.query.branch_id.trim() : undefined;
+    const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 50;
+
+    let branchId = queryBranch;
+    if (branchId && !canAccessBranch(identity, branchId)) {
+      res.status(403).json({
+        error: 'FORBIDDEN',
+        message: 'Access denied: You do not have permission to view transfers for this branch',
+      });
+      return;
+    }
+
+    try {
+      const movements = await repo.listTransferMovements(
+        identity.organization_id,
+        branchId,
+        isNaN(limit) ? 50 : limit
+      );
+      res.status(200).json({ movements });
+    } catch (err) {
+      handleMobileError(res, err, 'transfers-list');
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /:id/transfer — Inter-branch Mobile Handset Stock Transfer
+  // -------------------------------------------------------------------------
+  router.post('/:id/transfer', async (req: Request, res: Response) => {
+    if (!requireInventoryWrite(req, res)) return;
+
+    const identity = req.identity!;
+    const deviceId = typeof req.params.id === 'string' ? req.params.id : String(req.params.id ?? '');
+    const body = req.body ?? {};
+
+    const sourceBranchId = typeof body.source_branch_id === 'string' ? body.source_branch_id.trim() : '';
+    const destinationBranchId = typeof body.destination_branch_id === 'string' ? body.destination_branch_id.trim() : '';
+    const notes = typeof body.notes === 'string' ? body.notes.trim() : null;
+
+    if (!sourceBranchId) {
+      res.status(400).json({ error: 'source_branch_id is required' });
+      return;
+    }
+
+    if (!destinationBranchId) {
+      res.status(400).json({ error: 'destination_branch_id is required' });
+      return;
+    }
+
+    if (sourceBranchId === destinationBranchId) {
+      res.status(400).json({ error: 'Source and destination branches cannot be the same' });
+      return;
+    }
+
+    // Verify caller is authorized for the source branch
+    if (!canAccessBranch(identity, sourceBranchId)) {
+      res.status(403).json({
+        error: 'FORBIDDEN',
+        message: 'Access denied: You do not have permission to transfer stock out of this branch',
+      });
+      return;
+    }
+
+    try {
+      const result = await repo.transferMobileDevice({
+        device_id: deviceId,
+        organization_id: identity.organization_id,
+        source_branch_id: sourceBranchId,
+        destination_branch_id: destinationBranchId,
+        performed_by: identity.user_id,
+        notes,
+      });
+
+      res.status(200).json(result);
+    } catch (err) {
+      handleMobileError(res, err, 'transfer');
+    }
+  });
+
   // GET /:id — single device detail
   // -------------------------------------------------------------------------
 

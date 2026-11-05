@@ -703,4 +703,43 @@ export const mobileApi = {
     return httpClient.post('/api/mobiles/sales', payload);
   },
 
+  /**
+   * Transfer a mobile device between branches.
+   */
+  transferMobile: async (
+    deviceId: string,
+    payload: { source_branch_id: string; destination_branch_id: string; notes?: string }
+  ): Promise<{ success: boolean; movement_id: string }> => {
+    return httpClient.post(`/api/mobiles/${deviceId}/transfer`, payload);
+  },
+
+  /**
+   * List transfer movement audit records.
+   */
+  getMobileTransfers: async (
+    params: { branch_id?: string; limit?: number } = {}
+  ): Promise<{
+    movements: Array<{
+      id: string;
+      device_id: string;
+      movement_type: string;
+      from_branch_id: string | null;
+      to_branch_id: string | null;
+      from_branch_name?: string;
+      to_branch_name?: string;
+      brand?: string;
+      model?: string;
+      imei1?: string;
+      performed_by_name?: string;
+      notes: string | null;
+      created_at: string;
+    }>;
+  }> => {
+    const searchParams = new URLSearchParams();
+    if (params.branch_id) searchParams.set('branch_id', params.branch_id);
+    if (params.limit) searchParams.set('limit', String(params.limit));
+    const qs = searchParams.toString();
+    return httpClient.get(`/api/mobiles/transfers${qs ? `?${qs}` : ''}`);
+  },
+
 };

@@ -54,10 +54,10 @@ export const MobileInventoryCard: React.FC<MobileInventoryCardProps> = ({ summar
         {/* Primary Metrics */}
         <div className="grid grid-cols-2 gap-4 pb-4 border-b border-gray-100 dark:border-gray-800">
           <div>
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Units</p>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{total}</p>
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">In-Stock Mobiles</p>
+            <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{inStock}</p>
             <p className="text-xs text-gray-400 mt-0.5">
-              {inStock} In Stock {inspection > 0 && `• ${inspection} Inspection`}
+              {total} Total Handsets {inspection > 0 && `• ${inspection} Inspection`}
             </p>
           </div>
           <div>

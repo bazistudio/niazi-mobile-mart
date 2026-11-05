@@ -563,7 +563,14 @@ export const MobileInventoryDashboard: React.FC = () => {
 
         {/* Render Selected Section View */}
         {inventorySection === 'TRANSFER' ? (
-          <StockTransferTab currentBranchId={branchId} availableDevices={items} />
+          <StockTransferTab
+            currentBranchId={branchId}
+            availableDevices={items}
+            onTransferCompleted={() => {
+              fetchMobiles();
+              fetchInvestment();
+            }}
+          />
         ) : inventorySection === 'LOWSTOCK' ? (
           /* Low Stock (0 Available) View */
           <Card variant="default" padding="lg" className="bg-surface border-border text-center py-14">
