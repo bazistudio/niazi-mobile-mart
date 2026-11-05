@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MoreHorizontal, FileText, Activity, Printer, Download, User, RotateCcw } from 'lucide-react';
 import { HistoryItem } from '../types/history.types';
 import { InvoicePreviewModal } from './InvoicePreviewModal';
@@ -26,11 +26,18 @@ export const HistoryRowActions: React.FC<Props> = ({ item }) => {
   const [showPurchaseReturn, setShowPurchaseReturn] = useState(false);
 
   const { openPreview } = usePrintStore();
-  const { settings, shopHeader } = usePrinterStore();
+  const { settings, shopHeader, isHydrated, fetchSettings } = usePrinterStore();
+
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
 
   const handlePrint = async () => {
     setIsOpen(false);
-    if (!settings || !shopHeader) return;
+    if (!isHydrated || !settings || !shopHeader) {
+      toast.error('Printer settings not ready. Please wait and try again.');
+      return;
+    }
     
     let html = '';
     let docType = 'Generic';

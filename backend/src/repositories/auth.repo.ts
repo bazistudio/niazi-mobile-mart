@@ -295,6 +295,52 @@ export class AuthRepo {
   }
 
   /**
+   * Atomically increment failed_pin_attempts and apply lockout if threshold reached.
+   * Single UPDATE RETURNING eliminates race conditions on concurrent unlock requests.
+   *
+   * @param userId             The user's UUID.
+   * @param maxAttempts        Threshold at which lockout is applied (default: 5).
+   * @param lockoutDurationMs  Lockout duration in milliseconds (default: 300_000 = 5 min).
+   * @returns AtomicLockoutResult — new attempt count and lockout timestamp if applied.
+   */
+  async recordFailedPinAtomic(
+    userId: string,
+    maxAttempts: number = 5,
+    lockoutDurationMs: number = 300_000,
+  ): Promise<AtomicLockoutResult> {
+    const result = await this.pool.query<{
+      failed_pin_attempts: string;
+      pin_locked_until_ms: string | null;
+    }>(
+      `UPDATE users
+         SET
+           failed_pin_attempts = failed_pin_attempts + 1,
+           pin_locked_until_ms = CASE
+             WHEN failed_pin_attempts + 1 >= $2
+             THEN (
+               EXTRACT(EPOCH FROM NOW()) * 1000 + $3
+             )::BIGINT
+             ELSE NULL
+           END,
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING
+         failed_pin_attempts,
+         pin_locked_until_ms::text AS pin_locked_until_ms`,
+      [userId, maxAttempts, lockoutDurationMs],
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      return { attempts: 0, lockedUntilMs: null };
+    }
+    return {
+      attempts: parseInt(row.failed_pin_attempts, 10),
+      lockedUntilMs: row.pin_locked_until_ms,
+    };
+  }
+
+  /**
    * Increment failed_pin_attempts.
    */
   async recordFailedPin(userId: string): Promise<number> {

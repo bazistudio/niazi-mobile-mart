@@ -42,13 +42,13 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
   const searchInvoice = searchParams.get('invoice');
 
   const { openPreview } = usePrintStore();
-  const { settings, shopHeader, fetchSettings } = usePrinterStore();
+  const { settings, shopHeader, fetchSettings, isHydrated } = usePrinterStore();
 
   useEffect(() => {
-    if (isOpen && !settings) {
+    if (isOpen) {
       fetchSettings();
     }
-  }, [isOpen, settings, fetchSettings]);
+  }, [isOpen, fetchSettings]);
 
   const fetchOrderDetails = async (orderId: string): Promise<any | null> => {
     if (orderDetailsMap[orderId]) return orderDetailsMap[orderId];
@@ -87,6 +87,10 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
   };
 
   const handleReprint = async (order: any) => {
+    if (!isHydrated) {
+      toast.error('Printer settings not ready. Please wait and try again.');
+      return;
+    }
     let orderToPrint = orderDetailsMap[order._id || order.id];
     if (!orderToPrint || !orderToPrint.items || orderToPrint.items.length === 0) {
       toast.loading('Fetching invoice lines for reprint...', { id: 'reprint-load' });
@@ -213,13 +217,8 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
     return (returnsResponse as SalesReturn[]).filter((r) => r.status === 'COMPLETED');
   }, [returnsResponse]);
 
-  if (!isOpen) return null;
-
-  const totalSalesAmount = orders.reduce((sum: number, order: MappedSaleOrder) => sum + (order.grandTotal || order.totalAmount || 0), 0);
-  const totalReturnedAmount = returns.reduce((sum: number, r: SalesReturn) => sum + (r.total_amount || 0), 0);
-  const netTotal = totalSalesAmount - totalReturnedAmount;
-
   // Merge sales and returns into a single chronological list (most-recent first)
+  // Hook declared unconditionally before any early returns to satisfy React Rules of Hooks
   const allRows: TableRow[] = useMemo(() => {
     const rows: TableRow[] = [
       ...orders.map((o): SaleRow => ({ kind: 'sale', data: o })),
@@ -232,6 +231,12 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
     });
     return rows;
   }, [orders, returns]);
+
+  if (!isOpen) return null;
+
+  const totalSalesAmount = orders.reduce((sum: number, order: MappedSaleOrder) => sum + (order.grandTotal || order.totalAmount || 0), 0);
+  const totalReturnedAmount = returns.reduce((sum: number, r: SalesReturn) => sum + (r.total_amount || 0), 0);
+  const netTotal = totalSalesAmount - totalReturnedAmount;
 
   const isAnyLoading = isLoading || isLoadingReturns;
 

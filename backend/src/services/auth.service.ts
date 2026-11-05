@@ -60,7 +60,7 @@ export const DUMMY_ARGON2_HASH =
 export class AuthServiceError extends Error {
   constructor(
     message: string,
-    public readonly code: 'INVALID_CREDENTIALS' | 'LOCKED_OUT' | 'DISABLED' | 'PENDING' | 'SERVER_ERROR',
+    public readonly code: 'INVALID_CREDENTIALS' | 'LOCKED_OUT' | 'DISABLED' | 'PENDING' | 'SERVER_ERROR' | 'INVALID_PIN' | 'USER_NOT_FOUND' | 'NO_PIN_CONFIGURED',
     public readonly statusCode: number,
     public readonly retryAfterMs?: number
   ) {
@@ -142,11 +142,11 @@ export class AuthService {
   constructor(private readonly repo: AuthRepo) {}
 
   /**
-   * Authenticate a user with username + password (or PIN).
+   * Authenticate a user with username + password.
    *
-   * The `password` field is tried first as a login_key (password).
-   * If that fails and the user has a pin_hash, it is also tried as a PIN.
-   * This mirrors Rust auth_service.rs::login() behavior exactly.
+   * DEF-BROWSER-01: Terminal PIN is NOT accepted for initial session login.
+   * Initial login requires strict verification of `login_key_hash` (password).
+   * PIN verification is strictly reserved for the dedicated `/api/auth/unlock` endpoint.
    *
    * SECURITY: On the 4th failed attempt, a 2-second progressive delay is
    * applied before responding to slow brute-force attacks without yet locking
@@ -213,11 +213,11 @@ export class AuthService {
       );
     }
 
-    // 4. Try login_key_hash (password)
+    // 4. Try login_key_hash (password only)
     const passwordMatch = await verifyArgon2(password, user.login_key_hash);
 
     if (passwordMatch) {
-      // 5a. Successful password login — reset lockout
+      // 5. Successful password login — reset lockout
       await this.repo.resetLoginLockout(user.id);
 
       const token = issueToken({
@@ -231,45 +231,7 @@ export class AuthService {
       return { token, user: sanitizeUser(user) };
     }
 
-    // 5b. Try PIN (if user has one)
-    if (user.pin_hash && user.pin_hash !== '') {
-      // Check PIN lockout
-      const pinLockRemaining = remainingLockout(user.pin_locked_until_ms);
-      if (pinLockRemaining > 0) {
-        throw new AuthServiceError(
-          `PIN is temporarily locked. Try again in ${Math.ceil(pinLockRemaining / 60_000)} minute(s).`,
-          'LOCKED_OUT',
-          429,
-          pinLockRemaining
-        );
-      }
-
-      const pinMatch = await verifyArgon2(password, user.pin_hash);
-
-      if (pinMatch) {
-        // Successful PIN login — reset PIN lockout
-        await this.repo.resetPinLockout(user.id);
-
-        const token = issueToken({
-          userId: user.id,
-          username: user.username,
-          role: user.role,
-          accessProfile: user.access_profile,
-          branchId: user.branch_id,
-        });
-
-        return { token, user: sanitizeUser(user) };
-      }
-
-      // PIN also failed — record PIN failure
-      const newPinAttempts = await this.repo.recordFailedPin(user.id);
-      if (newPinAttempts >= MAX_PIN_ATTEMPTS) {
-        const lockedUntil = BigInt(Date.now() + PIN_LOCKOUT_MS);
-        await this.repo.lockPinUntil(user.id, lockedUntil);
-      }
-    }
-
-    // 6. Both password and PIN failed.
+    // 6. Password failed.
     //    Use ATOMIC recordFailedLoginAtomic — single UPDATE RETURNING that
     //    increments the counter AND conditionally sets the lockout timestamp.
     //    This eliminates the race condition of the prior two-query approach.
@@ -298,6 +260,85 @@ export class AuthService {
     throw new AuthServiceError(
       `Invalid username or password. ${attemptsRemaining} attempt(s) remaining before lockout.`,
       'INVALID_CREDENTIALS',
+      401
+    );
+  }
+
+  /**
+   * DEF-BROWSER-01: Dedicated Terminal PIN Unlock
+   *
+   * Unlocks an already-authenticated session using the user's configured PIN.
+   * - Restricted strictly to the session's authenticated user ID.
+   * - Does NOT issue a replacement JWT token.
+   * - Failed attempts increment `failed_pin_attempts` and lock PIN only,
+   *   without affecting password login counters.
+   *
+   * @throws AuthServiceError on invalid PIN, locked PIN, or missing PIN configuration
+   */
+  async unlock(userId: string, pin: string): Promise<{ success: true }> {
+    const cleanPin = pin ? pin.trim() : '';
+    if (!cleanPin) {
+      throw new AuthServiceError('PIN cannot be empty', 'INVALID_PIN', 400);
+    }
+
+    const user = await this.repo.findById(userId);
+    if (!user) {
+      throw new AuthServiceError('Active session user not found', 'USER_NOT_FOUND', 401);
+    }
+
+    if (!user.is_active || user.status === 'DISABLED') {
+      throw new AuthServiceError('Account is disabled. Contact your administrator.', 'DISABLED', 403);
+    }
+
+    // Check PIN lockout
+    const pinLockRemaining = remainingLockout(user.pin_locked_until_ms);
+    if (pinLockRemaining > 0) {
+      throw new AuthServiceError(
+        `Terminal unlock is temporarily locked due to repeated incorrect attempts. Try again in ${Math.ceil(pinLockRemaining / 60_000)} minute(s).`,
+        'LOCKED_OUT',
+        429,
+        pinLockRemaining
+      );
+    } else if (user.pin_locked_until_ms !== null) {
+      // Prior lockout period has elapsed: reset counters (desktop parity)
+      await this.repo.resetPinLockout(user.id);
+    }
+
+    if (!user.pin_hash || user.pin_hash.trim() === '') {
+      throw new AuthServiceError(
+        'No PIN is configured for this account. Please sign out and log in with your password, or contact your administrator.',
+        'NO_PIN_CONFIGURED',
+        400
+      );
+    }
+
+    const pinMatch = await verifyArgon2(cleanPin, user.pin_hash);
+
+    if (pinMatch) {
+      // Successful unlock: reset PIN lockout and return success (no token replacement)
+      await this.repo.resetPinLockout(user.id);
+      return { success: true };
+    }
+
+    // PIN verification failed: record failed attempt on PIN counters atomically
+    const { attempts: newPinAttempts, lockedUntilMs } =
+      await this.repo.recordFailedPinAtomic(user.id, MAX_PIN_ATTEMPTS, PIN_LOCKOUT_MS);
+
+    if (lockedUntilMs !== null) {
+      const lockedUntil = parseInt(lockedUntilMs, 10);
+      const retryAfterMs = isNaN(lockedUntil) ? PIN_LOCKOUT_MS : Math.max(0, lockedUntil - Date.now());
+      throw new AuthServiceError(
+        'Terminal unlock locked for 5 minutes due to repeated failed attempts.',
+        'LOCKED_OUT',
+        429,
+        retryAfterMs
+      );
+    }
+
+    const remaining = Math.max(0, MAX_PIN_ATTEMPTS - newPinAttempts);
+    throw new AuthServiceError(
+      `Incorrect PIN. ${remaining} attempt(s) remaining.`,
+      'INVALID_PIN',
       401
     );
   }

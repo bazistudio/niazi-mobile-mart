@@ -34,3 +34,9 @@ export async function getMeUser() {
 export async function loginUserWithSnapshot(username: string, pin: string) {
   return AuthService.loginWithSnapshot(username, pin);
 }
+/**
+ * Dedicated Terminal PIN Unlock (DEF-BROWSER-01)
+ */
+export async function unlockTerminalWithPin(pin: string) {
+  return AuthService.unlock(pin);
+}

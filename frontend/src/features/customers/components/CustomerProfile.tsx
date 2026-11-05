@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import { customerApi } from '@/services/customer.api';
 import { LedgerBook } from '@/features/ledger/components/LedgerBook';
@@ -27,7 +28,7 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
   const [detail, setDetail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { openPreview } = usePrintStore();
-  const { settings, shopHeader, fetchSettings } = usePrinterStore();
+  const { settings, shopHeader, isHydrated, fetchSettings } = usePrinterStore();
   const [expandedInvoices, setExpandedInvoices] = useState<Record<string, boolean>>({});
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isOpeningBalanceModalOpen, setIsOpeningBalanceModalOpen] = useState(false);
@@ -37,10 +38,8 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
   const isOrgAdmin = user?.role === 'ADMIN';
 
   useEffect(() => {
-    if (!settings || !shopHeader) {
-      fetchSettings();
-    }
-  }, [settings, shopHeader, fetchSettings]);
+    fetchSettings();
+  }, [fetchSettings]);
 
   const toggleInvoice = (id: string) => {
     setExpandedInvoices(prev => ({ ...prev, [id]: !prev[id] }));
@@ -48,7 +47,7 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
 
   const handlePrintInvoice = (e: React.MouseEvent, inv: any) => {
     e.stopPropagation();
-    if (!settings || !shopHeader) return;
+    if (!isHydrated || !settings || !shopHeader) return;
     const html = printFormatter.formatSaleInvoice({
       orderNumber: inv.orderNumber,
       createdAt: inv.createdAt,
@@ -104,7 +103,7 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
   const isCredit = stats.outstanding < 0;
 
   const handlePrintFullLedger = () => {
-    if (!settings || !shopHeader || !rawTimeline) return;
+    if (!isHydrated || !settings || !shopHeader || !rawTimeline) return;
     const html = printFormatter.formatLedgerStatement(
       { id: customer.id, type: 'CUSTOMER', name: customer.name, balance: stats.outstanding },
       rawTimeline,
@@ -115,16 +114,28 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
     openPreview({ html, documentType: 'Generic', referenceId: 'ledger', title: 'Ledger Statement' });
   };
 
-  const handleDownloadFullLedgerPDF = () => {
-    if (!settings || !shopHeader || !rawTimeline) return;
-    const html = printFormatter.formatLedgerStatement(
-      { id: customer.id, type: 'CUSTOMER', name: customer.name, balance: stats.outstanding },
-      rawTimeline,
-      settings,
-      shopHeader,
-      'Full Ledger'
-    );
-    downloadHtmlAsPdf(html, `Ledger_${customer.name.replace(/\s+/g, '_')}`);
+  const [isPdfLoading, setIsPdfLoading] = React.useState(false);
+
+  const handleDownloadFullLedgerPDF = async () => {
+    if (!isHydrated || !settings || !shopHeader || !rawTimeline) return;
+    if (isPdfLoading) return;
+    setIsPdfLoading(true);
+    toast.loading('Preparing PDF...', { id: 'ledger-pdf' });
+    try {
+      const html = printFormatter.formatLedgerStatement(
+        { id: customer.id, type: 'CUSTOMER', name: customer.name, balance: stats.outstanding },
+        rawTimeline,
+        settings,
+        shopHeader,
+        'Full Ledger'
+      );
+      await downloadHtmlAsPdf(html, `Ledger_${customer.name.replace(/\s+/g, '_')}`);
+      toast.success('PDF download started.', { id: 'ledger-pdf' });
+    } catch (err) {
+      toast.error('Failed to generate PDF. Please try again.', { id: 'ledger-pdf' });
+    } finally {
+      setIsPdfLoading(false);
+    }
   };
 
   /** Reusable quick action button class */
@@ -212,9 +223,10 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
             <button
               type="button"
               onClick={handleDownloadFullLedgerPDF}
-              className={`${actionBtnClass} text-text-secondary hover:bg-surface-hover`}
+              disabled={isPdfLoading}
+              className={`${actionBtnClass} text-text-secondary hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed`}
             >
-              <Download className="w-4 h-4 text-text-muted" /> Export PDF
+              <Download className="w-4 h-4 text-text-muted" /> {isPdfLoading ? 'Preparing PDF...' : 'Export PDF'}
             </button>
             <button
               type="button"

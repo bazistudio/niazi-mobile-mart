@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import toast from 'react-hot-toast';
 import { useLedger } from '../hooks/useLedger';
 import {
   Download, FileText, ArrowDownRight, ArrowUpRight,
@@ -88,14 +89,14 @@ export const LedgerBook: React.FC<LedgerBookProps> = ({ initialParty, readonly }
   } = useLedger(initialParty);
 
   const { openPreview } = usePrintStore();
-  const { settings, shopHeader, fetchSettings } = usePrinterStore();
+  const { settings, shopHeader, isHydrated, fetchSettings } = usePrinterStore();
   const [expandedRows, setExpandedRows]       = useState<Record<string, boolean>>({});
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [previewInvoiceItem, setPreviewInvoiceItem] = useState<HistoryItem | null>(null);
 
   React.useEffect(() => {
-    if (!settings || !shopHeader) fetchSettings();
-  }, [settings, shopHeader, fetchSettings]);
+    fetchSettings();
+  }, [fetchSettings]);
 
   if (!selectedParty) return null;
 
@@ -110,7 +111,7 @@ export const LedgerBook: React.FC<LedgerBookProps> = ({ initialParty, readonly }
 
   const handlePrintReceipt = (e: React.MouseEvent, entry: any) => {
     e.stopPropagation();
-    if (!settings || !shopHeader) return;
+    if (!isHydrated || !settings || !shopHeader) return;
     const currentBal = typeof entry.runningBalance === 'number' ? entry.runningBalance : (typeof entry.balance === 'number' ? entry.balance : 0);
     const payAmt = entry.amount || 0;
     const prevBal = currentBal + payAmt;
@@ -133,15 +134,27 @@ export const LedgerBook: React.FC<LedgerBookProps> = ({ initialParty, readonly }
   };
 
   const handlePrintLedger = () => {
-    if (!settings || !shopHeader || !selectedParty) return;
+    if (!isHydrated || !settings || !shopHeader || !selectedParty) return;
     const html = printFormatter.formatLedgerStatement(selectedParty, timeline, settings, shopHeader, 'Full Ledger');
     openPreview({ html, documentType: 'Generic', referenceId: 'ledger', title: 'Ledger Statement' });
   };
 
-  const handleExportPdf = () => {
-    if (!settings || !shopHeader || !selectedParty) return;
-    const html = printFormatter.formatLedgerStatement(selectedParty, timeline, settings, shopHeader, 'Full Ledger');
-    downloadHtmlAsPdf(html, `Ledger_${selectedParty.name.replace(/\s+/g, '_')}`);
+  const [isPdfLoading, setIsPdfLoading] = React.useState(false);
+
+  const handleExportPdf = async () => {
+    if (!isHydrated || !settings || !shopHeader || !selectedParty) return;
+    if (isPdfLoading) return;
+    setIsPdfLoading(true);
+    toast.loading('Preparing PDF...', { id: 'ledger-pdf' });
+    try {
+      const html = printFormatter.formatLedgerStatement(selectedParty, timeline, settings, shopHeader, 'Full Ledger');
+      await downloadHtmlAsPdf(html, `Ledger_${selectedParty.name.replace(/\s+/g, '_')}`);
+      toast.success('PDF download started.', { id: 'ledger-pdf' });
+    } catch (err) {
+      toast.error('Failed to generate PDF. Please try again.', { id: 'ledger-pdf' });
+    } finally {
+      setIsPdfLoading(false);
+    }
   };
 
   // Build a minimal "customer" / "supplier" object for payment modals
@@ -260,8 +273,9 @@ export const LedgerBook: React.FC<LedgerBookProps> = ({ initialParty, readonly }
             </button>
             <button
               onClick={handleExportPdf}
-              title="Export PDF"
-              className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              title={isPdfLoading ? 'Preparing PDF...' : 'Export PDF'}
+              disabled={isPdfLoading}
+              className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Download className="w-4 h-4" />
             </button>

@@ -43,13 +43,11 @@ export const CartSummary: React.FC = () => {
   // Phase 1B: Drawer cash balance for State B review banner
   const currentDrawerCash = useCashStore((s) => s.summary?.expected_closing_cash ?? s.currentSession?.opening_cash ?? 0);
 
-  const { settings, shopHeader, fetchSettings } = usePrinterStore();
+  const { settings, shopHeader, fetchSettings, isHydrated } = usePrinterStore();
 
   useEffect(() => {
-    if (!settings || !shopHeader) {
-      fetchSettings();
-    }
-  }, [settings, shopHeader, fetchSettings]);
+    fetchSettings();
+  }, [fetchSettings]);
 
   const [isCustomerModalOpen, setCustomerModalOpen] = useState(false);
   const [isLedgerModalOpen, setLedgerModalOpen] = useState(false);
@@ -441,6 +439,10 @@ export const CartSummary: React.FC = () => {
     targetCustomer: { id: string; name: string } | null,
     shouldPrint: boolean
   ) => {
+    if (!isHydrated) {
+      toast.error('Printer settings not ready. Please wait and try again.');
+      return;
+    }
     const isRefund = grandTotal < 0;
     setIsProcessing(true);
 

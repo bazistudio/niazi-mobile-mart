@@ -619,7 +619,7 @@ export const usePosStore = create<PosStore>()(
                 alreadyReturnedQty: alreadyReturnedQty,
                 returnableQty: returnableQty,
                 selectedForReturn: returnableQty > 0, // auto-select returnable lines
-                returnQty: returnableQty > 0 ? returnableQty : 0,
+                returnQty: returnableQty > 0 ? 1 : 0,
               };
             });
 

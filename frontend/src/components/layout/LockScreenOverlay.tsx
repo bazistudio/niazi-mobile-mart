@@ -6,7 +6,7 @@ import { useAuthStore } from '@/lib/auth/core/auth.store';
 import { useTerminalStore } from '@/store/useTerminalStore';
 import { usePosStore } from '@/features/pos/store/usePosStore';
 import { isTauriEnvironment, tauriClient } from '@/lib/tauri/tauriClient';
-import { loginUser } from '@/lib/auth/core/auth.client';
+import { unlockTerminalWithPin } from '@/lib/auth/core/auth.client';
 
 /**
  * Extract 1-2 letter uppercase initials from display name
@@ -93,24 +93,19 @@ export const LockScreenOverlay: React.FC = () => {
         return;
       }
 
-      // Path B: Central Web / Online Mode Verification
-      const username = user?.username;
-      if (!username) {
-        setIsVerifying(false);
-        triggerErrorShake('Session user not identified. Please sign out and log in again.');
-        return;
-      }
-
+      // Path B: Central Web / Online Mode Dedicated PIN Unlock (DEF-BROWSER-01)
       try {
-        await loginUser(username, cleanPin);
+        await unlockTerminalWithPin(cleanPin);
         setError(null);
         setPin('');
         unlockTerminal();
       } catch (err: any) {
         const errorMsg =
           err?.status === 429
-            ? err?.message || 'Too many attempts. Account locked temporarily.'
-            : 'Incorrect PIN. Please try again.';
+            ? err?.message || 'Too many attempts. Terminal unlock temporarily locked.'
+            : err?.status === 400
+              ? err?.message || 'No PIN configured for this account. Please sign out and log in with your password.'
+              : err?.message || 'Incorrect PIN. Please try again.';
         triggerErrorShake(errorMsg);
       } finally {
         setIsVerifying(false);

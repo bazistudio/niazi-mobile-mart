@@ -347,12 +347,13 @@ export const printFormatter = {
 };
 
 const renderDocument = (invoice: UnifiedInvoice, settings: PrinterSettings, title: string): string => {
-  // Legacy '58mm' / THERMAL_58MM values fall through to the 80mm path (Task 5.5)
   const paperWidth = settings.paperSize?.width || (settings.printerType === 'A4' ? 'A4' : '80mm');
   
-  // '58mm' / THERMAL_58MM remapped to 80mm path (Task 5.5)
   if (paperWidth === 'A4' || settings.printerType === 'A4' || settings.printerType === 'PDF_ONLY') {
     return formatA4(invoice, settings, title);
+  }
+  if (paperWidth === '58mm') {
+    return formatThermal(invoice, settings, 58, title);
   }
   return formatThermal(invoice, settings, 80, title);
 };
@@ -470,9 +471,8 @@ const formatA4 = (invoice: UnifiedInvoice, settings: PrinterSettings, title: str
   `;
 };
 
-const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, _width: number, title: string): string => {
-  // _width retained for call-site compat; 80mm standard width
-  const pxWidth = 272;
+const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, widthMm: number, title: string): string => {
+  const pxWidth = widthMm === 58 ? 192 : 272;
   const baseFontSize = 13.5;
   const fontFamily = settings.font?.family === 'monospace' ? 'Courier, "Courier New", monospace' : 'Arial, sans-serif';
 
@@ -481,7 +481,7 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, _widt
       <style>
         @media print {
           @page {
-            size: 80mm auto;
+            size: ${widthMm}mm auto;
             margin: 0;
           }
           body, html {

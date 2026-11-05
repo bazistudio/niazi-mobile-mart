@@ -1,10 +1,11 @@
 
 import React, { useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { usePosStore } from '../../store/usePosStore';
 import { usePrintStore } from '@/lib/printer';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
 import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
-import { UnifiedInvoice, PrinterSettings, ShopHeader } from '@/features/settings/printer/types/printer.types';
+import { UnifiedInvoice } from '@/features/settings/printer/types/printer.types';
 import { useInventoryStore } from '@/features/inventory/core/inventory.store';
 
 export const InvoiceReceipt: React.FC = () => {
@@ -12,45 +13,21 @@ export const InvoiceReceipt: React.FC = () => {
   const setLastInvoice = usePosStore(state => state.setLastInvoice);
 
   const { openPreview } = usePrintStore();
-  const { settings, shopHeader, fetchSettings } = usePrinterStore();
+  const { settings, shopHeader, isHydrated, fetchSettings } = usePrinterStore();
 
   useEffect(() => {
-    if (!settings || !shopHeader) {
-      fetchSettings();
-    }
-  }, [settings, shopHeader, fetchSettings]);
+    fetchSettings();
+  }, [fetchSettings]);
 
   useEffect(() => {
     if (invoice) {
+      if (!isHydrated || !settings || !shopHeader) {
+        toast.error('Printer settings not ready. Please wait and try again.');
+        setLastInvoice(null);
+        return;
+      }
+
       const inventoryProducts = useInventoryStore.getState().products;
-
-      const effectiveShop: ShopHeader = shopHeader || {
-        name: invoice.shop?.name || 'Niazi Mobile Mart POS',
-        address: invoice.shop?.address || '',
-        phone: invoice.shop?.phone || '',
-        email: '',
-        taxNumber: '',
-        footerText: 'Thank you for your business!'
-      };
-
-      const effectiveSettings: PrinterSettings = settings || {
-        enabled: true,
-        printerType: 'THERMAL_80MM',
-        connectionType: 'BROWSER_PRINT',
-        paperSize: { width: '80mm' },
-        layout: { orientation: 'portrait', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0 },
-        font: { size: 12, family: 'monospace' },
-        invoice: {
-          showLogo: false,
-          showShopInfo: true,
-          showBarcode: true,
-          showQR: false,
-          showTax: false,
-          showDiscount: true
-        },
-        autoPrint: false,
-        printCopyCount: 1
-      };
 
       const unified: UnifiedInvoice = {
         invoiceNo: invoice.invoiceId,
@@ -118,11 +95,11 @@ export const InvoiceReceipt: React.FC = () => {
         change: invoice.summary.change,
         // FINDING-02: pass outstanding balance so thermal formatter can print it
         due: invoice.summary.due,
-        shop: effectiveShop,
+        shop: shopHeader,
         returnPolicy: 'Goods once sold can only be returned or exchanged within 3 days with original receipt.'
       };
 
-      const html = printFormatter.format(unified, effectiveSettings);
+      const html = printFormatter.format(unified, settings);
       openPreview({
         html,
         documentType: 'SaleInvoice',
@@ -132,7 +109,7 @@ export const InvoiceReceipt: React.FC = () => {
 
       setLastInvoice(null);
     }
-  }, [invoice, settings, shopHeader, openPreview, setLastInvoice]);
+  }, [invoice, isHydrated, settings, shopHeader, openPreview, setLastInvoice]);
 
   return null;
 };

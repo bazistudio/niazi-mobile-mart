@@ -29,7 +29,7 @@ interface DocumentLineItem {
 export const InvoicePreviewModal: React.FC<Props> = ({ item, onClose }) => {
   const activeShop = useOrganizationStore((state) => state.activeShop);
   const { openPreview } = usePrintStore();
-  const { settings, shopHeader } = usePrinterStore();
+  const { settings, shopHeader, isHydrated, fetchSettings } = usePrinterStore();
 
   const [lines, setLines] = useState<DocumentLineItem[]>([]);
   const [isLoadingLines, setIsLoadingLines] = useState(false);
@@ -173,9 +173,13 @@ export const InvoicePreviewModal: React.FC<Props> = ({ item, onClose }) => {
     };
   }, [item.id, item.type, item.referenceId, item.amount, item.party?.name, item.createdAt]);
 
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
+
   const handlePrint = async () => {
-    if (!settings || !shopHeader) {
-      toast.error('Printer settings or shop header not configured.');
+    if (!isHydrated || !settings || !shopHeader) {
+      toast.error('Printer settings not ready. Please wait and try again.');
       return;
     }
 

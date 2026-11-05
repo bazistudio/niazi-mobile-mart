@@ -172,6 +172,43 @@ export function buildAuthRouter(pool: Pool): Router {
   });
 
   // -------------------------------------------------------------------------
+  // POST /unlock
+  // Dedicated Terminal PIN Unlock (DEF-BROWSER-01)
+  // Requires authenticated session Bearer token.
+  // -------------------------------------------------------------------------
+
+  router.post('/unlock', buildAuthMiddleware(pool), async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity;
+    if (!identity) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const { pin } = req.body as Record<string, unknown>;
+    if (typeof pin !== 'string' || !pin.trim()) {
+      res.status(400).json({ error: 'PIN is required', code: 'INVALID_PIN' });
+      return;
+    }
+
+    try {
+      const result = await authService.unlock(identity.user_id, pin.trim());
+      res.status(200).json(result);
+    } catch (err: unknown) {
+      if (err instanceof AuthServiceError) {
+        const body: Record<string, unknown> = { error: err.message, code: err.code };
+        if (err.retryAfterMs !== undefined) {
+          body['retry_after_ms'] = err.retryAfterMs;
+          res.setHeader('Retry-After', Math.ceil(err.retryAfterMs / 1000).toString());
+        }
+        res.status(err.statusCode).json(body);
+      } else {
+        console.error('[auth/unlock] Unexpected error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // GET /me
   // -------------------------------------------------------------------------
 

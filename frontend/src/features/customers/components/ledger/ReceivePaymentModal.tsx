@@ -28,7 +28,11 @@ export const ReceivePaymentModal = ({ isOpen, onClose, customer, onPaymentSucces
     (s) => s.activeShopId || s.activeShop?._id || s.activeShop?.id || null
   );
   const { openPreview } = usePrintStore();
-  const { settings, shopHeader } = usePrinterStore();
+  const { settings, shopHeader, isHydrated, fetchSettings } = usePrinterStore();
+
+  React.useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
 
   const paymentMutation = useMutation({
     mutationFn: ledgerApi.recordPayment,
@@ -36,33 +40,32 @@ export const ReceivePaymentModal = ({ isOpen, onClose, customer, onPaymentSucces
       invalidateQueries.customers(queryClient, user);
       invalidateQueries.ledger(queryClient, user, 'CUSTOMER', customer?.id);
       setAmount('');
-      
       // Attempt to Print Receipt automatically
-      if (settings && shopHeader && data?.data?.paymentId) {
+      if (isHydrated && settings && shopHeader && data?.data?.paymentId) {
         // Construct a mock ledger object since the backend just returns IDs right now
         // Ideally we fetch the full ledger object, or construct it from the inputs
-        const payAmount = Number(amount) || 0;
-        const newBal = typeof data?.data?.newBalance === 'number'
-          ? data.data.newBalance
-          : (typeof (customer as any)?.balance === 'number' ? (customer as any).balance - payAmount : ((customer as any)?.currentBalance ?? 0));
-        const prevBal = typeof data?.data?.newBalance === 'number'
-          ? data.data.newBalance + payAmount
-          : ((customer as any)?.balance ?? (customer as any)?.currentBalance ?? (newBal + payAmount));
-
-        const mockLedger = {
-          transactionId: data.data.receiptNumber || data.data.paymentId,
-          receiptNumber: data.data.receiptNumber,
-          createdAt: new Date().toISOString(),
-          customerId: customer,
-          customerName: customer?.name,
-          customer: customer,
-          type: 'payment',
-          amount: payAmount,
-          debitAccount: method.toLowerCase() === 'bank transfer' ? 'bank' : method.toLowerCase(),
-          description: `Payment Received (${method})`,
-          previousBalance: prevBal,
-          currentBalance: newBal,
-          newBalance: newBal,
+        const payAmount = Number(amount) || 0;
+        const newBal = typeof data?.data?.newBalance === 'number'
+          ? data.data.newBalance
+          : (typeof (customer as any)?.balance === 'number' ? (customer as any).balance - payAmount : ((customer as any)?.currentBalance ?? 0));
+        const prevBal = typeof data?.data?.newBalance === 'number'
+          ? data.data.newBalance + payAmount
+          : ((customer as any)?.balance ?? (customer as any)?.currentBalance ?? (newBal + payAmount));
+
+        const mockLedger = {
+          transactionId: data.data.receiptNumber || data.data.paymentId,
+          receiptNumber: data.data.receiptNumber,
+          createdAt: new Date().toISOString(),
+          customerId: customer,
+          customerName: customer?.name,
+          customer: customer,
+          type: 'payment',
+          amount: payAmount,
+          debitAccount: method.toLowerCase() === 'bank transfer' ? 'bank' : method.toLowerCase(),
+          description: `Payment Received (${method})`,
+          previousBalance: prevBal,
+          currentBalance: newBal,
+          newBalance: newBal,
         };
         const html = printFormatter.formatPaymentReceipt(mockLedger, settings, shopHeader);
         openPreview({ html, documentType: 'PaymentReceipt', referenceId: data.data.paymentId, title: 'Payment Receipt' });
@@ -89,7 +92,6 @@ export const ReceivePaymentModal = ({ isOpen, onClose, customer, onPaymentSucces
       toast.error('No branch selected. Please select a branch before recording a cash payment.');
       return;
     }
-    
     paymentMutation.mutate({
       partyId: customer?.id,
       partyType: 'CUSTOMER',
@@ -104,12 +106,10 @@ export const ReceivePaymentModal = ({ isOpen, onClose, customer, onPaymentSucces
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
       <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-        
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800">
           <h3 className="text-lg font-bold text-gray-900 dark:text-white">Receive Payment</h3>
-          <button 
-            onClick={onClose}
+          <button            onClick={onClose}
             className="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 transition-colors"
           >
             <X className="w-5 h-5" />

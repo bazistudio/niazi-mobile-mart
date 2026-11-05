@@ -300,7 +300,7 @@ export async function completeSaleTx(
   }
 
   // Step 3: Validate Customer if provided
-  let customerOpt: { id: string; name: string; credit_limit: number } | null = null;
+  let customerOpt: { id: string; name: string; credit_limit: number; balance: number } | null = null;
   const rawCustomerId = dto.customer_id?.trim();
   if (rawCustomerId && rawCustomerId.length > 0 && rawCustomerId !== 'walk-in') {
     // DEF-SALE-03 fix: lock the customer row with FOR UPDATE so that concurrent
@@ -321,10 +321,18 @@ export async function completeSaleTx(
         400
       );
     }
+    // Read live customer balance under FOR UPDATE lock
+    const balRow = await client.query(
+      'SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT AS balance FROM customer_ledger_entries WHERE customer_id = $1',
+      [rawCustomerId]
+    );
+    const liveBalance = Number(balRow.rows[0]?.balance ?? 0);
+
     customerOpt = {
       id: cust['id'] as string,
       name: cust['name'] as string,
       credit_limit: Number(cust['credit_limit'] ?? 0),
+      balance: liveBalance,
     };
   }
 
@@ -546,27 +554,25 @@ export async function completeSaleTx(
   let creditAmount: number;
   let paymentStatus: PaymentStatus;
   let excessTenderedForSettlement = 0;
+  let existingAdvanceApplied = 0;
 
   try {
     const engineResult = calculatePaymentAllocation({
       invoiceTotal: totalAmount,
       tenders: engineTenders,
       customerId: engineCustomerId,
-      previousCustomerBalance: 0, // placeholder; actual DB balance read in Step 11 under lock
+      previousCustomerBalance: customerOpt?.balance ?? 0,
       customerCreditLimit: engineCreditLimit,
     });
 
     // Map engine allocation results to repo variables.
-    // Note: previousCustomerBalance was passed as 0 above because the actual locked
-    // balance is read in Step 11 (inside the transaction, after FOR UPDATE). The engine
-    // is used here only to validate tender structure and derive payment status/change/credit.
-    // The full advance/settlement accounting is performed in Step 11 using the live DB balance.
     recordedPaid    = engineResult.invoiceAllocated > totalAmount
                         ? totalAmount
                         : engineResult.invoiceAllocated;
     changeAmount    = engineResult.changeReturned;
     creditAmount    = engineResult.creditAllocated;
     paymentStatus   = engineResult.paymentStatus;
+    existingAdvanceApplied = engineResult.existingAdvanceApplied;
     // Cash excess for debt settlement / advance (cash-only, validated by engine + R-02 guard above).
     // For walk-in customers changeReturned is already set; excessTenderedForSettlement stays 0.
     excessTenderedForSettlement = customerOpt !== null ? cashExcessForSettlement : 0;
@@ -697,17 +703,27 @@ export async function completeSaleTx(
       ? saleIdOverride.trim()
       : uuidv4();
 
-  // Step 11: Handle Customer Credit & Ledger Entry / Excess Settlement
+  // Step 11: Handle Customer Advance, Credit & Ledger Entry / Excess Settlement
   let customerBalanceAfter: number | null = null;
-  if (customerId && (creditAmount > 0 || excessTenderedForSettlement > 0)) {
+  if (customerId && (existingAdvanceApplied > 0 || creditAmount > 0 || excessTenderedForSettlement > 0)) {
     const cid = customerId;
-    const outstandingRow = await client.query(
-      'SELECT COALESCE(SUM(debit) - SUM(credit), 0)::BIGINT FROM customer_ledger_entries WHERE customer_id = $1',
-      [cid]
-    );
-    const outstandingData = outstandingRow.rows[0] as Record<string, unknown>;
-    const currentOutstanding = Number(Object.values(outstandingData)[0] ?? 0);
+    let currentOutstanding = customerOpt?.balance ?? 0;
 
+    // 11a: Automatically apply available customer advance
+    if (existingAdvanceApplied > 0) {
+      const balanceAfterAdvance = currentOutstanding + existingAdvanceApplied;
+      customerBalanceAfter = balanceAfterAdvance;
+      currentOutstanding = balanceAfterAdvance;
+      const advLedgerId = uuidv4();
+      const advDesc = `Customer advance applied to Invoice ${invoiceNumber}`;
+      await client.query(
+        `INSERT INTO customer_ledger_entries (id, customer_id, reference_id, reference_number, entry_type, debit, credit, balance_after, description, performed_by, created_at)
+         VALUES ($1, $2, $3, $4, 'SALE', $5, 0, $6, $7, $8, $9)`,
+        [advLedgerId, cid, saleId, invoiceNumber, existingAdvanceApplied, balanceAfterAdvance, advDesc, uid, now]
+      );
+    }
+
+    // 11b: Record credit sale if invoice not fully paid
     if (creditAmount > 0) {
       if (customerCreditLimit > 0) {
         const potentialOutstanding = currentOutstanding + creditAmount;
@@ -888,7 +904,27 @@ export async function completeSaleTx(
   const salePayments: SalePayment[] = [];
   let remainingAllocation = totalAmount;
 
+  if (existingAdvanceApplied > 0) {
+    const advPaymentId = uuidv4();
+    await client.query(
+      `INSERT INTO sale_payments (id, sale_id, amount, payment_method, reference_number, notes, created_at)
+       VALUES ($1, $2, $3, 'OTHER', $4, $5, $6)`,
+      [advPaymentId, saleId, existingAdvanceApplied, invoiceNumber, `Customer Advance Applied: Rs ${existingAdvanceApplied}`, now]
+    );
+    salePayments.push({
+      id: advPaymentId,
+      sale_id: saleId,
+      amount: existingAdvanceApplied,
+      payment_method: 'OTHER',
+      reference_number: invoiceNumber,
+      notes: `Customer Advance Applied: Rs ${existingAdvanceApplied}`,
+      created_at: now,
+    });
+    remainingAllocation -= existingAdvanceApplied;
+  }
+
   for (const tender of tenderInputs) {
+    if (remainingAllocation <= 0) break;
     if (remainingAllocation === 0) break;
     const allocated = Math.min(tender.amount, remainingAllocation);
     if (allocated > 0) {

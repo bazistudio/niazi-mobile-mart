@@ -10,6 +10,7 @@ interface PrinterState {
   selectedBranchId: string | null;
   activeTemplate: InvoiceTemplateKey;
   isLoading: boolean;
+  isHydrated: boolean;
   error: string | null;
   fetchSettings: (branchId?: string | null) => Promise<void>;
   setSelectedBranchId: (branchId: string | null) => void;
@@ -41,10 +42,10 @@ const DEFAULT_SETTINGS: PrinterSettings = {
 const DEFAULT_SHOP_HEADER: ShopHeader = {
   name: 'Niazi Mobile Mart',
   branchName: 'Main Branch',
-  address: 'Main Market, City Branch',
-  phone: '0300-1234567',
+  address: '',
+  phone: '',
   secondaryPhone: '',
-  whatsapp: '0300-1234567',
+  whatsapp: '',
   email: '',
   taxNumber: '',
   returnPolicy: 'Goods once sold can only be returned/exchanged within 3 days with original receipt.',
@@ -62,6 +63,7 @@ export const usePrinterStore = create<PrinterState>((set, get) => ({
   selectedBranchId: null,
   activeTemplate: 'SaleInvoice',
   isLoading: false,
+  isHydrated: false,
   error: null,
 
   setSelectedBranchId: (branchId) => {
@@ -139,7 +141,7 @@ export const usePrinterStore = create<PrinterState>((set, get) => ({
           logoUrl: dbData.logo_url || '',
         };
 
-        set({ settings: pSettings, shopHeader: header, isLoading: false });
+        set({ settings: pSettings, shopHeader: header, isLoading: false, isHydrated: true });
 
         if (typeof window !== 'undefined') {
           const cacheKey = resolvedBranch ? `niazi_printer_settings_${resolvedBranch}` : 'niazi_printer_settings';
@@ -163,6 +165,7 @@ export const usePrinterStore = create<PrinterState>((set, get) => ({
           settings: { ...DEFAULT_SETTINGS, ...parsed.printer },
           shopHeader: { ...DEFAULT_SHOP_HEADER, ...parsed.shopHeader },
           isLoading: false,
+          isHydrated: true,
         });
       } else {
         set({ settings: DEFAULT_SETTINGS, shopHeader: DEFAULT_SHOP_HEADER, isLoading: false });

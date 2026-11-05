@@ -432,6 +432,45 @@ export class AuthService {
   }
 
   /**
+   * Dedicated Terminal PIN Unlock (DEF-BROWSER-01)
+   * Calls /api/auth/unlock with the session's active Bearer token.
+   * Does NOT alter the existing session token or expiry.
+   */
+  static async unlock(pin: string): Promise<{ success: boolean }> {
+    const token = getAuthToken();
+    if (!token) {
+      throw new Error('No authenticated session token found. Please log in.');
+    }
+
+    const apiBaseUrl = getApiBaseUrl();
+    const url = `${apiBaseUrl}/api/auth/unlock`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ pin }),
+    });
+
+    if (!response.ok) {
+      let errMessage = 'Incorrect PIN. Please try again.';
+      let statusCode = response.status;
+      try {
+        const data = await response.json();
+        if (data && (data.error || data.message)) {
+          errMessage = data.error || data.message;
+        }
+      } catch {}
+      const err = new Error(errMessage);
+      err.status = statusCode;
+      throw err;
+    }
+
+    return { success: true };
+  }
+
+  /**
    * Application-facing access point for current Bearer token.
    */
   static getToken(): string | null {

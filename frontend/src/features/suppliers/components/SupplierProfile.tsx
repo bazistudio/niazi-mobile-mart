@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import { supplierApi } from '@/services/supplier.api';
 import { LedgerBook } from '@/features/ledger/components/LedgerBook';
@@ -20,16 +21,15 @@ export const SupplierProfile: React.FC<SupplierProfileProps> = ({ id }) => {
   const [detail, setDetail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { openPreview } = usePrintStore();
-  const { settings, shopHeader, fetchSettings } = usePrinterStore();
+  const { settings, shopHeader, isHydrated, fetchSettings } = usePrinterStore();
+  const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [expandedPurchases, setExpandedPurchases] = useState<Record<string, boolean>>({});
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   useEffect(() => {
-    if (!settings || !shopHeader) {
-      fetchSettings();
-    }
-  }, [settings, shopHeader, fetchSettings]);
+    fetchSettings();
+  }, [fetchSettings]);
 
   const togglePurchase = (pid: string) => {
     setExpandedPurchases(prev => ({ ...prev, [pid]: !prev[pid] }));
@@ -97,7 +97,10 @@ export const SupplierProfile: React.FC<SupplierProfileProps> = ({ id }) => {
   const isPayable = actualBalance < 0;
 
   const handlePrintFullLedger = () => {
-    if (!settings || !shopHeader || !rawTimeline) return;
+    if (!isHydrated || !settings || !shopHeader || !rawTimeline) {
+      toast.error('Printer settings not ready. Please wait and try again.');
+      return;
+    }
     const html = printFormatter.formatLedgerStatement(
       { id: supplier.id, type: 'SUPPLIER', name: supplier.name, balance: actualBalance },
       rawTimeline,
@@ -108,16 +111,29 @@ export const SupplierProfile: React.FC<SupplierProfileProps> = ({ id }) => {
     openPreview({ html, documentType: 'Generic', referenceId: 'ledger', title: 'Ledger Statement' });
   };
 
-  const handleDownloadFullLedgerPDF = () => {
-    if (!settings || !shopHeader || !rawTimeline) return;
-    const html = printFormatter.formatLedgerStatement(
-      { id: supplier.id, type: 'SUPPLIER', name: supplier.name, balance: actualBalance },
-      rawTimeline,
-      settings,
-      shopHeader,
-      'Full Ledger'
-    );
-    downloadHtmlAsPdf(html, `Ledger_${supplier.name.replace(/\s+/g, '_')}`);
+  const handleDownloadFullLedgerPDF = async () => {
+    if (!isHydrated || !settings || !shopHeader || !rawTimeline) {
+      toast.error('Printer settings not ready. Please wait and try again.');
+      return;
+    }
+    if (isPdfLoading) return;
+    setIsPdfLoading(true);
+    toast.loading('Preparing PDF...', { id: 'supplier-ledger-pdf' });
+    try {
+      const html = printFormatter.formatLedgerStatement(
+        { id: supplier.id, type: 'SUPPLIER', name: supplier.name, balance: actualBalance },
+        rawTimeline,
+        settings,
+        shopHeader,
+        'Full Ledger'
+      );
+      await downloadHtmlAsPdf(html, `Ledger_${supplier.name.replace(/\s+/g, '_')}`);
+      toast.success('PDF download started.', { id: 'supplier-ledger-pdf' });
+    } catch (err) {
+      toast.error('Failed to generate PDF. Please try again.', { id: 'supplier-ledger-pdf' });
+    } finally {
+      setIsPdfLoading(false);
+    }
   };
 
   const handleNewPurchase = () => {
