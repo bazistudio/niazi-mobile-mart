@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { httpFetch } from '@/lib/tauri/tauriClient';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
+import { useAuthStore } from '@/lib/auth/core/auth.store';
 
 export interface GlobalSearchResultItem {
   id: string;
@@ -14,6 +16,14 @@ export interface GlobalSearchResultItem {
   costPrice?: number;
   quantity?: number;
   stock?: number;
+  branchStock?: number;
+  warehouseStock?: number;
+  totalStock?: number;
+  brand?: string;
+  company?: string;
+  quality?: string;
+  color?: string;
+  compatibleModels?: string[];
   mobile?: string;
   accountCode?: string;
   companyName?: string;
@@ -43,6 +53,10 @@ export function useGlobalSearch(query: string, type: string = 'quick', isFocused
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const activeShopId = useOrganizationStore((s) => s.activeShopId || s.activeShop?._id);
+  const userBranchId = useAuthStore((s) => s.user?.branch_id || s.user?.branchId);
+  const effectiveBranchId = activeShopId || userBranchId || '';
+
   // Debounce logic
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -69,7 +83,8 @@ export function useGlobalSearch(query: string, type: string = 'quick', isFocused
     setIsLoading(true);
     setError(null);
 
-    const url = `/api/v1/search?q=${encodeURIComponent(debouncedQuery.trim())}&category=${encodeURIComponent(debouncedType)}`;
+    const branchParam = effectiveBranchId ? `&branch_id=${encodeURIComponent(effectiveBranchId)}` : '';
+    const url = `/api/v1/search?q=${encodeURIComponent(debouncedQuery.trim())}&category=${encodeURIComponent(debouncedType)}${branchParam}`;
     httpFetch<GlobalSearchResult>(url)
       .then((data) => {
         if (!isCancelled) {
@@ -93,7 +108,7 @@ export function useGlobalSearch(query: string, type: string = 'quick', isFocused
     return () => {
       isCancelled = true;
     };
-  }, [debouncedQuery, debouncedType, isFocused]);
+  }, [debouncedQuery, debouncedType, isFocused, effectiveBranchId]);
 
   return { results, isLoading, error, debouncedQuery, debouncedType };
 }

@@ -8,7 +8,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 import { globalSearch } from '../repositories/search.repo';
-import { sendError } from './product.routes';
+import { sendError, canViewProductCost } from './product.routes';
 import { buildAuthMiddleware, isOrgAdmin, RequestIdentity } from '../auth';
 
 export function createSearchRouter(pool: Pool): Router {
@@ -21,17 +21,14 @@ export function createSearchRouter(pool: Pool): Router {
     const callerIsOrgAdmin = isOrgAdmin(identity);
     let branchId: string | null = null;
 
-    // Branch boundary enforcement:
-    // Non-org-admins are strictly scoped to their assigned branch. Query parameter branch_id cannot override.
-    // Org Admins may view branch-scoped search by supplying branch_id, or view global catalog if omitted.
+    // Global Search Bar (Phase 1):
+    // All authenticated users across all branches can search the organization-wide product catalog
+    // (including Central Warehouse stock). We pass the user's active/assigned branchId as context
+    // so the repository can return both local branch stock AND warehouse/total stock in one step.
     if (!callerIsOrgAdmin) {
-      if (!identity.branch_id) {
-        res.status(403).json({ error: 'Access denied: User has no assigned branch' });
-        return;
-      }
-      branchId = identity.branch_id;
+      branchId = identity.branch_id || null;
     } else {
-      branchId = (req.query['branch_id'] as string) || (req.query['branchId'] as string) || null;
+      branchId = (req.query['branch_id'] as string) || (req.query['branchId'] as string) || identity.branch_id || null;
     }
 
     try {
@@ -39,6 +36,14 @@ export function createSearchRouter(pool: Pool): Router {
       const category = (req.query['category'] as string) || (req.query['type'] as string) || 'quick';
 
       const results = await globalSearch(pool, q, branchId, category);
+      const callerCanViewCost = canViewProductCost(identity);
+      if (!callerCanViewCost && results.products.length > 0) {
+        results.products = results.products.map((p) => ({
+          ...p,
+          purchasePrice: 0,
+          costPrice: 0,
+        }));
+      }
       res.json(results);
     } catch (err) {
       sendError(req, res, err);

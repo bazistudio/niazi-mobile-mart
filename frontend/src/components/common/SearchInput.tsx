@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, Package, Users, Truck, FileText, Loader2, ChevronDown } from 'lucide-react';
+import { Search, Package, Users, Truck, FileText, Loader2, ChevronDown, Building2, Store } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useGlobalSearch } from '@/hooks/useGlobalSearch';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { usePosStore } from '@/features/pos/store/usePosStore';
@@ -58,6 +59,22 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
 
   const handleProductSelect = (product: any, e?: React.MouseEvent | React.KeyboardEvent) => {
     e?.preventDefault();
+    const branchStock = product.branchStock ?? product.stock ?? product.quantity ?? 0;
+    const warehouseStock = product.warehouseStock ?? 0;
+    const totalStock = product.totalStock ?? branchStock;
+
+    if (branchStock <= 0) {
+      if (warehouseStock > 0) {
+        toast(`"${product.name}" has 0 branch stock (Available in Warehouse: ${warehouseStock} pcs)`, { icon: '🏬' });
+      } else if (totalStock > 0) {
+        toast(`"${product.name}" has 0 stock in this branch (Other branches: ${totalStock} pcs)`, { icon: '📦' });
+      } else {
+        toast.error(`"${product.name}" is out of stock across all locations`);
+      }
+      setIsFocused(false);
+      return;
+    }
+
     // Map global search result to DBInventory format expected by POS
     const posProduct = {
       id: product.id || product._id,
@@ -66,7 +83,7 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
       name: product.name,
       salePrice: product.price ?? product.salePrice ?? 0,
       costPrice: product.purchasePrice ?? product.costPrice ?? 0,
-      stock: product.stock ?? product.quantity ?? 0
+      stock: branchStock
     };
     addToCart(posProduct as any);
     
@@ -330,8 +347,8 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
                         onClick={(e) => handleProductSelect(product, e)}
                         className={`w-full text-left flex items-center justify-between px-3 py-2 rounded-md transition-colors group ${isSelected ? 'bg-surface-hover ring-1 ring-focus-ring' : 'hover:bg-surface-hover'}`}
                       >
-                        <div>
-                          <p className="text-sm font-medium text-text-primary group-hover:text-primary flex items-center gap-2">
+                        <div className="min-w-0 pr-3">
+                          <p className="text-sm font-medium text-text-primary group-hover:text-primary flex items-center gap-2 flex-wrap">
                             <span>{product.name}</span>
                             {product.match_type === 'COMPATIBLE_MODEL' && (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
@@ -339,11 +356,23 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
                               </span>
                             )}
                           </p>
-                          <p className="text-xs text-text-muted">{product.sku || product.barcode || ''}</p>
+                          <div className="flex items-center gap-2 text-xs text-text-muted mt-0.5 flex-wrap">
+                            <span className="font-mono">{product.sku || product.barcode || ''}</span>
+                            {product.brand && product.brand !== '-' && (
+                              <span className="px-1.5 py-0.2 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] font-medium border border-blue-200 dark:border-blue-800">
+                                {product.brand}
+                              </span>
+                            )}
+                            {product.quality && product.quality !== '-' && (
+                              <span className="px-1.5 py-0.2 rounded bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 text-[10px] font-medium border border-teal-200 dark:border-teal-800">
+                                {product.quality}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex flex-col items-end gap-1">
+                        <div className="flex flex-col items-end gap-1 shrink-0">
                           <span 
-                            className="text-sm font-bold text-primary cursor-pointer select-none"
+                            className="text-sm font-bold text-primary cursor-pointer select-none tabular-nums"
                             onMouseDown={(e) => { e.stopPropagation(); setRevealedPriceId(product.id || product._id || null); }}
                             onMouseUp={(e) => { e.stopPropagation(); setRevealedPriceId(null); }}
                             onMouseLeave={(e) => { e.stopPropagation(); setRevealedPriceId(null); }}
@@ -352,11 +381,18 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
                             onClick={(e) => { e.stopPropagation(); }}
                             title="Hold to see cost price"
                           >
-                            Rs {revealedPriceId === product._id ? (product.purchasePrice ?? product.costPrice ?? 0) : (product.price ?? product.salePrice ?? 0)}
+                            Rs {(revealedPriceId === (product.id || product._id) ? (product.purchasePrice ?? product.costPrice ?? 0) : (product.price ?? product.salePrice ?? 0)).toLocaleString()}
                           </span>
-                          <span className="text-xs font-semibold bg-surface-hover text-text-secondary px-2 py-0.5 rounded-md border border-border">
-                            Qty: {product.quantity}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md border ${(product.branchStock ?? product.quantity ?? 0) > 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800' : 'bg-surface-hover text-text-muted border-border'}`}>
+                              <Store className="h-3 w-3" />
+                              Shop: {product.branchStock ?? product.quantity ?? 0}
+                            </span>
+                            <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md border ${(product.warehouseStock ?? 0) > 0 ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-800' : 'bg-surface-hover text-text-muted border-border'}`}>
+                              <Building2 className="h-3 w-3" />
+                              Warehouse: {product.warehouseStock ?? 0}
+                            </span>
+                          </div>
                         </div>
                       </button>
                     );
