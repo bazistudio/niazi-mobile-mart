@@ -17,6 +17,7 @@ import {
   Coins,
   Building2,
   Smartphone,
+  PackageCheck,
 } from 'lucide-react';
 import { NavigationGroup } from '../../types/navigation';
 import { PERMISSIONS } from '../permissions';
@@ -39,6 +40,7 @@ export const shopAdminNavigation: NavigationGroup[] = [
     label: 'Inventory',
     items: [
       { name: 'Mobile Inventory', href: '/dashboard/shop-admin/mobiles', icon: Smartphone, permission: PERMISSIONS.INVENTORY_VIEW },
+      { name: 'Sold Mobiles', href: '/dashboard/shop-admin/mobiles/sold', icon: PackageCheck, permission: PERMISSIONS.INVENTORY_VIEW },
       { name: 'Products & Stock', href: '/dashboard/shop-admin/inventory', icon: Tags, permission: PERMISSIONS.PRODUCTS_VIEW },
     ],
   },

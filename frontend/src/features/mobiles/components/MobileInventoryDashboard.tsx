@@ -44,6 +44,7 @@ import type { MobileInventoryItem, MobileCondition } from '../types/mobile.types
 // ─── Mobile module sub-navigation tabs ──────────────────────────────────────
 const MOBILE_NAV_TABS = [
   { label: 'Inventory', href: '/dashboard/shop-admin/mobiles' },
+  { label: 'Sold Mobiles', href: '/dashboard/shop-admin/mobiles/sold' },
   { label: 'Mobile Sale', href: '/dashboard/shop-admin/mobiles/sale' },
   { label: 'Sale History', href: '/dashboard/shop-admin/mobiles/sale-history' },
 ] as const;

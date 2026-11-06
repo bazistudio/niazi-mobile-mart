@@ -17,7 +17,9 @@ import {
   Settings,
   Wrench,
   UserCog,
-  Coins
+  Coins,
+  TrendingUp,
+  PackageCheck,
 } from 'lucide-react';
 import { NavigationGroup } from '../../types/navigation';
 
@@ -29,6 +31,7 @@ export const organizationNavigation: NavigationGroup[] = [
       { name: 'Repairs', href: '/dashboard/organization/repairs', icon: Wrench },
       { name: 'Audit Log', href: '/dashboard/organization/audit-logs', icon: Activity },
       { name: 'Reports', href: '/dashboard/organization/reports', icon: BarChart3 },
+      { name: 'Progress Report', href: '/dashboard/organization/progress-report', icon: TrendingUp },
       { name: 'History', href: '/dashboard/organization/history', icon: History },
       { name: 'Business', href: '/dashboard/organization/business', icon: Briefcase },
       { name: 'Ledger', href: '/dashboard/organization/ledger', icon: BookOpen },
@@ -38,6 +41,7 @@ export const organizationNavigation: NavigationGroup[] = [
       // { name: 'Social', href: '/dashboard/organization/social', icon: Share2 },
       { name: 'Products', href: '/dashboard/organization/products', icon: Package },
       { name: 'Mobile Inventory', href: '/dashboard/organization/mobile-inventory', icon: Smartphone },
+      { name: 'Sold Mobiles', href: '/dashboard/organization/mobile-inventory?tab=sold', icon: PackageCheck },
       { name: 'Customers', href: '/dashboard/organization/customers', icon: UserCheck },
       { name: 'Suppliers', href: '/dashboard/organization/suppliers', icon: Truck },
       { name: 'HR', href: '/dashboard/organization/hr', icon: UserCog },

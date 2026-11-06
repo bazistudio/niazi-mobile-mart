@@ -14,6 +14,7 @@ import { MobileInventoryPage } from '@/pages/dashboard/shop-admin/MobileInventor
 import { AddMobilePage } from '@/pages/dashboard/shop-admin/AddMobilePage';
 import { MobileSalePage } from '@/pages/dashboard/shop-admin/MobileSalePage';
 import { MobileSaleHistoryPage } from '@/pages/dashboard/shop-admin/MobileSaleHistoryPage';
+import { SoldMobilesPage } from '@/pages/dashboard/shop-admin/SoldMobilesPage';
 import { StockPage } from '@/pages/dashboard/shop-admin/StockPage';
 import { ImportPage } from '@/pages/dashboard/shop-admin/ImportPage';
 import { SalesPage } from '@/pages/dashboard/shop-admin/SalesPage';
@@ -118,6 +119,16 @@ export const shopAdminCoreRoutes = (
       element={
         <PermissionGuard requiredPermission={PERMISSIONS.INVENTORY_VIEW} fallbackPath="/dashboard/shop-admin">
           <MobileSaleHistoryPage />
+        </PermissionGuard>
+      }
+    />
+
+    {/* Sold Mobiles Ledger */}
+    <Route
+      path="mobiles/sold"
+      element={
+        <PermissionGuard requiredPermission={PERMISSIONS.INVENTORY_VIEW} fallbackPath="/dashboard/shop-admin">
+          <SoldMobilesPage />
         </PermissionGuard>
       }
     />

@@ -21,6 +21,7 @@ import { OrganizationSuppliersPage } from '@/pages/dashboard/organization/Organi
 import { OrganizationProfilePage } from '@/pages/dashboard/organization/OrganizationProfilePage';
 import { OrganizationSettingsPage } from '@/pages/dashboard/organization/OrganizationSettingsPage';
 import { OrganizationHRPage } from '@/pages/dashboard/organization/OrganizationHRPage';
+import { OrganizationProgressReportPage } from '@/pages/dashboard/organization/OrganizationProgressReportPage';
 import { CashManagementPage } from '@/pages/dashboard/shop-admin/CashManagementPage';
 
 export const organizationRoutes = (
@@ -81,10 +82,13 @@ export const organizationRoutes = (
       {/* 15. Suppliers */}
       <Route path="suppliers" element={<OrganizationSuppliersPage />} />
 
-      {/* 16. HR — Prototype (mock data, no backend writes) */}
+      {/* 16. HR — Real staff data, preview-only salary/advances */}
       <Route path="hr" element={<OrganizationHRPage />} />
 
-      {/* 17. Settings */}
+      {/* 17. Progress Report — Real mechanic data, other roles pending backend */}
+      <Route path="progress-report" element={<OrganizationProgressReportPage />} />
+
+      {/* 18. Settings */}
       <Route path="settings" element={<OrganizationSettingsPage />} />
     </Route>
   </Route>

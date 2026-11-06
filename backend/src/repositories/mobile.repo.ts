@@ -1007,6 +1007,11 @@ export class MobileRepo {
          b.code AS branch_code,
          pw.purchase_date AS pw_purchase_date,
          pw.voucher_no AS pw_voucher_no,
+         msi.sale_price AS msi_sale_price,
+         msi.created_at AS msi_sale_date,
+         s.invoice_number AS s_invoice_number,
+         s.customer_name_snapshot AS s_customer_name,
+         u_sold.name AS s_sold_by_name,
          (SELECT imei FROM mobile_imei_identifiers
           WHERE device_id = d.id AND slot = 'IMEI1' LIMIT 1) AS imei1,
          (SELECT imei FROM mobile_imei_identifiers
@@ -1014,6 +1019,9 @@ export class MobileRepo {
        FROM mobile_devices d
        LEFT JOIN branches b ON b.id = d.branch_id
        LEFT JOIN mobile_purchase_paperwork pw ON pw.device_id = d.id
+       LEFT JOIN mobile_sale_items msi ON msi.device_id = d.id AND msi.is_return = FALSE
+       LEFT JOIN sales s ON s.id = d.sale_id
+       LEFT JOIN users u_sold ON u_sold.id = msi.sold_by
        WHERE ${where}
        ORDER BY d.created_at DESC
        LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
@@ -1024,11 +1032,35 @@ export class MobileRepo {
       const imeis: Array<{ id: string; imei: string; slot: MobileSlot }> = [];
       if (row.imei1) imeis.push({ id: '', imei: row.imei1, slot: 'IMEI1' });
       if (row.imei2) imeis.push({ id: '', imei: row.imei2, slot: 'IMEI2' });
-      const { imei1: _i1, imei2: _i2, pw_purchase_date, pw_voucher_no, ...device } = row as typeof row & { pw_purchase_date?: string | null; pw_voucher_no?: string | null };
+      const {
+        imei1: _i1,
+        imei2: _i2,
+        pw_purchase_date,
+        pw_voucher_no,
+        msi_sale_price,
+        msi_sale_date,
+        s_invoice_number,
+        s_customer_name,
+        s_sold_by_name,
+        ...device
+      } = row as typeof row & {
+        pw_purchase_date?: string | null;
+        pw_voucher_no?: string | null;
+        msi_sale_price?: string | null;
+        msi_sale_date?: string | null;
+        s_invoice_number?: string | null;
+        s_customer_name?: string | null;
+        s_sold_by_name?: string | null;
+      };
       return {
         ...device,
         purchase_date: row.condition === 'USED' ? (pw_purchase_date || null) : row.created_at.slice(0, 10),
         voucher_no: pw_voucher_no || null,
+        sale_price_actual: msi_sale_price ? parseFloat(msi_sale_price) : null,
+        sale_date: msi_sale_date || null,
+        invoice_number: s_invoice_number || null,
+        customer_name: s_customer_name || null,
+        sold_by_name: s_sold_by_name || null,
         imeis,
       } as MobileDeviceRow;
     });

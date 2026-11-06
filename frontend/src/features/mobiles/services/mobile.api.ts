@@ -48,6 +48,11 @@ export interface MobileDeviceRow {
   branch_code?: string | null;
   purchase_date?: string | null;
   voucher_no?: string | null;
+  sale_price_actual?: number | null;
+  sale_date?: string | null;
+  invoice_number?: string | null;
+  customer_name?: string | null;
+  sold_by_name?: string | null;
 }
 
 export interface MobileBranchSummaryItem {
@@ -317,6 +322,11 @@ export function mapDeviceRowToItem(row: MobileDeviceRow): MobileInventoryItem {
     createdAt: row.created_at,
     purchaseDate: row.purchase_date || (row.condition === "NEW" ? row.created_at.slice(0, 10) : null),
     voucherNo: row.voucher_no || undefined,
+    salePriceActual: row.sale_price_actual ?? null,
+    saleDate: row.sale_date ?? null,
+    invoiceNumber: row.invoice_number ?? null,
+    customerName: row.customer_name ?? null,
+    soldByName: row.sold_by_name ?? null,
   };
 }
 
