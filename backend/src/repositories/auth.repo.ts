@@ -227,9 +227,21 @@ export class AuthRepo {
     }>(
       `UPDATE users
          SET
-           failed_login_attempts = failed_login_attempts + 1,
+           failed_login_attempts = CASE
+             WHEN login_locked_until_ms IS NOT NULL
+                  AND login_locked_until_ms <= (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+             THEN 1
+             ELSE COALESCE(failed_login_attempts, 0) + 1
+           END,
            login_locked_until_ms = CASE
-             WHEN failed_login_attempts + 1 >= $2
+             WHEN (
+               CASE
+                 WHEN login_locked_until_ms IS NOT NULL
+                      AND login_locked_until_ms <= (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+                 THEN 1
+                 ELSE COALESCE(failed_login_attempts, 0) + 1
+               END
+             ) >= $2
              THEN (
                EXTRACT(EPOCH FROM NOW()) * 1000 + $3
              )::BIGINT
@@ -314,9 +326,21 @@ export class AuthRepo {
     }>(
       `UPDATE users
          SET
-           failed_pin_attempts = failed_pin_attempts + 1,
+           failed_pin_attempts = CASE
+             WHEN pin_locked_until_ms IS NOT NULL
+                  AND pin_locked_until_ms <= (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+             THEN 1
+             ELSE COALESCE(failed_pin_attempts, 0) + 1
+           END,
            pin_locked_until_ms = CASE
-             WHEN failed_pin_attempts + 1 >= $2
+             WHEN (
+               CASE
+                 WHEN pin_locked_until_ms IS NOT NULL
+                      AND pin_locked_until_ms <= (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+                 THEN 1
+                 ELSE COALESCE(failed_pin_attempts, 0) + 1
+               END
+             ) >= $2
              THEN (
                EXTRACT(EPOCH FROM NOW()) * 1000 + $3
              )::BIGINT

@@ -211,14 +211,22 @@ export class AuthService {
         429,
         loginLockRemaining
       );
+    } else if (user.login_locked_until_ms !== null || user.failed_login_attempts >= MAX_LOGIN_ATTEMPTS) {
+      // Prior lockout period has elapsed: reset login counters so a new attempt starts fresh at 0
+      await this.repo.resetLoginLockout(user.id);
+      user.failed_login_attempts = 0;
+      user.login_locked_until_ms = null;
     }
 
-    // 4. Try login_key_hash (password only)
+    // 4. Try login_key_hash (password) first
     const passwordMatch = await verifyArgon2(password, user.login_key_hash);
 
     if (passwordMatch) {
-      // 5. Successful password login — reset lockout
+      // 5a. Successful password login — reset lockouts
       await this.repo.resetLoginLockout(user.id);
+      if (user.failed_pin_attempts > 0 || user.pin_locked_until_ms !== null) {
+        await this.repo.resetPinLockout(user.id);
+      }
 
       const token = issueToken({
         userId: user.id,
@@ -231,7 +239,44 @@ export class AuthService {
       return { token, user: sanitizeUser(user) };
     }
 
-    // 6. Password failed.
+    // 5b. Try pin_hash (4-digit PIN login for desktop & browser users, matching Rust auth_service.rs)
+    if (user.pin_hash && user.pin_hash.trim() !== '') {
+      const pinLockRemaining = remainingLockout(user.pin_locked_until_ms);
+      if (pinLockRemaining > 0) {
+        throw new AuthServiceError(
+          `PIN is temporarily locked. Try again in ${Math.ceil(pinLockRemaining / 60_000)} minute(s).`,
+          'LOCKED_OUT',
+          429,
+          pinLockRemaining
+        );
+      } else if (user.pin_locked_until_ms !== null || user.failed_pin_attempts >= MAX_PIN_ATTEMPTS) {
+        await this.repo.resetPinLockout(user.id);
+        user.failed_pin_attempts = 0;
+        user.pin_locked_until_ms = null;
+      }
+
+      const pinMatch = await verifyArgon2(password.trim(), user.pin_hash);
+
+      if (pinMatch) {
+        // Successful PIN login — reset both PIN and login lockout counters
+        await this.repo.resetPinLockout(user.id);
+        if (user.failed_login_attempts > 0 || user.login_locked_until_ms !== null) {
+          await this.repo.resetLoginLockout(user.id);
+        }
+
+        const token = issueToken({
+          userId: user.id,
+          username: user.username,
+          role: user.role,
+          accessProfile: user.access_profile,
+          branchId: user.branch_id,
+        });
+
+        return { token, user: sanitizeUser(user) };
+      }
+    }
+
+    // 6. Both password and PIN failed.
     //    Use ATOMIC recordFailedLoginAtomic — single UPDATE RETURNING that
     //    increments the counter AND conditionally sets the lockout timestamp.
     //    This eliminates the race condition of the prior two-query approach.
@@ -299,7 +344,7 @@ export class AuthService {
         429,
         pinLockRemaining
       );
-    } else if (user.pin_locked_until_ms !== null) {
+    } else if (user.pin_locked_until_ms !== null || user.failed_pin_attempts >= MAX_PIN_ATTEMPTS) {
       // Prior lockout period has elapsed: reset counters (desktop parity)
       await this.repo.resetPinLockout(user.id);
     }

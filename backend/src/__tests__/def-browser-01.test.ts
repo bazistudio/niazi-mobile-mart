@@ -207,11 +207,21 @@ describe('DEF-BROWSER-01: Terminal PIN Unlock & Password Separation Suite', () =
     );
   });
 
-  test('3. PIN cannot be used through normal /api/auth/login', async () => {
-    // Attempting to log in with terminal PIN instead of password MUST FAIL
+  test('3. Valid 4-digit PIN login succeeds on /api/auth/login (and expired lockout resets)', async () => {
+    // Both password AND 4-digit PIN must work on /api/auth/login for desktop & browser users
+    const res = await authService.login(testUsername, CORRECT_PIN);
+    assert.ok(res.token, 'Token must be returned on valid 4-digit PIN login');
+    assert.equal(res.user.username, testUsername);
+
+    // Also verify that an expired login_locked_until_ms does NOT permanently re-lock on attempt 1
+    const expiredMs = Date.now() - 10_000;
+    await pool.query(
+      'UPDATE users SET failed_login_attempts = 5, login_locked_until_ms = $1 WHERE id = $2',
+      [expiredMs, testUserId]
+    );
     await assert.rejects(
       async () => {
-        await authService.login(testUsername, CORRECT_PIN);
+        await authService.login(testUsername, WRONG_PIN);
       },
       (err: any) => {
         assert.equal(err.code, 'INVALID_CREDENTIALS');
@@ -219,6 +229,10 @@ describe('DEF-BROWSER-01: Terminal PIN Unlock & Password Separation Suite', () =
         return true;
       }
     );
+    const updated = await authRepo.findById(testUserId);
+    assert.equal(updated?.failed_login_attempts, 1, 'Expired lockout must reset and count as attempt 1, not 6');
+    assert.equal(updated?.login_locked_until_ms, null);
+    await authRepo.resetLoginLockout(testUserId);
   });
 
   test('4. A correct PIN unlocks an authenticated user terminal', async () => {
