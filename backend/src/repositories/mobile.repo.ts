@@ -401,6 +401,35 @@ export interface UpdateSellerInput {
   notes?: string | null;
 }
 
+export interface TransferMobileDeviceInput {
+  device_id: string;
+  organization_id: string;
+  source_branch_id: string;
+  destination_branch_id: string;
+  performed_by: string;
+  notes?: string | null;
+}
+
+export interface MobileMovementRow {
+  id: string;
+  device_id: string;
+  organization_id: string;
+  movement_type: MobileMovementType;
+  from_branch_id: string | null;
+  to_branch_id: string | null;
+  from_status: string | null;
+  to_status: string;
+  notes: string | null;
+  performed_by: string;
+  created_at: string;
+  brand?: string;
+  model?: string;
+  imei1?: string;
+  from_branch_name?: string;
+  to_branch_name?: string;
+  performed_by_name?: string;
+}
+
 /** Branch-scoped investment summary (NEW + USED breakdown, IN_STOCK only). */
 export interface BranchInvestmentSummary {
   total_investment: number;
@@ -978,6 +1007,11 @@ export class MobileRepo {
          b.code AS branch_code,
          pw.purchase_date AS pw_purchase_date,
          pw.voucher_no AS pw_voucher_no,
+         msi.sale_price AS msi_sale_price,
+         msi.created_at AS msi_sale_date,
+         s.invoice_number AS s_invoice_number,
+         s.customer_name_snapshot AS s_customer_name,
+         u_sold.name AS s_sold_by_name,
          (SELECT imei FROM mobile_imei_identifiers
           WHERE device_id = d.id AND slot = 'IMEI1' LIMIT 1) AS imei1,
          (SELECT imei FROM mobile_imei_identifiers
@@ -985,6 +1019,9 @@ export class MobileRepo {
        FROM mobile_devices d
        LEFT JOIN branches b ON b.id = d.branch_id
        LEFT JOIN mobile_purchase_paperwork pw ON pw.device_id = d.id
+       LEFT JOIN mobile_sale_items msi ON msi.device_id = d.id AND msi.is_return = FALSE
+       LEFT JOIN sales s ON s.id = d.sale_id
+       LEFT JOIN users u_sold ON u_sold.id = msi.sold_by
        WHERE ${where}
        ORDER BY d.created_at DESC
        LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
@@ -995,11 +1032,35 @@ export class MobileRepo {
       const imeis: Array<{ id: string; imei: string; slot: MobileSlot }> = [];
       if (row.imei1) imeis.push({ id: '', imei: row.imei1, slot: 'IMEI1' });
       if (row.imei2) imeis.push({ id: '', imei: row.imei2, slot: 'IMEI2' });
-      const { imei1: _i1, imei2: _i2, pw_purchase_date, pw_voucher_no, ...device } = row as typeof row & { pw_purchase_date?: string | null; pw_voucher_no?: string | null };
+      const {
+        imei1: _i1,
+        imei2: _i2,
+        pw_purchase_date,
+        pw_voucher_no,
+        msi_sale_price,
+        msi_sale_date,
+        s_invoice_number,
+        s_customer_name,
+        s_sold_by_name,
+        ...device
+      } = row as typeof row & {
+        pw_purchase_date?: string | null;
+        pw_voucher_no?: string | null;
+        msi_sale_price?: string | null;
+        msi_sale_date?: string | null;
+        s_invoice_number?: string | null;
+        s_customer_name?: string | null;
+        s_sold_by_name?: string | null;
+      };
       return {
         ...device,
         purchase_date: row.condition === 'USED' ? (pw_purchase_date || null) : row.created_at.slice(0, 10),
         voucher_no: pw_voucher_no || null,
+        sale_price_actual: msi_sale_price ? parseFloat(msi_sale_price) : null,
+        sale_date: msi_sale_date || null,
+        invoice_number: s_invoice_number || null,
+        customer_name: s_customer_name || null,
+        sold_by_name: s_sold_by_name || null,
         imeis,
       } as MobileDeviceRow;
     });
@@ -2432,5 +2493,182 @@ export class MobileRepo {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Phase 13 — Mobile Stock Transfer & Movement Audit
+  // -------------------------------------------------------------------------
 
+  /**
+   * Atomically transfers a mobile device from one branch to another.
+   */
+  async transferMobileDevice(input: TransferMobileDeviceInput): Promise<{ success: boolean; movement_id: string }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const srcBranchId = input.source_branch_id.trim();
+      const dstBranchId = input.destination_branch_id.trim();
+
+      if (srcBranchId === dstBranchId) {
+        throw new MobileRepoError('Source and destination branches cannot be the same', 400);
+      }
+
+      // 1. Verify destination branch exists and belongs to the same organization
+      const dstCheck = await client.query<{ exists: boolean }>(
+        `SELECT EXISTS(
+           SELECT 1 FROM branches
+           WHERE id = $1 AND organization_id = $2
+         ) AS exists`,
+        [dstBranchId, input.organization_id]
+      );
+      if (!dstCheck.rows[0]?.exists) {
+        throw new MobileRepoError('Destination branch does not exist or does not belong to your organization', 400);
+      }
+
+      // 2. Lock target device row inside transaction
+      const devRes = await client.query<MobileDeviceRow>(
+        `SELECT id, organization_id, branch_id, status, condition, brand, model
+         FROM mobile_devices
+         WHERE id = $1 AND organization_id = $2
+         FOR UPDATE`,
+        [input.device_id, input.organization_id]
+      );
+
+      if (devRes.rows.length === 0) {
+        throw new MobileRepoError('Mobile device not found in your organization', 404);
+      }
+
+      const device = devRes.rows[0];
+
+      if (device.branch_id !== srcBranchId) {
+        throw new MobileRepoError(
+          `Device does not reside in source branch. Current branch: ${device.branch_id}`,
+          409
+        );
+      }
+
+      if (device.status !== 'IN_STOCK') {
+        throw new MobileRepoError(
+          `Only IN_STOCK devices can be transferred. Current status is ${device.status}.`,
+          422
+        );
+      }
+
+      const now = this.nowIso();
+      const movementId = this.newId();
+
+      // 3. Update device branch_id
+      await client.query(
+        `UPDATE mobile_devices
+         SET branch_id = $1,
+             updated_by = $2,
+             updated_at = $3
+         WHERE id = $4 AND organization_id = $5`,
+        [dstBranchId, input.performed_by, now, input.device_id, input.organization_id]
+      );
+
+      // 4. Update purchase paperwork branch_id if present
+      await client.query(
+        `UPDATE mobile_purchase_paperwork
+         SET branch_id = $1,
+             updated_at = $2
+         WHERE device_id = $3 AND organization_id = $4`,
+        [dstBranchId, now, input.device_id, input.organization_id]
+      );
+
+      // 5. Insert audit row in mobile_device_movements
+      await client.query(
+        `INSERT INTO mobile_device_movements (
+           id, device_id, organization_id,
+           movement_type,
+           from_branch_id, to_branch_id,
+           from_status, to_status,
+           notes, performed_by, created_at
+         ) VALUES (
+           $1, $2, $3,
+           'TRANSFERRED',
+           $4, $5,
+           'IN_STOCK', 'IN_STOCK',
+           $6, $7, $8
+         )`,
+        [
+          movementId,
+          input.device_id,
+          input.organization_id,
+          srcBranchId,
+          dstBranchId,
+          input.notes ?? null,
+          input.performed_by,
+          now,
+        ]
+      );
+
+      // 6. Write change_logs audit entry
+      await this.writeAuditEntry(client, {
+        organizationId: input.organization_id,
+        branchId: srcBranchId,
+        eventType: 'MOBILE_DEVICE_TRANSFERRED',
+        entityId: input.device_id,
+        eventPayload: {
+          device_id: input.device_id,
+          brand: device.brand,
+          model: device.model,
+          from_branch_id: srcBranchId,
+          to_branch_id: dstBranchId,
+          notes: input.notes ?? null,
+          transferred_by: input.performed_by,
+          movement_id: movementId,
+        },
+      });
+
+      await client.query('COMMIT');
+      return { success: true, movement_id: movementId };
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Lists transfer movements for the branch or organization.
+   */
+  async listTransferMovements(
+    organizationId: string,
+    branchId?: string,
+    limit: number = 50
+  ): Promise<MobileMovementRow[]> {
+    let where = `m.organization_id = $1 AND m.movement_type = 'TRANSFERRED'`;
+    const params: any[] = [organizationId];
+
+    if (branchId && branchId.trim()) {
+      params.push(branchId.trim());
+      where += ` AND (m.from_branch_id = $${params.length} OR m.to_branch_id = $${params.length})`;
+    }
+
+    params.push(Math.min(Math.max(limit, 1), 100));
+
+    const result = await this.pool.query<MobileMovementRow>(
+      `SELECT
+         m.id, m.device_id, m.organization_id, m.movement_type,
+         m.from_branch_id, m.to_branch_id, m.from_status, m.to_status,
+         m.notes, m.performed_by, m.created_at,
+         d.brand, d.model,
+         (SELECT imei FROM mobile_imei_identifiers WHERE device_id = d.id AND slot = 'IMEI1' LIMIT 1) AS imei1,
+         fb.name AS from_branch_name,
+         tb.name AS to_branch_name,
+         u.name AS performed_by_name
+       FROM mobile_device_movements m
+       JOIN mobile_devices d ON d.id = m.device_id
+       LEFT JOIN branches fb ON fb.id = m.from_branch_id
+       LEFT JOIN branches tb ON tb.id = m.to_branch_id
+       LEFT JOIN users u ON u.id = m.performed_by
+       WHERE ${where}
+       ORDER BY m.created_at DESC
+       LIMIT $${params.length}`,
+      params
+    );
+
+    return result.rows;
+  }
 }

@@ -91,4 +91,9 @@ export interface MobileInventoryItem {
   voucherNo?: string;
   createdAt: string;
   purchaseDate?: string | null;
+  salePriceActual?: number | null;
+  saleDate?: string | null;
+  invoiceNumber?: string | null;
+  customerName?: string | null;
+  soldByName?: string | null;
 }

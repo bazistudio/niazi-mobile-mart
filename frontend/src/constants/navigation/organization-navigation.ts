@@ -17,7 +17,9 @@ import {
   Settings,
   Wrench,
   UserCog,
-  Coins
+  Coins,
+  TrendingUp,
+  PackageCheck,
 } from 'lucide-react';
 import { NavigationGroup } from '../../types/navigation';
 
@@ -29,6 +31,7 @@ export const organizationNavigation: NavigationGroup[] = [
       { name: 'Repairs', href: '/dashboard/organization/repairs', icon: Wrench },
       { name: 'Audit Log', href: '/dashboard/organization/audit-logs', icon: Activity },
       { name: 'Reports', href: '/dashboard/organization/reports', icon: BarChart3 },
+      { name: 'Progress Report', href: '/dashboard/organization/progress-report', icon: TrendingUp },
       { name: 'History', href: '/dashboard/organization/history', icon: History },
       { name: 'Business', href: '/dashboard/organization/business', icon: Briefcase },
       { name: 'Ledger', href: '/dashboard/organization/ledger', icon: BookOpen },

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { OrganizationPageShell } from '@/features/dashboard/components/organization/OrganizationPageShell';
 import {
   Smartphone,
@@ -20,6 +20,7 @@ import {
   ArrowUpDown,
   SlidersHorizontal,
   Eye,
+  PackageCheck,
 } from 'lucide-react';
 import { Button, Badge, Card } from '@/components/ui';
 import {
@@ -31,12 +32,14 @@ import {
 import type { MobileInventoryItem, MobileCondition } from '@/features/mobiles/types/mobile.types';
 import { MobileDetailModal } from '@/features/mobiles/components/MobileDetailModal';
 import { EditMobileModal } from '@/features/mobiles/components/EditMobileModal';
+import { SoldMobilesTab } from '@/features/mobiles/components/SoldMobilesTab';
 import { buildUsedMobileA4Html, buildUsedMobilePdfFilename } from '@/features/mobiles/templates/usedMobileA4Template';
 import { usePrintStore } from '@/lib/printer/print.store';
 import { downloadHtmlAsPdf } from '@/lib/printer/pdfExport';
 
 export function OrganizationMobileInventoryPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Data states
   const [summary, setSummary] = useState<MobileOrganizationSummary | null>(null);
@@ -44,10 +47,29 @@ export function OrganizationMobileInventoryPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // View tab state: 'IN_STOCK' (Main Inventory) or 'SOLD' (Sold Mobiles)
+  const tabParam = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState<'IN_STOCK' | 'SOLD'>(
+    tabParam === 'sold' ? 'SOLD' : 'IN_STOCK'
+  );
+
+  useEffect(() => {
+    if (tabParam === 'sold') {
+      setActiveTab('SOLD');
+    } else if (tabParam === 'in-stock') {
+      setActiveTab('IN_STOCK');
+    }
+  }, [tabParam]);
+
+  const handleTabChange = (newTab: 'IN_STOCK' | 'SOLD') => {
+    setActiveTab(newTab);
+    setSearchParams(newTab === 'SOLD' ? { tab: 'sold' } : {});
+  };
+
   // Filter states
   const [selectedBranchId, setSelectedBranchId] = useState<string>('all');
   const [conditionFilter, setConditionFilter] = useState<'ALL' | MobileCondition>('ALL');
-  const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [statusFilter, setStatusFilter] = useState<string>('IN_STOCK');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [editDeviceId, setEditDeviceId] = useState<string | null>(null);
@@ -85,11 +107,12 @@ export function OrganizationMobileInventoryPage() {
       setSummary(summaryRes.summary);
 
       // 2. Fetch consolidated devices across all branches (no branch_id = org-wide for admin)
-      const devicesRes = await mobileApi.getMobiles({
-        limit: 200,
+      // By default fetch active inventory (IN_STOCK / INSPECTION) without mixing SOLD handsets
+      const devicesRes = await mobileApi.getAllMobiles({
+        // org-wide fetch when branch_id is omitted
       });
 
-      const mapped = (devicesRes.devices || []).map(mapDeviceRowToItem);
+      const mapped = devicesRes.map(mapDeviceRowToItem);
       setDevices(mapped);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to retrieve organization mobile inventory';
@@ -130,8 +153,11 @@ export function OrganizationMobileInventoryPage() {
         return false;
       }
       // Status filter
-      if (statusFilter !== 'ALL' && device.status !== statusFilter) {
-        return false;
+      if (statusFilter !== 'ALL') {
+        if (device.status !== statusFilter) return false;
+      } else {
+        // 'ALL' in active inventory context means active devices (IN_STOCK or INSPECTION), never SOLD
+        if (device.status === 'SOLD') return false;
       }
       // Search query (brand, model, IMEI, branch name)
       if (searchQuery.trim()) {
@@ -218,7 +244,88 @@ export function OrganizationMobileInventoryPage() {
         </div>
       )}
 
-      {/* ── Section 1: Organization Overview Metrics ────────────────────────── */}
+      {/* ── Sub-Navigation: In-Stock vs Sold Mobiles ────────────────────── */}
+      <div className="flex items-center gap-2 border-b border-gray-200 dark:border-gray-800 pb-3">
+        <button
+          type="button"
+          onClick={() => handleTabChange('IN_STOCK')}
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            activeTab === 'IN_STOCK'
+              ? 'bg-teal-600 text-white shadow-xs'
+              : 'bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+          }`}
+        >
+          <Smartphone className="w-4 h-4" />
+          <span>Active Mobile Inventory</span>
+          <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${
+            activeTab === 'IN_STOCK' ? 'bg-teal-700 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+          }`}>
+            {inStockCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleTabChange('SOLD')}
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            activeTab === 'SOLD'
+              ? 'bg-teal-600 text-white shadow-xs'
+              : 'bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+          }`}
+        >
+          <PackageCheck className="w-4 h-4" />
+          <span>Sold Mobiles Ledger</span>
+          <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${
+            activeTab === 'SOLD' ? 'bg-teal-700 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+          }`}>
+            {soldCount}
+          </span>
+        </button>
+      </div>
+
+      {activeTab === 'SOLD' ? (
+        /* ── Sold Mobiles Organization View ──────────────────────────────── */
+        <div className="space-y-4">
+          <div className="flex items-center justify-between bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-100 dark:border-gray-800">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Branch Scope:</span>
+              <select
+                value={selectedBranchId}
+                onChange={(e) => setSelectedBranchId(e.target.value)}
+                className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 cursor-pointer focus:ring-1 focus:ring-teal-500"
+              >
+                <option value="all">All Authorized Branches ({branches.length})</option>
+                {branches.map((b) => (
+                  <option key={b.branch_id} value={b.branch_id}>
+                    {b.branch_name} ({b.sold_count} sold)
+                  </option>
+                ))}
+              </select>
+            </div>
+            {selectedBranchId !== 'all' && (
+              <button
+                type="button"
+                onClick={() => setSelectedBranchId('all')}
+                className="text-xs font-semibold text-teal-700 dark:text-teal-400 hover:underline cursor-pointer"
+              >
+                Reset to All Branches
+              </button>
+            )}
+          </div>
+
+          <SoldMobilesTab
+            branchId={selectedBranchId === 'all' ? undefined : selectedBranchId}
+            branchName={
+              selectedBranchId === 'all'
+                ? 'All Authorized Branches'
+                : branchMap.get(selectedBranchId)?.branch_name || 'Selected Branch'
+            }
+            isOrgAdminView={true}
+          />
+        </div>
+      ) : (
+        /* ── Active Inventory View ───────────────────────────────────────── */
+        <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total Devices */}
         <div className="bg-white dark:bg-gray-900 p-5 rounded-xl border border-gray-100 dark:border-gray-800 shadow-xs flex flex-col justify-between">
@@ -463,10 +570,9 @@ export function OrganizationMobileInventoryPage() {
               onChange={(e) => setStatusFilter(e.target.value)}
               className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 cursor-pointer focus:ring-1 focus:ring-teal-500"
             >
-              <option value="ALL">All Statuses</option>
               <option value="IN_STOCK">In Stock</option>
               <option value="INSPECTION">Inspection</option>
-              <option value="SOLD">Sold</option>
+              <option value="ALL">All Active (In Stock &amp; Inspection)</option>
             </select>
 
             {/* Branch Dropdown */}
@@ -679,7 +785,7 @@ export function OrganizationMobileInventoryPage() {
         <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-100 dark:border-gray-800">
           <div>
             Showing <span className="font-bold text-gray-900 dark:text-white">{filteredDevices.length}</span> of{' '}
-            <span className="font-bold text-gray-900 dark:text-white">{totalDevices}</span> devices
+            <span className="font-bold text-gray-900 dark:text-white">{inStockCount}</span> active units
             {selectedBranchId !== 'all' && (
               <span> (Filtered to <span className="font-bold text-gray-900 dark:text-white">{branchMap.get(selectedBranchId)?.branch_name}</span>)</span>
             )}
@@ -692,6 +798,8 @@ export function OrganizationMobileInventoryPage() {
           </div>
         </div>
       </div>
+      </>
+      )}
     </OrganizationPageShell>
 
       {/* Mobile detail modal */}

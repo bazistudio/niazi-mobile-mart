@@ -20,6 +20,7 @@ import {
   ArrowRightLeft,
   AlertOctagon,
   Boxes,
+  PackageCheck,
   Info,
   Calendar,
   Printer,
@@ -36,6 +37,7 @@ import { EditMobileModal } from './EditMobileModal';
 import { buildUsedMobileA4Html, buildUsedMobilePdfFilename } from '../templates/usedMobileA4Template';
 import { buildMobileInventoryA4Html, buildMobileInventoryPdfFilename } from '../templates/mobileInventoryA4Template';
 import { StockTransferTab } from './StockTransferTab';
+import { SoldMobilesTab } from './SoldMobilesTab';
 import { usePrintStore } from '@/lib/printer/print.store';
 import { downloadHtmlAsPdf } from '@/lib/printer/pdfExport';
 import type { BranchInvestmentSummary } from '../services/mobile.api';
@@ -44,6 +46,7 @@ import type { MobileInventoryItem, MobileCondition } from '../types/mobile.types
 // ─── Mobile module sub-navigation tabs ──────────────────────────────────────
 const MOBILE_NAV_TABS = [
   { label: 'Inventory', href: '/dashboard/shop-admin/mobiles' },
+  { label: 'Sold Mobiles', href: '/dashboard/shop-admin/mobiles/sold' },
   { label: 'Mobile Sale', href: '/dashboard/shop-admin/mobiles/sale' },
   { label: 'Sale History', href: '/dashboard/shop-admin/mobiles/sale-history' },
 ] as const;
@@ -112,7 +115,7 @@ export const MobileInventoryDashboard: React.FC = () => {
   const branchId = activeShopId || activeShop?._id || activeShop?.id || undefined;
 
   // Active top view section: 'INSTOCK' (default) | 'LOWSTOCK' | 'TRANSFER'
-  const [inventorySection, setInventorySection] = useState<'INSTOCK' | 'LOWSTOCK' | 'TRANSFER'>('INSTOCK');
+  const [inventorySection, setInventorySection] = useState<'INSTOCK' | 'LOWSTOCK' | 'TRANSFER' | 'SOLD'>('INSTOCK');
 
   const [items, setItems] = useState<MobileInventoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -559,11 +562,36 @@ export const MobileInventoryDashboard: React.FC = () => {
               Preview
             </Badge>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setInventorySection('SOLD')}
+            className={`px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${inventorySection === 'SOLD'
+                ? 'bg-surface text-primary shadow-xs border border-border'
+                : 'text-text-secondary hover:text-text-primary'
+              }`}
+          >
+            <PackageCheck className="w-4 h-4 text-primary" />
+            <span>Sold Mobiles</span>
+          </button>
         </div>
 
         {/* Render Selected Section View */}
-        {inventorySection === 'TRANSFER' ? (
-          <StockTransferTab currentBranchId={branchId} availableDevices={items} />
+        {inventorySection === 'SOLD' ? (
+          <SoldMobilesTab
+            branchId={branchId}
+            branchName={activeShop?.name || 'Current Branch'}
+            isOrgAdminView={false}
+          />
+        ) : inventorySection === 'TRANSFER' ? (
+          <StockTransferTab
+            currentBranchId={branchId}
+            availableDevices={items}
+            onTransferCompleted={() => {
+              fetchMobiles();
+              fetchInvestment();
+            }}
+          />
         ) : inventorySection === 'LOWSTOCK' ? (
           /* Low Stock (0 Available) View */
           <Card variant="default" padding="lg" className="bg-surface border-border text-center py-14">

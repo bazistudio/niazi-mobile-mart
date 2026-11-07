@@ -49,4 +49,30 @@ export const queryKeys = {
   cash: {
     orgSummary: ['cash', 'organization-summary'] as const,
   },
+  // ─── HR Domain ────────────────────────────────────────────────────────────
+  // NOTE: Backend endpoints for HR do not yet exist.
+  // These keys are reserved for when they are built.
+  hr: {
+    salaryConfigs: ['hr', 'salary-configs'] as const,
+    salaryConfig: (staffId: string) => ['hr', 'salary-config', staffId] as const,
+    overtimeConfigs: ['hr', 'overtime-configs'] as const,
+    overtimeConfig: (staffId: string) => ['hr', 'overtime-config', staffId] as const,
+    advances: (staffId?: string) =>
+      staffId ? (['hr', 'advances', staffId] as const) : (['hr', 'advances'] as const),
+    attendance: (staffId: string, month: number, year: number) =>
+      ['hr', 'attendance', staffId, month, year] as const,
+    payroll: (month?: number, year?: number) =>
+      ['hr', 'payroll', month, year] as const,
+  },
+  // ─── Repairs Domain ───────────────────────────────────────────────────────
+  // repairApi.getRepairJobs({ technician_id }) is available — used in Progress Report.
+  repairs: (filters?: {
+    technician_id?: string;
+    branch_id?: string;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+    page?: number;
+    limit?: number;
+  }) => ['repairs', filters ?? {}] as const,
 };

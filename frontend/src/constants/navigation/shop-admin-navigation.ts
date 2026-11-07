@@ -17,6 +17,7 @@ import {
   Coins,
   Building2,
   Smartphone,
+  PackageCheck,
 } from 'lucide-react';
 import { NavigationGroup } from '../../types/navigation';
 import { PERMISSIONS } from '../permissions';
