@@ -31,6 +31,11 @@ import { AuthRepo, UserRow } from '../repositories/auth.repo';
 import { verifyArgon2 } from './argon2.service';
 import { issueToken } from './jwt.service';
 import { BLOCKED_LEGACY_ADMIN_ROLES } from '../auth';
+import { Pool } from 'pg';
+import { recordLoginAttendanceForUser } from './hr.service';
+
+// Organization ID constant for attendance recording
+const NIAZI_ORGANIZATION_ID_FOR_ATTENDANCE = '00000000-0000-0000-0000-000000000001';
 
 // ---------------------------------------------------------------------------
 // Constants — must match Rust
@@ -139,7 +144,10 @@ function sleep(ms: number): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export class AuthService {
-  constructor(private readonly repo: AuthRepo) {}
+  constructor(
+    private readonly repo: AuthRepo,
+    private readonly pool?: Pool
+  ) {}
 
   /**
    * Authenticate a user with username + password.
@@ -236,6 +244,14 @@ export class AuthService {
         branchId: user.branch_id,
       });
 
+      // Fire-and-forget attendance recording — login MUST NOT be blocked by this
+      if (this.pool) {
+        recordLoginAttendanceForUser(this.pool, user.id)
+          .catch((err: unknown) => {
+            console.error('[auth.service] Attendance recording failed (non-fatal):', err);
+          });
+      }
+
       return { token, user: sanitizeUser(user) };
     }
 
@@ -271,6 +287,14 @@ export class AuthService {
           accessProfile: user.access_profile,
           branchId: user.branch_id,
         });
+
+        // Fire-and-forget attendance recording — login MUST NOT be blocked by this
+        if (this.pool) {
+          recordLoginAttendanceForUser(this.pool, user.id)
+            .catch((err: unknown) => {
+              console.error('[auth.service] Attendance recording failed (non-fatal):', err);
+            });
+        }
 
         return { token, user: sanitizeUser(user) };
       }

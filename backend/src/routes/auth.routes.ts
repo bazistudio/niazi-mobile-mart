@@ -125,7 +125,7 @@ export function buildAuthRouter(pool: Pool): Router {
   const router = Router();
   const authRepo = new AuthRepo(pool);
   const usersRepo = new UsersRepo(pool);
-  const authService = new AuthService(authRepo);
+  const authService = new AuthService(authRepo, pool);
 
   // -------------------------------------------------------------------------
   // POST /login

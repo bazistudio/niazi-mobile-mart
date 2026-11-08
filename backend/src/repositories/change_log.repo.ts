@@ -43,15 +43,20 @@ export interface NotifyHint {
 }
 
 export interface WriteChangeLogOpts {
-  organizationId: string;
-  branchId: string;
-  /** Caller-supplied idempotency ID; defaults to a fresh uuid if omitted */
+  organizationId?: string;
+  branchId?: string | null;
   clientEventId?: string;
-  eventType: string;
-  entityType: string;
-  entityId: string;
-  /** Already-serialised JSON string — caller controls what goes in here */
-  payloadStr: string;
+  eventType?: string;
+  entityType?: string;
+  entityId?: string;
+  payloadStr?: string;
+  event_type?: string;
+  entity_type?: string;
+  entity_id?: string;
+  organization_id?: string;
+  branch_id?: string | null;
+  changed_by?: string | null;
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -67,6 +72,12 @@ export async function writeChangeLogEntry(
 ): Promise<string> {
   const clientEventId = opts.clientEventId ?? uuidv4();
   const now = new Date().toISOString();
+  const orgId = opts.organizationId ?? opts.organization_id ?? '00000000-0000-0000-0000-000000000001';
+  const branchId = opts.branchId !== undefined ? opts.branchId : (opts.branch_id ?? null);
+  const evType = opts.eventType ?? opts.event_type ?? 'UNKNOWN';
+  const entType = opts.entityType ?? opts.entity_type ?? 'unknown';
+  const entId = opts.entityId ?? opts.entity_id ?? '';
+  const payloadStr = opts.payloadStr ?? JSON.stringify(opts.metadata ?? {});
 
   const res = await client.query<{ sequence: string }>(
     `INSERT INTO change_log
@@ -75,32 +86,29 @@ export async function writeChangeLogEntry(
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING sequence::text`,
     [
-      opts.organizationId,
-      opts.branchId,
+      orgId,
+      branchId,
       clientEventId,
-      opts.eventType,
-      opts.entityType,
-      opts.entityId,
-      opts.payloadStr,
+      evType,
+      entType,
+      entId,
+      payloadStr,
       now,
     ]
   );
 
   const sequence: string = res.rows[0]?.sequence ?? '0';
 
-  // Issue NOTIFY in the same transaction — delivered only after COMMIT.
   const hint: NotifyHint = {
     v: 1,
-    orgId: opts.organizationId,
-    branchId: opts.branchId,
-    eventType: opts.eventType,
-    entityType: opts.entityType,
-    entityId: opts.entityId,
+    orgId,
+    branchId,
+    eventType: evType,
+    entityType: entType,
+    entityId: entId,
     sequence,
   };
 
-  // pg_notify payload must be a string literal; we pass it via parameterised
-  // call to avoid injection.  PostgreSQL's pg_notify() takes (channel, payload).
   await client.query(`SELECT pg_notify($1, $2)`, [
     REALTIME_NOTIFY_CHANNEL,
     JSON.stringify(hint),
@@ -109,12 +117,6 @@ export async function writeChangeLogEntry(
   return sequence;
 }
 
-/**
- * Convenience variant for org-wide events that span multiple branches
- * (e.g. cross-branch stock transfers sent from the warehouse).
- * branchId is set to the provided value but branchId in NotifyHint is null
- * to signal org-wide broadcast.
- */
 export async function writeChangeLogOrgWide(
   client: PoolClient,
   opts: WriteChangeLogOpts & { notifyBranchId: null }
@@ -144,11 +146,11 @@ export async function writeChangeLogOrgWide(
 
   const hint: NotifyHint = {
     v: 1,
-    orgId: opts.organizationId,
+    orgId: opts.organizationId ?? opts.organization_id ?? '00000000-0000-0000-0000-000000000001',
     branchId: null, // org-wide: all branches of this org receive the invalidation
-    eventType: opts.eventType,
-    entityType: opts.entityType,
-    entityId: opts.entityId,
+    eventType: opts.eventType ?? opts.event_type ?? 'UNKNOWN',
+    entityType: opts.entityType ?? opts.entity_type ?? 'unknown',
+    entityId: opts.entityId ?? opts.entity_id ?? '',
     sequence,
   };
 
