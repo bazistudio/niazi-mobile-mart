@@ -138,5 +138,179 @@ export function createReportsRouter(pool: Pool): Router {
     }
   });
 
+  // ── GET /api/reports/progress ─────────────────────────────────────────────
+  // Employee activity progress report.
+  // Query params: user_id (required), start_date, end_date, branch_id
+  // Access: org admin or branch admin. Org admin may pass any user_id.
+  // Branch admin may only view users in their own branch.
+  router.get('/progress', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    if (!isBranchAdmin(identity)) {
+      res.status(403).json({ error: 'Access denied: Progress reporting requires Admin or ShopAdmin role' });
+      return;
+    }
+
+    const userId = (req.query['user_id'] as string) || undefined;
+    const startDate = (req.query['start_date'] as string) || undefined;
+    const endDate = (req.query['end_date'] as string) || undefined;
+    const requestedBranchId = (req.query['branch_id'] as string) || undefined;
+
+    if (!userId || userId.trim().length < 32) {
+      res.status(400).json({ error: 'user_id is required' });
+      return;
+    }
+
+    // Branch-scoped admin can only view their own branch
+    const callerIsOrgAdmin = isOrgAdmin(identity);
+    let effectiveBranchId: string | undefined;
+    if (callerIsOrgAdmin) {
+      const normalizedBranchId = requestedBranchId === 'all' ? undefined : requestedBranchId;
+      if (normalizedBranchId && !canAccessBranch(identity, normalizedBranchId)) {
+        res.status(403).json({ error: 'Access denied: You do not have permission to view reports for this branch' });
+        return;
+      }
+      effectiveBranchId = normalizedBranchId;
+    } else {
+      if (!identity.branch_id) {
+        res.status(403).json({ error: 'Access denied: No branch assigned to your account' });
+        return;
+      }
+      effectiveBranchId = identity.branch_id;
+    }
+
+    try {
+      // Build positional query params and param index helpers.
+      // Param layout: $1 = user_id, $2 = branch_id (if any), $N = start_date (if any), $N+1 = end_date (if any)
+      const cleanParams: unknown[] = [userId.trim()];
+      if (effectiveBranchId) cleanParams.push(effectiveBranchId);
+      const startIdx = cleanParams.length + 1;
+      if (startDate) cleanParams.push(startDate);
+      const endIdx = cleanParams.length + 1;
+      if (endDate) cleanParams.push(endDate);
+
+      // Independent CTEs — each aggregates independently to prevent row multiplication.
+      // startIdx / endIdx are computed from cleanParams.length so they always reflect
+      // the actual $N positions regardless of which optional params are present.
+      const sql = `
+        WITH
+        -- Product POS sales by this user
+        sales_agg AS (
+          SELECT
+            COUNT(DISTINCT s.id)                  AS sale_count,
+            COALESCE(SUM(s.total_amount),    0)   AS gross_sales,
+            COALESCE(SUM(s.discount_amount), 0)   AS total_discounts,
+            COALESCE(SUM(s.paid_amount),     0)   AS total_collected
+          FROM sales s
+          WHERE s.created_by = $1
+            ${effectiveBranchId ? `AND s.branch_id = $2` : ''}
+            ${startDate  ? `AND s.created_at >= ${startIdx}` : ''}
+            ${endDate    ? `AND s.created_at <= ${endIdx}`   : ''}
+        ),
+        -- Handset sales attributed via mobile_sale_items (sold_by)
+        mobile_agg AS (
+          SELECT
+            COUNT(*)                              AS mobile_count,
+            COALESCE(SUM(msi.sale_price), 0)      AS mobile_gross_sales
+          FROM mobile_sale_items msi
+          WHERE msi.sold_by = $1
+            AND msi.is_return = FALSE
+            ${effectiveBranchId ? `AND msi.branch_id = $2` : ''}
+            ${startDate  ? `AND msi.created_at >= ${startIdx}` : ''}
+            ${endDate    ? `AND msi.created_at <= ${endIdx}`   : ''}
+        ),
+        -- Sales returns attributed to this user (as return processor)
+        returns_agg AS (
+          SELECT
+            COUNT(*)                              AS return_count,
+            COALESCE(SUM(sr.refund_amount), 0)    AS total_refunds
+          FROM sales_returns sr
+          WHERE sr.processed_by = $1
+            ${effectiveBranchId ? `AND sr.branch_id = $2` : ''}
+            ${startDate  ? `AND sr.created_at >= $${startIdx}` : ''}
+            ${endDate    ? `AND sr.created_at <= $${endIdx}`   : ''}
+        ),
+        -- Cash movements attributed to this user
+        cash_agg AS (
+          SELECT
+            COALESCE(SUM(CASE WHEN cm.movement_type = 'SALE_PAYMENT' THEN cm.amount ELSE 0 END), 0) AS cash_collected,
+            COALESCE(SUM(CASE WHEN cm.movement_type = 'REFUND'       THEN cm.amount ELSE 0 END), 0) AS cash_refunded
+          FROM cash_movements cm
+          WHERE cm.created_by = $1
+            ${effectiveBranchId ? `AND cm.branch_id = $2` : ''}
+            ${startDate  ? `AND cm.created_at >= $${startIdx}` : ''}
+            ${endDate    ? `AND cm.created_at <= $${endIdx}`   : ''}
+        ),
+        -- Repair jobs attributed to this user (as technician / assigned_to)
+        repair_agg AS (
+          SELECT
+            COUNT(*)                              AS repair_count,
+            COUNT(*) FILTER (WHERE rj.status IN ('COMPLETED','DELIVERED')) AS repair_completed,
+            COALESCE(SUM(rj.quoted_price), 0)     AS repair_quoted_total
+          FROM repair_jobs rj
+          WHERE rj.assigned_to = $1
+            ${effectiveBranchId ? `AND rj.branch_id = $2` : ''}
+            ${startDate  ? `AND rj.created_at >= $${startIdx}` : ''}
+            ${endDate    ? `AND rj.created_at <= $${endIdx}`   : ''}
+        )
+        SELECT
+          sa.sale_count,
+          sa.gross_sales,
+          sa.total_discounts,
+          sa.gross_sales - sa.total_discounts AS net_sales,
+          sa.total_collected,
+          ra.return_count,
+          ra.total_refunds,
+          ca.cash_collected,
+          ca.cash_refunded,
+          rpa.repair_count,
+          rpa.repair_completed,
+          rpa.repair_quoted_total,
+          ma.mobile_count,
+          ma.mobile_gross_sales
+        FROM sales_agg sa
+        CROSS JOIN returns_agg ra
+        CROSS JOIN cash_agg ca
+        CROSS JOIN repair_agg rpa
+        CROSS JOIN mobile_agg ma
+      `;
+
+      const result = await pool.query(sql, cleanParams);
+      const row = result.rows[0] || {};
+
+      res.status(200).json({
+        user_id: userId.trim(),
+        branch_id: effectiveBranchId || null,
+        period: { start_date: startDate || null, end_date: endDate || null },
+        sales: {
+          count: parseInt(row.sale_count || '0', 10),
+          gross: parseFloat(row.gross_sales || '0'),
+          discounts: parseFloat(row.total_discounts || '0'),
+          net: parseFloat(row.net_sales || '0'),
+          collected: parseFloat(row.total_collected || '0'),
+        },
+        returns: {
+          count: parseInt(row.return_count || '0', 10),
+          refunds: parseFloat(row.total_refunds || '0'),
+        },
+        cash: {
+          collected: parseFloat(row.cash_collected || '0'),
+          refunded: parseFloat(row.cash_refunded || '0'),
+        },
+        mobiles: {
+          count: parseInt(row.mobile_count || '0', 10),
+          gross: parseFloat(row.mobile_gross_sales || '0'),
+        },
+        repairs: {
+          count: parseInt(row.repair_count || '0', 10),
+          completed: parseInt(row.repair_completed || '0', 10),
+          quoted_total: parseFloat(row.repair_quoted_total || '0'),
+        },
+      });
+    } catch (err) {
+      sendError(req, res, err);
+    }
+  });
+
   return router;
 }

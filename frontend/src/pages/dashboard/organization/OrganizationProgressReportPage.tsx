@@ -3,25 +3,16 @@
  *
  * ╔══════════════════════════════════════════════════════════════════════════╗
  * ║  MECHANIC DATA — Real repair jobs from /api/repairs via repairApi        ║
- * ║  BLOCKED SECTIONS — Salesman, Cashier, Accountant, Admin require         ║
- * ║    user_id attribution on their respective APIs (not yet implemented).  ║
+ * ║  SALESMAN DATA — Real data from GET /api/v1/reports/progress?user_id=.. ║
+ * ║  CASHIER DATA  — Real data from GET /api/v1/reports/progress?user_id=.. ║
+ * ║  BLOCKED       — Accountant, Admin require separate API attribution      ║
  * ╚══════════════════════════════════════════════════════════════════════════╝
  *
- * What is real:
- *  - Staff list via useStaff()
- *  - Mechanic repair jobs via repairApi.getRepairJobs({ technician_id, branch_id })
- *  - Date-range filter applied client-side on job.createdAt
- *
- * What is blocked (backend user attribution missing):
- *  - Salesman: sales API has no user_id filter
- *  - Cashier: cash transactions have no user_id field
- *  - Accountant: ledger entries have no user_id field
- *  - Admin: audit log attribution not queryable per-user
- *
- * Scope constraints:
- *  - Frontend only — no backend changes
- *  - No new API contracts
- *  - No localStorage financial records
+ * Phase 2 changes:
+ *  - SalesmanReportCard: uses GET /api/v1/reports/progress (created_by attribution)
+ *  - CashierReportCard:  uses GET /api/v1/reports/progress (created_by attribution)
+ *  - Mechanic card unchanged (repairApi.getRepairJobs with technician_id)
+ *  - Accountant & Admin remain blocked (no per-user ledger/audit attribution yet)
  */
 
 import React, { useState, useMemo } from 'react';
@@ -30,7 +21,10 @@ import { OrganizationPageShell } from '@/features/dashboard/components/organizat
 import { BackendIntegrationNotice } from '@/features/hr/components/BackendIntegrationNotice';
 import { HRStaffSelector } from '@/features/hr/components/HRStaffSelector';
 import { repairApi } from '@/features/repairs/services/repair.api';
+import { httpClient } from '@/lib/http/httpClient';
+import { queryKeys } from '@/lib/react-query/queryKeys';
 import type { RepairJob } from '@/features/repairs/types/repair.types';
+import type { ProgressReportResponse } from '@/features/hr/types/hr.types';
 import {
   Wrench,
   ShoppingCart,
@@ -46,6 +40,9 @@ import {
   Users,
   BarChart3,
   Package,
+  TrendingUp,
+  TrendingDown,
+  ArrowLeftRight,
 } from 'lucide-react';
 
 // ─── Date Helpers ─────────────────────────────────────────────────────────────
@@ -118,6 +115,12 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+// ─── Currency Formatter ───────────────────────────────────────────────────────
+
+function pkr(n: number): string {
+  return `₨${Number(n).toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
 // ─── Filters ──────────────────────────────────────────────────────────────────
 
 interface Filters {
@@ -182,7 +185,7 @@ const FilterBar: React.FC<FilterBarProps> = ({ filters, onChange }) => {
             value={filters.staffId}
             onChange={(id) => set('staffId', id || undefined)}
             placeholder="All staff..."
-            roleFilter={filters.roleFilter || undefined}
+            roleFilter={filters.roleFilter ? [filters.roleFilter] : undefined}
             className="h-9"
           />
         </div>
@@ -364,7 +367,7 @@ const MechanicReportCard: React.FC<MechanicReportCardProps> = ({
           { label: 'In Progress',   value: stats.inProgress,     icon: Clock,         color: 'text-blue-600 dark:text-blue-400' },
           { label: 'Pending',       value: stats.pending,        icon: AlertCircle,   color: 'text-amber-600 dark:text-amber-400' },
           { label: 'Cancelled',     value: stats.cancelled,      icon: XCircle,       color: 'text-red-500 dark:text-red-400' },
-          { label: 'Revenue (PKR)', value: `₨${stats.totalRevenue.toLocaleString()}`, icon: BarChart3, color: 'text-purple-600 dark:text-purple-400' },
+          { label: 'Revenue (PKR)', value: pkr(stats.totalRevenue), icon: BarChart3,  color: 'text-purple-600 dark:text-purple-400' },
         ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="p-4 text-center">
             <Icon className={`w-4 h-4 mx-auto mb-1.5 ${color}`} />
@@ -415,9 +418,9 @@ const MechanicReportCard: React.FC<MechanicReportCardProps> = ({
                   </td>
                   <td className="px-4 py-2.5 text-right font-medium text-gray-800 dark:text-gray-200">
                     {job.grandTotal
-                      ? `₨${job.grandTotal.toLocaleString()}`
+                      ? pkr(job.grandTotal)
                       : job.estimatedCost
-                        ? `~₨${job.estimatedCost.toLocaleString()}`
+                        ? `~${pkr(job.estimatedCost)}`
                         : '—'}
                   </td>
                   <td className="px-4 py-2.5 text-xs text-gray-400 dark:text-gray-500">
@@ -441,6 +444,158 @@ const MechanicReportCard: React.FC<MechanicReportCardProps> = ({
     </div>
   );
 };
+
+// ─── Progress Report Card (Salesman & Cashier) ────────────────────────────────
+
+interface ProgressReportCardProps {
+  staffId: string;
+  branchId?: string;
+  dateRange: DateRange;
+  role: 'salesman' | 'cashier';
+}
+
+const ProgressReportCard: React.FC<ProgressReportCardProps> = ({
+  staffId,
+  branchId,
+  dateRange,
+  role,
+}) => {
+  const params = new URLSearchParams({ user_id: staffId });
+  if (branchId) params.set('branch_id', branchId);
+  if (dateRange.from) params.set('start_date', dateRange.from);
+  if (dateRange.to) params.set('end_date', dateRange.to);
+
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: queryKeys.reports.progress(staffId, branchId, dateRange.from, dateRange.to),
+    queryFn: () => httpClient.get<ProgressReportResponse>(`/api/v1/reports/progress?${params.toString()}`),
+    staleTime: 2 * 60 * 1000,
+    enabled: !!staffId,
+  });
+
+  const isSalesman = role === 'salesman';
+  const Icon = isSalesman ? ShoppingCart : Banknote;
+  const iconBg = isSalesman ? 'bg-emerald-50 dark:bg-emerald-950/40' : 'bg-orange-50 dark:bg-orange-950/40';
+  const iconColor = isSalesman ? 'text-emerald-600 dark:text-emerald-400' : 'text-orange-600 dark:text-orange-400';
+  const title = isSalesman ? 'Salesman — Sales Summary' : 'Cashier — Cash Handling Summary';
+  const endpoint = '/api/v1/reports/progress';
+
+  if (!staffId) {
+    return (
+      <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6 text-center text-sm text-gray-400 dark:text-gray-500">
+        Select a staff member above to view their {isSalesman ? 'sales' : 'cash handling'} report.
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
+        <div className="flex items-center gap-3 text-gray-400">
+          <RefreshCw className="w-4 h-4 animate-spin" />
+          <span className="text-sm">Loading {isSalesman ? 'sales' : 'cash'} data...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <BackendIntegrationNotice
+        title={`Failed to Load ${isSalesman ? 'Sales' : 'Cash'} Data`}
+        description={`Could not fetch from ${endpoint}. Check your connection and ensure the backend is running.`}
+        variant="warning"
+      />
+    );
+  }
+
+  if (!data) return null;
+
+  return (
+    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className={`w-9 h-9 rounded-xl ${iconBg} flex items-center justify-center`}>
+            <Icon className={`w-5 h-5 ${iconColor}`} />
+          </div>
+          <div>
+            <div className="text-sm font-bold text-gray-900 dark:text-white">{title}</div>
+            <div className="text-xs text-gray-400 dark:text-gray-500">
+              {dateRange.from} to {dateRange.to} · Live data from {endpoint}
+            </div>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => refetch()}
+          className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 transition-colors"
+          title="Refresh"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {isSalesman ? (
+        /* Salesman: Sales metrics */
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 divide-x divide-y sm:divide-y-0 divide-gray-100 dark:divide-gray-800">
+          {[
+            { label: 'Sales',       value: data.sales.count,       icon: ShoppingCart,  color: 'text-emerald-600 dark:text-emerald-400' },
+            { label: 'Gross',       value: pkr(data.sales.gross),  icon: TrendingUp,    color: 'text-blue-600 dark:text-blue-400' },
+            { label: 'Discounts',   value: pkr(data.sales.discounts), icon: TrendingDown, color: 'text-red-500 dark:text-red-400' },
+            { label: 'Net Sales',   value: pkr(data.sales.net),    icon: BarChart3,     color: 'text-gray-700 dark:text-gray-300' },
+            { label: 'Collected',   value: pkr(data.sales.collected), icon: CheckCircle2, color: 'text-green-600 dark:text-green-400' },
+          ].map(({ label, value, icon: Ico, color }) => (
+            <div key={label} className="p-4 text-center">
+              <Ico className={`w-4 h-4 mx-auto mb-1.5 ${color}`} />
+              <div className={`text-lg font-black ${color}`}>{value}</div>
+              <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{label}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        /* Cashier: Cash handling metrics */
+        <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-gray-100 dark:divide-gray-800">
+          {[
+            { label: 'Cash Collected', value: pkr(data.cash.collected), icon: TrendingUp,     color: 'text-green-600 dark:text-green-400' },
+            { label: 'Cash Refunded',  value: pkr(data.cash.refunded),  icon: TrendingDown,   color: 'text-red-500 dark:text-red-400' },
+            { label: 'Returns',        value: data.returns.count,        icon: ArrowLeftRight,  color: 'text-amber-600 dark:text-amber-400' },
+            { label: 'Return Refunds', value: pkr(data.returns.refunds), icon: Banknote,       color: 'text-orange-600 dark:text-orange-400' },
+          ].map(({ label, value, icon: Ico, color }) => (
+            <div key={label} className="p-4 text-center">
+              <Ico className={`w-4 h-4 mx-auto mb-1.5 ${color}`} />
+              <div className={`text-lg font-black ${color}`}>{value}</div>
+              <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Attribution note */}
+      <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/40">
+        <p className="text-xs text-gray-400 dark:text-gray-500">
+          {isSalesman
+            ? 'Sales attributed via created_by on the sales table. Discounts are actual discount amounts recorded at sale time. "Collected" = paid_amount on the sale record.'
+            : 'Cash movements attributed via created_by on cash_movements table. SALE_PAYMENT type = collected; REFUND type = refunded. Returns via processed_by on sales_returns.'
+          }
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// ─── No Staff Selected placeholder ───────────────────────────────────────────
+
+const NoStaffSelectedCard: React.FC<{ role: string; icon: React.ElementType }> = ({ role, icon: Icon }) => (
+  <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-8 text-center">
+    <Icon className="w-8 h-8 mx-auto mb-3 text-gray-300 dark:text-gray-600" />
+    <div className="text-sm font-semibold text-gray-500 dark:text-gray-400">
+      Select a {role} above to view their progress report.
+    </div>
+    <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+      Data is fetched per staff member from /api/v1/reports/progress
+    </div>
+  </div>
+);
 
 // ─── Blocked Role Cards ───────────────────────────────────────────────────────
 
@@ -484,8 +639,8 @@ type RoleView = 'all' | 'mechanic' | 'salesman' | 'cashier' | 'accountant' | 'ad
 const ROLE_TABS: { id: RoleView; label: string; icon: React.ElementType; hasData: boolean }[] = [
   { id: 'all',         label: 'All',        icon: Users,        hasData: true  },
   { id: 'mechanic',    label: 'Mechanic',   icon: Wrench,       hasData: true  },
-  { id: 'salesman',    label: 'Salesman',   icon: ShoppingCart, hasData: false },
-  { id: 'cashier',     label: 'Cashier',    icon: Banknote,     hasData: false },
+  { id: 'salesman',    label: 'Salesman',   icon: ShoppingCart, hasData: true  },
+  { id: 'cashier',     label: 'Cashier',    icon: Banknote,     hasData: true  },
   { id: 'accountant',  label: 'Accountant', icon: BookOpen,     hasData: false },
   { id: 'admin',       label: 'Admin',      icon: Shield,       hasData: false },
 ];
@@ -521,12 +676,12 @@ export const OrganizationProgressReportPage: React.FC = () => {
   return (
     <OrganizationPageShell
       title="Progress Report"
-      description="Per-staff performance data across roles. Mechanic data is live; other roles require backend attribution updates."
+      description="Per-staff performance data across roles. Mechanic, Salesman and Cashier data is live; Accountant and Admin require backend attribution updates."
     >
       {/* Top notice */}
       <BackendIntegrationNotice
-        title="Progress Report — Mechanic Data Live, Others Pending"
-        description="Mechanic/Technician repair data is fetched from /api/repairs filtered by technician_id. Salesman, Cashier, Accountant, and Admin sections require their APIs to be updated with user_id attribution."
+        title="Progress Report — Phase 2 Live"
+        description="Mechanic data: /api/repairs (technician_id). Salesman & Cashier data: /api/v1/reports/progress (created_by attribution). Select a staff member to view their metrics. Accountant and Admin sections remain pending."
         compact
       />
 
@@ -571,27 +726,25 @@ export const OrganizationProgressReportPage: React.FC = () => {
         )}
 
         {showSalesman && (
-          <BlockedRoleCard
-            roleName="Salesman"
-            icon={ShoppingCart}
-            description="Sales transactions currently have no user_id field — it is not possible to filter sales by salesman. Once the Sales API is updated to include salesman_id, this section will show real data."
-            requiredEndpoints={[
-              'GET /api/sales?salesman_id=:userId (pending)',
-              'Sales model: add salesman_id field (pending)',
-            ]}
-          />
+          filters.staffId
+            ? <ProgressReportCard
+                staffId={filters.staffId}
+                branchId={filters.branchId}
+                dateRange={effectiveRange}
+                role="salesman"
+              />
+            : <NoStaffSelectedCard role="salesman" icon={ShoppingCart} />
         )}
 
         {showCashier && (
-          <BlockedRoleCard
-            roleName="Cashier"
-            icon={Banknote}
-            description="Cash transactions do not carry a cashier_id attribution field. Once added to the Cash Management API, this section will display real cash-handling records per cashier."
-            requiredEndpoints={[
-              'GET /api/cash?cashier_id=:userId (pending)',
-              'Cash model: add cashier_id field (pending)',
-            ]}
-          />
+          filters.staffId
+            ? <ProgressReportCard
+                staffId={filters.staffId}
+                branchId={filters.branchId}
+                dateRange={effectiveRange}
+                role="cashier"
+              />
+            : <NoStaffSelectedCard role="cashier" icon={Banknote} />
         )}
 
         {showAccountant && (
