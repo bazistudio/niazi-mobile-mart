@@ -145,6 +145,37 @@ export async function getProfitSummary(
     ${linesWhere}
   `;
 
+  // ── Mobile-sale-items query params (Query 2b) ────────────────────────────
+  // Serialized mobile devices record cost in mobile_sale_items rather than sale_lines.
+  // We query non-returned mobile sale items for the matching non-voided sales.
+  let mobileWhere = "WHERE is_return = FALSE AND sale_id IN (SELECT id FROM sales WHERE sale_status != 'VOIDED'";
+  const mobileParams: unknown[] = [];
+  let mpIdx = 1;
+
+  if (filter?.branch_id) {
+    mobileWhere += ` AND branch_id = $${mpIdx++}`;
+    mobileParams.push(filter.branch_id);
+  }
+  if (filter?.start_date) {
+    const sDate = filter.start_date.length === 10 ? parseLocalDateStart(filter.start_date) : filter.start_date;
+    mobileWhere += ` AND created_at >= $${mpIdx++}`;
+    mobileParams.push(sDate);
+  }
+  if (filter?.end_date) {
+    const eDate = filter.end_date.length === 10 ? parseLocalDateEnd(filter.end_date) : filter.end_date;
+    mobileWhere += ` AND created_at <= $${mpIdx++}`;
+    mobileParams.push(eDate);
+  }
+  mobileWhere += ')';
+
+  const mobileSummaryQuery = `
+    SELECT
+      COALESCE(SUM(cost_price_snapshot), 0)::BIGINT AS total_mobile_cogs,
+      COUNT(*)::BIGINT AS total_mobiles_sold
+    FROM mobile_sale_items
+    ${mobileWhere}
+  `;
+
   // ── DASHBOARD-KPI-PHASE3: Returns revenue query params (Query 3) ──────────
   // Uses sr.created_at (return timestamp) with the same date/branch boundaries
   // so that a return made today reduces today's net figures regardless of when
@@ -210,26 +241,33 @@ export async function getProfitSummary(
   `;
 
   try {
-    // Run all four queries in parallel for minimal latency
-    const [salesRes, linesRes, retRevRes, retCogsRes] = await Promise.all([
+    // Run all five queries in parallel for minimal latency
+    const [salesRes, linesRes, mobileRes, retRevRes, retCogsRes] = await Promise.all([
       pool.query(salesSummaryQuery, params),
       pool.query(linesSummaryQuery, lineParams),
+      pool.query(mobileSummaryQuery, mobileParams),
       pool.query(returnsRevenueQuery, retRevParams),
       pool.query(returnsCogsQuery, retCogsParams),
     ]);
 
     const sRow = salesRes.rows[0] as Record<string, unknown>;
     const lRow = linesRes.rows[0] as Record<string, unknown>;
+    const mRow = mobileRes.rows[0] as Record<string, unknown>;
     const rrRow = retRevRes.rows[0] as Record<string, unknown>;
     const rcRow = retCogsRes.rows[0] as Record<string, unknown>;
 
-    // Gross figures from sales / sale_lines
-    const grossSales    = Number(sRow?.['gross_sales']     ?? 0);
-    const totalDiscounts = Number(sRow?.['total_discounts'] ?? 0);
-    const grossNetSales  = Number(sRow?.['net_sales']       ?? 0);
-    const grossInvoices  = Number(sRow?.['total_invoices']  ?? 0);
-    const grossCogs      = Number(lRow?.['total_cogs']      ?? 0);
-    const totalItemsSold = Number(lRow?.['total_items_sold'] ?? 0);
+    // Gross figures from sales / sale_lines / mobile_sale_items
+    const grossSales         = Number(sRow?.['gross_sales']         ?? 0);
+    const totalDiscounts     = Number(sRow?.['total_discounts']     ?? 0);
+    const grossNetSales      = Number(sRow?.['net_sales']           ?? 0);
+    const grossInvoices      = Number(sRow?.['total_invoices']      ?? 0);
+    const linesCogs          = Number(lRow?.['total_cogs']          ?? 0);
+    const linesItemsSold     = Number(lRow?.['total_items_sold']    ?? 0);
+    const mobileCogs         = Number(mRow?.['total_mobile_cogs']   ?? 0);
+    const mobileItemsSold    = Number(mRow?.['total_mobiles_sold']  ?? 0);
+
+    const grossCogs      = linesCogs + mobileCogs;
+    const totalItemsSold = linesItemsSold + mobileItemsSold;
 
     // DASHBOARD-KPI-PHASE3: Return deductions
     const returnedRevenue = Number(rrRow?.['returned_revenue'] ?? 0);

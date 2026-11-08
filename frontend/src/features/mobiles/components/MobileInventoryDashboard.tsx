@@ -182,16 +182,6 @@ export const MobileInventoryDashboard: React.FC = () => {
     fetchInvestment();
   }, [fetchInvestment]);
 
-  // Derive per-model stock quantities across currently available in-stock devices
-  const modelStockMap = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const item of items) {
-      const key = `${item.brand.trim()} ${item.model.trim()}`.toLowerCase();
-      map.set(key, (map.get(key) || 0) + 1);
-    }
-    return map;
-  }, [items]);
-
   // Effective active date range
   const activeDateRange = useMemo(() => {
     if (datePreset === 'CUSTOM') {
@@ -818,7 +808,6 @@ export const MobileInventoryDashboard: React.FC = () => {
                     <thead className="bg-surface-hover/80 text-text-secondary text-xs uppercase font-semibold border-b border-border">
                       <tr>
                         <th className="py-3 px-4">Device / Model</th>
-                        <th className="py-3 px-4 text-center">Available Stock</th>
                         <th className="py-3 px-4">Condition</th>
                         <th className="py-3 px-4">Specs & Color</th>
                         <th className="py-3 px-4">IMEI Identifier</th>
@@ -832,8 +821,6 @@ export const MobileInventoryDashboard: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-border">
                       {filteredItems.map((item) => {
-                        const modelKey = `${item.brand.trim()} ${item.model.trim()}`.toLowerCase();
-                        const modelStock = modelStockMap.get(modelKey) || 1;
                         const effectiveDate = item.purchaseDate || (item.condition === 'NEW' ? item.createdAt.slice(0, 10) : null);
                         return (
                           <tr
@@ -852,14 +839,6 @@ export const MobileInventoryDashboard: React.FC = () => {
                                   )}
                                 </div>
                               )}
-                            </td>
-
-                            {/* Available Stock Quantity Display */}
-                            <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-success/15 text-success border border-success/30">
-                                <Package className="w-3.5 h-3.5" />
-                                {modelStock} in stock
-                              </span>
                             </td>
 
                             {/* Condition */}
