@@ -33,6 +33,7 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isOpeningBalanceModalOpen, setIsOpeningBalanceModalOpen] = useState(false);
   const [previewHistoryItem, setPreviewHistoryItem] = useState<HistoryItem | null>(null);
+  const [isPdfLoading, setIsPdfLoading] = useState(false);
 
   const { user } = useAuthStore();
   const isOrgAdmin = user?.role === 'ADMIN';
@@ -48,16 +49,34 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
   const handlePrintInvoice = (e: React.MouseEvent, inv: any) => {
     e.stopPropagation();
     if (!isHydrated || !settings || !shopHeader) return;
-    const html = printFormatter.formatSaleInvoice({
+
+    const hasMobileLines = inv.items && inv.items.some((i: any) => i.lineType === 'MOBILE' || i.imei || i.serialNumber);
+    const invoiceData = {
       orderNumber: inv.orderNumber,
+      invoiceNumber: inv.orderNumber,
       createdAt: inv.createdAt,
+      customer: { name: detail?.customer?.name, phone: detail?.customer?.phone, address: detail?.customer?.address },
       customerId: { name: detail?.customer?.name, phone: detail?.customer?.phone },
-      items: inv.items.map((i: any) => ({ name: i.productId?.name || 'Unknown Item', qty: i.qty || i.quantity || 0, price: i.price || 0, total: (i.qty || i.quantity || 0) * (i.price || 0) })),
+      items: inv.items.map((i: any) => ({
+        name: i.productId?.name || i.name || 'Item',
+        qty: i.qty || i.quantity || 0,
+        price: i.price || 0,
+        total: (i.qty || i.quantity || 0) * (i.price || 0),
+        imei: i.imei || i.serialNumber,
+        specs: i.specs || undefined,
+      })),
       totalAmount: inv.totalAmount,
+      subtotal: inv.totalAmount,
+      total: inv.totalAmount,
       paymentMethod: inv.paymentMethod || 'Cash',
-      status: inv.status
-    }, settings, shopHeader);
-    openPreview({ html, documentType: 'SaleInvoice', referenceId: inv.orderNumber, title: 'Sale Invoice' });
+      status: inv.status,
+    };
+
+    const html = hasMobileLines
+      ? printFormatter.formatMobileSaleInvoice(invoiceData, settings, shopHeader)
+      : printFormatter.formatSaleInvoice(invoiceData, settings, shopHeader);
+    const docType = hasMobileLines ? 'MobileSaleInvoice' : 'SaleInvoice';
+    openPreview({ html, documentType: docType as any, referenceId: inv.orderNumber, title: `${docType === 'MobileSaleInvoice' ? 'Mobile Sale Invoice' : 'Sale Invoice'} - ${inv.orderNumber}` });
   };
 
   const { rawTimeline } = useLedger(detail?.customer ? {
@@ -113,8 +132,6 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
     );
     openPreview({ html, documentType: 'Generic', referenceId: 'ledger', title: 'Ledger Statement' });
   };
-
-  const [isPdfLoading, setIsPdfLoading] = React.useState(false);
 
   const handleDownloadFullLedgerPDF = async () => {
     if (!isHydrated || !settings || !shopHeader || !rawTimeline) return;
