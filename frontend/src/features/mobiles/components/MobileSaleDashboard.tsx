@@ -17,7 +17,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useLocation, useNavigate, Link } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
   Smartphone,
   Search,
@@ -58,6 +58,7 @@ import { DocumentService } from '@/features/pos/services/document/document.servi
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
 import { usePrintStore } from '@/lib/printer';
 import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
+import { buildMobileSaleDualA4Html } from '../templates/mobileSaleA4Template';
 import { Building2, User, Phone, MapPin, ReceiptText, ShieldCheck as ShieldIcon, CreditCard as CardIcon } from 'lucide-react';
 import { usePosStore } from '@/features/pos/store/usePosStore';
 import toast from 'react-hot-toast';
@@ -144,6 +145,7 @@ function getPtaBadge(status: string) {
 
 export const MobileSaleDashboard: React.FC = () => {
   const { pathname } = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const canRevealCost =
@@ -422,6 +424,35 @@ export const MobileSaleDashboard: React.FC = () => {
     [activeBucket, isInCart, syncDefaultPaymentToNetTotal]
   );
 
+  // Support direct handset transfer from Mobile Inventory list (double click)
+  const handledTransferKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const directDeviceId = searchParams.get('deviceId');
+    const directImei = searchParams.get('imei');
+    if (!directDeviceId && !directImei) {
+      handledTransferKeyRef.current = null;
+      return;
+    }
+    if (isLoadingCatalog) return;
+
+    const transferKey = `${directDeviceId || ''}_${directImei || ''}`;
+    if (handledTransferKeyRef.current === transferKey) return;
+
+    const targetDevice = allDevices.find(
+      (d) =>
+        (directDeviceId && d.id === directDeviceId) ||
+        (directImei && d.imeis?.some((i) => i.imei.toLowerCase() === directImei.trim().toLowerCase()))
+    );
+
+    if (targetDevice) {
+      handledTransferKeyRef.current = transferKey;
+      addToCart(targetDevice, 'SALE');
+      // Clear URL params so refresh won't re-add
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, allDevices, isLoadingCatalog, addToCart, setSearchParams]);
+
   const removeFromCart = useCallback(
     (deviceId: string) => {
       delete salePriceInputRefs.current[deviceId];
@@ -626,19 +657,21 @@ export const MobileSaleDashboard: React.FC = () => {
         const printOrder = {
           invoiceNumber: res.invoiceNumber,
           createdAt: res.createdAt,
-          customer: customer ? { name: customer.name, phone: customer.phone } : { name: "Walk-In Customer" },
+          customer: customer ? { name: customer.name, phone: customer.phone, address: (customer as any)?.address } : { name: "Walk-In Customer" },
           cashier: res.cashier.name + " (" + res.cashier.role + ")",
-          items: res.devices.map((d) => ({
-            name: d.brand + " " + d.model,
-            qty: 1,
-            price: d.salePrice,
-            total: d.salePrice,
-            imei: d.imei1,
-            specs: (() => {
-              const matchedCart = cart.find(c => c.device.id === d.deviceId);
-              return [matchedCart?.device.storage, matchedCart?.device.ram, matchedCart?.device.color].filter(Boolean).join(" • ") || undefined;
-            })(),
-          })),
+          items: res.devices.map((d) => {
+            const matchedCart = cart.find(c => c.device.id === d.deviceId);
+            return {
+              name: d.brand + " " + d.model,
+              qty: 1,
+              price: d.salePrice,
+              total: d.salePrice,
+              imei1: d.imei1,
+              specs: [matchedCart?.device.storage, matchedCart?.device.ram, matchedCart?.device.color].filter(Boolean).join(" • ") || undefined,
+              condition: matchedCart?.device.condition,
+              ptaStatus: matchedCart?.device.pta_status,
+            };
+          }),
           subtotal: res.subtotal,
           discount: res.discount,
           total: res.totalAmount,
@@ -648,12 +681,13 @@ export const MobileSaleDashboard: React.FC = () => {
           due: res.creditAmount,
         };
 
-        const printHtml = printFormatter.formatMobileSaleInvoice(printOrder, effectiveSettings as any, effectiveShop as any);
+        // Render official A4 Dual-Copy Print (Top: Shop Copy, Bottom: Customer Copy with Cut Line)
+        const printHtml = buildMobileSaleDualA4Html(printOrder, effectiveShop as any);
         openPrintPreview({
           html: printHtml,
           documentType: 'MobileSaleInvoice',
           referenceId: res.invoiceNumber,
-          title: "Mobile Sale Receipt - " + res.invoiceNumber,
+          title: "Mobile Sale Invoice (A4 Dual-Copy) - " + res.invoiceNumber,
         });
 
         await DocumentService.logPrint(res.invoiceNumber, "PRINT");

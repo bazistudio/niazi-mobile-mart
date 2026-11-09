@@ -825,7 +825,11 @@ export const MobileInventoryDashboard: React.FC = () => {
                         return (
                           <tr
                             key={item.id}
-                            className="hover:bg-surface-hover/50 transition-colors group"
+                            onDoubleClick={() => {
+                              navigate(`/dashboard/shop-admin/mobiles/sale?deviceId=${encodeURIComponent(item.id)}&imei=${encodeURIComponent(item.imei1)}`);
+                            }}
+                            title="Double-click to sell this handset in Mobile POS"
+                            className="hover:bg-primary/5 cursor-pointer transition-colors group select-none"
                           >
                             {/* Device / Model */}
                             <td className="py-3.5 px-4">

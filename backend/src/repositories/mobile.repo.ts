@@ -2401,15 +2401,19 @@ export class MobileRepo {
           physical_affidavit_acknowledged: boolean;
           seller_id: string | null;
           recorded_by: string;
+          recorded_by_name: string | null;
           created_at: string;
         }>(
           `SELECT
-             id, voucher_no, purchase_date, purchase_price,
-             seller_name, father_name, seller_cnic, seller_phone, seller_address,
-             ownership_declaration_acknowledged, physical_affidavit_acknowledged,
-             seller_id, recorded_by, created_at
-           FROM mobile_purchase_paperwork
-           WHERE device_id = $1 AND organization_id = $2 AND branch_id = $3`,
+             pw.id, pw.voucher_no, pw.purchase_date, pw.purchase_price,
+             pw.seller_name, pw.father_name, pw.seller_cnic, pw.seller_phone, pw.seller_address,
+             pw.ownership_declaration_acknowledged, pw.physical_affidavit_acknowledged,
+             pw.seller_id, pw.recorded_by,
+             COALESCE(u.name, pw.recorded_by) AS recorded_by_name,
+             pw.created_at
+           FROM mobile_purchase_paperwork pw
+           LEFT JOIN users u ON u.id = pw.recorded_by
+           WHERE pw.device_id = $1 AND pw.organization_id = $2 AND pw.branch_id = $3`,
           [deviceId, organizationId, branchId]
         );
 
@@ -2437,7 +2441,7 @@ export class MobileRepo {
             voucher_no:    pw.voucher_no,
             purchase_date: pw.purchase_date,
             purchase_price: pw.purchase_price,
-            recorded_by:   pw.recorded_by,
+            recorded_by:   pw.recorded_by_name || pw.recorded_by,
             created_at:    pw.created_at,
             seller: {
               seller_id:       pw.seller_id ?? null,

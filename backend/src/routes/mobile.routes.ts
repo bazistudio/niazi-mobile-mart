@@ -1718,8 +1718,10 @@ export function buildMobileRouter(pool: Pool): Router {
       }
 
       // Role-based seller field visibility:
-      // Non-org-admin roles see CNIC masked and phone/address redacted.
-      if (profile.paperwork?.seller && !isOrgAdmin(identity)) {
+      // Authorized staff for this branch (or org admins) see full seller paperwork details
+      // needed for physical purchase affidavit printing. Users outside the branch receive redacted fields.
+      const isAuthorizedForBranch = isOrgAdmin(identity) || canAccessBranch(identity, branchId);
+      if (profile.paperwork?.seller && !isAuthorizedForBranch) {
         profile.paperwork.seller = {
           ...profile.paperwork.seller,
           father_name:    '[REDACTED]',

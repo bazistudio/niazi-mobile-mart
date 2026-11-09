@@ -1,4 +1,5 @@
 import { UnifiedInvoice, PrinterSettings, ShopHeader } from '../types/printer.types';
+import { buildMobileSaleDualA4Html } from '@/features/mobiles/templates/mobileSaleA4Template';
 
 /**
  * HTML entity escaping helper for untrusted text in print templates.
@@ -109,6 +110,42 @@ export const printFormatter = {
    * Specialized invoice layout for serialized mobile devices with prominent IMEI, specs & cashier accountability
    */
   formatMobileSaleInvoice: (order: any, settings: PrinterSettings, shop: ShopHeader): string => {
+    // Requirements: Mobile sale invoices must consistently render as official A4 Dual-Copy
+    // across Mobile Sale POS, Dashboard Daily Sales Modal, History reprints, and Customer Ledger.
+    try {
+      const mobilePrintOrder = {
+        invoiceNumber: order.invoiceNumber || order.displayNumber || order.orderNumber || order.transactionId || ('INV-M-' + Date.now().toString().slice(-6)),
+        createdAt: order.createdAt || new Date().toISOString(),
+        customer: order.customer
+          ? { name: order.customer.name, phone: order.customer.phone, address: order.customer.address }
+          : (order.customerId ? { name: order.customerId.name, phone: order.customerId.phone } : { name: 'Walk-In Customer' }),
+        cashier: order.cashier || order.cashierName || 'Cashier',
+        items: (order.items || []).map((i: any) => ({
+          name: i.name || i.productName || 'Mobile Handset',
+          qty: i.qty || i.quantity || 1,
+          price: i.price ?? i.salePrice ?? i.unitPrice ?? 0,
+          total: i.total ?? i.subtotal ?? ((i.qty || 1) * (i.price || 0)),
+          imei1: i.imei || i.imei1 || i.serialNumber,
+          imei2: i.imei2,
+          specs: i.specs || i.storage || undefined,
+          condition: i.condition,
+          ptaStatus: i.ptaStatus || i.pta_status,
+        })),
+        subtotal: order.subtotal ?? order.subTotal ?? order.totalAmount ?? order.grandTotal ?? 0,
+        discount: order.discount ?? order.discountAmount ?? 0,
+        total: order.total ?? order.totalAmount ?? order.grandTotal ?? 0,
+        tendered: order.tendered ?? order.paidAmount ?? order.totalPaid ?? order.total ?? 0,
+        change: order.change ?? order.changeAmount ?? 0,
+        due: order.due ?? order.creditAmount ?? order.remainingDue ?? 0,
+        paymentBreakdown: order.paymentBreakdown || (order.paymentMethod ? [{ method: order.paymentMethod, amount: order.total || 0 }] : undefined),
+        notes: order.notes,
+      };
+
+      return buildMobileSaleDualA4Html(mobilePrintOrder, shop);
+    } catch (err) {
+      console.warn('Fallback to standard renderDocument for mobile invoice:', err);
+    }
+
     const invoice: UnifiedInvoice = {
       invoiceNo: order.invoiceNumber || order.displayNumber || order.transactionId || 'INV-M-' + Date.now().toString().slice(-6),
       date: new Date(order.createdAt || Date.now()).toLocaleString(),
