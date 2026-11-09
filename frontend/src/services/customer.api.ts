@@ -141,20 +141,20 @@ export const customerApi = {
     }
   },
 
-  deleteCustomer: async (id: string): Promise<{
+  deleteCustomer: async (id: string, password?: string): Promise<{
     success: boolean;
     message: string;
   }> => {
     try {
-      // Phase 15 Rule: Customers with financial history are safely deactivated, never physically deleted
-      await tauriClient.customerDeactivate(id);
+      // Safe deactivation with ADMIN password gate
+      await tauriClient.customerDeactivate(id, password);
       return {
         success: true,
         message: 'Customer deactivated successfully',
       };
     } catch (err: any) {
-      console.error('Failed to deactivate customer via Tauri IPC:', err);
-      throw new Error(err?.toString() || 'Failed to deactivate customer');
+      console.error('Failed to deactivate customer:', err);
+      throw new Error(err?.response?.data?.message || err?.message || err?.toString() || 'Failed to deactivate customer');
     }
   },
 

@@ -671,11 +671,19 @@ export const tauriClient = {
   },
 
   async adminVerifyPassword(password: string): Promise<void> {
+    if (getApiBaseUrl()) {
+      await httpFetch<void>('/api/auth/verify-admin-password', {
+        method: 'POST',
+        body: JSON.stringify({ password }),
+      });
+      return;
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('admin_verify_password', { password });
       return;
     }
+    throw new Error('API Base URL or Tauri environment required');
   },
 
   async adminDeleteUser(userId: string): Promise<void> {
@@ -1253,11 +1261,20 @@ export const tauriClient = {
     throw new Error('Tauri environment required');
   },
 
-  async customerDeactivate(id: string): Promise<void> {
+  async customerDeactivate(id: string, password?: string): Promise<void> {
+    if (getApiBaseUrl()) {
+      await httpFetch<void>(`/api/v1/customers/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ password }),
+      });
+      return;
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('storage_customer_deactivate', { id });
+      return;
     }
+    throw new Error('API Base URL or Tauri environment required');
   },
 
   // â”€â”€ Supplier & Procurement Domain (Phase 16) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
