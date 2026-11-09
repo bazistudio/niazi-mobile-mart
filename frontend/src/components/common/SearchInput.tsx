@@ -1,37 +1,40 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, Package, Users, Truck, FileText, Loader2, ChevronDown, Building2, Store } from 'lucide-react';
-import toast from 'react-hot-toast';
-import { useGlobalSearch } from '@/hooks/useGlobalSearch';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { usePosStore } from '@/features/pos/store/usePosStore';
+import { Search, Package, Loader2, ChevronDown, Building2, Store, Check, Info } from 'lucide-react';
+import { useGlobalSearch, GlobalSearchResultItem } from '@/hooks/useGlobalSearch';
+import { useCategories } from '@/features/inventory/hooks/useCategories';
+import { ProductDetailsDrawer } from '@/features/inventory/product/components/ProductDetailsDrawer';
+import { InventoryProduct, StockStatus } from '@/features/inventory/types';
 
 interface SearchInputProps {
   placeholder?: string;
   onSearch?: (term: string) => void;
 }
 
-const CATEGORIES = [
-  { id: 'invoice', label: 'Invoices' },
-  { id: 'customer', label: 'Customers' },
-  { id: 'supplier', label: 'Suppliers' },
-];
-
-export const SearchInput = ({ placeholder = "Search products, customers, invoices...", onSearch }: SearchInputProps) => {
+export const SearchInput = ({ placeholder = "Search products...", onSearch }: SearchInputProps) => {
   const [query, setQuery] = useState('');
-  const [category, setCategory] = useState('quick');
+  const [selectedTypeId, setSelectedTypeId] = useState<string>('');
   const [isFocused, setIsFocused] = useState(false);
-  const [isCategoryOpen, setIsCategoryOpen] = useState(false);
+  const [isTypeDropdownOpen, setIsTypeDropdownOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [revealedPriceId, setRevealedPriceId] = useState<string | null>(null);
+  const [selectedProductForDetails, setSelectedProductForDetails] = useState<InventoryProduct | null>(null);
 
-  const { results, isLoading, error, debouncedQuery } = useGlobalSearch(query, category, isFocused, 300);
+  // Dynamic Product Types master data from authoritative source
+  const { categories, isLoading: isLoadingCategories } = useCategories();
+
+  // Set 'Unit' as the default selected type once categories load (if available), fallback to empty ('All Products')
+  useEffect(() => {
+    if (categories && categories.length > 0 && selectedTypeId === '') {
+      const unitType = categories.find(c => c.name.trim().toLowerCase() === 'unit');
+      if (unitType) {
+        setSelectedTypeId(unitType.id);
+      }
+    }
+  }, [categories, selectedTypeId]);
+
+  // Search results starting from the very 1st typed character
+  const { results, isLoading, error, debouncedQuery } = useGlobalSearch(query, selectedTypeId, isFocused, 300);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  
-  const location = useLocation();
-  const pathname = location.pathname;
-  const navigate = useNavigate();
-  const { addToCart } = usePosStore();
-  const isPosPage = pathname === '/dashboard/shop-admin/pos';
 
   // Global Shortcuts: Ctrl+K or Ctrl+/
   useEffect(() => {
@@ -50,88 +53,52 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsFocused(false);
-        setIsCategoryOpen(false);
+        setIsTypeDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleProductSelect = (product: any, e?: React.MouseEvent | React.KeyboardEvent) => {
+  // Open Product Details without adding to POS cart or redirecting
+  const handleProductClick = (product: GlobalSearchResultItem, e?: React.MouseEvent | React.KeyboardEvent) => {
     e?.preventDefault();
-    const branchStock = product.branchStock ?? product.stock ?? product.quantity ?? 0;
-    const warehouseStock = product.warehouseStock ?? 0;
-    const totalStock = product.totalStock ?? branchStock;
+    e?.stopPropagation();
 
-    if (branchStock <= 0) {
-      if (warehouseStock > 0) {
-        toast(`"${product.name}" has 0 branch stock (Available in Warehouse: ${warehouseStock} pcs)`, { icon: '🏬' });
-      } else if (totalStock > 0) {
-        toast(`"${product.name}" has 0 stock in this branch (Other branches: ${totalStock} pcs)`, { icon: '📦' });
-      } else {
-        toast.error(`"${product.name}" is out of stock across all locations`);
-      }
-      setIsFocused(false);
-      return;
-    }
-
-    // Map global search result to DBInventory format expected by POS
-    const posProduct = {
-      id: product.id || product._id,
+    // Map GlobalSearchResultItem to InventoryProduct shape for ProductDetailsDrawer
+    const mappedProduct: InventoryProduct = {
+      id: product.id || product._id || '',
+      name: product.name,
       sku: product.sku || '',
       barcode: product.barcode || '',
-      name: product.name,
-      salePrice: product.price ?? product.salePrice ?? 0,
-      costPrice: product.purchasePrice ?? product.costPrice ?? 0,
-      stock: branchStock
+      description: '',
+      price: product.price ?? product.salePrice ?? 0,
+      costPrice: product.costPrice ?? product.purchasePrice,
+      purchasePrice: product.purchasePrice ?? product.costPrice,
+      stock: product.totalStock ?? product.quantity ?? 0,
+      branchStock: product.branchStock,
+      warehouseStock: product.warehouseStock,
+      status: (product.totalStock ?? 0) > 2 ? StockStatus.IN_STOCK : ((product.totalStock ?? 0) > 0 ? StockStatus.LOW_STOCK : StockStatus.OUT_OF_STOCK),
+      minStockThreshold: 2,
+      category: product.typeName || '',
+      brand: product.brand || '',
+      unit: 'pcs',
+      trackInventory: true,
+      serialTracking: false,
+      imeiTracking: false,
+      batchTracking: false,
+      expiryTracking: false,
+      costMethod: 'Average Cost',
+      compatibleModels: product.compatibleModels || [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
-    addToCart(posProduct as any);
-    
-    if (!isPosPage) {
-      navigate('/dashboard/shop-admin/pos');
-    }
-    
+
+    setSelectedProductForDetails(mappedProduct);
     setIsFocused(false);
-    setQuery('');
   };
 
-  const handleLinkClick = () => {
-    setIsFocused(false);
-    setQuery('');
-  };
-
-  const handleGlobalSelect = (type: string, item: any) => {
-    if (type === 'product') {
-      handleProductSelect(item);
-    } else if (type === 'customer') {
-      navigate(`/dashboard/shop-admin/customers/${item._id}`);
-      handleLinkClick();
-    } else if (type === 'supplier') {
-      navigate(`/dashboard/shop-admin/suppliers/${item._id}`);
-      handleLinkClick();
-    } else if (type === 'invoice') {
-      const orderNum = item.orderNumber || item.invoiceNumber || query;
-      const cleanNum = orderNum.replace(/^ORD-/i, '');
-      navigate(`/dashboard/shop-admin?invoice=${cleanNum}`);
-      handleLinkClick();
-    }
-  };
-
-  const hasResults =
-    results.products.length > 0 ||
-    results.customers.length > 0 ||
-    results.suppliers.length > 0 ||
-    results.invoices.length > 0;
-
-  // Flatten items for arrow key navigation
-  const allItems = useMemo(() => {
-    const items: { type: string, item: any }[] = [];
-    results.products.forEach(p => items.push({ type: 'product', item: p }));
-    results.customers.forEach(c => items.push({ type: 'customer', item: c }));
-    results.suppliers.forEach(s => items.push({ type: 'supplier', item: s }));
-    results.invoices.forEach(i => items.push({ type: 'invoice', item: i }));
-    return items;
-  }, [results]);
+  const hasResults = results.products.length > 0;
 
   useEffect(() => {
     setSelectedIndex(-1);
@@ -142,27 +109,19 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelectedIndex(prev => (prev < allItems.length - 1 ? prev + 1 : 0));
+      setSelectedIndex(prev => (prev < results.products.length - 1 ? prev + 1 : 0));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setSelectedIndex(prev => (prev > 0 ? prev - 1 : allItems.length - 1));
+      setSelectedIndex(prev => (prev > 0 ? prev - 1 : results.products.length - 1));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (selectedIndex >= 0 && selectedIndex < allItems.length) {
-        const selected = allItems[selectedIndex];
-        handleGlobalSelect(selected.type, selected.item);
-      } else if (allItems.length > 0) {
-        // If nothing is selected but they press enter, select the first match
-        handleGlobalSelect(allItems[0].type, allItems[0].item);
+      if (selectedIndex >= 0 && selectedIndex < results.products.length) {
+        handleProductClick(results.products[selectedIndex]);
+      } else if (results.products.length > 0) {
+        handleProductClick(results.products[0]);
       }
     }
   };
-
-  // Calculate offsets for index mapping
-  const productsOffset = 0;
-  const customersOffset = results.products.length;
-  const suppliersOffset = customersOffset + results.customers.length;
-  const invoicesOffset = suppliersOffset + results.suppliers.length;
 
   // Scroll active item into view
   useEffect(() => {
@@ -174,354 +133,265 @@ export const SearchInput = ({ placeholder = "Search products, customers, invoice
     }
   }, [selectedIndex]);
 
-  // Barcode Auto-select logic
-  useEffect(() => {
-    if (query.trim().length > 5 && results.products.length > 0) {
-      const bestProduct = results.products[0];
-      if (bestProduct.barcode === query.trim()) {
-        handleProductSelect(bestProduct);
-      }
-    }
-  }, [query, results.products]);
-
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
-    
-    // Prefix parsing
-    let cleanVal = val;
-    let matchedCategory = null;
-    if (val.startsWith('p:')) { matchedCategory = 'product'; cleanVal = val.slice(2).trimStart(); }
-    else if (val.startsWith('i:')) { matchedCategory = 'invoice'; cleanVal = val.slice(2).trimStart(); }
-    else if (val.startsWith('c:')) { matchedCategory = 'customer'; cleanVal = val.slice(2).trimStart(); }
-    else if (val.startsWith('s:')) { matchedCategory = 'supplier'; cleanVal = val.slice(2).trimStart(); }
-
-    if (matchedCategory) {
-      setCategory(matchedCategory);
-      setQuery(cleanVal);
-      onSearch?.(cleanVal);
-    } else {
-      setQuery(val);
-      onSearch?.(val);
-    }
+    setQuery(val);
+    onSearch?.(val);
   };
 
-  const getMatchBadge = (item: any, query: string, fields: { key: string; label: string }[]) => {
-    if (!query) return null;
-    const q = query.toLowerCase();
-    
-    let bestMatch: { label: string; priority: number } | null = null;
-    
-    for (const field of fields) {
-      const val = item[field.key];
-      if (!val) continue;
-      
-      const itemStr = String(val).toLowerCase();
-      let priority = -1;
-      
-      if (itemStr === q) priority = 3; // exact
-      else if (itemStr.startsWith(q)) priority = 2; // startsWith
-      else if (itemStr.includes(q)) priority = 1; // includes
-      
-      if (priority > (bestMatch?.priority || 0)) {
-        bestMatch = { label: field.label, priority };
-      }
-      
-      if (priority === 3) break;
-    }
-    
-    if (bestMatch) {
-      return (
-        <span className="ml-2 text-[10px] uppercase tracking-wider bg-primary/10 text-primary px-1.5 py-0.5 rounded border border-primary/20">
-          Matched {bestMatch.label}
-        </span>
-      );
-    }
-    
-    return null;
-  };
-
-  const activeCategoryLabel = CATEGORIES.find(c => c.id === category)?.label || 'Quick Search';
+  const activeTypeLabel = selectedTypeId 
+    ? (categories.find(c => c.id === selectedTypeId)?.name || 'Product Type')
+    : 'All Products';
 
   return (
-    <div className="relative flex w-full min-w-0 md:ml-0 max-w-2xl" ref={dropdownRef}>
-      <div className="w-full flex items-center bg-surface-hover rounded-full border border-border focus-within:border-primary focus-within:bg-surface focus-within:ring-2 focus-within:ring-focus-ring transition-all shadow-sm">
-        <label htmlFor="search-field" className="sr-only">
-          Search
-        </label>
-        <div className="relative flex-grow text-text-muted focus-within:text-text-primary flex items-center">
-          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-            {isLoading ? (
-              <Loader2 className="h-5 w-5 animate-spin text-primary" aria-hidden="true" />
-            ) : (
-              <Search className="h-5 w-5" aria-hidden="true" />
-            )}
+    <>
+      <div className="relative flex w-full min-w-0 md:ml-0 max-w-2xl" ref={dropdownRef}>
+        <div className="w-full flex items-center bg-surface-hover rounded-full border border-border focus-within:border-primary focus-within:bg-surface focus-within:ring-2 focus-within:ring-focus-ring transition-all shadow-sm">
+          <label htmlFor="search-field" className="sr-only">
+            Search products
+          </label>
+          <div className="relative flex-grow text-text-muted focus-within:text-text-primary flex items-center">
+            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+              {isLoading ? (
+                <Loader2 className="h-5 w-5 animate-spin text-primary" aria-hidden="true" />
+              ) : (
+                <Search className="h-5 w-5" aria-hidden="true" />
+              )}
+            </div>
+            <input
+              id="search-field"
+              className="block h-10 w-full bg-transparent border-0 py-2 pl-10 pr-3 text-text-primary placeholder-text-muted focus:outline-none sm:text-sm"
+              placeholder={placeholder}
+              type="search"
+              name="search"
+              autoComplete="off"
+              value={query}
+              onChange={handleChange}
+              onFocus={() => setIsFocused(true)}
+              onKeyDown={handleInputKeyDown}
+            />
           </div>
-          {category === 'invoice' && (
-            <span className="absolute inset-y-0 left-10 flex items-center pr-1 text-sm font-medium text-text-muted select-none">
-              ORD-
-            </span>
-          )}
-          <input
-            id="search-field"
-            className={`block h-10 w-full bg-transparent border-0 py-2 ${category === 'invoice' ? 'pl-20' : 'pl-10'} pr-3 text-text-primary placeholder-text-muted focus:outline-none sm:text-sm`}
-            placeholder={category === 'invoice' ? '000027' : placeholder}
-            type="search"
-            name="search"
-            autoComplete="off"
-            value={query}
-            onChange={handleChange}
-            onFocus={() => setIsFocused(true)}
-            onKeyDown={handleInputKeyDown}
-          />
+          
+          {/* Dynamic Product Type Dropdown Toggle */}
+          <div className="relative flex-shrink-0 border-l border-border h-6 mx-2"></div>
+          <button
+            type="button"
+            onClick={() => { setIsTypeDropdownOpen(!isTypeDropdownOpen); setIsFocused(true); }}
+            className="flex items-center gap-1.5 pr-4 pl-2 h-10 text-xs font-semibold text-text-secondary hover:text-text-primary focus:outline-none truncate max-w-[170px]"
+            title={activeTypeLabel}
+          >
+            <span className="truncate">{activeTypeLabel}</span>
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
+          </button>
         </div>
-        
-        {/* Category Dropdown Toggle */}
-        <div className="relative flex-shrink-0 border-l border-border h-6 mx-2"></div>
-        <button
-          type="button"
-          onClick={() => { setIsCategoryOpen(!isCategoryOpen); setIsFocused(true); }}
-          className="flex items-center gap-1 pr-4 pl-2 h-10 text-sm font-medium text-text-secondary hover:text-text-primary focus:outline-none"
-        >
-          {activeCategoryLabel} <ChevronDown className="h-4 w-4" />
-        </button>
-      </div>
 
-      {/* Categories Dropdown Menu */}
-      {isCategoryOpen && (
-        <div className="absolute top-12 right-0 w-48 bg-surface rounded-md shadow-dropdown border border-border overflow-hidden z-[var(--z-dropdown)]">
-          <div className="py-1">
-            {CATEGORIES.map(cat => (
+        {/* Dynamic Product Types Dropdown Menu */}
+        {isTypeDropdownOpen && (
+          <div className="absolute top-12 right-0 w-56 max-h-72 overflow-y-auto bg-surface rounded-xl shadow-dropdown border border-border overflow-hidden z-[var(--z-dropdown)] py-1">
+            <button
+              type="button"
+              className={`w-full text-left px-3.5 py-2 text-xs font-medium flex items-center justify-between hover:bg-surface-hover ${selectedTypeId === '' ? 'text-primary font-bold bg-surface-hover' : 'text-text-secondary'}`}
+              onClick={() => {
+                setSelectedTypeId('');
+                setIsTypeDropdownOpen(false);
+                document.getElementById('search-field')?.focus();
+              }}
+            >
+              <span>All Products</span>
+              {selectedTypeId === '' && <Check className="h-3.5 w-3.5 text-primary" />}
+            </button>
+            
+            {isLoadingCategories && (
+              <div className="px-3.5 py-2 text-xs text-text-muted flex items-center gap-2">
+                <Loader2 className="h-3 w-3 animate-spin" /> Loading types...
+              </div>
+            )}
+
+            {categories.map(cat => (
               <button
                 key={cat.id}
                 type="button"
-                className={`w-full text-left px-4 py-2 text-sm hover:bg-surface-hover ${category === cat.id ? 'text-primary font-semibold bg-surface-hover' : 'text-text-secondary'}`}
+                className={`w-full text-left px-3.5 py-2 text-xs font-medium flex items-center justify-between hover:bg-surface-hover ${selectedTypeId === cat.id ? 'text-primary font-bold bg-surface-hover' : 'text-text-secondary'}`}
                 onClick={() => {
-                  setCategory(cat.id);
-                  setIsCategoryOpen(false);
+                  setSelectedTypeId(cat.id);
+                  setIsTypeDropdownOpen(false);
                   document.getElementById('search-field')?.focus();
                 }}
               >
-                {cat.label}
+                <span className="truncate">{cat.name}</span>
+                {selectedTypeId === cat.id && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
               </button>
             ))}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Dropdown UI for results */}
-      {isFocused && query.trim().length >= 2 && !isCategoryOpen && (
-        <div className="absolute top-12 left-0 w-full bg-surface rounded-md shadow-dropdown border border-border overflow-hidden z-[var(--z-popover)]">
-          <div className="max-h-[70vh] overflow-y-auto p-2">
-            
-            {error && (
-              <div className="p-4 text-sm text-danger text-center">{error}</div>
-            )}
+        {/* Dropdown UI for results (Triggers from 1st character) */}
+        {isFocused && query.trim().length >= 1 && !isTypeDropdownOpen && (
+          <div className="absolute top-12 left-0 w-full bg-surface rounded-xl shadow-dropdown border border-border overflow-hidden z-[var(--z-popover)]">
+            <div className="max-h-[75vh] overflow-y-auto p-2">
+              
+              {error && (
+                <div className="p-4 text-sm text-danger text-center">{error}</div>
+              )}
 
-            {!isLoading && !hasResults && !error && (
-              <div className="p-8 text-center text-text-muted">
-                <p className="text-sm mb-4">No results found for "{query}"</p>
-                <div className="flex flex-col gap-2 text-xs">
-                  <p className="text-text-muted">Suggestions:</p>
-                  <p>• Try searching by SKU</p>
-                  <p>• Try customer phone</p>
-                  <p>• Try invoice number</p>
+              {!isLoading && !hasResults && !error && (
+                <div className="p-8 text-center text-text-muted">
+                  <p className="text-sm font-medium mb-1">No products with available stock found for "{query}"</p>
+                  <p className="text-xs text-text-muted">Only products currently having positive stock (&gt; 0) in at least one branch or warehouse are displayed.</p>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Products */}
-            {results.products.length > 0 && (
-              <div className="mb-2">
-                <div className="px-3 py-2 text-xs font-semibold text-text-muted uppercase tracking-wider flex items-center gap-2">
-                  <Package className="h-4 w-4" /> Products
-                </div>
-                <div className="space-y-1">
-                  {results.products.map((product, i) => {
-                    const globalIdx = productsOffset + i;
-                    const isSelected = selectedIndex === globalIdx;
-                    return (
-                      <button
-                        type="button"
-                        id={`search-item-${globalIdx}`}
-                        key={product._id}
-                        onClick={(e) => handleProductSelect(product, e)}
-                        className={`w-full text-left flex items-center justify-between px-3 py-2 rounded-md transition-colors group ${isSelected ? 'bg-surface-hover ring-1 ring-focus-ring' : 'hover:bg-surface-hover'}`}
-                      >
-                        <div className="min-w-0 pr-3">
-                          <p className="text-sm font-medium text-text-primary group-hover:text-primary flex items-center gap-2 flex-wrap">
-                            <span>{product.name}</span>
-                            {product.match_type === 'COMPATIBLE_MODEL' && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
-                                Compatible: {product.matched_value || product.matched_compatible_model}
+              {/* Products List */}
+              {results.products.length > 0 && (
+                <div>
+                  <div className="px-3 py-1.5 text-[11px] font-bold text-text-muted uppercase tracking-wider flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Package className="h-3.5 w-3.5 text-primary" /> Products ({results.products.length})
+                    </span>
+                    <span className="text-[10px] text-text-muted lowercase font-normal">Click to view details &amp; multi-branch availability</span>
+                  </div>
+                  <div className="space-y-1.5 mt-1">
+                    {results.products.map((product, i) => {
+                      const isSelected = selectedIndex === i;
+                      const hasLocations = product.stockLocations && product.stockLocations.length > 0;
+                      
+                      return (
+                        <button
+                          type="button"
+                          id={`search-item-${i}`}
+                          key={product.id || product._id}
+                          onClick={(e) => handleProductClick(product, e)}
+                          className={`w-full text-left p-3 rounded-lg border transition-colors group ${
+                            isSelected 
+                              ? 'bg-surface-hover border-primary/40 ring-1 ring-focus-ring' 
+                              : 'border-border/60 hover:bg-surface-hover hover:border-border'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            {/* Product Info */}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2.5 flex-wrap">
+                                <span className="text-base font-bold text-text-primary group-hover:text-primary leading-tight">
+                                  {product.name}
+                                </span>
+                                {product.sku && (
+                                  <span className="font-mono bg-surface px-1.5 py-0.5 rounded border border-border/70 text-[11px] text-text-muted">
+                                    {product.sku}
+                                  </span>
+                                )}
+                                {product.barcode && (
+                                  <span className="font-mono bg-surface px-1.5 py-0.5 rounded border border-border/70 text-[11px] text-text-muted">
+                                    {product.barcode}
+                                  </span>
+                                )}
+                                {product.match_type === 'COMPATIBLE_MODEL' && (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                                    Compatible: {product.matched_value || product.matched_compatible_model}
+                                  </span>
+                                )}
+                              </div>
+                              
+                              {/* Full Product Specifications Line (Type, Quality, Color, Brand, Company, Fits) matching POS bar with scaled up text */}
+                              <div className="flex items-center gap-2 text-xs mt-1.5 flex-wrap">
+                                {product.typeName && (
+                                  <span className="px-2 py-0.5 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded font-bold uppercase tracking-wider text-xs">
+                                    {product.typeName}
+                                  </span>
+                                )}
+                                {product.quality && product.quality !== '-' && (
+                                  <span className="px-2 py-0.5 bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 rounded font-medium text-xs">
+                                    {product.quality}
+                                  </span>
+                                )}
+                                {product.color && product.color !== '-' && (
+                                  <span className="px-2 py-0.5 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 rounded font-medium text-xs">
+                                    {product.color}
+                                  </span>
+                                )}
+                                {product.brand && product.brand !== '-' && (
+                                  <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded font-medium text-xs">
+                                    {product.brand}
+                                  </span>
+                                )}
+                                {product.company && product.company !== '-' && (
+                                  <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded font-medium text-xs">
+                                    {product.company}
+                                  </span>
+                                )}
+                                {product.compatibleModels && product.compatibleModels.length > 0 && (
+                                  <span className="text-xs text-text-muted font-normal">
+                                    Fits: <span className="font-medium text-text-secondary">{product.compatibleModels.slice(0, 3).join(', ')}{product.compatibleModels.length > 3 ? '...' : ''}</span>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Price Section */}
+                            <div className="flex flex-col items-end shrink-0">
+                              <span 
+                                className="text-base font-extrabold text-primary tabular-nums"
+                                onMouseDown={(e) => { e.stopPropagation(); setRevealedPriceId(product.id || product._id || null); }}
+                                onMouseUp={(e) => { e.stopPropagation(); setRevealedPriceId(null); }}
+                                onMouseLeave={(e) => { e.stopPropagation(); setRevealedPriceId(null); }}
+                                onTouchStart={(e) => { e.stopPropagation(); setRevealedPriceId(product.id || product._id || null); }}
+                                onTouchEnd={(e) => { e.stopPropagation(); setRevealedPriceId(null); }}
+                                onClick={(e) => { e.stopPropagation(); }}
+                                title="Hold to see cost price"
+                              >
+                                Rs {(revealedPriceId === (product.id || product._id) ? (product.purchasePrice ?? product.costPrice ?? 0) : (product.price ?? product.salePrice ?? 0)).toLocaleString()}
                               </span>
-                            )}
-                          </p>
-                          <div className="flex items-center gap-2 text-xs text-text-muted mt-0.5 flex-wrap">
-                            <span className="font-mono">{product.sku || product.barcode || ''}</span>
-                            {product.brand && product.brand !== '-' && (
-                              <span className="px-1.5 py-0.2 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] font-medium border border-blue-200 dark:border-blue-800">
-                                {product.brand}
+                              <span className="text-xs text-text-muted mt-0.5">
+                                Total Stock: <strong className="text-text-primary font-bold text-xs">{product.totalStock ?? product.quantity ?? 0} pcs</strong>
                               </span>
-                            )}
-                            {product.quality && product.quality !== '-' && (
-                              <span className="px-1.5 py-0.2 rounded bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 text-[10px] font-medium border border-teal-200 dark:border-teal-800">
-                                {product.quality}
-                              </span>
-                            )}
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-1 shrink-0">
-                          <span 
-                            className="text-sm font-bold text-primary cursor-pointer select-none tabular-nums"
-                            onMouseDown={(e) => { e.stopPropagation(); setRevealedPriceId(product.id || product._id || null); }}
-                            onMouseUp={(e) => { e.stopPropagation(); setRevealedPriceId(null); }}
-                            onMouseLeave={(e) => { e.stopPropagation(); setRevealedPriceId(null); }}
-                            onTouchStart={(e) => { e.stopPropagation(); setRevealedPriceId(product.id || product._id || null); }}
-                            onTouchEnd={(e) => { e.stopPropagation(); setRevealedPriceId(null); }}
-                            onClick={(e) => { e.stopPropagation(); }}
-                            title="Hold to see cost price"
-                          >
-                            Rs {(revealedPriceId === (product.id || product._id) ? (product.purchasePrice ?? product.costPrice ?? 0) : (product.price ?? product.salePrice ?? 0)).toLocaleString()}
-                          </span>
-                          <div className="flex items-center gap-1.5">
-                            <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md border ${(product.branchStock ?? product.quantity ?? 0) > 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800' : 'bg-surface-hover text-text-muted border-border'}`}>
-                              <Store className="h-3 w-3" />
-                              Shop: {product.branchStock ?? product.quantity ?? 0}
-                            </span>
-                            <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md border ${(product.warehouseStock ?? 0) > 0 ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-800' : 'bg-surface-hover text-text-muted border-border'}`}>
-                              <Building2 className="h-3 w-3" />
-                              Warehouse: {product.warehouseStock ?? 0}
-                            </span>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
 
-            {/* Customers */}
-            {results.customers.length > 0 && (
-              <div className="mb-2">
-                <div className="px-3 py-2 text-xs font-semibold text-text-muted uppercase tracking-wider flex items-center gap-2">
-                  <Users className="h-4 w-4" /> Customers
+                          {/* POSITIVE-STOCK LOCATIONS ONLY CHIPS */}
+                          {hasLocations && (
+                            <div className="mt-2 pt-2 border-t border-border/50 flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-bold text-text-muted uppercase tracking-wider mr-1">
+                                Available at:
+                              </span>
+                              {product.stockLocations.map((loc) => {
+                                const isWarehouse = loc.branchName.toLowerCase().includes('warehouse') || loc.branchId === '00000000-0000-0000-0000-000000000003';
+                                return (
+                                  <span 
+                                    key={loc.branchId}
+                                    className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-md border ${
+                                      isWarehouse 
+                                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-800'
+                                        : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
+                                    }`}
+                                  >
+                                    {isWarehouse ? <Building2 className="h-3.5 w-3.5 shrink-0" /> : <Store className="h-3.5 w-3.5 shrink-0" />}
+                                    <span>{loc.branchName}</span>
+                                    <strong className="ml-0.5 px-1 rounded bg-black/5 dark:bg-white/10 tabular-nums">{loc.quantity}</strong>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  {results.customers.map((customer, i) => {
-                    const globalIdx = customersOffset + i;
-                    const isSelected = selectedIndex === globalIdx;
-                    return (
-                      <Link
-                        id={`search-item-${globalIdx}`}
-                        key={customer._id}
-                        to={`/dashboard/shop-admin/customers/${customer._id}`}
-                        onClick={handleLinkClick}
-                        className={`flex items-center justify-between px-3 py-2 rounded-md transition-colors group ${isSelected ? 'bg-surface-hover ring-1 ring-focus-ring' : 'hover:bg-surface-hover'}`}
-                      >
-                        <div>
-                          <p className="text-sm font-medium text-text-primary group-hover:text-primary flex items-center">
-                            {customer.name}
-                            {getMatchBadge(customer, query, [
-                              { key: 'name', label: 'Name' },
-                              { key: 'phone', label: 'Phone' },
-                              { key: 'email', label: 'Email' }
-                            ])}
-                          </p>
-                          <p className="text-xs text-text-muted">{customer.phone}</p>
-                        </div>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+              )}
 
-            {/* Suppliers */}
-            {results.suppliers.length > 0 && (
-              <div className="mb-2">
-                <div className="px-3 py-2 text-xs font-semibold text-text-muted uppercase tracking-wider flex items-center gap-2">
-                  <Truck className="h-4 w-4" /> Suppliers
-                </div>
-                <div className="space-y-1">
-                  {results.suppliers.map((supplier, i) => {
-                    const globalIdx = suppliersOffset + i;
-                    const isSelected = selectedIndex === globalIdx;
-                    return (
-                      <Link
-                        id={`search-item-${globalIdx}`}
-                        key={supplier._id}
-                        to={`/dashboard/shop-admin/suppliers/${supplier._id}`}
-                        onClick={handleLinkClick}
-                        className={`flex items-center justify-between px-3 py-2 rounded-md transition-colors group ${isSelected ? 'bg-surface-hover ring-1 ring-focus-ring' : 'hover:bg-surface-hover'}`}
-                      >
-                        <div>
-                          <p className="text-sm font-medium text-text-primary group-hover:text-primary flex items-center">
-                            {supplier.name}
-                            {getMatchBadge(supplier, query, [
-                              { key: 'name', label: 'Name' },
-                              { key: 'companyName', label: 'Company' },
-                              { key: 'phone', label: 'Phone' },
-                              { key: 'email', label: 'Email' }
-                            ])}
-                          </p>
-                          <p className="text-xs text-text-muted">{supplier.companyName || supplier.phone}</p>
-                        </div>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Invoices */}
-            {results.invoices.length > 0 && (
-              <div className="mb-2">
-                <div className="px-3 py-2 text-xs font-semibold text-text-muted uppercase tracking-wider flex items-center gap-2">
-                  <FileText className="h-4 w-4" /> Invoices
-                </div>
-                <div className="space-y-1">
-                  {results.invoices.map((invoice, i) => {
-                    const globalIdx = invoicesOffset + i;
-                    const isSelected = selectedIndex === globalIdx;
-                    return (
-                      <Link
-                        id={`search-item-${globalIdx}`}
-                        key={invoice._id}
-                        to={`/dashboard/shop-admin/history?invoice=${invoice._id}`}
-                        onClick={handleLinkClick}
-                        className={`flex items-center justify-between px-3 py-2 rounded-md transition-colors group ${isSelected ? 'bg-surface-hover ring-1 ring-focus-ring' : 'hover:bg-surface-hover'}`}
-                      >
-                        <div>
-                          <p className="text-sm font-medium text-text-primary group-hover:text-primary flex items-center">
-                            Invoice #{invoice.orderNumber || invoice.invoiceNumber}
-                            {getMatchBadge(invoice, query, [
-                              { key: 'invoiceNumber', label: 'Invoice #' },
-                              { key: 'orderNumber', label: 'Order #' }
-                            ])}
-                          </p>
-                          <p className="text-xs text-text-muted">
-                            {invoice.customerName ?? 'Walk-in'}
-                          </p>
-                        </div>
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-md border ${
-                          invoice.status === 'paid' ? 'bg-success/10 text-success border-success/20' :
-                          invoice.status === 'pending' ? 'bg-warning/10 text-warning border-warning/20' :
-                          'bg-surface-hover text-text-muted border-border'
-                        }`}>
-                          {invoice.status}
-                        </span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
+            </div>
           </div>
-        </div>
+        )}
+      </div>
+
+      {/* Existing Product Details Drawer opened upon product selection */}
+      {selectedProductForDetails && (
+        <ProductDetailsDrawer
+          product={selectedProductForDetails}
+          onClose={() => setSelectedProductForDetails(null)}
+          onEdit={() => {}}
+        />
       )}
-    </div>
+    </>
   );
 };
 

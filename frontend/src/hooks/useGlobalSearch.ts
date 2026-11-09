@@ -3,10 +3,16 @@ import { httpFetch } from '@/lib/tauri/tauriClient';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 
+export interface StockLocationItem {
+  branchId: string;
+  branchName: string;
+  quantity: number;
+}
+
 export interface GlobalSearchResultItem {
   id: string;
   _id?: string;
-  type: 'product' | 'customer' | 'supplier' | 'invoice';
+  type: 'product';
   name: string;
   sku?: string;
   barcode?: string;
@@ -23,33 +29,23 @@ export interface GlobalSearchResultItem {
   company?: string;
   quality?: string;
   color?: string;
+  type_id?: string;
+  typeName?: string;
   compatibleModels?: string[];
-  mobile?: string;
-  accountCode?: string;
-  companyName?: string;
-  phone?: string;
-  invoiceNumber?: string;
-  totalAmount?: number;
+  stockLocations: StockLocationItem[];
   match_type?: string;
   matched_value?: string;
   matched_compatible_model?: string;
-  orderNumber?: string;
-  customerId?: string;
-  customerName?: string;
-  status?: string;
 }
 
 export interface GlobalSearchResult {
   products: GlobalSearchResultItem[];
-  customers: GlobalSearchResultItem[];
-  suppliers: GlobalSearchResultItem[];
-  invoices: GlobalSearchResultItem[];
 }
 
-export function useGlobalSearch(query: string, type: string = 'quick', isFocused: boolean = true, delay: number = 300) {
+export function useGlobalSearch(query: string, typeId: string = '', isFocused: boolean = true, delay: number = 300) {
   const [debouncedQuery, setDebouncedQuery] = useState(query);
-  const [debouncedType, setDebouncedType] = useState(type);
-  const [results, setResults] = useState<GlobalSearchResult>({ products: [], customers: [], suppliers: [], invoices: [] });
+  const [debouncedTypeId, setDebouncedTypeId] = useState(typeId);
+  const [results, setResults] = useState<GlobalSearchResult>({ products: [] });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,20 +57,20 @@ export function useGlobalSearch(query: string, type: string = 'quick', isFocused
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedQuery(query);
-      setDebouncedType(type);
+      setDebouncedTypeId(typeId);
     }, delay);
 
     return () => {
       clearTimeout(handler);
     };
-  }, [query, type, delay]);
+  }, [query, typeId, delay]);
 
-  // Live HTTP search logic
+  // Live HTTP search logic (Triggers from 1st character)
   useEffect(() => {
     let isCancelled = false;
 
     if (!isFocused || !debouncedQuery || debouncedQuery.trim().length < 1) {
-      setResults({ products: [], customers: [], suppliers: [], invoices: [] });
+      setResults({ products: [] });
       setIsLoading(false);
       setError(null);
       return;
@@ -84,15 +80,14 @@ export function useGlobalSearch(query: string, type: string = 'quick', isFocused
     setError(null);
 
     const branchParam = effectiveBranchId ? `&branch_id=${encodeURIComponent(effectiveBranchId)}` : '';
-    const url = `/api/v1/search?q=${encodeURIComponent(debouncedQuery.trim())}&category=${encodeURIComponent(debouncedType)}${branchParam}`;
+    const typeParam = debouncedTypeId ? `&type_id=${encodeURIComponent(debouncedTypeId)}` : '';
+    const url = `/api/v1/search?q=${encodeURIComponent(debouncedQuery.trim())}${typeParam}${branchParam}`;
+
     httpFetch<GlobalSearchResult>(url)
       .then((data) => {
         if (!isCancelled) {
           setResults({
             products: data?.products || [],
-            customers: data?.customers || [],
-            suppliers: data?.suppliers || [],
-            invoices: data?.invoices || [],
           });
           setIsLoading(false);
         }
@@ -108,7 +103,7 @@ export function useGlobalSearch(query: string, type: string = 'quick', isFocused
     return () => {
       isCancelled = true;
     };
-  }, [debouncedQuery, debouncedType, isFocused, effectiveBranchId]);
+  }, [debouncedQuery, debouncedTypeId, isFocused, effectiveBranchId]);
 
-  return { results, isLoading, error, debouncedQuery, debouncedType };
+  return { results, isLoading, error, debouncedQuery, debouncedTypeId };
 }
