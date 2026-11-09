@@ -205,14 +205,15 @@ export interface BackendSalaryConfig {
   user_id: string;
   organization_id: string;
   branch_id: string | null;
-  salary_type: 'MONTHLY' | 'DAILY' | 'HOURLY';
+  salary_type: 'MONTHLY' | 'DAILY' | 'HOURLY' | 'COMMISSION_PERCENTAGE';
   monthly_salary: number | null;
   daily_rate: number | null;
   hourly_rate: number | null;
+  commission_percentage: number | null;
   effective_from: string;       // ISO date string (YYYY-MM-DD)
   effective_to: string | null;  // null = currently active
   overtime_multiplier: number;  // default 1.5
-  created_by: string;
+  configured_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -237,13 +238,18 @@ export interface BackendShiftTemplate {
 export interface BackendPayrollPeriod {
   id: string;
   organization_id: string;
-  period_month: number;   // 1–12
-  period_year: number;
-  start_date: string;     // YYYY-MM-DD
-  end_date: string;       // YYYY-MM-DD
+  label: string;
+  /** period_start is the raw DB column name (YYYY-MM-DD). Same as start_date. */
+  period_start: string;   // YYYY-MM-DD
+  /** period_end is the raw DB column name (YYYY-MM-DD). Same as end_date. */
+  period_end: string;     // YYYY-MM-DD
+  /** Added in migration 043 — may be null for pre-migration rows */
+  period_month: number | null;   // 1–12
+  /** Added in migration 043 — may be null for pre-migration rows */
+  period_year: number | null;
   status: 'DRAFT' | 'APPROVED' | 'PAID' | 'CLOSED';
   late_reset_policy: 'MONTHLY' | 'PAYROLL_PERIOD' | 'CONTINUOUS';
-  created_by: string;
+  created_by: string | null;
   approved_by: string | null;
   approved_at: string | null;
   created_at: string;

@@ -204,8 +204,8 @@ export function createReportsRouter(pool: Pool): Router {
           FROM sales s
           WHERE s.created_by = $1
             ${effectiveBranchId ? `AND s.branch_id = $2` : ''}
-            ${startDate  ? `AND s.created_at >= ${startIdx}` : ''}
-            ${endDate    ? `AND s.created_at <= ${endIdx}`   : ''}
+            ${startDate  ? `AND s.created_at >= $${startIdx}` : ''}
+            ${endDate    ? `AND s.created_at <= $${endIdx}`   : ''}
         ),
         -- Handset sales attributed via mobile_sale_items (sold_by)
         mobile_agg AS (
@@ -216,8 +216,8 @@ export function createReportsRouter(pool: Pool): Router {
           WHERE msi.sold_by = $1
             AND msi.is_return = FALSE
             ${effectiveBranchId ? `AND msi.branch_id = $2` : ''}
-            ${startDate  ? `AND msi.created_at >= ${startIdx}` : ''}
-            ${endDate    ? `AND msi.created_at <= ${endIdx}`   : ''}
+            ${startDate  ? `AND msi.created_at >= $${startIdx}` : ''}
+            ${endDate    ? `AND msi.created_at <= $${endIdx}`   : ''}
         ),
         -- Sales returns attributed to this user (as return processor)
         returns_agg AS (

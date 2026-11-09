@@ -154,18 +154,21 @@ export function buildHrRouter(pool: Pool): Router {
         daily_rate,
         hourly_rate,
         overtime_multiplier,
+        commission_percentage,
         effective_from,
       } = req.body as {
-        salary_type: 'MONTHLY' | 'DAILY' | 'HOURLY';
+        salary_type: 'MONTHLY' | 'DAILY' | 'HOURLY' | 'COMMISSION_PERCENTAGE';
         monthly_salary?: number;
         daily_rate?: number;
         hourly_rate?: number;
         overtime_multiplier?: number;
+        commission_percentage?: number;
         effective_from: string;
       };
 
-      if (!salary_type || !['MONTHLY', 'DAILY', 'HOURLY'].includes(salary_type)) {
-        res.status(400).json({ error: 'salary_type must be MONTHLY, DAILY, or HOURLY' });
+      const VALID_SALARY_TYPES = ['MONTHLY', 'DAILY', 'HOURLY', 'COMMISSION_PERCENTAGE'];
+      if (!salary_type || !VALID_SALARY_TYPES.includes(salary_type)) {
+        res.status(400).json({ error: `salary_type must be one of: ${VALID_SALARY_TYPES.join(', ')}` });
         return;
       }
       if (!effective_from || !/^\d{4}-\d{2}-\d{2}$/.test(effective_from)) {
@@ -181,6 +184,7 @@ export function buildHrRouter(pool: Pool): Router {
         daily_rate,
         hourly_rate,
         overtime_multiplier,
+        commission_percentage,
         effective_from,
         configured_by: identity.user_id,
       });
@@ -215,12 +219,16 @@ export function buildHrRouter(pool: Pool): Router {
       return;
     }
     try {
-      const { requested_amount, reason } = req.body as {
-        requested_amount: number;
+      // Accept `amount` (new frontend contract) or `requested_amount` (legacy)
+      const { amount, requested_amount, reason, requested_date } = req.body as {
+        amount?: number;
+        requested_amount?: number;
         reason: string;
+        requested_date?: string;
       };
-      if (!requested_amount || requested_amount <= 0) {
-        res.status(400).json({ error: 'requested_amount must be a positive number' });
+      const resolvedAmount = amount ?? requested_amount ?? 0;
+      if (!resolvedAmount || resolvedAmount <= 0) {
+        res.status(400).json({ error: 'amount must be a positive number' });
         return;
       }
       if (!reason || reason.trim().length === 0) {
@@ -230,8 +238,9 @@ export function buildHrRouter(pool: Pool): Router {
       const advance = await requestAdvance(pool, {
         user_id: getParamStr(req.params['userId']),
         organization_id: NIAZI_ORGANIZATION_ID,
-        requested_amount,
+        amount: resolvedAmount,
         reason: reason.trim(),
+        requested_date: requested_date ?? null,
         requested_by: identity.user_id,
       });
       res.status(201).json(advance);
@@ -284,17 +293,27 @@ export function buildHrRouter(pool: Pool): Router {
       return;
     }
     try {
-      const { disbursed_amount, cash_movement_id } = req.body as {
-        disbursed_amount: number;
+      // Accept new frontend shape (payment_method + disbursement_date + reference_number)
+      // as well as legacy shape (disbursed_amount + cash_movement_id).
+      const {
+        disbursed_amount,
+        payment_method,
+        disbursement_date,
+        reference_number,
+        cash_movement_id,
+      } = req.body as {
+        disbursed_amount?: number;
+        payment_method?: string;
+        disbursement_date?: string;
+        reference_number?: string;
         cash_movement_id?: string;
       };
-      if (!disbursed_amount || disbursed_amount <= 0) {
-        res.status(400).json({ error: 'disbursed_amount must be positive' });
-        return;
-      }
       const advance = await disburseStaffAdvance(pool, {
         advance_id: getParamStr(req.params['advanceId']),
         disbursed_amount,
+        payment_method,
+        disbursement_date: disbursement_date ?? null,
+        reference_number: reference_number ?? null,
         disbursed_by: identity.user_id,
         organization_id: NIAZI_ORGANIZATION_ID,
         cash_movement_id,
@@ -381,18 +400,31 @@ export function buildHrRouter(pool: Pool): Router {
       return;
     }
     try {
-      const { label, period_start, period_end, late_reset_policy } = req.body as {
-        label: string;
-        period_start: string;
-        period_end: string;
+      // Accept new frontend shape (period_month, period_year, start_date, end_date)
+      // as well as legacy shape (label, period_start, period_end).
+      const {
+        period_month, period_year, start_date, end_date,
+        label, period_start, period_end, late_reset_policy,
+      } = req.body as {
+        period_month?: number;
+        period_year?: number;
+        start_date?: string;
+        end_date?: string;
+        label?: string;
+        period_start?: string;
+        period_end?: string;
         late_reset_policy?: string;
       };
-      if (!label || !period_start || !period_end) {
-        res.status(400).json({ error: 'label, period_start, and period_end are required' });
+      // Require either new-shape dates OR legacy dates
+      const hasNewShape = (start_date || end_date);
+      const hasLegacyShape = (period_start || period_end);
+      if (!hasNewShape && !hasLegacyShape) {
+        res.status(400).json({ error: 'start_date and end_date (or period_start and period_end) are required' });
         return;
       }
       const period = await createOrgPayrollPeriod(pool, {
         organization_id: NIAZI_ORGANIZATION_ID,
+        period_month, period_year, start_date, end_date,
         label, period_start, period_end, late_reset_policy,
         created_by: identity.user_id,
       });
@@ -463,33 +495,42 @@ export function buildHrRouter(pool: Pool): Router {
       return;
     }
     try {
+      // Accept `amount` (new frontend contract) or `payment_amount` (legacy).
+      // payment_date is optional — service defaults to now_utc date when absent.
       const {
-        payment_amount, payment_method, payment_date,
-        reference_number, notes,
+        amount: payAmt,
+        payment_amount,
+        payment_method,
+        payment_date,
+        reference_number,
+        notes,
       } = req.body as {
-        payment_amount: number;
+        amount?: number;
+        payment_amount?: number;
         payment_method: string;
-        payment_date: string;
+        payment_date?: string;
         reference_number?: string;
         notes?: string;
       };
-      if (!payment_amount || payment_amount <= 0) {
-        res.status(400).json({ error: 'payment_amount must be positive' });
+      const resolvedPayAmount = payAmt ?? payment_amount ?? 0;
+      if (!resolvedPayAmount || resolvedPayAmount <= 0) {
+        res.status(400).json({ error: 'amount must be a positive number' });
         return;
       }
       if (!payment_method) {
         res.status(400).json({ error: 'payment_method is required' });
         return;
       }
-      if (!payment_date || !/^\d{4}-\d{2}-\d{2}$/.test(payment_date)) {
-        res.status(400).json({ error: 'payment_date must be YYYY-MM-DD' });
+      // payment_date is accepted but not required (defaults to today in service)
+      if (payment_date && !/^\d{4}-\d{2}-\d{2}$/.test(payment_date)) {
+        res.status(400).json({ error: 'payment_date must be YYYY-MM-DD when provided' });
         return;
       }
       const record = await processSalaryPayment(pool, {
         salary_record_id: getParamStr(req.params['recordId']),
-        payment_amount,
+        payment_amount: resolvedPayAmount,
         payment_method,
-        payment_date,
+        payment_date: payment_date ?? new Date().toISOString().slice(0, 10),
         reference_number,
         notes,
         processed_by: identity.user_id,

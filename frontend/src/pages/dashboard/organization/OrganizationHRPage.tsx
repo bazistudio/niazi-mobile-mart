@@ -655,10 +655,19 @@ const StaffTab: React.FC<StaffTabProps> = ({
                   onSave={async (config, overtimeConfig) => {
                     const todayStr = new Date().toISOString().slice(0, 10);
                     // 1. Save core salary to live HR endpoints
+                    // Map UI employmentType to backend salary_type
+                    const derivedSalaryType =
+                      config.employmentType === 'COMMISSION_PERCENTAGE'
+                        ? 'COMMISSION_PERCENTAGE'
+                        : 'MONTHLY';
                     await saveStaffSalaryConfig({
                       staffId: modalStaff._id,
-                      salary_type: 'MONTHLY',
-                      monthly_salary: config.monthlySalary,
+                      salary_type: derivedSalaryType,
+                      monthly_salary: config.monthlySalary || undefined,
+                      commission_percentage:
+                        config.employmentType === 'COMMISSION_PERCENTAGE'
+                          ? (config.commissionPercentage ?? 50)
+                          : undefined,
                       effective_from: todayStr,
                       overtime_multiplier: overtimeConfig.overtimeMultiplier,
                     });

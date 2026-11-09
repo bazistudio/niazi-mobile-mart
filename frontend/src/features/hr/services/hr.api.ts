@@ -75,10 +75,11 @@ export async function getStaffSalaryConfig(
 
 export async function saveStaffSalaryConfig(params: {
   staffId: string;
-  salary_type: 'MONTHLY' | 'DAILY' | 'HOURLY';
+  salary_type: 'MONTHLY' | 'DAILY' | 'HOURLY' | 'COMMISSION_PERCENTAGE';
   monthly_salary?: number;
   daily_rate?: number;
   hourly_rate?: number;
+  commission_percentage?: number;
   effective_from: string; // YYYY-MM-DD
   overtime_multiplier?: number;
 }): Promise<BackendSalaryConfig> {

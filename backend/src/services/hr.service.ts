@@ -209,11 +209,12 @@ export async function setStaffSalaryConfig(
   params: {
     user_id: string;
     organization_id: string;
-    salary_type: 'MONTHLY' | 'DAILY' | 'HOURLY';
+    salary_type: 'MONTHLY' | 'DAILY' | 'HOURLY' | 'COMMISSION_PERCENTAGE';
     monthly_salary?: number;
     daily_rate?: number;
     hourly_rate?: number;
     overtime_multiplier?: number;
+    commission_percentage?: number;
     effective_from: string;
     configured_by: string;
   }
@@ -230,6 +231,7 @@ export async function setStaffSalaryConfig(
       daily_rate: params.daily_rate ?? null,
       hourly_rate: params.hourly_rate ?? null,
       overtime_multiplier: params.overtime_multiplier ?? DEFAULT_OVERTIME_MULTIPLIER,
+      commission_percentage: params.commission_percentage ?? null,
       effective_from: params.effective_from,
       configured_by: params.configured_by,
       now_utc: nowUtc(),
@@ -294,19 +296,47 @@ export async function createOrgPayrollPeriod(
   pool: Pool,
   params: {
     organization_id: string;
-    label: string;
-    period_start: string;
-    period_end: string;
+    // Frontend sends period_month + period_year + start_date + end_date.
+    // Legacy callers may still send label + period_start + period_end.
+    // Both shapes are accepted.
+    period_month?: number;
+    period_year?: number;
+    start_date?: string;
+    end_date?: string;
+    label?: string;
+    period_start?: string;
+    period_end?: string;
     late_reset_policy?: string;
     created_by: string;
   }
 ) {
+  // Resolve period start/end — prefer new-shape fields, fall back to legacy.
+  const periodStart = params.start_date ?? params.period_start ?? '';
+  const periodEnd   = params.end_date   ?? params.period_end   ?? '';
+
+  // Build a human-readable label if one was not supplied.
+  // Uses period_month/year when present, otherwise derives from periodStart.
+  let label = params.label;
+  if (!label) {
+    if (params.period_month != null && params.period_year != null) {
+      const MONTH_NAMES = [
+        'Jan','Feb','Mar','Apr','May','Jun',
+        'Jul','Aug','Sep','Oct','Nov','Dec',
+      ];
+      label = `${MONTH_NAMES[params.period_month - 1] ?? String(params.period_month)} ${params.period_year}`;
+    } else if (periodStart) {
+      label = periodStart.slice(0, 7); // 'YYYY-MM'
+    } else {
+      label = 'Payroll Period';
+    }
+  }
+
   return createPayrollPeriod(pool, {
     id: uuidv4(),
     organization_id: params.organization_id,
-    label: params.label,
-    period_start: params.period_start,
-    period_end: params.period_end,
+    label,
+    period_start: periodStart,
+    period_end: periodEnd,
     late_reset_policy: params.late_reset_policy ?? 'MONTHLY',
     created_by: params.created_by,
     now_utc: nowUtc(),
@@ -379,12 +409,12 @@ export async function generatePayroll(
 
     for (const user of users) {
       // Get active salary config
-      const config = await getActiveSalaryConfig(pool, user.id);
+      const config = await getActiveSalaryConfig(pool, user.user_id);
       if (!config) continue;  // Skip users without salary config
 
       // Get attendance summary for the period
       const attendance = await getAttendanceSummary(
-        pool, user.id, period.period_start, period.period_end
+        pool, user.user_id, period.period_start, period.period_end
       );
 
       // Calculate working days in period
@@ -418,7 +448,7 @@ export async function generatePayroll(
       }
 
       // Outstanding advance balance = sum of active outstanding advances
-      const advances = await getActiveOutstandingAdvances(pool, user.id);
+      const advances = await getActiveOutstandingAdvances(pool, user.user_id);
       const totalOutstanding = advances.reduce((sum, a) => sum + parseFloat(a.outstanding_balance), 0);
       // For now, recover nothing automatically — advance recovery is explicitly set
       const advanceRecovery = 0;
@@ -429,7 +459,7 @@ export async function generatePayroll(
       const record = await upsertSalaryRecord(client, {
         id: uuidv4(),
         payroll_period_id: periodId,
-        user_id: user.id,
+        user_id: user.user_id,
         organization_id: organizationId,
         salary_config_id: config.id,
         salary_type_snapshot: config.salary_type,
@@ -559,15 +589,25 @@ export async function requestAdvance(
   params: {
     user_id: string;
     organization_id: string;
-    requested_amount: number;
+    // Frontend sends `amount`; legacy callers may send `requested_amount`.
+    amount?: number;
+    requested_amount?: number;
     reason: string;
+    requested_date?: string | null;
     requested_by: string;
   }
 ) {
+  const resolvedAmount = params.amount ?? params.requested_amount ?? 0;
+  const now = nowUtc();
   return createAdvanceRequest(pool, {
     id: uuidv4(),
-    ...params,
-    now_utc: nowUtc(),
+    user_id: params.user_id,
+    organization_id: params.organization_id,
+    requested_amount: resolvedAmount,
+    reason: params.reason,
+    requested_by: params.requested_by,
+    requested_date: params.requested_date ?? null,
+    now_utc: now,
   });
 }
 
@@ -605,7 +645,13 @@ export async function disburseStaffAdvance(
   pool: Pool,
   params: {
     advance_id: string;
-    disbursed_amount: number;
+    // Legacy callers may pass disbursed_amount directly.
+    // New frontend shape: payment_method + disbursement_date + reference_number.
+    // When disbursed_amount is absent the advance's own requested_amount is used.
+    disbursed_amount?: number;
+    payment_method?: string;
+    disbursement_date?: string | null;
+    reference_number?: string | null;
     disbursed_by: string;
     organization_id: string;
     cash_movement_id?: string;
@@ -615,8 +661,31 @@ export async function disburseStaffAdvance(
   try {
     await client.query('BEGIN');
     const now = nowUtc();
+
+    // Fetch the advance so we can resolve the disbursement amount and store method.
+    const advanceRow = await client.query<{ requested_amount: string; status: string }>(
+      `SELECT requested_amount, status FROM staff_advances WHERE id = $1 FOR UPDATE`,
+      [params.advance_id]
+    );
+    if (!advanceRow.rows[0]) throw new Error('Advance not found');
+    if (advanceRow.rows[0].status !== 'APPROVED') {
+      throw new Error('Advance not found or not in APPROVED status');
+    }
+
+    // Use supplied amount, or fall back to the full requested_amount.
+    const disbursedAmount =
+      params.disbursed_amount ?? parseFloat(advanceRow.rows[0].requested_amount);
+
+    // Persist disbursement_method before updating main status.
+    if (params.payment_method) {
+      await client.query(
+        `UPDATE staff_advances SET disbursement_method = $2 WHERE id = $1`,
+        [params.advance_id, params.payment_method]
+      );
+    }
+
     const advance = await disburseAdvance(
-      client, params.advance_id, params.disbursed_amount,
+      client, params.advance_id, disbursedAmount,
       params.disbursed_by, params.cash_movement_id ?? null, now
     );
     if (!advance) throw new Error('Advance not found or not in APPROVED status');
@@ -628,12 +697,12 @@ export async function disburseStaffAdvance(
       user_id: advance.user_id,
       organization_id: params.organization_id,
       transaction_type: 'DISBURSEMENT',
-      amount: params.disbursed_amount,
-      balance_after: params.disbursed_amount,
+      amount: disbursedAmount,
+      balance_after: disbursedAmount,
       salary_record_id: null,
       cash_movement_id: params.cash_movement_id ?? null,
       reversal_of: null,
-      notes: null,
+      notes: params.reference_number ? `ref: ${params.reference_number}` : null,
       created_by: params.disbursed_by,
       now_utc: now,
     });

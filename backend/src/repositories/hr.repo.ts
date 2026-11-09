@@ -17,7 +17,8 @@ export interface StaffSalaryConfigRow {
   id: string;
   user_id: string;
   organization_id: string;
-  salary_type: 'MONTHLY' | 'DAILY' | 'HOURLY';
+  salary_type: 'MONTHLY' | 'DAILY' | 'HOURLY' | 'COMMISSION_PERCENTAGE';
+  commission_percentage: string | null;
   monthly_salary: string | null;
   daily_rate: string | null;
   hourly_rate: string | null;
@@ -73,6 +74,10 @@ export interface PayrollPeriodRow {
   label: string;
   period_start: string;
   period_end: string;
+  /** Added by migration 043 — may be NULL for rows created before the migration */
+  period_month: number | null;
+  /** Added by migration 043 — may be NULL for rows created before the migration */
+  period_year: number | null;
   status: string;
   late_reset_policy: string;
   created_by: string | null;
@@ -130,6 +135,8 @@ export interface StaffAdvanceRow {
   disbursed_at: string | null;
   cash_movement_id: string | null;
   outstanding_balance: string;
+  requested_date: string | null;
+  disbursement_method: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -210,7 +217,11 @@ export async function getAttendanceForUserMonth(
   const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
   const endDate = `${year}-${String(month).padStart(2, '0')}-31`;
   const result = await pool.query<StaffAttendanceRow>(
-    `SELECT * FROM staff_attendance
+    `SELECT *,
+            first_login_at                AS check_in_at,
+            checked_out_at               AS check_out_at,
+            shift_duration_minutes_snap  AS shift_duration_minutes
+     FROM staff_attendance
      WHERE user_id = $1
        AND attendance_date >= $2
        AND attendance_date <= $3
@@ -304,11 +315,12 @@ export async function setSalaryConfig(
     new_id: string;
     user_id: string;
     organization_id: string;
-    salary_type: 'MONTHLY' | 'DAILY' | 'HOURLY';
+    salary_type: 'MONTHLY' | 'DAILY' | 'HOURLY' | 'COMMISSION_PERCENTAGE';
     monthly_salary: number | null;
     daily_rate: number | null;
     hourly_rate: number | null;
     overtime_multiplier: number;
+    commission_percentage: number | null;
     effective_from: string;   // YYYY-MM-DD
     configured_by: string;
     now_utc: string;
@@ -326,8 +338,9 @@ export async function setSalaryConfig(
     `INSERT INTO staff_salary_configs (
        id, user_id, organization_id, salary_type,
        monthly_salary, daily_rate, hourly_rate, overtime_multiplier,
+       commission_percentage,
        effective_from, effective_to, configured_by, created_at, updated_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL,$10,$11,$11)
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULL,$11,$12,$12)
      RETURNING *`,
     [
       params.new_id,
@@ -338,6 +351,7 @@ export async function setSalaryConfig(
       params.daily_rate,
       params.hourly_rate,
       params.overtime_multiplier,
+      params.commission_percentage,
       params.effective_from,
       params.configured_by,
       params.now_utc,
@@ -601,7 +615,16 @@ export async function getSalaryRecordsByPeriod(
   payroll_period_id: string
 ): Promise<SalaryRecordRow[]> {
   const result = await pool.query<SalaryRecordRow>(
-    `SELECT sr.*, u.name AS user_name, u.username, u.role
+    `SELECT
+       sr.*,
+       sr.payroll_period_id              AS period_id,
+       u.name                            AS full_name,
+       u.branch_id,
+       sr.base_salary_snapshot           AS base_salary,
+       sr.advance_recovery_amount        AS advance_deduction,
+       sr.net_payable                    AS gross_payable,
+       sr.total_paid                     AS paid_amount,
+       sr.remaining_payable              AS remaining_amount
      FROM salary_records sr
      JOIN users u ON u.id = sr.user_id
      WHERE sr.payroll_period_id = $1
@@ -638,7 +661,7 @@ export async function updateSalaryRecordPayment(
        remaining_payable  = remaining_payable - $2,
        status = CASE
          WHEN (remaining_payable - $2) <= 0 THEN 'PAID'
-         ELSE 'PARTIAL'
+         ELSE 'PARTIALLY_PAID'
        END,
        updated_at = $3
      WHERE id = $1
@@ -659,14 +682,16 @@ export async function createAdvanceRequest(
     requested_amount: number;
     reason: string;
     requested_by: string;
+    requested_date: string | null;
     now_utc: string;
   }
 ): Promise<StaffAdvanceRow> {
   const result = await pool.query<StaffAdvanceRow>(
     `INSERT INTO staff_advances (
        id, user_id, organization_id, requested_amount, reason,
-       status, requested_by, outstanding_balance, created_at, updated_at
-     ) VALUES ($1,$2,$3,$4,$5,'PENDING',$6,0,$7,$7)
+       status, requested_by, outstanding_balance,
+       requested_date, created_at, updated_at
+     ) VALUES ($1,$2,$3,$4,$5,'PENDING',$6,0,$7,$8,$8)
      RETURNING *`,
     [
       params.id,
@@ -675,6 +700,7 @@ export async function createAdvanceRequest(
       params.requested_amount,
       params.reason,
       params.requested_by,
+      params.requested_date ?? params.now_utc.slice(0, 10),
       params.now_utc,
     ]
   );
@@ -687,7 +713,12 @@ export async function getAdvancesForUser(
   organization_id: string
 ): Promise<StaffAdvanceRow[]> {
   const result = await pool.query<StaffAdvanceRow>(
-    `SELECT * FROM staff_advances
+    `SELECT *,
+            requested_amount                              AS amount,
+            outstanding_balance                           AS outstanding_amount,
+            COALESCE(disbursed_amount, '0') ::numeric
+              - outstanding_balance::numeric              AS recovered_amount
+     FROM staff_advances
      WHERE user_id = $1 AND organization_id = $2
      ORDER BY created_at DESC`,
     [user_id, organization_id]
@@ -817,12 +848,33 @@ export async function updateAdvanceBalance(
  * List active users belonging to an organization.
  * Uses branch→organization join since users don't have direct org FK.
  */
+export interface OrgActiveUserRow {
+  user_id: string;
+  username: string;
+  full_name: string;
+  email: string | null;
+  role: string;
+  branch_id: string | null;
+  branch_name: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
 export async function listOrgActiveUsers(
   pool: Pool,
   organization_id: string
-): Promise<{ id: string; name: string; username: string; role: string; branch_id: string | null }[]> {
-  const result = await pool.query<{ id: string; name: string; username: string; role: string; branch_id: string | null }>(
-    `SELECT u.id, u.name, u.username, u.role, u.branch_id
+): Promise<OrgActiveUserRow[]> {
+  const result = await pool.query<OrgActiveUserRow>(
+    `SELECT
+       u.id          AS user_id,
+       u.username,
+       u.name        AS full_name,
+       u.email,
+       u.role,
+       u.branch_id,
+       b.name        AS branch_name,
+       (u.is_active = 1) AS is_active,
+       u.created_at
      FROM users u
      LEFT JOIN branches b ON b.id = u.branch_id
      WHERE (b.organization_id = $1 OR u.branch_id IS NULL)
