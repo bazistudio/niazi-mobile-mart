@@ -128,7 +128,7 @@ export const HistoryRowActions: React.FC<Props> = ({ item }) => {
         toast.error('Failed to load sale details for printing. Please try again.');
         return;
       }
-      const hasMobileLines = orderSource.items && orderSource.items.some((i: any) => i.lineType === 'MOBILE' || i.imei);
+      const hasMobileLines = orderSource.items && orderSource.items.some((i: any) => i.lineType === 'MOBILE' || (i.imei && i.lineType !== 'PRODUCT'));
       if (hasMobileLines) {
         html = printFormatter.formatMobileSaleInvoice(orderSource, settings, shopHeader);
         docType = 'MobileSaleInvoice';

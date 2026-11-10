@@ -174,8 +174,16 @@ export const printFormatter = {
   },
     formatSaleInvoice: (order: any, settings: PrinterSettings, shop: ShopHeader): string => {
     const invoice: UnifiedInvoice = {
-      invoiceNo: order.displayNumber || order.orderNumber || order.transactionId || (order._id ? `TP-${order._id.slice(-6).toUpperCase()}` : `TP-${Date.now().toString().slice(-6)}`),
-      date: new Date(order.createdAt || Date.now()).toLocaleString(),
+      invoiceNo:
+        order.invoiceNo ||
+        order.invoiceNumber ||
+        order.displayNumber ||
+        order.orderNumber ||
+        order.transactionId ||
+        (order._id ? `TP-${order._id.slice(-6).toUpperCase()}` : `TP-${Date.now().toString().slice(-6)}`),
+      date: order.createdAt
+        ? new Date(order.createdAt).toLocaleString()
+        : (order.date || new Date().toLocaleString()),
       customer: order.customerId
         ? { name: order.customerId.name || 'Walk-in Customer', phone: order.customerId.phone }
         : (order.customer ? { name: order.customer.name || 'Walk-in Customer', phone: order.customer.phone } : undefined),
@@ -187,7 +195,7 @@ export const printFormatter = {
           name: i.productName || i.name || 'Item', 
           qty, 
           price, 
-          total: i.subtotal ?? (qty * price),
+          total: i.total ?? i.subtotal ?? (qty * price),
           imei: i.imei || i.serialNumber,
           specs: i.specs || undefined
         };
@@ -196,14 +204,22 @@ export const printFormatter = {
       discount: order.discount ?? order.discountAmount ?? 0,
       tax: order.taxAmount ?? order.tax ?? 0,
       total: order.grandTotal ?? order.totalAmount ?? order.total ?? 0,
-      paymentMethod: order.paymentMethod || 'cash',
-      tendered: order.tenderedAmount ?? order.totalPaid,
+      paymentMethod:
+        order.paymentMethod ||
+        (Array.isArray(order.paymentBreakdown) && order.paymentBreakdown.length > 0
+          ? order.paymentBreakdown.map((p: any) => p.method).join(', ')
+          : undefined) ||
+        (Array.isArray(order.payments) && order.payments.length > 0
+          ? order.payments.map((p: any) => p.payment_method || p.method).join(', ')
+          : undefined) ||
+        'cash',
+      tendered: order.tendered ?? order.tenderedAmount ?? order.paidAmount ?? order.totalPaid,
       change: order.changeReturned ?? order.change ?? order.changeAmount,
       // FINDING-02: outstanding balance owed after this sale
       due: order.remainingDue ?? order.creditAmount ?? order.due,
       shop,
-      returnPolicy: shop.returnPolicy || 'Goods once sold can only be returned/exchanged within 3 days with original receipt.',
-      warrantyInstructions: shop.warrantyInstructions || undefined
+      returnPolicy: order.returnPolicy || shop.returnPolicy || 'Goods once sold can only be returned/exchanged within 3 days with original receipt.',
+      warrantyInstructions: order.warrantyInstructions || shop.warrantyInstructions || undefined
     };
     return renderDocument(invoice, settings, 'Sale Receipt');
   },
@@ -509,12 +525,15 @@ const formatA4 = (invoice: UnifiedInvoice, settings: PrinterSettings, title: str
 };
 
 const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, widthMm: number, title: string): string => {
-  const pxWidth = widthMm === 58 ? 192 : 272;
-  const baseFontSize = 13.23; // 98% of 13.5 — 80mm content scale fix
+  const is58 = widthMm === 58;
+  const pxWidth = is58 ? 192 : 266;
+  const baseFontSize = is58 ? 13.23 : 12;
   const fontFamily = settings.font?.family === 'monospace' ? 'Courier, "Courier New", monospace' : 'Arial, sans-serif';
+  const containerMargin = is58 ? '0 auto' : '0 3px';
+  const containerPadding = is58 ? '10px 8px 8px 8px' : '10px 3px 8px 3px';
 
   return `
-    <div style="font-family: ${fontFamily}; font-size: ${baseFontSize}px; width: ${pxWidth}px; max-width: ${pxWidth}px; margin: 0 auto; line-height: 1.3; color: #000000; background-color: #ffffff; padding: ${widthMm === 80 ? '10px 5px 8px 5px' : '10px 8px 8px 8px'}; box-sizing: border-box; font-weight: bold;">
+    <div style="font-family: ${fontFamily}; font-size: ${baseFontSize}px; width: ${pxWidth}px; max-width: ${pxWidth}px; margin: ${containerMargin}; line-height: 1.3; color: #000000; background-color: #ffffff; padding: ${containerPadding}; box-sizing: border-box; font-weight: bold;">
       <style>
         @media print {
           @page {

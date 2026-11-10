@@ -204,7 +204,7 @@ export const InvoicePreviewModal: React.FC<Props> = ({ item, onClose }) => {
         return;
       }
 
-      const hasMobileLines = orderSource.items && orderSource.items.some((i: any) => i.lineType === 'MOBILE' || i.imei);
+      const hasMobileLines = orderSource.items && orderSource.items.some((i: any) => i.lineType === 'MOBILE' || (i.imei && i.lineType !== 'PRODUCT'));
       if (hasMobileLines) {
         html = printFormatter.formatMobileSaleInvoice(orderSource, settings, shopHeader);
         docType = 'MobileSaleInvoice';

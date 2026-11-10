@@ -123,7 +123,7 @@ export const DailySalesModal = ({ isOpen, onClose, branchId: propBranchId }: Dai
       footerText: 'Thank you!'
     };
 
-    const hasMobileLines = orderToPrint.items && orderToPrint.items.some((i: any) => i.lineType === 'MOBILE' || i.imei);
+    const hasMobileLines = orderToPrint.items && orderToPrint.items.some((i: any) => i.lineType === 'MOBILE' || (i.imei && i.lineType !== 'PRODUCT'));
     const html = hasMobileLines
       ? printFormatter.formatMobileSaleInvoice(orderToPrint, defaultSettings, defaultHeader)
       : printFormatter.formatSaleInvoice(orderToPrint, defaultSettings, defaultHeader);
