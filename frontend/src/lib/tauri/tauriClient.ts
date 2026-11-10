@@ -2298,6 +2298,7 @@ export interface CustomerDetailDto {
   total_sales_count: number;
   total_sales_amount: number;
   last_transaction_date: string | null;
+  ledger_entry_count?: number;
 }
 
 export interface CreateCustomerDto {

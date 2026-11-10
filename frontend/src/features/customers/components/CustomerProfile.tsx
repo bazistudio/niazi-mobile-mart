@@ -50,7 +50,7 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
     e.stopPropagation();
     if (!isHydrated || !settings || !shopHeader) return;
 
-    const hasMobileLines = inv.items && inv.items.some((i: any) => i.lineType === 'MOBILE' || i.imei || i.serialNumber);
+    const hasMobileLines = inv.items && inv.items.some((i: any) => i.lineType === 'MOBILE' || (i.imei && i.lineType !== 'PRODUCT'));
     const invoiceData = {
       orderNumber: inv.orderNumber,
       invoiceNumber: inv.orderNumber,
@@ -79,12 +79,19 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
     openPreview({ html, documentType: docType as any, referenceId: inv.orderNumber, title: `${docType === 'MobileSaleInvoice' ? 'Mobile Sale Invoice' : 'Sale Invoice'} - ${inv.orderNumber}` });
   };
 
-  const { rawTimeline } = useLedger(detail?.customer ? {
+  const { rawTimeline, isLedgerLoading, refetchLedger } = useLedger(detail?.customer ? {
     id: detail.customer.id,
     type: 'CUSTOMER',
     name: detail.customer.name,
     balance: detail.stats.outstanding
   } : null);
+
+  // Opening balance is only settable if customer has 0 ledger entries, 0 invoices, and 0 outstanding
+  const hasExistingLedgerEntries =
+    (detail?.stats?.ledgerEntryCount && detail.stats.ledgerEntryCount > 0) ||
+    (rawTimeline && rawTimeline.length > 0) ||
+    (detail?.stats?.invoiceCount > 0) ||
+    (detail?.stats?.outstanding !== undefined && detail.stats.outstanding !== 0);
 
   const fetchDetail = React.useCallback(async () => {
     try {
@@ -223,11 +230,26 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
             {isOrgAdmin && (
               <button
                 type="button"
-                onClick={() => setIsOpeningBalanceModalOpen(true)}
-                className={`${actionBtnClass} bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 dark:text-blue-400 dark:hover:bg-blue-400/20`}
-                title="Set an opening balance for this customer (org-admin only)"
+                onClick={() => !hasExistingLedgerEntries && setIsOpeningBalanceModalOpen(true)}
+                disabled={hasExistingLedgerEntries}
+                className={`${actionBtnClass} ${
+                  hasExistingLedgerEntries
+                    ? 'opacity-40 cursor-not-allowed bg-surface-hover text-text-muted border border-border/50'
+                    : 'bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 dark:text-blue-400 dark:hover:bg-blue-400/20 cursor-pointer'
+                }`}
+                title={
+                  hasExistingLedgerEntries
+                    ? 'Opening balance already set or customer has active transactions in ledger'
+                    : 'Set an opening balance for this customer (org-admin only)'
+                }
               >
-                <Scale className="w-4 h-4" /> Set Opening Balance
+                <Scale className="w-4 h-4" />
+                <span>Set Opening Balance</span>
+                {hasExistingLedgerEntries && (
+                  <span className="ml-auto text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-muted/20 text-text-muted">
+                    Locked
+                  </span>
+                )}
               </button>
             )}
             <button
@@ -427,7 +449,10 @@ export const CustomerProfile: React.FC<CustomerProfileProps> = ({ id }) => {
           onClose={() => setIsOpeningBalanceModalOpen(false)}
           customerId={customer.id}
           customerName={customer.name}
-          onSuccess={fetchDetail}
+          onSuccess={() => {
+            fetchDetail();
+            refetchLedger();
+          }}
         />
       )}
     </div>

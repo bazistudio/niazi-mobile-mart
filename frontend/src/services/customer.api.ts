@@ -167,6 +167,7 @@ export const customerApi = {
         outstanding: number;
         invoiceCount: number;
         lastTransactionDate: string | null;
+        ledgerEntryCount: number;
         recentInvoices: any[];
       };
     };
@@ -182,6 +183,7 @@ export const customerApi = {
             outstanding: detail.outstanding_balance,
             invoiceCount: detail.total_sales_count,
             lastTransactionDate: detail.last_transaction_date,
+            ledgerEntryCount: detail.ledger_entry_count ?? 0,
             recentInvoices: [],
           },
         },

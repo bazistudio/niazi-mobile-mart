@@ -73,6 +73,7 @@ export interface CustomerDetailDto {
   total_sales_count: number;
   total_sales_amount: number;
   last_transaction_date: string | null;
+  ledger_entry_count?: number;
 }
 
 export interface CreateCustomerDto {
@@ -347,12 +348,12 @@ export async function getCustomerDetail(pool: Pool, id: string): Promise<Custome
     [id]
   );
 
-  // Last transaction date: most recent ledger entry created_at
+  // Last transaction date and ledger entry count
   const ledgerResult = await pool.query(
-    `SELECT created_at FROM customer_ledger_entries
-     WHERE customer_id = $1
-     ORDER BY created_at DESC, id DESC
-     LIMIT 1`,
+    `SELECT COUNT(*)::BIGINT AS ledger_entry_count,
+            MAX(created_at) AS last_created_at
+     FROM customer_ledger_entries
+     WHERE customer_id = $1`,
     [id]
   );
 
@@ -361,7 +362,8 @@ export async function getCustomerDetail(pool: Pool, id: string): Promise<Custome
     outstanding_balance: outstandingBalance,
     total_sales_count: Number(salesResult.rows[0]?.['total_sales_count'] ?? 0),
     total_sales_amount: Number(salesResult.rows[0]?.['total_sales_amount'] ?? 0),
-    last_transaction_date: (ledgerResult.rows[0]?.['created_at'] as string | null) ?? null,
+    last_transaction_date: (ledgerResult.rows[0]?.['last_created_at'] as string | null) ?? null,
+    ledger_entry_count: Number(ledgerResult.rows[0]?.['ledger_entry_count'] ?? 0),
   };
 }
 
