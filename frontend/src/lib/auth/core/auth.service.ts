@@ -462,7 +462,7 @@ export class AuthService {
           errMessage = data.error || data.message;
         }
       } catch {}
-      const err = new Error(errMessage);
+      const err: Error & { status?: number } = new Error(errMessage);
       err.status = statusCode;
       throw err;
     }

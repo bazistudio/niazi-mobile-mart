@@ -14,7 +14,7 @@ export interface InvoiceDocument {
   shop: ShopProfile;
 
   // DEF-SALE-06: customer and cashier carried through for receipt printing
-  customer?: { id: string; name: string } | null;
+  customer?: { id: string; name: string; phone?: string } | null;
   cashier?: string | null;
 
   items: {
@@ -48,7 +48,7 @@ export class DocumentService {
   static buildInvoice(
     transaction: DBTransaction,
     shopProfile: ShopProfile,
-    extras?: { customer?: { id: string; name: string } | null; cashier?: string | null }
+    extras?: { customer?: { id: string; name: string; phone?: string } | null; cashier?: string | null }
   ): InvoiceDocument {
     return {
       invoiceId: transaction.transactionId,
