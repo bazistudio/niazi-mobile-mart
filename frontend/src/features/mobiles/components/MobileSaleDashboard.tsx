@@ -112,6 +112,7 @@ const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
 
 const MOBILE_NAV_TABS = [
   { label: 'Inventory', href: '/dashboard/shop-admin/mobiles' },
+  { label: 'Sold Mobiles', href: '/dashboard/shop-admin/mobiles/sold' },
   { label: 'Mobile Sale (POS)', href: '/dashboard/shop-admin/mobiles/sale' },
   { label: 'Sale History', href: '/dashboard/shop-admin/mobiles/sale-history' },
 ] as const;

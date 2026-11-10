@@ -91,6 +91,7 @@ export interface MobileInventoryItem {
   voucherNo?: string;
   createdAt: string;
   purchaseDate?: string | null;
+  saleId?: string | null;
   salePriceActual?: number | null;
   saleDate?: string | null;
   invoiceNumber?: string | null;

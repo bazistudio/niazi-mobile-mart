@@ -28,6 +28,11 @@ import {
 import { useAuthStore } from '@/lib/auth/core/auth.store';
 import { mobileApi } from '../services/mobile.api';
 import type { MobileFullProfile } from '../services/mobile.api';
+import { salesApi } from '@/services/sales.api';
+import { usePrintStore } from '@/lib/printer';
+import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
+import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
+import { toast } from 'react-hot-toast';
 
 interface MobileDetailModalProps {
   deviceId: string;
@@ -141,6 +146,70 @@ export const MobileDetailModal: React.FC<MobileDetailModalProps> = ({
   const [profile, setProfile] = useState<MobileFullProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isReprinting, setIsReprinting] = useState(false);
+
+  const { openPreview } = usePrintStore();
+  const { settings, shopHeader, isHydrated, fetchSettings } = usePrinterStore();
+
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
+
+  const handleReprintSaleInvoice = async () => {
+    if (!profile) return;
+    const saleId = profile.device.sale_id;
+    const invoiceNum = profile.device.invoice_number;
+
+    if (!saleId && !invoiceNum) {
+      toast.error('No sale invoice linked to this device.');
+      return;
+    }
+
+    if (!isHydrated || !settings || !shopHeader) {
+      toast.error('Printer settings not ready. Please try again in a moment.');
+      return;
+    }
+
+    setIsReprinting(true);
+    try {
+      let orderSource: any = null;
+      if (saleId) {
+        const res = await salesApi.getOrderById(saleId);
+        if (res?.success && res.order) {
+          orderSource = res.order;
+        }
+      }
+
+      if (!orderSource && invoiceNum) {
+        const byInv = await salesApi.getOrders({ orderNumber: invoiceNum });
+        if (byInv?.success && byInv.data && byInv.data.length > 0) {
+          const detailRes = await salesApi.getOrderById(byInv.data[0].id);
+          if (detailRes?.success && detailRes.order) {
+            orderSource = detailRes.order;
+          } else {
+            orderSource = byInv.data[0];
+          }
+        }
+      }
+
+      if (!orderSource) {
+        toast.error('Could not find sale record for this invoice.');
+        return;
+      }
+
+      const html = printFormatter.formatMobileSaleInvoice(orderSource, settings, shopHeader);
+      openPreview({
+        html,
+        documentType: 'MobileSaleInvoice',
+        referenceId: orderSource.orderNumber || invoiceNum || 'mobile-sale-invoice',
+        title: `Mobile Sale Invoice - ${orderSource.orderNumber || invoiceNum || ''}`,
+      });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to generate sale invoice printout.');
+    } finally {
+      setIsReprinting(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -209,6 +278,18 @@ export const MobileDetailModal: React.FC<MobileDetailModalProps> = ({
           <div className="flex items-center gap-2">
             {profile && (
               <>
+                {profile.device.status === 'SOLD' && (profile.device.sale_id || profile.device.invoice_number) && (
+                  <button
+                    type="button"
+                    onClick={handleReprintSaleInvoice}
+                    disabled={isReprinting}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 rounded-lg border border-emerald-200 dark:border-emerald-800 transition-colors shadow-xs"
+                    title="Reprint Customer Sale Invoice (A4 Dual-Copy)"
+                  >
+                    <Printer className={`w-3.5 h-3.5 ${isReprinting ? 'animate-spin' : ''}`} />
+                    <span>Reprint Invoice</span>
+                  </button>
+                )}
                 {onPrint && (
                   <button
                     type="button"

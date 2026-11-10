@@ -18,7 +18,7 @@
  *  - Timestamps are fabricated for preview purposes only and are labelled as such.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import {
   History,
@@ -31,8 +31,13 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Printer,
 } from 'lucide-react';
 import { Badge, Card, Button } from '@/components/ui';
+import { usePrintStore } from '@/lib/printer';
+import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
+import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
+import { toast } from 'react-hot-toast';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PREVIEW ADAPTER — replace with real API call when backend is ready
@@ -229,6 +234,7 @@ const PAGE_SIZE = 10;
 // ─── Mobile module sub-navigation tabs ─────────────────────────────────────
 const MOBILE_NAV_TABS = [
   { label: 'Inventory', href: '/dashboard/shop-admin/mobiles' },
+  { label: 'Sold Mobiles', href: '/dashboard/shop-admin/mobiles/sold' },
   { label: 'Mobile Sale', href: '/dashboard/shop-admin/mobiles/sale' },
   { label: 'Sale History', href: '/dashboard/shop-admin/mobiles/sale-history' },
 ] as const;
@@ -236,6 +242,14 @@ const MOBILE_NAV_TABS = [
 export const MobileSaleHistoryDashboard: React.FC = () => {
   const { pathname } = useLocation();
   const { records, isPreview, isLoading, error } = usePreviewData();
+
+  const { openPreview } = usePrintStore();
+  const { settings, shopHeader, isHydrated, fetchSettings } = usePrinterStore();
+  const [reprintingId, setReprintingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
 
   // ── Filters ──
   const [searchQuery, setSearchQuery] = useState('');
@@ -286,6 +300,60 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
     setCurrentPage(1);
   };
 
+  const handleReprint = (row: SaleHistoryRecord) => {
+    if (!isHydrated || !settings || !shopHeader) {
+      toast.error('Printer settings not ready. Please try again in a moment.');
+      return;
+    }
+
+    setReprintingId(row.previewId);
+    try {
+      const orderPayload: any = {
+        id: row.previewId,
+        orderNumber: `INV-${row.previewId.toUpperCase()}`,
+        invoiceNumber: `INV-${row.previewId.toUpperCase()}`,
+        createdAt: row.saleDateTime,
+        customerName: row.customerName || 'Walk-in Customer',
+        customerPhone: '—',
+        paymentMethod: row.paymentMethod.toLowerCase(),
+        subtotal: row.salePrice,
+        discount: row.discount,
+        grandTotal: row.grandTotal,
+        total: row.grandTotal,
+        items: [
+          {
+            id: row.previewId,
+            lineType: 'MOBILE',
+            name: `${row.brand} ${row.model}`,
+            productName: `${row.brand} ${row.model}`,
+            specs: `${row.storage} / ${row.ram} · ${row.color}`,
+            imei: row.imei1,
+            imei1: row.imei1,
+            imei2: row.imei2,
+            condition: row.condition,
+            ptaStatus: row.ptaStatus,
+            quantity: 1,
+            unitPrice: row.salePrice,
+            salePrice: row.salePrice,
+            lineTotal: row.grandTotal,
+          },
+        ],
+      };
+
+      const html = printFormatter.formatMobileSaleInvoice(orderPayload, settings, shopHeader);
+      openPreview({
+        html,
+        documentType: 'MobileSaleInvoice',
+        referenceId: orderPayload.orderNumber || 'preview-sale-invoice',
+        title: `Mobile Sale Invoice - ${orderPayload.orderNumber}`,
+      });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to generate print preview.');
+    } finally {
+      setReprintingId(null);
+    }
+  };
+
   const hasActiveFilters =
     searchQuery.trim() ||
     filterCondition !== 'ALL' ||
@@ -294,7 +362,7 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
     filterDateTo;
 
   return (
-    <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto pb-16 px-4 sm:px-6">
+    <div className="flex flex-col gap-6 w-full max-w-[1400px] mx-auto pb-16 px-4 sm:px-6">
       {/* Mobile module sub-nav */}
       <div className="flex items-center gap-1 pt-4 border-b border-border pb-0 overflow-x-auto">
         {MOBILE_NAV_TABS.map((tab) => {
@@ -511,6 +579,9 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
                   <th className="text-left px-4 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap">
                     Payment
                   </th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap">
+                    Action
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -594,6 +665,21 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
                       {/* Payment */}
                       <td className="px-4 py-3 whitespace-nowrap">
                         <p className="text-text-secondary text-sm">{row.paymentMethod}</p>
+                      </td>
+
+                      {/* Action */}
+                      <td className="px-4 py-3 text-center whitespace-nowrap">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleReprint(row)}
+                          disabled={reprintingId === row.previewId}
+                          className="text-xs text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 cursor-pointer font-medium"
+                          title="Reprint A4 Sale Invoice"
+                        >
+                          <Printer className={`w-3.5 h-3.5 mr-1 ${reprintingId === row.previewId ? 'animate-spin' : ''}`} />
+                          Reprint
+                        </Button>
                       </td>
                     </tr>
                   );

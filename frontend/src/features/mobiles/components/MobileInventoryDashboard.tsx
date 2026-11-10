@@ -337,7 +337,7 @@ export const MobileInventoryDashboard: React.FC = () => {
 
   return (
     <>
-      <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto pb-16 px-4 sm:px-6">
+      <div className="flex flex-col gap-6 w-full max-w-[1400px] mx-auto pb-16 px-4 sm:px-6">
         {/* Mobile module sub-nav */}
         <div className="flex items-center gap-1 pt-4 border-b border-border pb-0 overflow-x-auto">
           {MOBILE_NAV_TABS.map((tab) => {
