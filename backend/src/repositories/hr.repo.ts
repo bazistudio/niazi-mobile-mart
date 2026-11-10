@@ -244,18 +244,21 @@ export async function getAttendanceSummary(
   present_days: number;
   absent_days: number;
   late_count: number;
+  approved_overtime_minutes: number;
 }> {
   const result = await pool.query<{
     present_days: string;
     absent_days: string;
     late_count: string;
     total_days: string;
+    approved_overtime_minutes: string;
   }>(
     `SELECT
        COUNT(*) FILTER (WHERE status IN ('PRESENT','LATE')) AS present_days,
        COUNT(*) FILTER (WHERE status = 'ABSENT') AS absent_days,
        COUNT(*) FILTER (WHERE status = 'LATE') AS late_count,
-       COUNT(*) AS total_days
+       COUNT(*) AS total_days,
+       COALESCE(SUM(approved_overtime_minutes) FILTER (WHERE approved_overtime_minutes IS NOT NULL AND approved_overtime_minutes > 0), 0) AS approved_overtime_minutes
      FROM staff_attendance
      WHERE user_id = $1
        AND attendance_date >= $2
@@ -268,6 +271,7 @@ export async function getAttendanceSummary(
     present_days: parseInt(row?.present_days ?? '0', 10),
     absent_days: parseInt(row?.absent_days ?? '0', 10),
     late_count: parseInt(row?.late_count ?? '0', 10),
+    approved_overtime_minutes: parseInt(row?.approved_overtime_minutes ?? '0', 10),
   };
 }
 

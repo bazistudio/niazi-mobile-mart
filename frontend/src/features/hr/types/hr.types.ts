@@ -30,8 +30,7 @@ export interface HRSalaryConfig {
   /**
    * Standard work hours per day. Full-time business rule: 11 hours.
    * For part-time staff, e.g. 2h, 4h, 5h.
-   * Note: Overtime triggers at 9 hours — a KNOWN discrepancy kept as
-   * two separate configurable values. See HROvertimeConfig.overtimeTriggerHours.
+   * Overtime triggers after standard 11-hour shift (see HROvertimeConfig.overtimeTriggerHours).
    */
   standardShiftHours: number; // default: 11
   /**
@@ -62,11 +61,9 @@ export interface HROvertimeConfig {
   overtimeMultiplier: number; // default: 1.5
   /**
    * Hours/day beyond which overtime applies.
-   * Business rule: 9 hours.
-   * KNOWN DISCREPANCY: standard shift is 11 hrs but overtime triggers at 9 hrs.
-   * Both values are kept as separate configurable fields — never silently merge.
+   * Business rule: 11 hours (after standard 11-hour shift).
    */
-  overtimeTriggerHours: number; // default: 9
+  overtimeTriggerHours: number; // default: 11
   /**
    * Whether manager approval is required before overtime is counted.
    */
@@ -117,9 +114,9 @@ export interface HRAttendanceRules {
    */
   absenceDeductionFraction: number;   // 1/26 ≈ 0.03846
   /**
-   * Trigger for overtime (separate from standard shift — KNOWN discrepancy).
+   * Trigger for overtime (after standard 11-hour shift).
    */
-  overtimeTriggerHours: number;       // 9
+  overtimeTriggerHours: number;       // 11
   overtimeMultiplier: number;         // 1.5
 }
 
@@ -128,7 +125,7 @@ export const DEFAULT_ATTENDANCE_RULES: HRAttendanceRules = {
   lateThresholdMinutes: 20,
   workingDaysPerMonth: 26,
   absenceDeductionFraction: 1 / 26,
-  overtimeTriggerHours: 9,
+  overtimeTriggerHours: 11,
   overtimeMultiplier: 1.5,
 };
 

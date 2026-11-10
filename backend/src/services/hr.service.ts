@@ -427,6 +427,7 @@ export async function generatePayroll(
       let absenceDeduction = 0;
       let lateAbsenceEquivalents = 0;
       let grossSalary = 0;
+      let overtimeMinutes = 0;
       let overtimeAmount = 0;
 
       if (config.salary_type === 'MONTHLY') {
@@ -434,9 +435,13 @@ export async function generatePayroll(
         const totalAbsences = attendance.absent_days + lateAbsenceEquivalents;
         absenceDeduction = totalAbsences * (baseSalary / MONTHLY_WORKING_DAYS);
         grossSalary = baseSalary;
-        // Overtime: needs approved_overtime_minutes from attendance — left as 0 for now
-        // (overtime requires explicit approval per architecture — not auto-calculated)
-        overtimeAmount = 0;
+        // Approved overtime for monthly-salaried staff:
+        // (approved_overtime_minutes / 60) * (baseSalary / 26 / 11) * overtime_multiplier
+        overtimeMinutes = attendance.approved_overtime_minutes ?? 0;
+        const overtimeMultiplier = parseFloat(config.overtime_multiplier ?? String(DEFAULT_OVERTIME_MULTIPLIER));
+        const standardShiftHours = DEFAULT_SHIFT_MINUTES / 60; // 11 hours
+        const perHourRate = baseSalary / MONTHLY_WORKING_DAYS / standardShiftHours;
+        overtimeAmount = Math.round(((overtimeMinutes / 60) * perHourRate * overtimeMultiplier) * 100) / 100;
       } else if (config.salary_type === 'DAILY') {
         const dailyRate = parseFloat(config.daily_rate ?? '0');
         grossSalary = attendance.present_days * dailyRate;
@@ -470,7 +475,7 @@ export async function generatePayroll(
         late_count: attendance.late_count,
         late_absence_equivalents: lateAbsenceEquivalents,
         absence_deduction: absenceDeduction,
-        overtime_minutes: 0,
+        overtime_minutes: overtimeMinutes,
         overtime_amount: overtimeAmount,
         bonus_amount: 0,
         advance_recovery_amount: advanceRecovery,

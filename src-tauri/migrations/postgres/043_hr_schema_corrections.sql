@@ -13,8 +13,6 @@
 -- NO data destruction. All existing rows remain valid.
 -- DO NOT execute against production without a schema backup.
 
-BEGIN;
-
 -- ─── 1. staff_attendance.status: extend CHECK to include HALF_DAY, WEEKLY_OFF ─
 
 -- PostgreSQL does not support ALTER CONSTRAINT directly on a named CHECK.
@@ -115,5 +113,3 @@ UPDATE staff_advances
   SET requested_date = LEFT(created_at, 10)
 WHERE requested_date IS NULL
   AND created_at IS NOT NULL;
-
-COMMIT;

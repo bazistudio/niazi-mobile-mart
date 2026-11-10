@@ -14,7 +14,7 @@
  *  - Standard shift: 11 hours/day
  *  - Late threshold: 20 minutes
  *  - Absence deduction: 1/26 of monthly salary per absent day
- *  - Overtime trigger: 9 hours (KNOWN DISCREPANCY from 11hr standard — both kept as separate values)
+ *  - Overtime trigger: 11 hours (after standard 11-hour shift)
  *  - Overtime multiplier: 1.5× (configurable per staff via salary-config)
  *
  * Phase 2 backend endpoints available:
@@ -756,7 +756,7 @@ const SalaryReviewTab: React.FC = () => {
         0,
         monthlySalary -
           absentDays * (monthlySalary / effectiveRules.workingDaysPerMonth) -
-          lateDays * (monthlySalary / effectiveRules.workingDaysPerMonth * 0.5) +
+          Math.floor(lateDays / 3) * (monthlySalary / effectiveRules.workingDaysPerMonth) +
           overtimeHours * (monthlySalary / effectiveRules.workingDaysPerMonth / (customShiftHours || effectiveRules.standardShiftHours)) * effectiveRules.overtimeMultiplier +
           bonusAmount -
           advanceDeduction

@@ -95,7 +95,7 @@ export const StaffSalaryConfiguration: React.FC<StaffSalaryConfigurationProps> =
     setEmploymentType(type);
     if (type === 'FULL_TIME') {
       setStandardShiftHours(DEFAULT_ATTENDANCE_RULES.standardShiftHours); // 11 hrs
-      setOvertimeTriggerHours(DEFAULT_ATTENDANCE_RULES.overtimeTriggerHours); // 9 hrs
+      setOvertimeTriggerHours(DEFAULT_ATTENDANCE_RULES.overtimeTriggerHours); // 11 hrs
       if (monthlySalary === 0) setMonthlySalary(30000);
     } else if (type === 'PART_TIME') {
       if (standardShiftHours >= 11) {
