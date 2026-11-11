@@ -24,11 +24,14 @@ import {
   Search,
   Store,
   Pencil,
+  Printer,
 } from 'lucide-react';
 import { Button, Card, Badge } from '@/components/ui';
 import { KeypadSpecsSection, INITIAL_KEYPAD_FORM_DATA, KeypadFormData } from './KeypadSpecsSection';
 import { Keyboard } from 'lucide-react';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
+import { usePrintStore } from '@/lib/printer/print.store';
+import { buildUsedMobileA4Html } from '../templates/usedMobileA4Template';
 import { mobileApi, transformFormDataToApiPayload } from '../services/mobile.api';
 import type { SellerSearchResult } from '../services/mobile.api';
 import { supplierApi } from '@/services/supplier.api';
@@ -69,8 +72,8 @@ const INITIAL_FORM_DATA: MobileFormData = {
     sellerPhone: '',
     sellerAddress: '',
     sellerId: null as string | null,   // Phase 2: optional registry link
-    ownershipDeclarationAcknowledged: false,
-    physicalAffidavitAcknowledged: false,
+    ownershipDeclarationAcknowledged: true,
+    physicalAffidavitAcknowledged: true,
   },
   inspection: {
     bodyGrade: 'GOOD',
@@ -126,8 +129,10 @@ export const AddMobileForm: React.FC = () => {
   const [formData, setFormData] = useState<MobileFormData>(INITIAL_FORM_DATA);
   const [keypadData, setKeypadData] = useState<KeypadFormData>(INITIAL_KEYPAD_FORM_DATA);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSavingAndPrinting, setIsSavingAndPrinting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+  const openPrintPreview = usePrintStore((s) => s.openPreview);
 
   // Auto Sr No preview state
   const [nextSrNo, setNextSrNo] = useState<string | null>(null);
@@ -348,6 +353,22 @@ export const AddMobileForm: React.FC = () => {
 
     setCustomRamInput('');
     setIsAddingRam(false);
+  };
+
+  // Helper to format Pakistani mobile number as 03XX-XXXXXXX (11 digits max)
+  const handlePhoneChange = (raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 11);
+    let formatted = digits;
+    if (digits.length > 4) {
+      formatted = `${digits.slice(0, 4)}-${digits.slice(4)}`;
+    }
+    setFormData((prev) => ({
+      ...prev,
+      paperwork: {
+        ...prev.paperwork,
+        sellerPhone: formatted,
+      },
+    }));
   };
 
   // Helper to format CNIC as XXXXX-XXXXXXX-X
@@ -629,8 +650,7 @@ export const AddMobileForm: React.FC = () => {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveDevice = async (shouldPrint: boolean) => {
     setSubmitError(null);
     setSubmitSuccess(null);
 
@@ -693,7 +713,12 @@ export const AddMobileForm: React.FC = () => {
       }
     }
 
-    setIsSubmitting(true);
+    if (shouldPrint) {
+      setIsSavingAndPrinting(true);
+    } else {
+      setIsSubmitting(true);
+    }
+
     try {
       const payload = transformFormDataToApiPayload(formData, branchId, selectedSupplier?.id || null);
       const res = await mobileApi.createMobile(payload);
@@ -701,15 +726,39 @@ export const AddMobileForm: React.FC = () => {
         ? ` — Sr No: ${(res as { voucher_no?: string }).voucher_no}`
         : '';
       setSubmitSuccess(`Mobile registered successfully${voucherLabel}! Device ID: ${res.device_id.slice(0, 8)}...`);
+
+      if (shouldPrint) {
+        try {
+          const fullProfileRes = await mobileApi.getMobileFullProfile(res.device_id, branchId);
+          if (fullProfileRes?.profile) {
+            const html = buildUsedMobileA4Html(fullProfileRes.profile);
+            openPrintPreview({
+              html,
+              documentType: 'Generic',
+              referenceId: fullProfileRes.profile.device.id,
+              title: `Purchase Receipt — Sr No ${fullProfileRes.profile.paperwork?.voucher_no ?? fullProfileRes.profile.device.id.slice(0, 8)}`,
+            });
+          }
+        } catch (printErr) {
+          console.error('Failed to fetch full profile for A4 print preview:', printErr);
+        }
+      }
+
       setTimeout(() => {
         navigate('/dashboard/shop-admin/mobiles');
-      }, 700);
+      }, shouldPrint ? 1500 : 700);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to register mobile device. Please try again.';
       setSubmitError(msg);
     } finally {
       setIsSubmitting(false);
+      setIsSavingAndPrinting(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await saveDevice(false);
   };
 
   return (
@@ -1812,15 +1861,11 @@ export const AddMobileForm: React.FC = () => {
                   id={`${formId}-seller-phone`}
                   type="tel"
                   required={isUsed}
+                  maxLength={12}
                   placeholder="03XX-XXXXXXX"
                   value={formData.paperwork.sellerPhone}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      paperwork: { ...prev.paperwork, sellerPhone: e.target.value },
-                    }))
-                  }
-                  className="w-full px-3 py-2 text-sm bg-surface text-text-primary border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                  onChange={(e) => handlePhoneChange(e.target.value)}
+                  className="w-full px-3 py-2 text-sm font-mono bg-surface text-text-primary border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring"
                 />
               </div>
 
@@ -1828,7 +1873,7 @@ export const AddMobileForm: React.FC = () => {
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center justify-between">
                   <label htmlFor={`${formId}-purchase-date`} className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-                  Historical Purchase Date / تاریخ خریداری *
+                    Purchase Date *
                   </label>
                   <span className="text-[11px] text-text-muted font-urdu">تاریخ خریداری</span>
                 </div>
@@ -2282,13 +2327,13 @@ export const AddMobileForm: React.FC = () => {
             <span className="font-semibold text-text-secondary">Note:</span> Serialized mobile devices will be saved directly to inventory and tracked by unique IMEI.
           </div>
 
-          <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
             <Button
               type="button"
               variant="outline"
               size="md"
               onClick={() => navigate('/dashboard/shop-admin/mobiles')}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isSavingAndPrinting}
               className="w-full sm:w-auto"
             >
               Cancel
@@ -2296,10 +2341,10 @@ export const AddMobileForm: React.FC = () => {
 
             <Button
               type="submit"
-              variant="primary"
+              variant="outline"
               size="md"
-              disabled={isSubmitting || imeiCheckStatus === 'taken'}
-              className="w-full sm:w-auto font-semibold shadow-sm"
+              disabled={isSubmitting || isSavingAndPrinting || imeiCheckStatus === 'taken'}
+              className="w-full sm:w-auto font-medium"
             >
               {isSubmitting ? (
                 <span className="flex items-center gap-2">
@@ -2308,6 +2353,27 @@ export const AddMobileForm: React.FC = () => {
                 </span>
               ) : (
                 'Save Mobile'
+              )}
+            </Button>
+
+            <Button
+              type="button"
+              variant="primary"
+              size="md"
+              onClick={() => void saveDevice(true)}
+              disabled={isSubmitting || isSavingAndPrinting || imeiCheckStatus === 'taken'}
+              className="w-full sm:w-auto font-semibold shadow-sm inline-flex items-center justify-center gap-2"
+            >
+              {isSavingAndPrinting ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Saving & Opening Print...</span>
+                </span>
+              ) : (
+                <>
+                  <Printer className="w-4 h-4" />
+                  <span>Save & Print</span>
+                </>
               )}
             </Button>
           </div>

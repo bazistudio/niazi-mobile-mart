@@ -33,8 +33,8 @@ import { timingSafeEqual } from 'crypto';
 import { AuthRepo, defaultLimitsForRole } from '../repositories/auth.repo';
 import { UsersRepo } from '../repositories/users.repo';
 import { AuthService, AuthServiceError } from '../services/auth.service';
-import { hashArgon2 } from '../services/argon2.service';
-import { buildAuthMiddleware } from '../auth';
+import { hashArgon2, verifyArgon2 } from '../services/argon2.service';
+import { buildAuthMiddleware, isOrgAdmin } from '../auth';
 
 // ---------------------------------------------------------------------------
 // Rate Limiters
@@ -125,7 +125,7 @@ export function buildAuthRouter(pool: Pool): Router {
   const router = Router();
   const authRepo = new AuthRepo(pool);
   const usersRepo = new UsersRepo(pool);
-  const authService = new AuthService(authRepo);
+  const authService = new AuthService(authRepo, pool);
 
   // -------------------------------------------------------------------------
   // POST /login
@@ -228,6 +228,48 @@ export function buildAuthRouter(pool: Pool): Router {
       res.status(200).json(user);
     } catch (err) {
       console.error('[auth/me] Unexpected error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /verify-admin-password
+  // -------------------------------------------------------------------------
+
+  router.post('/verify-admin-password', buildAuthMiddleware(pool), async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity;
+    if (!identity) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    if (!isOrgAdmin(identity)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Only Organization Administrators can verify admin credentials' });
+      return;
+    }
+
+    const { password } = req.body as Record<string, unknown>;
+    if (typeof password !== 'string' || !password.trim()) {
+      res.status(400).json({ error: 'password is required' });
+      return;
+    }
+
+    try {
+      const adminUser = await authRepo.findById(identity.user_id);
+      if (!adminUser || !adminUser.login_key_hash) {
+        res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Administrator record or credentials not found' });
+        return;
+      }
+
+      const match = await verifyArgon2(password.trim(), adminUser.login_key_hash);
+      if (!match) {
+        res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Incorrect administrator password' });
+        return;
+      }
+
+      res.status(200).json({ success: true, message: 'Administrator password verified successfully' });
+    } catch (err) {
+      console.error('[auth/verify-admin-password] Unexpected error:', err);
       res.status(500).json({ error: 'Internal server error' });
     }
   });

@@ -66,7 +66,7 @@ export const CartSummary: React.FC = () => {
 
   const [pendingTransaction, setPendingTransaction] = useState<{
     paymentBreakdown: { method: string; amount: number }[];
-    customerObj: { id: string; name: string } | null;
+    customerObj: { id: string; name: string; phone?: string } | null;
     shouldPrint: boolean;
     projectedBalance: number;
   } | null>(null);
@@ -273,7 +273,7 @@ export const CartSummary: React.FC = () => {
     setMultiPaymentOpen(true);
   };
 
-  const triggerReceiptPrint = async (orderData: any, targetCustomer: { id: string; name: string } | null) => {
+  const triggerReceiptPrint = async (orderData: any, targetCustomer: { id: string; name: string; phone?: string } | null) => {
     if (!orderData) return;
     try {
       const activeShop = useOrganizationStore.getState().activeShop;
@@ -285,7 +285,7 @@ export const CartSummary: React.FC = () => {
       const authUser = useAuthStore.getState().user;
       const invoiceExtras = {
         customer: targetCustomer ?? null,
-        cashier: authUser?.name ?? null,
+        cashier: authUser ? (authUser.role ? `${authUser.name} (${authUser.role})` : authUser.name) : null,
       };
       const mappedTransaction: any = {
         transactionId: orderData.orderNumber || orderData.transactionId || orderData._id || `TXN-${Date.now()}`,
@@ -340,7 +340,7 @@ export const CartSummary: React.FC = () => {
       toast.success('Exchange processed successfully.');
       window.dispatchEvent(new CustomEvent('pos:sale-completed'));
       if (pendingExchangeShouldPrint && res?.order) {
-        await triggerReceiptPrint(res.order, selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name } : null);
+        await triggerReceiptPrint(res.order, selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name, phone: selectedCustomer.phone } : null);
       }
     } catch (error: any) {
       const msg = (error?.message || '').toLowerCase();
@@ -371,7 +371,7 @@ export const CartSummary: React.FC = () => {
         window.dispatchEvent(new CustomEvent('pos:sale-completed'));
         if (shouldPrint || pendingAction === 'print') {
           if (res?.order) {
-            await triggerReceiptPrint(res.order, selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name } : null);
+            await triggerReceiptPrint(res.order, selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name, phone: selectedCustomer.phone } : null);
           }
         }
       } catch (error: any) {
@@ -400,20 +400,20 @@ export const CartSummary: React.FC = () => {
     const payments = receivedAmount > 0 ? [{ method: 'cash', amount: receivedAmount }] : [];
     processTransaction(
       payments,
-      { id: targetCust.id, name: targetCust.name },
+      { id: targetCust.id, name: targetCust.name, phone: targetCust.phone },
       pendingAction === 'print'
     );
   };
 
   const processTransaction = async (
     paymentBreakdown: { method: string; amount: number }[] = [],
-    customerObj: { id: string; name: string } | null = null,
+    customerObj: { id: string; name: string; phone?: string } | null = null,
     shouldPrint: boolean = false
   ) => {
     if (!activeSession) return;
 
     const targetCustomer =
-      customerObj || (selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name } : null);
+      customerObj || (selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name, phone: selectedCustomer.phone } : null);
 
     // Credit limit warning verification
     if (selectedCustomer) {
@@ -436,13 +436,9 @@ export const CartSummary: React.FC = () => {
 
   const executeTransaction = async (
     paymentBreakdown: { method: string; amount: number }[],
-    targetCustomer: { id: string; name: string } | null,
+    targetCustomer: { id: string; name: string; phone?: string } | null,
     shouldPrint: boolean
   ) => {
-    if (!isHydrated) {
-      toast.error('Printer settings not ready. Please wait and try again.');
-      return;
-    }
     const isRefund = grandTotal < 0;
     setIsProcessing(true);
 
@@ -496,7 +492,7 @@ export const CartSummary: React.FC = () => {
           const authUser = useAuthStore.getState().user;
           const invoiceExtras = {
             customer: targetCustomer ?? null,
-            cashier: authUser?.name ?? null,
+            cashier: authUser ? (authUser.role ? `${authUser.name} (${authUser.role})` : authUser.name) : null,
           };
           const invoice = DocumentService.buildInvoice(mappedTransaction as any, realShopProfile as any, invoiceExtras);
           // Set in store to trigger unified thermal printing in InvoiceReceipt.tsx

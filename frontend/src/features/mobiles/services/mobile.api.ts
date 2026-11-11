@@ -322,6 +322,7 @@ export function mapDeviceRowToItem(row: MobileDeviceRow): MobileInventoryItem {
     createdAt: row.created_at,
     purchaseDate: row.purchase_date || (row.condition === "NEW" ? row.created_at.slice(0, 10) : null),
     voucherNo: row.voucher_no || undefined,
+    saleId: row.sale_id ?? null,
     salePriceActual: row.sale_price_actual ?? null,
     saleDate: row.sale_date ?? null,
     invoiceNumber: row.invoice_number ?? null,

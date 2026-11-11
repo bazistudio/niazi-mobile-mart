@@ -1,5 +1,5 @@
 import React from 'react';
-import { Filter, RotateCcw } from 'lucide-react';
+import { Filter, RotateCcw, Search, UserPlus } from 'lucide-react';
 import { HRStaffSelector } from './HRStaffSelector';
 import type { HRReportFilters as HRReportFiltersType } from '../types/hr.types';
 import type { StaffUser } from '@/features/settings/types/staff.types';
@@ -10,6 +10,8 @@ interface HRReportFiltersProps {
   onReset?: () => void;
   /** Branch options loaded from tauriClient / shopApi — passed in from parent */
   branchOptions?: Array<{ id: string; name: string }>;
+  /** Callback to trigger Add User modal/drawer */
+  onAddUser?: () => void;
 }
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -51,16 +53,17 @@ export const HRReportFilters: React.FC<HRReportFiltersProps> = ({
   onChange,
   onReset,
   branchOptions = [],
+  onAddUser,
 }) => {
   const update = (patch: Partial<HRReportFiltersType>) => {
     onChange({ ...filters, ...patch });
   };
 
   const hasActiveFilters =
-    filters.branchId || filters.staffId || filters.role || filters.month || filters.year;
+    filters.branchId || filters.staffId || filters.role || filters.month || filters.year || filters.search;
 
   return (
-    <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-900">
+    <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-900 shadow-xs">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center gap-2">
@@ -72,17 +75,30 @@ export const HRReportFilters: React.FC<HRReportFiltersProps> = ({
             </span>
           )}
         </div>
-        {onReset && hasActiveFilters && (
-          <button
-            type="button"
-            onClick={onReset}
-            className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400
-              hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
-          >
-            <RotateCcw className="w-3 h-3" />
-            Reset
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {onReset && hasActiveFilters && (
+            <button
+              type="button"
+              onClick={onReset}
+              className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400
+                hover:text-gray-700 dark:hover:text-gray-200 transition-colors cursor-pointer"
+            >
+              <RotateCcw className="w-3 h-3" />
+              Reset
+            </button>
+          )}
+          {onAddUser && (
+            <button
+              type="button"
+              onClick={onAddUser}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
+                bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-colors cursor-pointer"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              Add User
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filters Grid */}
@@ -106,16 +122,16 @@ export const HRReportFilters: React.FC<HRReportFiltersProps> = ({
           </select>
         </div>
 
-        {/* Employee Filter */}
+        {/* Employee Filter with Inline Search & Select */}
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-            Employee
+            Employee (Search & Select)
           </label>
           <HRStaffSelector
             value={filters.staffId}
             onChange={(id) => update({ staffId: id || undefined })}
             label=""
-            placeholder="All employees"
+            placeholder="Search employee..."
           />
         </div>
 

@@ -82,10 +82,17 @@ export const HRStaffSelector: React.FC<HRStaffSelectorProps> = ({
     setSearchTerm('');
   };
 
-  const displayRole = (staff: StaffUser) => {
-    if (staff.roleName) return mapStaffRoleToDisplay(staff.roleName as any) || staff.roleName;
+  const displayRole = (staff: StaffUser): string => {
+    if (staff.roleName) {
+      const mapped = mapStaffRoleToDisplay(staff.roleName);
+      return mapped?.roleName || staff.roleName;
+    }
     const role = mapRoleIdToStaffRole(staff.roleId);
-    return role ? mapStaffRoleToDisplay(role as any) || role : 'Staff';
+    if (role) {
+      const mapped = mapStaffRoleToDisplay(role);
+      return mapped?.roleName || role;
+    }
+    return 'Staff';
   };
 
   return (
@@ -100,70 +107,61 @@ export const HRStaffSelector: React.FC<HRStaffSelectorProps> = ({
       )}
 
       <div className="relative">
-        {/* Trigger Button */}
-        <button
-          type="button"
-          onClick={() => !disabled && setIsOpen((v) => !v)}
-          disabled={disabled || isLoading}
-          className={`w-full flex items-center justify-between gap-2 h-10 px-3 text-sm
-            bg-white dark:bg-gray-900 border rounded-lg transition-all duration-150
-            focus:outline-none focus:ring-2 focus:ring-blue-500/30
-            disabled:opacity-50 disabled:cursor-not-allowed
+        {/* Trigger / Inline Search Input */}
+        <div
+          className={`w-full flex items-center justify-between gap-2 h-9 px-2.5 text-sm
+            bg-gray-50 dark:bg-gray-800 border rounded-lg transition-all duration-150
             ${error
-              ? 'border-red-400 dark:border-red-500 focus:border-red-400'
-              : 'border-gray-200 dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-500 focus:border-blue-500'
+              ? 'border-red-400 dark:border-red-500'
+              : 'border-gray-200 dark:border-gray-700 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/30'
             }
-            ${isOpen ? 'border-blue-500 dark:border-blue-500 ring-2 ring-blue-500/20' : ''}
+            ${isOpen ? 'border-blue-500 ring-2 ring-blue-500/20' : ''}
           `}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <User className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
-            {selectedStaff ? (
-              <span className="text-gray-900 dark:text-white truncate font-medium">
-                {selectedStaff.name}
-              </span>
-            ) : (
-              <span className="text-gray-400 dark:text-gray-500">
-                {isLoading ? 'Loading staff...' : placeholder}
-              </span>
-            )}
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <User className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" />
+            <input
+              type="text"
+              disabled={disabled || isLoading}
+              value={isOpen ? searchTerm : (selectedStaff?.name || '')}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                if (!isOpen) setIsOpen(true);
+              }}
+              onFocus={() => {
+                if (!disabled) {
+                  setSearchTerm('');
+                  setIsOpen(true);
+                }
+              }}
+              placeholder={isLoading ? 'Loading staff...' : placeholder}
+              className="w-full bg-transparent text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none"
+            />
           </div>
           <div className="flex items-center gap-1 shrink-0">
             {selectedStaff && !disabled && (
-              <span
-                role="button"
-                tabIndex={0}
+              <button
+                type="button"
                 onClick={handleClear}
-                onKeyDown={(e) => e.key === 'Enter' && handleClear(e as any)}
-                className="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
+                className="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
+                title="Clear employee"
               >
                 <X className="w-3.5 h-3.5" />
-              </span>
+              </button>
             )}
-            <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+            <button
+              type="button"
+              onClick={() => !disabled && setIsOpen((v) => !v)}
+              className="p-0.5 rounded text-gray-400 hover:text-gray-600 cursor-pointer"
+            >
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+            </button>
           </div>
-        </button>
+        </div>
 
-        {/* Dropdown */}
+        {/* Dropdown Options List */}
         {isOpen && (
           <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl overflow-hidden">
-            {/* Search Input */}
-            <div className="p-2 border-b border-gray-100 dark:border-gray-800">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                <input
-                  autoFocus
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search by name or role..."
-                  className="w-full pl-8 pr-3 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg
-                    focus:outline-none focus:ring-1 focus:ring-blue-500/30 focus:border-blue-500
-                    text-gray-900 dark:text-white placeholder:text-gray-400"
-                />
-              </div>
-            </div>
-
             {/* Staff List */}
             <div className="max-h-56 overflow-y-auto">
               {/* Clear selection option */}
@@ -171,15 +169,15 @@ export const HRStaffSelector: React.FC<HRStaffSelectorProps> = ({
                 <button
                   type="button"
                   onClick={() => { onChange(undefined); setIsOpen(false); setSearchTerm(''); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-500 dark:text-gray-400
-                    hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-500 dark:text-gray-400
+                    hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left cursor-pointer"
                 >
-                  <span className="text-xs italic">— No selection —</span>
+                  <span>— All Employees (Clear) —</span>
                 </button>
               )}
 
               {filteredStaff.length === 0 ? (
-                <div className="px-3 py-4 text-center text-sm text-gray-400 dark:text-gray-500">
+                <div className="px-3 py-4 text-center text-xs text-gray-400 dark:text-gray-500">
                   {searchTerm ? `No staff match "${searchTerm}"` : 'No staff available'}
                 </div>
               ) : (
@@ -188,29 +186,29 @@ export const HRStaffSelector: React.FC<HRStaffSelectorProps> = ({
                     key={staff._id}
                     type="button"
                     onClick={() => handleSelect(staff)}
-                    className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 text-sm
-                      transition-colors text-left
+                    className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-xs
+                      transition-colors text-left cursor-pointer
                       ${staff._id === value
-                        ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400'
+                        ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 font-semibold'
                         : 'hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-white'
                       }`}
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shrink-0">
-                        <span className="text-white text-xs font-semibold">
+                      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shrink-0">
+                        <span className="text-white text-[10px] font-bold">
                           {staff.name.charAt(0).toUpperCase()}
                         </span>
                       </div>
                       <div className="min-w-0">
-                        <div className="font-medium truncate">{staff.name}</div>
+                        <div className="truncate">{staff.name}</div>
                         {staff.branchName && (
-                          <div className="text-xs text-gray-400 dark:text-gray-500 truncate">
+                          <div className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
                             {staff.branchName}
                           </div>
                         )}
                       </div>
                     </div>
-                    <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0 ml-2">
+                    <span className="text-[10px] text-gray-400 dark:text-gray-500 shrink-0 ml-2">
                       {displayRole(staff)}
                     </span>
                   </button>

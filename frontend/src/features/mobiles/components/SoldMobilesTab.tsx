@@ -46,6 +46,10 @@ import { mobileApi, mapDeviceRowToItem } from '../services/mobile.api';
 import { MobileDetailModal } from './MobileDetailModal';
 import { buildSoldMobilesA4Html, buildSoldMobilesPdfFilename } from '../templates/soldMobileA4Template';
 import { usePrintStore } from '@/lib/printer/print.store';
+import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
+import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
+import { salesApi } from '@/services/sales.api';
+import { toast } from 'react-hot-toast';
 import { downloadHtmlAsPdf } from '@/lib/printer/pdfExport';
 import type { MobileInventoryItem, MobileCondition } from '../types/mobile.types';
 
@@ -116,7 +120,13 @@ export const SoldMobilesTab: React.FC<SoldMobilesTabProps> = ({
 
   const { hasPermission } = usePermissions();
   // Cost & Profit visibility: requires finance view or settings admin
-  const canViewFinancials = hasPermission(PERMISSIONS.FINANCE_VIEW) || user?.role === 'ADMIN' || user?.role === 'ORGANIZATION_ADMIN';
+  const canViewFinancials =
+    hasPermission(PERMISSIONS.FINANCE_VIEW) ||
+    user?.role === 'ADMIN' ||
+    user?.role === 'SUPER_ADMIN' ||
+    user?.role === 'MULTI_ADMIN' ||
+    user?.role === 'OWNER' ||
+    user?.role === 'SHOP_ADMIN';
 
   const [items, setItems] = useState<MobileInventoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -132,8 +142,66 @@ export const SoldMobilesTab: React.FC<SoldMobilesTabProps> = ({
   // Modals & Exporting
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const openPrintPreview = usePrintStore((s) => s.openPreview);
+  const { settings, shopHeader, isHydrated, fetchSettings } = usePrinterStore();
+  const [reprintingId, setReprintingId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [copiedImei, setCopiedImei] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
+
+  const handleReprintSale = useCallback(async (item: MobileInventoryItem) => {
+    if (!item.saleId && !item.invoiceNumber) {
+      toast.error('No sale invoice linked to this device.');
+      return;
+    }
+
+    if (!isHydrated || !settings || !shopHeader) {
+      toast.error('Printer settings not ready. Please try again in a moment.');
+      return;
+    }
+
+    setReprintingId(item.id);
+    try {
+      let orderSource: any = null;
+      if (item.saleId) {
+        const res = await salesApi.getOrderById(item.saleId);
+        if (res?.success && res.order) {
+          orderSource = res.order;
+        }
+      }
+
+      if (!orderSource && item.invoiceNumber) {
+        const byInv = await salesApi.getOrders({ orderNumber: item.invoiceNumber });
+        if (byInv?.success && byInv.data && byInv.data.length > 0) {
+          const detailRes = await salesApi.getOrderById(byInv.data[0].id);
+          if (detailRes?.success && detailRes.order) {
+            orderSource = detailRes.order;
+          } else {
+            orderSource = byInv.data[0];
+          }
+        }
+      }
+
+      if (!orderSource) {
+        toast.error('Could not find sale record for this invoice.');
+        return;
+      }
+
+      const html = printFormatter.formatMobileSaleInvoice(orderSource, settings, shopHeader);
+      openPrintPreview({
+        html,
+        documentType: 'MobileSaleInvoice',
+        referenceId: orderSource.orderNumber || item.invoiceNumber || 'mobile-sale-invoice',
+        title: `Mobile Sale Invoice - ${orderSource.orderNumber || item.invoiceNumber || ''}`,
+      });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to generate sale invoice printout.');
+    } finally {
+      setReprintingId(null);
+    }
+  }, [isHydrated, settings, shopHeader, openPrintPreview]);
 
   // Fetch all SOLD mobiles for this branch
   const fetchSoldMobiles = useCallback(async () => {
@@ -245,7 +313,8 @@ export const SoldMobilesTab: React.FC<SoldMobilesTabProps> = ({
     openPrintPreview({
       html,
       title: `Sold Mobiles Report (${filteredItems.length} Handsets)`,
-      documentType: 'A4',
+      documentType: 'Generic',
+      referenceId: 'sold-mobiles-report',
     });
   }, [filteredItems, branchName, datePreset, customStartDate, customEndDate, searchTerm, user, canViewFinancials, openPrintPreview]);
 
@@ -650,16 +719,29 @@ export const SoldMobilesTab: React.FC<SoldMobilesTabProps> = ({
                           </span>
                         </td>
                       )}
-                      <td className="py-3 px-3 text-center">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setSelectedDeviceId(item.id)}
-                          className="text-xs text-primary cursor-pointer hover:bg-primary/10"
-                          title="View Full Device Audit"
-                        >
-                          View
-                        </Button>
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <div className="flex items-center justify-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleReprintSale(item)}
+                            disabled={reprintingId === item.id}
+                            className="text-xs text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 cursor-pointer font-medium"
+                            title="Reprint A4 Sale Invoice"
+                          >
+                            <Printer className={`w-3.5 h-3.5 mr-1 ${reprintingId === item.id ? 'animate-spin' : ''}`} />
+                            Reprint
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedDeviceId(item.id)}
+                            className="text-xs text-primary cursor-pointer hover:bg-primary/10"
+                            title="View Full Device Audit"
+                          >
+                            View
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -673,7 +755,6 @@ export const SoldMobilesTab: React.FC<SoldMobilesTabProps> = ({
       {/* ── Detail Modal ──────────────────────────────────────────────────────── */}
       {selectedDeviceId && (
         <MobileDetailModal
-          isOpen={Boolean(selectedDeviceId)}
           onClose={() => setSelectedDeviceId(null)}
           deviceId={selectedDeviceId}
           branchId={branchId}

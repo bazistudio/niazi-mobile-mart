@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { customerApi } from '@/services/customer.api';
 import { useNavigate } from 'react-router-dom';
 import { CustomerFormDrawer } from './modals/AddCustomerDrawer';
+import { DeleteCustomerModal } from './modals/DeleteCustomerModal';
 import toast from 'react-hot-toast';
 import { queryKeys } from '@/lib/react-query/queryKeys';
 import { invalidateQueries } from '@/lib/react-query/invalidate';
@@ -15,9 +16,12 @@ export const CustomersTab = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
+  const isOrgAdmin = user?.role === 'ADMIN';
+
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<any>(null);
+  const [deletingCustomer, setDeletingCustomer] = useState<any>(null);
 
   const { data: customerResponse, isLoading } = useQuery({
     queryKey: queryKeys.customers.all,
@@ -48,21 +52,15 @@ export const CustomersTab = () => {
     navigate(`/dashboard/shop-admin/customers/${customerId}`);
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this customer?')) {
-      try {
-        await customerApi.deleteCustomer(id);
-        invalidateQueries.customers(queryClient, user);
-        toast.success('Customer deleted successfully');
-      } catch (error: any) {
-        toast.error(error?.response?.data?.message || 'Failed to delete customer');
-      }
-    }
-  };
-
   const handleEdit = (customer: any) => {
+    if (!isOrgAdmin) return;
     setEditingCustomer(customer);
     setIsAddModalOpen(true);
+  };
+
+  const handleDeletePrompt = (customer: any) => {
+    if (!isOrgAdmin) return;
+    setDeletingCustomer(customer);
   };
 
   return (
@@ -194,27 +192,31 @@ export const CustomersTab = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button 
-                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-all" 
-                        title="Edit Customer"
-                        onClick={() => handleEdit(customer)}
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <button 
-                        className="p-2 text-gray-400 hover:text-[#006970] hover:bg-[#006970]/10 dark:hover:bg-[#006970]/30 rounded-lg transition-all" 
+                      {isOrgAdmin && (
+                        <button
+                          className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-all"
+                          title="Edit Customer"
+                          onClick={() => handleEdit(customer)}
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                      )}
+                      <button
+                        className="p-2 text-gray-400 hover:text-[#006970] hover:bg-[#006970]/10 dark:hover:bg-[#006970]/30 rounded-lg transition-all"
                         title="View Ledger & Profile"
                         onClick={() => navigateToLedger(customer.id)}
                       >
                         <BookOpen className="w-4 h-4" />
                       </button>
-                      <button 
-                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all" 
-                        title="Delete Customer"
-                        onClick={() => handleDelete(customer.id)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {isOrgAdmin && (
+                        <button
+                          className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all"
+                          title="Delete / Deactivate Customer"
+                          onClick={() => handleDeletePrompt(customer)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -242,6 +244,15 @@ export const CustomersTab = () => {
         }} 
         customers={customers}
         editingCustomer={editingCustomer}
+      />
+
+      <DeleteCustomerModal
+        isOpen={Boolean(deletingCustomer)}
+        onClose={() => setDeletingCustomer(null)}
+        customer={deletingCustomer}
+        onSuccess={() => {
+          invalidateQueries.customers(queryClient, user);
+        }}
       />
     </div>
   );

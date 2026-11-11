@@ -21,6 +21,8 @@ import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
 import { buildAuthMiddleware, authorizePermission, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
+import { AuthRepo } from '../repositories/auth.repo';
+import { verifyArgon2 } from '../services/argon2.service';
 import { writeChangeLogEntry } from '../repositories/change_log.repo';
 import {
   CustomerRepoError,
@@ -190,9 +192,9 @@ export function createCustomerRouter(pool: Pool): Router {
   router.put('/:id', async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;
 
-    const denied = authorizePermission(identity, 'customers', null);
-    if (denied) {
-      res.status(403).json({ error: 'FORBIDDEN', message: denied });
+    // Strict Security Gate: Only Organization Administrators (ADMIN) may edit customer records/configurations
+    if (!isOrgAdmin(identity)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Only Organization Administrators may edit customer details or configuration' });
       return;
     }
 
@@ -238,13 +240,32 @@ export function createCustomerRouter(pool: Pool): Router {
   router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;
 
-    const denied = authorizePermission(identity, 'customers', null);
-    if (denied) {
-      res.status(403).json({ error: 'FORBIDDEN', message: denied });
+    // Strict Security Gate: Only Organization Administrators (ADMIN) may deactivate customers
+    if (!isOrgAdmin(identity)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Only Organization Administrators may deactivate customer records' });
+      return;
+    }
+
+    const { password } = (req.body || {}) as { password?: string };
+    if (!password || typeof password !== 'string' || !password.trim()) {
+      res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Administrator password is required to deactivate a customer' });
       return;
     }
 
     try {
+      const authRepo = new AuthRepo(pool);
+      const adminUser = await authRepo.findById(identity.user_id);
+      if (!adminUser || !adminUser.login_key_hash) {
+        res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Administrator record or credentials not found' });
+        return;
+      }
+
+      const isPasswordValid = await verifyArgon2(password.trim(), adminUser.login_key_hash);
+      if (!isPasswordValid) {
+        res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Incorrect administrator password' });
+        return;
+      }
+
       const id = req.params['id'] as string;
       await deactivateCustomer(pool, id);
       res.status(200).json({ success: true, message: 'Customer deactivated successfully' });
@@ -380,9 +401,9 @@ export function createCustomerV1Router(pool: Pool): Router {
   router.put('/:id', async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;
 
-    const denied = authorizePermission(identity, 'customers', null);
-    if (denied) {
-      res.status(403).json({ error: 'FORBIDDEN', message: denied });
+    // Strict Security Gate: Only Organization Administrators (ADMIN) may edit customer records/configurations
+    if (!isOrgAdmin(identity)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Only Organization Administrators may edit customer details or configuration' });
       return;
     }
 
@@ -407,13 +428,32 @@ export function createCustomerV1Router(pool: Pool): Router {
   router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;
 
-    const denied = authorizePermission(identity, 'customers', null);
-    if (denied) {
-      res.status(403).json({ error: 'FORBIDDEN', message: denied });
+    // Strict Security Gate: Only Organization Administrators (ADMIN) may deactivate customers
+    if (!isOrgAdmin(identity)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Only Organization Administrators may deactivate customer records' });
+      return;
+    }
+
+    const { password } = (req.body || {}) as { password?: string };
+    if (!password || typeof password !== 'string' || !password.trim()) {
+      res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Administrator password is required to deactivate a customer' });
       return;
     }
 
     try {
+      const authRepo = new AuthRepo(pool);
+      const adminUser = await authRepo.findById(identity.user_id);
+      if (!adminUser || !adminUser.login_key_hash) {
+        res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Administrator record or credentials not found' });
+        return;
+      }
+
+      const isPasswordValid = await verifyArgon2(password.trim(), adminUser.login_key_hash);
+      if (!isPasswordValid) {
+        res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Incorrect administrator password' });
+        return;
+      }
+
       const id = req.params['id'] as string;
       await deactivateCustomer(pool, id);
       res.status(200).json({ success: true, message: 'Customer deactivated successfully' });

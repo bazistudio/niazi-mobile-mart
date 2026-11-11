@@ -118,9 +118,18 @@ export function buildUsedMobileA4Html(profile: MobileFullProfile): string {
     ['Cable',          inspection?.accessories_cable],
     ['Handsfree',      inspection?.accessories_handsfree],
   ];
-  const accHtml = accessories.map(([label, val]) =>
-    `<span style="margin-right:16px;font-size:12px">${boolCell(val)} ${esc(label)}</span>`
-  ).join('');
+  const accRows: string[] = [];
+  for (let i = 0; i < accessories.length; i += 2) {
+    const [l1, v1] = accessories[i];
+    const [l2, v2] = accessories[i + 1] ?? [];
+    accRows.push(`<tr>
+      <td style="padding:2.5px 6px;font-size:11px;border:1px solid #e5e7eb;width:50%">${boolCell(v1)} ${esc(l1)}</td>
+      <td style="padding:2.5px 6px;font-size:11px;border:1px solid #e5e7eb;width:50%">${l2 ? `${boolCell(v2)} ${esc(l2)}` : ''}</td>
+    </tr>`);
+  }
+  const accTableHtml = `<table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;margin-top:2px">
+    ${accRows.join('\n')}
+  </table>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -311,7 +320,8 @@ export function buildUsedMobileA4Html(profile: MobileFullProfile): string {
           </table>
         </td>
         <td style="width:34%;padding-left:10px;border-left:1px solid #e5e7eb;font-size:11.5px">
-          <strong>Accessories:</strong><br>${accHtml || '<span style="color:#9ca3af;font-style:italic">Not recorded</span>'}
+          <strong>Accessories:</strong>
+          ${accTableHtml}
         </td>
       </tr>
     </table>

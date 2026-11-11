@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { MoreHorizontal, FileText, Activity, Printer, Download, User, RotateCcw } from 'lucide-react';
 import { HistoryItem } from '../types/history.types';
 import { InvoicePreviewModal } from './InvoicePreviewModal';
@@ -25,12 +26,81 @@ export const HistoryRowActions: React.FC<Props> = ({ item }) => {
   const [showSalesReturn, setShowSalesReturn] = useState(false);
   const [showPurchaseReturn, setShowPurchaseReturn] = useState(false);
 
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+
   const { openPreview } = usePrintStore();
   const { settings, shopHeader, isHydrated, fetchSettings } = usePrinterStore();
 
   useEffect(() => {
     fetchSettings();
   }, [fetchSettings]);
+
+  const updatePosition = useCallback(() => {
+    if (!buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const menuWidth = 224; // w-56 is 14rem = 224px
+    const estimatedHeight = item.type === 'sale' || item.type === 'purchase' ? 260 : 220;
+    const padding = 8;
+
+    // Horizontal position: align right edge of menu to right edge of button
+    let left = rect.right - menuWidth;
+    if (left < padding) left = padding;
+    if (left + menuWidth > window.innerWidth - padding) {
+      left = window.innerWidth - menuWidth - padding;
+    }
+
+    // Vertical position: check space below vs space above
+    const spaceBelow = window.innerHeight - rect.bottom;
+    let top: number;
+    if (spaceBelow < estimatedHeight + padding && rect.top > estimatedHeight + padding) {
+      // Open upwards above the button
+      top = rect.top - estimatedHeight - 4;
+    } else {
+      // Open downwards below the button
+      top = rect.bottom + 4;
+    }
+
+    setMenuPosition({ top, left });
+  }, [item.type]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    updatePosition();
+
+    const handleScrollOrResize = () => {
+      updatePosition();
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsOpen(false);
+      }
+    };
+
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (
+        menuRef.current && !menuRef.current.contains(target) &&
+        buttonRef.current && !buttonRef.current.contains(target)
+      ) {
+        setIsOpen(false);
+      }
+    };
+
+    window.addEventListener('resize', handleScrollOrResize);
+    window.addEventListener('scroll', handleScrollOrResize, true);
+    window.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('mousedown', handlePointerDown);
+
+    return () => {
+      window.removeEventListener('resize', handleScrollOrResize);
+      window.removeEventListener('scroll', handleScrollOrResize, true);
+      window.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mousedown', handlePointerDown);
+    };
+  }, [isOpen, updatePosition]);
 
   const handlePrint = async () => {
     setIsOpen(false);
@@ -58,7 +128,7 @@ export const HistoryRowActions: React.FC<Props> = ({ item }) => {
         toast.error('Failed to load sale details for printing. Please try again.');
         return;
       }
-      const hasMobileLines = orderSource.items && orderSource.items.some((i: any) => i.lineType === 'MOBILE' || i.imei);
+      const hasMobileLines = orderSource.items && orderSource.items.some((i: any) => i.lineType === 'MOBILE' || (i.imei && i.lineType !== 'PRODUCT'));
       if (hasMobileLines) {
         html = printFormatter.formatMobileSaleInvoice(orderSource, settings, shopHeader);
         docType = 'MobileSaleInvoice';
@@ -206,77 +276,82 @@ export const HistoryRowActions: React.FC<Props> = ({ item }) => {
   return (
     <div className="relative inline-block text-left">
       <button 
+        ref={buttonRef}
         onClick={() => setIsOpen(!isOpen)}
         className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
       >
         <MoreHorizontal className="w-5 h-5" />
       </button>
 
-      {isOpen && (
-        <>
-          <div 
-            className="fixed inset-0 z-10" 
-            onClick={() => setIsOpen(false)}
-          ></div>
-          <div className="origin-top-right absolute right-0 mt-2 w-56 rounded-xl shadow-lg bg-white dark:bg-gray-800 ring-1 ring-black ring-opacity-5 z-20 overflow-hidden border border-gray-100 dark:border-gray-700">
-            <div className="py-1" role="menu">
-              <button
-                onClick={() => { setIsOpen(false); setShowPreview(true); }}
-                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3 font-medium transition-colors"
-              >
-                <FileText className="w-4 h-4 text-blue-500" />
-                View Document
-              </button>
-              <button
-                onClick={() => { setIsOpen(false); setShowTrace(true); }}
-                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3 font-medium transition-colors border-b border-gray-100 dark:border-gray-700"
-              >
-                <Activity className="w-4 h-4 text-emerald-500" />
-                Ledger Trace (Audit)
-              </button>
+      {isOpen && createPortal(
+        <div
+          ref={menuRef}
+          style={{
+            position: 'fixed',
+            top: `${menuPosition.top}px`,
+            left: `${menuPosition.left}px`,
+            zIndex: 9999,
+          }}
+          className="w-56 rounded-xl shadow-2xl bg-white dark:bg-gray-800 ring-1 ring-black ring-opacity-5 overflow-hidden border border-gray-100 dark:border-gray-700 animate-in fade-in zoom-in-95 duration-100"
+        >
+          <div className="py-1" role="menu">
+            <button
+              onClick={() => { setIsOpen(false); setShowPreview(true); }}
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3 font-medium transition-colors"
+            >
+              <FileText className="w-4 h-4 text-blue-500" />
+              View Document
+            </button>
+            <button
+              onClick={() => { setIsOpen(false); setShowTrace(true); }}
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3 font-medium transition-colors border-b border-gray-100 dark:border-gray-700"
+            >
+              <Activity className="w-4 h-4 text-emerald-500" />
+              Ledger Trace (Audit)
+            </button>
 
-              {item.type === 'sale' && (
-                <button
-                  onClick={() => { setIsOpen(false); setShowSalesReturn(true); }}
-                  className="w-full text-left px-4 py-2.5 text-sm text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/30 flex items-center gap-3 font-medium transition-colors border-b border-gray-100 dark:border-gray-700"
-                >
-                  <RotateCcw className="w-4 h-4 text-[#e76f51]" />
-                  Return Sale Items
-                </button>
-              )}
+            {item.type === 'sale' && (
+              <button
+                onClick={() => { setIsOpen(false); setShowSalesReturn(true); }}
+                className="w-full text-left px-4 py-2.5 text-sm text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/30 flex items-center gap-3 font-medium transition-colors border-b border-gray-100 dark:border-gray-700"
+              >
+                <RotateCcw className="w-4 h-4 text-[#e76f51]" />
+                Return Sale Items
+              </button>
+            )}
 
-              {item.type === 'purchase' && (
-                <button
-                  onClick={() => { setIsOpen(false); setShowPurchaseReturn(true); }}
-                  className="w-full text-left px-4 py-2.5 text-sm text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 flex items-center gap-3 font-medium transition-colors border-b border-gray-100 dark:border-gray-700"
-                >
-                  <RotateCcw className="w-4 h-4 text-[#2a9d8f]" />
-                  Return to Supplier
-                </button>
-              )}
+            {item.type === 'purchase' && (
+              <button
+                onClick={() => { setIsOpen(false); setShowPurchaseReturn(true); }}
+                className="w-full text-left px-4 py-2.5 text-sm text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 flex items-center gap-3 font-medium transition-colors border-b border-gray-100 dark:border-gray-700"
+              >
+                <RotateCcw className="w-4 h-4 text-[#2a9d8f]" />
+                Return to Supplier
+              </button>
+            )}
 
-              <button
-                onClick={handlePrint}
-                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3 font-medium transition-colors"
-              >
-                <Printer className="w-4 h-4 text-gray-400" />
-                Print Receipt
-              </button>
-              <button
-                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3 font-medium transition-colors"
-              >
-                <Download className="w-4 h-4 text-gray-400" />
-                Export JSON
-              </button>
-              <button
-                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3 font-medium transition-colors border-t border-gray-100 dark:border-gray-700"
-              >
-                <User className="w-4 h-4 text-purple-500" />
-                Open Profile
-              </button>
-            </div>
+            <button
+              onClick={handlePrint}
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3 font-medium transition-colors"
+            >
+              <Printer className="w-4 h-4 text-gray-400" />
+              Print Receipt
+            </button>
+            <button
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3 font-medium transition-colors"
+            >
+              <Download className="w-4 h-4 text-gray-400" />
+              Export JSON
+            </button>
+            <button
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3 font-medium transition-colors border-t border-gray-100 dark:border-gray-700"
+            >
+              <User className="w-4 h-4 text-purple-500" />
+              Open Profile
+            </button>
           </div>
-        </>
+        </div>,
+        document.body
       )}
 
       {showPreview && (

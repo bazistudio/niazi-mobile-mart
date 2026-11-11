@@ -75,8 +75,9 @@ export const SalaryCalculationBreakdown: React.FC<SalaryCalculationBreakdownProp
     const hourlyRate = perDayRate / standardShiftHours;
 
     const absenceDeduction = absentDays * perDayRate;
-    // Late deduction: each late-mark = half a day's deduction (illustrative; adjust when HR policy is finalized)
-    const lateDeduction = lateDays * (perDayRate * 0.5);
+    // Late deduction policy: 3 qualifying late arrivals = 1 absence equivalent (monthlySalary / 26)
+    const lateAbsenceEquivalents = Math.floor(lateDays / 3);
+    const lateDeduction = lateAbsenceEquivalents * perDayRate;
     const overtimePay = overtimeHours * hourlyRate * overtimeMultiplier;
 
     const netSalary = Math.max(
@@ -185,10 +186,10 @@ export const SalaryCalculationBreakdown: React.FC<SalaryCalculationBreakdownProp
             )}
             {lateDeduction > 0 && (
               <BreakdownRow
-                label={`Late Marks (${lateDays} × ½ day rate)`}
+                label={`Late Marks (${lateDays} late${lateDays !== 1 ? 's' : ''} → ${Math.floor(lateDays / 3)} absence equiv. × ${formatCurrency(monthlySalary / DEFAULT_ATTENDANCE_RULES.workingDaysPerMonth)}/day)`}
                 value={-lateDeduction}
                 variant="deduction"
-                note="Late deduction formula — confirm with HR policy"
+                note="3 qualifying late arrivals (>20 min) = 1 absence equivalent"
               />
             )}
             {advanceDeduction > 0 && (

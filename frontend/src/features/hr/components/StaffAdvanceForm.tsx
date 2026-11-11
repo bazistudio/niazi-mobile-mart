@@ -1,74 +1,103 @@
 import React, { useState } from 'react';
-import { DollarSign, FileText, Lock, AlertCircle } from 'lucide-react';
+import { DollarSign, FileText, AlertCircle, CheckCircle, Loader2, Send } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { HRStaffSelector } from './HRStaffSelector';
-import { BackendIntegrationNotice } from './BackendIntegrationNotice';
+import { submitAdvanceRequest } from '../services/hr.api';
+import { queryKeys } from '@/lib/react-query/queryKeys';
 import type { StaffUser } from '@/features/settings/types/staff.types';
 
 interface StaffAdvanceFormProps {
   /** If provided, the staff selector is pre-set and hidden */
   preselectedStaff?: StaffUser;
   onCancel?: () => void;
+  onSuccess?: () => void;
 }
 
 /**
  * StaffAdvanceForm
  *
- * Form for submitting a staff advance request.
- *
- * ⚠️  IMPORTANT CONSTRAINTS:
- * - No advance records are stored anywhere (not localStorage, not DB)
- * - Previous sessions' prototype localStorage data is NOT displayed here
- * - Submission shows a backend-unavailable notice
- * - Real staff dropdown via useStaff() — no mock names
+ * Form for submitting a staff advance request via POST /api/v1/hr/staff/:userId/advances.
+ * Wires to real backend — no localStorage, no mock data.
  */
 export const StaffAdvanceForm: React.FC<StaffAdvanceFormProps> = ({
   preselectedStaff,
   onCancel,
+  onSuccess,
 }) => {
-  const [selectedStaff, setSelectedStaff] = useState<StaffUser | undefined>(
-    preselectedStaff
-  );
+  const queryClient = useQueryClient();
+  const [selectedStaff, setSelectedStaff] = useState<StaffUser | undefined>(preselectedStaff);
   const [amount, setAmount] = useState<number | ''>('');
   const [reason, setReason] = useState('');
-  const [requestDate, setRequestDate] = useState(
-    new Date().toISOString().slice(0, 10)
-  );
+  const [requestDate, setRequestDate] = useState(new Date().toISOString().slice(0, 10));
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
 
   const errors: Record<string, string> = {};
   if (!selectedStaff) errors.staff = 'Please select a staff member';
-  if (!amount || Number(amount) <= 0) errors.amount = 'Enter a valid amount';
+  if (!amount || Number(amount) <= 0) errors.amount = 'Enter a valid amount greater than zero';
   if (!reason.trim()) errors.reason = 'Reason is required';
 
   const hasErrors = Object.keys(errors).length > 0;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitAttempted(true);
     if (hasErrors) return;
-    // Backend not available — show notice only (already rendered below)
+    if (!selectedStaff) return;
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      await submitAdvanceRequest({
+        staffId: selectedStaff._id,
+        amount: Number(amount),
+        reason: reason.trim(),
+        requested_date: requestDate,
+      });
+      setSubmitSuccess(true);
+      // Invalidate the advance list for this staff member
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.hr.advances(selectedStaff._id),
+      });
+      onSuccess?.();
+      // Reset form after short delay
+      setTimeout(() => {
+        setAmount('');
+        setReason('');
+        setRequestDate(new Date().toISOString().slice(0, 10));
+        setSubmitAttempted(false);
+        setSubmitSuccess(false);
+        if (!preselectedStaff) setSelectedStaff(undefined);
+      }, 2000);
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      setSubmitError(e?.message || 'Failed to submit advance request. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <div className="space-y-5">
-      {/* Backend notice — always visible */}
-      <BackendIntegrationNotice
-        title="Advance Recording Unavailable"
-        description="Advance requests cannot be saved — the HR advances backend endpoint is not yet built. This form is for preview only. No advance record will be created."
-        requiredEndpoints={[
-          'POST /api/v1/hr/advances',
-          'GET /api/v1/hr/advances?staffId=:staffId',
-        ]}
-        variant="warning"
-      />
+      {/* Success banner */}
+      {submitSuccess && (
+        <div className="rounded-xl bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 px-4 py-3 flex items-center gap-2">
+          <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+          <span className="text-sm font-medium text-green-700 dark:text-green-300">
+            Advance request submitted successfully!
+          </span>
+        </div>
+      )}
 
-      {/* No localStorage notice */}
-      <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700">
-        <AlertCircle className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          Advance history from previous prototype sessions is not shown here. Only data from a real HR backend will be displayed when available.
-        </p>
-      </div>
+      {/* Error banner */}
+      {submitError && (
+        <div className="rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 px-4 py-3 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+          <span className="text-sm text-red-700 dark:text-red-300">{submitError}</span>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         {/* Staff Selector */}
@@ -101,7 +130,7 @@ export const StaffAdvanceForm: React.FC<StaffAdvanceFormProps> = ({
         {/* Amount */}
         <div className="space-y-1.5">
           <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            Advance Amount (PKR)
+            Advance Amount (PKR) <span className="text-red-500">*</span>
           </label>
           <div className="relative">
             <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -111,9 +140,10 @@ export const StaffAdvanceForm: React.FC<StaffAdvanceFormProps> = ({
               value={amount}
               onChange={(e) => setAmount(e.target.value === '' ? '' : Number(e.target.value))}
               placeholder="e.g. 5000"
+              disabled={isSubmitting || submitSuccess}
               className={`w-full pl-10 pr-3 py-2.5 text-sm bg-gray-50 dark:bg-gray-800
                 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30
-                text-gray-900 dark:text-white transition-colors
+                text-gray-900 dark:text-white transition-colors disabled:opacity-60
                 ${submitAttempted && errors.amount
                   ? 'border-red-400 dark:border-red-500 focus:border-red-400'
                   : 'border-gray-200 dark:border-gray-700 focus:border-blue-500'
@@ -134,16 +164,17 @@ export const StaffAdvanceForm: React.FC<StaffAdvanceFormProps> = ({
             type="date"
             value={requestDate}
             onChange={(e) => setRequestDate(e.target.value)}
+            disabled={isSubmitting || submitSuccess}
             className="w-full px-3 py-2.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700
               rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500
-              text-gray-900 dark:text-white"
+              text-gray-900 dark:text-white disabled:opacity-60"
           />
         </div>
 
         {/* Reason */}
         <div className="space-y-1.5">
           <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            Reason for Advance
+            Reason for Advance <span className="text-red-500">*</span>
           </label>
           <div className="relative">
             <FileText className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
@@ -151,10 +182,11 @@ export const StaffAdvanceForm: React.FC<StaffAdvanceFormProps> = ({
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               rows={3}
+              disabled={isSubmitting || submitSuccess}
               placeholder="Briefly explain the reason for the advance request..."
               className={`w-full pl-10 pr-3 py-2.5 text-sm bg-gray-50 dark:bg-gray-800
                 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30
-                text-gray-900 dark:text-white resize-none transition-colors
+                text-gray-900 dark:text-white resize-none transition-colors disabled:opacity-60
                 ${submitAttempted && errors.reason
                   ? 'border-red-400 dark:border-red-500 focus:border-red-400'
                   : 'border-gray-200 dark:border-gray-700 focus:border-blue-500'
@@ -166,38 +198,42 @@ export const StaffAdvanceForm: React.FC<StaffAdvanceFormProps> = ({
           )}
         </div>
 
-        {/* Submit attempt notice */}
-        {submitAttempted && !hasErrors && (
-          <BackendIntegrationNotice
-            title="Submission Not Available"
-            description="The form is complete, but the advance request cannot be submitted — POST /api/v1/hr/advances is not yet implemented. No data has been saved."
-            variant="warning"
-            compact
-          />
-        )}
-
         {/* Actions */}
         <div className="flex items-center justify-end gap-3 pt-2">
           {onCancel && (
             <button
               type="button"
               onClick={onCancel}
+              disabled={isSubmitting}
               className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400
-                hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
           )}
           <button
             type="submit"
+            disabled={isSubmitting || submitSuccess}
             className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold
-              bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400
-              border border-gray-200 dark:border-gray-700 cursor-pointer
-              hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-            title="Backend not yet available — submission is a preview only"
+              bg-blue-600 hover:bg-blue-700 text-white transition-colors
+              disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Lock className="w-3.5 h-3.5" />
-            Submit Request (Preview)
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Submitting…
+              </>
+            ) : submitSuccess ? (
+              <>
+                <CheckCircle className="w-3.5 h-3.5" />
+                Submitted
+              </>
+            ) : (
+              <>
+                <Send className="w-3.5 h-3.5" />
+                Submit Request
+              </>
+            )}
           </button>
         </div>
       </form>

@@ -1,3 +1,4 @@
+import { backfillMissingAbsences } from './services/absence.service';
 /**
  * TypeScript Backend -- Entry Point
  *
@@ -59,6 +60,7 @@ import { buildRepairRouter } from './routes/repair.routes';
 import { createSettingsRouter } from './routes/settings.routes';
 import { buildRolesRouter } from './routes/roles.routes'; // DEF-08
 import { buildMobileRouter } from './routes/mobile.routes';
+import { buildHrRouter } from './routes/hr.routes';
 import { BranchRepo } from './repositories/branch.repo';
 import {
   listBrands,
@@ -295,6 +297,19 @@ async function main(): Promise<void> {
   const rolesRouter = buildRolesRouter(pool);
   app.use('/api/roles', rolesRouter);
   app.use('/api/v1/roles', rolesRouter);
+
+  // -------------------------------------------------------------------------
+  // HR & Payroll routes — TypeScript Online Authority
+  // -------------------------------------------------------------------------
+    // Periodic background absence backfill runner (every 60 minutes, background, non-blocking)
+  setInterval(() => {
+    backfillMissingAbsences(pool, 3).catch(err => {
+      console.error('[absence.runner] Periodic absence check error:', err);
+    });
+  }, 60 * 60 * 1000);
+  const hrRouter = buildHrRouter(pool);
+  app.use('/api/hr', hrRouter);
+  app.use('/api/v1/hr', hrRouter);
 
   // -------------------------------------------------------------------------
   // Mobile Inventory routes — TypeScript Online Authority

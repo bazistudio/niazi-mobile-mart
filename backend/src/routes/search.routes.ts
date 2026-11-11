@@ -33,9 +33,9 @@ export function createSearchRouter(pool: Pool): Router {
 
     try {
       const q = (req.query['q'] as string) || (req.query['query'] as string) || (req.query['search'] as string) || '';
-      const category = (req.query['category'] as string) || (req.query['type'] as string) || 'quick';
+      const typeId = (req.query['type_id'] as string) || (req.query['typeId'] as string) || (req.query['category_id'] as string) || null;
 
-      const results = await globalSearch(pool, q, branchId, category);
+      const results = await globalSearch(pool, q, branchId, typeId);
       const callerCanViewCost = canViewProductCost(identity);
       if (!callerCanViewCost && results.products.length > 0) {
         results.products = results.products.map((p) => ({

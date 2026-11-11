@@ -49,20 +49,34 @@ export const queryKeys = {
   cash: {
     orgSummary: ['cash', 'organization-summary'] as const,
   },
+  // ─── Reports Domain ───────────────────────────────────────────────────────
+  // Phase 2: GET /api/v1/reports/progress is now live.
+  reports: {
+    progress: (
+      userId: string,
+      branchId?: string | null,
+      startDate?: string | null,
+      endDate?: string | null
+    ) => ['reports', 'progress', userId, branchId ?? null, startDate ?? null, endDate ?? null] as const,
+  },
   // ─── HR Domain ────────────────────────────────────────────────────────────
-  // NOTE: Backend endpoints for HR do not yet exist.
-  // These keys are reserved for when they are built.
+  // Phase 2: HR backend endpoints are now live at /api/v1/hr/*.
   hr: {
+    staff: ['hr', 'staff'] as const,
     salaryConfigs: ['hr', 'salary-configs'] as const,
     salaryConfig: (staffId: string) => ['hr', 'salary-config', staffId] as const,
+    salaryConfigHistory: (staffId: string) => ['hr', 'salary-config-history', staffId] as const,
     overtimeConfigs: ['hr', 'overtime-configs'] as const,
     overtimeConfig: (staffId: string) => ['hr', 'overtime-config', staffId] as const,
     advances: (staffId?: string) =>
       staffId ? (['hr', 'advances', staffId] as const) : (['hr', 'advances'] as const),
     attendance: (staffId: string, month: number, year: number) =>
       ['hr', 'attendance', staffId, month, year] as const,
+    payrollPeriods: ['hr', 'payroll-periods'] as const,
+    payrollRecords: (periodId: string) => ['hr', 'payroll-records', periodId] as const,
     payroll: (month?: number, year?: number) =>
       ['hr', 'payroll', month, year] as const,
+    shiftTemplates: ['hr', 'shift-templates'] as const,
   },
   // ─── Repairs Domain ───────────────────────────────────────────────────────
   // repairApi.getRepairJobs({ technician_id }) is available — used in Progress Report.

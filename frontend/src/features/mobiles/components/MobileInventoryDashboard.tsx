@@ -337,7 +337,7 @@ export const MobileInventoryDashboard: React.FC = () => {
 
   return (
     <>
-      <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto pb-16 px-4 sm:px-6">
+      <div className="flex flex-col gap-6 w-full max-w-[1400px] mx-auto pb-16 px-4 sm:px-6">
         {/* Mobile module sub-nav */}
         <div className="flex items-center gap-1 pt-4 border-b border-border pb-0 overflow-x-auto">
           {MOBILE_NAV_TABS.map((tab) => {
@@ -825,7 +825,11 @@ export const MobileInventoryDashboard: React.FC = () => {
                         return (
                           <tr
                             key={item.id}
-                            className="hover:bg-surface-hover/50 transition-colors group"
+                            onDoubleClick={() => {
+                              navigate(`/dashboard/shop-admin/mobiles/sale?deviceId=${encodeURIComponent(item.id)}&imei=${encodeURIComponent(item.imei1)}`);
+                            }}
+                            title="Double-click to sell this handset in Mobile POS"
+                            className="hover:bg-primary/5 cursor-pointer transition-colors group select-none"
                           >
                             {/* Device / Model */}
                             <td className="py-3.5 px-4">

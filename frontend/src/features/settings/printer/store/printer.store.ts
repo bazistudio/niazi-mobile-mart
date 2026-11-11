@@ -168,10 +168,21 @@ export const usePrinterStore = create<PrinterState>((set, get) => ({
           isHydrated: true,
         });
       } else {
-        set({ settings: DEFAULT_SETTINGS, shopHeader: DEFAULT_SHOP_HEADER, isLoading: false });
+        set({
+          settings: DEFAULT_SETTINGS,
+          shopHeader: DEFAULT_SHOP_HEADER,
+          isLoading: false,
+          isHydrated: true,
+        });
       }
     } catch (err: any) {
-      set({ error: err.message || 'Failed to fetch settings', isLoading: false });
+      set({
+        settings: get().settings || DEFAULT_SETTINGS,
+        shopHeader: get().shopHeader || DEFAULT_SHOP_HEADER,
+        error: err.message || 'Failed to fetch settings',
+        isLoading: false,
+        isHydrated: true,
+      });
     }
   },
 

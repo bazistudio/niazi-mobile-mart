@@ -387,7 +387,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({
             </div>
 
             <div className="pt-6 mt-6 border-t border-border flex items-center justify-between text-[11px] text-text-muted shrink-0">
-              <span>Niazi Mobile Mart Desktop ERP • Version 1.3.57</span>
+              <span>Niazi Mobile Mart Desktop ERP • Version 1.3.58</span>
               <button
                 onClick={onClose}
                 className="px-3.5 py-1.5 rounded-lg bg-surface-hover hover:bg-border text-text-secondary font-medium transition-colors"

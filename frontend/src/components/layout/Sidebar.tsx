@@ -75,14 +75,16 @@ export const Sidebar = () => {
     !isMainBranch(activeBranchId) &&
     !showAllPages;
 
-  // Whether the current user may reveal extra pages via the toggle
+  // Whether the current user may reveal extra pages via the toggle.
+  // Branch accounts (branch admins/users/cashiers) must strictly see branch default pages only.
+  // "View All Pages" is restricted exclusively to organization admins inspecting a branch.
   const userRole = (user?.role || '').toUpperCase();
-  const canViewAllPages = BRANCH_ADMIN_ROLES.has(userRole);
   const isOrgAdmin =
     userRole === 'OWNER' ||
     userRole === 'SUPER_ADMIN' ||
     userRole === 'MULTI_ADMIN' ||
     userRole === 'ADMIN';
+  const canViewAllPages = isOrgAdmin;
 
   const handleAdminDashboardClick = (e: React.MouseEvent) => {
     e.preventDefault();
