@@ -118,7 +118,7 @@ export const PosActionsDropdown: React.FC<PosActionsDropdownProps> = ({ onOpenIn
               </div>
             </button>
 
-            {/* Walk-in Cash Return */}
+            {/* Return by Invoice (unified — handles walk-in cash, credit, and partial-paid returns) */}
             <button
               type="button"
               onClick={handleCashReturn}
@@ -126,8 +126,8 @@ export const PosActionsDropdown: React.FC<PosActionsDropdownProps> = ({ onOpenIn
             >
               <HandCoins className="w-4 h-4 text-secondary" />
               <div>
-                <div>Walk-in Cash Return</div>
-                <div className="text-[10px] text-text-muted font-normal">Refund cash for items in cart</div>
+                <div>Return by Invoice</div>
+                <div className="text-[10px] text-text-muted font-normal">Lookup invoice to process refund or credit</div>
               </div>
             </button>
           </div>

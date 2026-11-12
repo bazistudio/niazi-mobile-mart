@@ -109,9 +109,10 @@ export const CartTable = () => {
         const costPrice = item?.costPrice ?? 0;
 
         if (costPrice > 0 && parsed <= costPrice) {
+          const minAllowed = costPrice + 1;
           import("react-hot-toast").then(m =>
             m.default.error(
-              `Custom price (Rs. ${parsed.toLocaleString()}) cannot be equal to or below cost price (Rs. ${costPrice.toLocaleString()}). Selling price must be strictly higher than cost.`,
+              `Selling price (Rs. ${parsed.toLocaleString()}) cannot be equal to or below the latest purchase cost (Rs. ${costPrice.toLocaleString()}). Minimum allowed: Rs. ${minAllowed.toLocaleString()}.`,
               { duration: 4500, id: `min-price-${productId}` }
             )
           );

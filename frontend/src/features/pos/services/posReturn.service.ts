@@ -17,15 +17,15 @@ export interface ReturnCartItem {
 }
 
 export const WALK_IN_RETURN_BLOCKED_MESSAGE =
-  'Cash Return needs the original invoice. Use "Return by Invoice" to load it first. ' +
+  'Return needs the original invoice. Use "Return by Invoice" to load it first. ' +
   'Returns without an invoice are not supported yet.';
 
 export const EXCHANGE_BLOCKED_MESSAGE =
   'Exchange cannot be completed yet: returned items would be recorded as a sale. ' +
-  'Process the return with "Return by Invoice" + "Cash Return", then sell the new items as a normal sale.';
+  'Process the return with "Return by Invoice" + "Return", then sell the new items as a normal sale.';
 
 export const INVOICE_LOADED_CHECKOUT_BLOCKED_MESSAGE =
-  'An invoice is loaded for return. Use "Cash Return" to refund it, or clear the cart to start a new sale.';
+  'An invoice is loaded for return. Use "Return" to process it, or clear the cart to start a new sale.';
 
 /**
  * Maps POS cart items onto the original sale's returnable lines.
@@ -90,22 +90,15 @@ export function allocateReturnLines(
 }
 
 /**
- * Creates a proper sales return (cash refund) against the linked invoice.
- * The backend computes the refund amount from the original sale lines.
+ * @deprecated Use createUnifiedReturnForInvoice() instead.
+ * Kept for backward compatibility with any remaining call sites.
+ * Always uses CASH — does NOT auto-detect customer credit sales.
  */
 export async function createCashReturnForInvoice(
   saleId: string,
   cartItems: ReturnCartItem[],
 ) {
-  const info = await returnsApi.getSaleReturnableInfo(saleId);
-  const lines = allocateReturnLines(cartItems, info.lines);
-  return returnsApi.createSalesReturn({
-    sale_id: info.sale_id,
-    lines,
-    refund_method: 'CASH',
-    reason: 'POS Cash Return',
-    notes: null,
-  });
+  return createUnifiedReturnForInvoice(saleId, cartItems, 'CASH', 'POS Cash Return');
 }
 
 /**
@@ -119,6 +112,38 @@ export async function createReturnForInvoice(
   cartItems: ReturnCartItem[],
   refundMethod: 'CASH' | 'CREDIT',
   reason = 'POS Invoice Return',
+) {
+  return createUnifiedReturnForInvoice(saleId, cartItems, refundMethod, reason);
+}
+
+/**
+ * Unified return service entry point (Phase 2 canonical implementation).
+ *
+ * Fetches authoritative returnable info from the backend, allocates quantities
+ * to original sale lines, then submits a single return request with the
+ * cashier-confirmed refund method.
+ *
+ * Supported refund methods:
+ *   'CASH'   — physical cash refund from drawer; backend enforces open cash session.
+ *   'CREDIT' — customer ledger credit entry; no cash movement posted.
+ *
+ * The backend (returns.repo.ts / sales_return_service.rs) is authoritative for:
+ *   - Quantity validation against already_returned_quantity.
+ *   - Customer balance calculation.
+ *   - Atomic transaction (ledger + cash + stock + return header).
+ *
+ * Split allocation (partially-paid invoice: credit reversal + cash payout) is
+ * handled upstream in processReturn() — the cashier selects one of:
+ *   1. Keep excess as customer account advance → 'CREDIT' (backend allows negative balance).
+ *   2. Refund excess in cash → 'CASH' for the full return amount.
+ * No schema migration is required; the existing single refund_method field is
+ * sufficient for each of the two paths the cashier can choose.
+ */
+export async function createUnifiedReturnForInvoice(
+  saleId: string,
+  cartItems: ReturnCartItem[],
+  refundMethod: 'CASH' | 'CREDIT',
+  reason = 'POS Return',
 ) {
   const info = await returnsApi.getSaleReturnableInfo(saleId);
   const lines = allocateReturnLines(cartItems, info.lines);

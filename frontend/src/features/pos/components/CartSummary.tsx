@@ -35,6 +35,7 @@ export const CartSummary: React.FC = () => {
   const setCheckoutIdempotencyKey = usePosStore((s) => s.setCheckoutIdempotencyKey);
   const setCustomer = usePosStore((s) => s.setCustomer);
   const processCashReturn = usePosStore((s) => s.processCashReturn);
+  const processReturn = usePosStore((s) => s.processReturn);
   const isReturnMode = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId)?.isReturnMode ?? false);
   const enterCashReturnMode = usePosStore((s) => s.enterCashReturnMode);
   const exitCashReturnMode = usePosStore((s) => s.exitCashReturnMode);
@@ -123,7 +124,7 @@ export const CartSummary: React.FC = () => {
       if (e.key === 'Escape') {
         e.preventDefault();
         exitCashReturnMode();
-        toast('Cash return cancelled.', { icon: '↩️' });
+        toast('Return cancelled.', { icon: '↩️' });
       }
     };
     window.addEventListener('keydown', handleEscapeKey);
@@ -165,34 +166,39 @@ export const CartSummary: React.FC = () => {
     ? (returnLines.length > 0 ? selectedRefundAmt : Math.abs(grandTotal))
     : grandTotal;
 
-  // Phase 1B: Two-stage Cash Return handler.
+  // Phase 2: Unified Return handler (renamed from handleCashReturn).
+  // Routes through processReturn() which auto-detects the correct refund method:
+  //   - Walk-in customer → CASH
+  //   - Registered credit sale → CREDIT
+  //   - Registered with excess → ReturnOverflowModal (advance or cash payout)
+  //
   // State A (isReturnMode=false, first click):
   //   - If no invoice: open invoice lookup.
   //   - If no cart items: show error.
-  //   - Otherwise: call processCashReturn() which calls enterCashReturnMode() and shows prep toast.
+  //   - Otherwise: processReturn() calls enterCashReturnMode() → State B.
   // State B (isReturnMode=true, second click):
-  //   - Call processCashReturn() which submits the real API and resets state.
-  //   - ESC / clearCart cancels return mode via exitCashReturnMode (called in clearCart).
-  const handleCashReturn = async () => {
+  //   - processReturn() resolves method, may show modal, then submits.
+  //   - ESC / clearCart cancels via exitCashReturnMode.
+  const handleReturn = async () => {
     if (!activeSession) return;
 
     // State A: not yet in return mode
     if (!isReturnMode) {
       if (!activeSession.linkedInvoiceId) {
         // No invoice linked — guide the cashier to select one first.
-        window.dispatchEvent(new CustomEvent('pos:open-invoice-lookup', { detail: { heading: 'Select Sale Invoice for Cash Return' } }));
-        toast('Select the original sale invoice to proceed with Cash Return.', { icon: '🔍' });
+        window.dispatchEvent(new CustomEvent('pos:open-invoice-lookup', { detail: { heading: 'Select Sale Invoice for Return' } }));
+        toast('Select the original sale invoice to proceed with the return.', { icon: '🔍' });
         return;
       }
       if (activeSession.cart.length === 0) {
-        toast.error('Add items to return before processing a Cash Return.');
+        toast.error('Add items to return before processing a return.');
         return;
       }
       // Delegate to store: sets isReturnMode=true and shows prep toast (State A -> B)
       try {
-        await processCashReturn();
+        await processReturn();
       } catch {
-        // processCashReturn already toasts on error
+        // processReturn already toasts on error
       }
       return;
     }
@@ -201,9 +207,9 @@ export const CartSummary: React.FC = () => {
     if (isProcessing) return; // duplicate-click guard
     setIsProcessing(true);
     try {
-      await processCashReturn();
+      await processReturn();
     } catch {
-      // processCashReturn already toasts on error; it also calls exitCashReturnMode on failure
+      // processReturn already toasts on error; it also calls exitCashReturnMode on failure
     } finally {
       setIsProcessing(false);
     }
@@ -594,10 +600,10 @@ export const CartSummary: React.FC = () => {
         return (
           <div className="flex flex-col gap-1 px-2.5 py-2 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-300 dark:border-red-800 text-xs">
             <div className="flex items-center justify-between">
-              <span className="text-red-700 dark:text-red-400 font-black uppercase tracking-wider text-[10px]">⚠ CASH RETURN PREPARED — CONFIRM OR ESC</span>
+              <span className="text-red-700 dark:text-red-400 font-black uppercase tracking-wider text-[10px]">⚠ RETURN PREPARED — CONFIRM OR ESC</span>
               <button
                 type="button"
-                onClick={() => { exitCashReturnMode(); toast('Cash return cancelled.', { icon: '↩️' }); }}
+                onClick={() => { exitCashReturnMode(); toast('Return cancelled.', { icon: '↩️' }); }}
                 className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200 font-bold text-[10px] underline ml-2 shrink-0"
               >
                 Cancel (ESC)
@@ -733,13 +739,13 @@ export const CartSummary: React.FC = () => {
 
       {/* Extra Action Buttons Row (Directly below SALE / PAY & PRINT) */}
       <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border/60">
-        {/* 1. Cash Return — Phase 1B two-stage button */}
+        {/* 1. Return — Phase 2 unified return button */}
         <button
           type="button"
-          onClick={handleCashReturn}
+          onClick={handleReturn}
           id="pos-btn-cash-return"
           disabled={isProcessing}
-          title={isReturnMode ? 'Confirm Cash Return (second click submits the real transaction)' : 'Cash Return / Refund'}
+          title={isReturnMode ? 'Confirm Return (second click submits the transaction)' : 'Process Sales Return (Cash or Customer Credit)'}
           onKeyDown={(e) => {
             // Phase 1B Defect #4 fix: ESC is now handled by the window-level listener
             // in the useEffect above (active during isReturnMode). No button-focus
@@ -759,7 +765,7 @@ export const CartSummary: React.FC = () => {
           }`}
         >
           <Banknote className="h-3.5 w-3.5" />
-          <span className="truncate">{isReturnMode ? 'CONFIRM RETURN' : 'Cash Return'}</span>
+          <span className="truncate">{isReturnMode ? 'CONFIRM RETURN' : 'Return'}</span>
         </button>
 
         {/* 2. Product Replace */}
