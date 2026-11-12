@@ -5,6 +5,25 @@ All notable changes to Niazi Mobile Mart will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.59] - 2026-11-12
+
+### Fixed
+- **POS Invoice Customer Balance & Accounting Attribution**:
+  - Implemented real-time customer previous balance and current balance calculations on printed/previewed sales invoices for credit sales and partial settlements.
+  - Aligned thermal (80mm/58mm) and A4 invoice formats to display `Previous Remaining Balance`, credit invoice debit additions (`New Invoice (Credit): + Rs X`), and `Current Remaining Balance` with explicit `DR`/`CR` indicators.
+- **Automated 80mm Return Invoice Print Trigger**:
+  - Linked return processing (`processReturn` and `processInvoiceReturn`) to automatically generate return `InvoiceDocument` records and dispatch thermal print previews immediately upon successful return completion.
+  - Included returned item lines, customer details, and live post-refund balance in return receipts.
+- **Customer Selection & Ledger Isolation in POS**:
+  - Fixed persistent customer ledger state in POS cart so that clearing the cart or completing a checkout cleanly resets `selectedParty` and authoritative balance to zero for subsequent Walk-In transactions.
+- **Invoice Scanner & Customer Ledger Synchronization**:
+  - Added full customer ledger synchronization on customer invoice barcode scan, retrieving customer ID, phone, credit limit, and live balance directly from backend.
+  - Updated customer ledger chronological display to list the latest invoices on top and oldest at the bottom.
+- **Inventory Pricing Floor & Cost Margins**:
+  - Enforced purchase-cost floor validation to prevent accidental below-cost selling while dynamically tracking profit margins against latest purchase batches.
+- **Unified Transaction History & PostgreSQL Timestamp Resolution**:
+  - Added 7-day and 30-day date presets in Sales & History and resolved timestamptz casting compatibility across PostgreSQL queries.
+
 ## [1.3.47] - Unreleased Candidate
 
 ### Added
