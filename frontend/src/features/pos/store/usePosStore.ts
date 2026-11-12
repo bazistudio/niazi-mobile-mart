@@ -14,6 +14,7 @@ import { queryKeys } from '@/lib/react-query/queryKeys';
 import {
   createCashReturnForInvoice,
   createReturnForInvoice,
+  createUnifiedReturnForInvoice,
   allocateReturnLines,
   WALK_IN_RETURN_BLOCKED_MESSAGE,
   EXCHANGE_BLOCKED_MESSAGE,
@@ -179,6 +180,7 @@ interface PosStore {
   setCheckoutIdempotencyKey: (key: string | null) => void;
   processCashReturn: () => Promise<any>;
   processInvoiceReturn: (skipOverflowCheck?: boolean, forceCashRefund?: boolean) => Promise<any>;
+  processReturn: () => Promise<any>;
   processExchange: (options?: {
     refundMethod?: 'CASH' | 'CREDIT';
     paymentBreakdown?: { method: string; amount: number }[];
@@ -571,38 +573,95 @@ export const usePosStore = create<PosStore>()(
           quantity: i.quantity || 1,
         }));
 
-        const loadedCustomer = invoice.partyId || invoice.customer || invoice.customerId;
-        let finalCustomer: SaleSession['customer'] = null;
-        // Preserve existing walk-in customer if no customer on invoice
-        const existingTab = saleTabs.find(t => t.id === activeTabId);
-        if (existingTab) finalCustomer = existingTab.customer;
+        // Resolve customer from invoice using supported candidate fields
+        let extractedCustomerId: string | null = null;
+        let extractedCustomerName: string = 'Walk-In Customer';
 
-        if (loadedCustomer) {
-          if (typeof loadedCustomer === 'object') {
-            finalCustomer = {
-              id: loadedCustomer._id || loadedCustomer.id,
-              name: loadedCustomer.name || 'Unknown',
-            };
-          } else if (typeof loadedCustomer === 'string' && loadedCustomer !== '000000000000000000000000') {
-            finalCustomer = { id: loadedCustomer, name: 'Unknown' };
+        const rawCustomer = invoice.customerId || invoice.customer || invoice.partyId;
+        if (rawCustomer) {
+          if (typeof rawCustomer === 'object') {
+            extractedCustomerId = rawCustomer.id || rawCustomer._id || null;
+            extractedCustomerName = rawCustomer.name || invoice.customerName || 'Customer';
+          } else if (typeof rawCustomer === 'string') {
+            const trimmed = rawCustomer.trim();
+            if (trimmed && trimmed !== '000000000000000000000000' && trimmed.toLowerCase() !== 'walk-in') {
+              extractedCustomerId = trimmed;
+              extractedCustomerName = invoice.customerName || (typeof invoice.customer === 'object' ? invoice.customer?.name : null) || 'Customer';
+            }
           }
         }
+
+        // Clean walk-in reset: if invoice has no registered customer, explicitly reset to Walk-In
+        let initialCustomer: SaleSession['customer'] = null;
+        if (extractedCustomerId) {
+          initialCustomer = {
+            id: extractedCustomerId,
+            name: extractedCustomerName,
+            phone: undefined,
+            mobile: undefined,
+            currentBalance: undefined,
+            creditLimit: undefined,
+          };
+        } else {
+          initialCustomer = {
+            id: 'walk-in',
+            name: 'Walk-In Customer',
+          };
+        }
+
+        const targetTabId = activeTabId;
 
         // Synchronous cart update (immediate UI response)
         set({
           saleTabs: saleTabs.map(tab => {
-            if (tab.id !== activeTabId) return tab;
+            if (tab.id !== targetTabId) return tab;
             return {
               ...tab,
               cart: mappedItems,
               returnLines: [], // will be populated asynchronously below
               linkedInvoiceId: saleId,
-              customer: finalCustomer,
+              customer: initialCustomer,
             };
           }),
         });
 
         toast.success(`Invoice ${invoice.orderNumber || invoice._id} loaded`);
+
+        // Asynchronous: enrich customer details and live balance from customerApi
+        if (extractedCustomerId) {
+          const enrichCustId = extractedCustomerId;
+          customerApi.getCustomerDetail(enrichCustId).then((customerRes) => {
+            if (customerRes.success && customerRes.data) {
+              const custData = customerRes.data.customer;
+              const statsData = customerRes.data.stats;
+              const liveOutstanding = typeof statsData?.outstanding === 'number'
+                ? statsData.outstanding
+                : (custData.currentBalance ?? 0);
+
+              set((state) => ({
+                saleTabs: state.saleTabs.map((tab) => {
+                  // Guard against stale async update: verify tab still active and still represents the same customer
+                  if (tab.id !== targetTabId || tab.customer?.id !== enrichCustId) {
+                    return tab;
+                  }
+                  return {
+                    ...tab,
+                    customer: {
+                      id: enrichCustId,
+                      name: custData.name || tab.customer.name,
+                      phone: custData.phone || custData.mobile,
+                      mobile: custData.mobile || custData.phone,
+                      currentBalance: liveOutstanding,
+                      creditLimit: custData.creditLimit ?? 0,
+                    },
+                  };
+                }),
+              }));
+            }
+          }).catch((err) => {
+            console.warn('[loadInvoice] getCustomerDetail enrichment failed:', err);
+          });
+        }
 
         // Asynchronous: fetch returnable info and populate returnLines
         if (saleId) {
@@ -834,36 +893,43 @@ export const usePosStore = create<PosStore>()(
         }
       },
 
-      processCashReturn: async () => {
+      // ── Phase 2: Unified Return (canonical implementation) ──────────────────
+      //
+      // Replaces the two disconnected return functions with one intelligent action.
+      // Auto-detects the correct refund method from customer type and invoice state.
+      // Uses the existing ReturnOverflowModal for cashier allocation decisions when
+      // return amount > outstanding receivable (partially paid / fully paid invoices).
+      //
+      // Routing logic:
+      //   Walk-in customer           → CASH always
+      //   Registered + credit sale   → CREDIT (reverses receivable, no cash out)
+      //   Registered + return > outstanding → ReturnOverflowModal (advance or cash)
+      //   Registered + fully paid    → ReturnOverflowModal (advance or cash)
+      processReturn: async () => {
         const session = get().getActiveSession();
         if (!session) return;
 
-        // ── State A guard: invoice must be linked before entering return mode ──
         if (!session.linkedInvoiceId) {
           toast.error(WALK_IN_RETURN_BLOCKED_MESSAGE, { duration: 6000 });
           return;
         }
 
         if (session.cart.length === 0) {
-          toast.error("No items in cart to return.");
+          toast.error('No items in cart to return.');
           return;
         }
 
-        // ── Phase 1B State Machine ─────────────────────────────────────────────
-        // State A -> State B: First click prepares the return (shows negative/red
-        // prices in the UI). No API call is made yet.
+        // ── State A -> State B: first click prepares, shows negative totals ────
         if (!session.isReturnMode) {
           get().enterCashReturnMode();
-          toast('Cash Return prepared. Review the negative total, then click Cash Return again to confirm.', {
+          toast('Return prepared. Review the amount, then click Return again to confirm.', {
             icon: '↩️',
             duration: 5000,
           });
           return;
         }
 
-        // ── State B -> State C: Second click — submit real API call ────────────
-        // Phase 1B/F fix: build payload from selected returnLines when available,
-        // fall back to full cart if returnLines not yet populated.
+        // ── State B -> State C: second click — resolve method then submit ──────
         const returnLines = session.returnLines ?? [];
         const selectedLines = returnLines.filter((l) => l.selectedForReturn && l.returnableQty > 0);
         const cartPayload = selectedLines.length > 0
@@ -883,46 +949,113 @@ export const usePosStore = create<PosStore>()(
           return;
         }
 
-        try {
-          const result = await createCashReturnForInvoice(
-            session.linkedInvoiceId,
-            cartPayload,
-          );
+        const customerId = session.customer?.id;
+        const isWalkIn = !customerId || customerId === 'walk-in';
 
-          // Reset state (also clears isReturnMode via clearCart)
-          get().clearCart();
-          platformAdapter.emitEvent('inventory-updated');
-
-          // Phase 1B fix: full cache invalidation (cash, returns, customers all added)
+        // ── Inner helper: submit the return once refund method is resolved ──────
+        const submitReturn = async (method: 'CASH' | 'CREDIT') => {
+          const activeSession = get().getActiveSession();
+          if (!activeSession?.linkedInvoiceId) return;
           try {
-            const qc = getQueryClient();
-            qc.invalidateQueries({ queryKey: queryKeys.dashboard.all });
-            qc.invalidateQueries({ queryKey: ['sales'] });
-            qc.invalidateQueries({ queryKey: ['products'] });
-            qc.invalidateQueries({ queryKey: queryKeys.customers.all });
-            qc.invalidateQueries({ queryKey: ['cash'] });
-            qc.invalidateQueries({ queryKey: ['returns'] });
-          } catch (qcErr) {
-            console.warn('Query cache invalidation failed (cash return):', qcErr);
+            const result = await createUnifiedReturnForInvoice(
+              activeSession.linkedInvoiceId,
+              cartPayload,
+              method,
+              'POS Return',
+            );
+            get().clearCart(); // also clears isReturnMode
+            platformAdapter.emitEvent('inventory-updated');
+            try {
+              const qc = getQueryClient();
+              qc.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+              qc.invalidateQueries({ queryKey: ['sales'] });
+              qc.invalidateQueries({ queryKey: ['products'] });
+              qc.invalidateQueries({ queryKey: queryKeys.customers.all });
+              qc.invalidateQueries({ queryKey: ['cash'] });
+              qc.invalidateQueries({ queryKey: ['returns'] });
+            } catch (qcErr) {
+              console.warn('[processReturn] cache invalidation failed (non-fatal):', qcErr);
+            }
+            try {
+              await useCashStore.getState().fetchCurrentState();
+            } catch (cashErr) {
+              console.warn('[processReturn] fetchCurrentState failed (non-fatal):', cashErr);
+            }
+            if (method === 'CASH') {
+              toast.success('Return recorded. Cash refunded from the drawer.');
+            } else {
+              toast.success('Return recorded. Customer credit updated.');
+            }
+            return result;
+          } catch (error: any) {
+            get().exitCashReturnMode();
+            const message = error?.message || error?.toString() || 'Unknown error';
+            console.error('[processReturn] submit failed', error);
+            toast.error('Return failed: ' + message);
+            throw error;
           }
+        };
 
-          // Phase 1B/F fix (Defect #5): refresh drawer balance after successful return
-          try {
-            await useCashStore.getState().fetchCurrentState();
-          } catch (cashErr) {
-            console.warn('[processCashReturn] fetchCurrentState failed (non-fatal):', cashErr);
-          }
-
-          toast.success("Return recorded. Cash refunded from the drawer.");
-          return result;
-        } catch (error: any) {
-          // On API failure: exit return mode so the cashier can retry cleanly
-          get().exitCashReturnMode();
-          const message = error?.message || error?.toString() || "Unknown error";
-          console.error("Cash Return failed", error);
-          toast.error("Return failed: " + message);
-          throw error;
+        // Walk-in: always cash, no customer balance check needed
+        if (isWalkIn) {
+          return submitReturn('CASH');
         }
+
+        // Registered customer: check balance to decide credit vs overflow modal
+        const returnTotal = session.cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+        const finalRefund = returnTotal - (session.invoiceDiscountValue || 0);
+
+        try {
+          const customerRes = await customerApi.getCustomerDetail(customerId);
+          const currentBalance = customerRes.data?.stats?.outstanding || 0;
+          // currentBalance = SUM(debit) - SUM(credit) → positive means customer owes shop
+
+          if (finalRefund <= currentBalance) {
+            // Return amount fully offset by outstanding receivable → pure CREDIT
+            return submitReturn('CREDIT');
+          }
+
+          // Excess: return amount > outstanding receivable → need cashier decision
+          const overflowAmount = finalRefund - currentBalance;
+          const shopRes = await shopApi.getMyShop();
+          const shopCashBalance = shopRes.data?.cashBalance || 0;
+
+          set({
+            returnOverflowState: {
+              isOpen: true,
+              currentBalance,
+              refundAmount: finalRefund,
+              overflowAmount,
+              shopCashBalance,
+              // Option 1: Keep excess as customer account advance (CREDIT — balance goes negative)
+              onKeepCredit: async () => {
+                set({ returnOverflowState: null });
+                get().exitCashReturnMode();
+                return submitReturn('CREDIT');
+              },
+              // Option 2: Pay out excess in cash (CASH — full refund from drawer)
+              onRefundCash: async () => {
+                set({ returnOverflowState: null });
+                get().exitCashReturnMode();
+                return submitReturn('CASH');
+              },
+              onCancel: () => {
+                set({ returnOverflowState: null });
+              },
+            },
+          });
+        } catch (error: any) {
+          console.error('[processReturn] customer balance check failed', error);
+          toast.error('Failed to verify customer balance. Please try again.');
+          get().exitCashReturnMode();
+        }
+      },
+
+      // ── processCashReturn: shim → processReturn() ─────────────────────────────
+      // Retained so any remaining call sites continue to work. Routes through
+      // the unified canonical action.
+      processCashReturn: async () => {
+        return get().processReturn();
       },
 
       processInvoiceReturn: async (skipOverflowCheck = false, forceCashRefund = false) => {

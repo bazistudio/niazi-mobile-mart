@@ -18,6 +18,8 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
   const navigate = useNavigate();
   const activeSession = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId));
 
+  const setCustomer = usePosStore((s) => s.setCustomer);
+
   const selectedCustomer = activeSession?.customer && activeSession.customer.id !== 'walk-in'
     ? activeSession.customer
     : null;
@@ -40,7 +42,28 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
       }
     : null;
 
-  const { timeline, isLedgerLoading, refetchLedger } = useLedger(ledgerQueryArg);
+  const { timeline, statement, isLedgerLoading, refetchLedger } = useLedger(ledgerQueryArg);
+
+  // Derive authoritative live balance: prefer store currentBalance if populated,
+  // otherwise fallback to statement current_balance from the live ledger
+  const authoritativeBalance = selectedCustomer?.currentBalance !== undefined
+    ? selectedCustomer.currentBalance
+    : (typeof statement?.current_balance === 'number' ? statement.current_balance : 0);
+
+  // Synchronize store customer balance if ledger returns authoritative balance and store lacked it
+  React.useEffect(() => {
+    if (
+      selectedCustomer &&
+      selectedCustomer.currentBalance === undefined &&
+      statement &&
+      typeof statement.current_balance === 'number'
+    ) {
+      setCustomer({
+        ...selectedCustomer,
+        currentBalance: statement.current_balance,
+      });
+    }
+  }, [selectedCustomer, statement, setCustomer]);
 
   // Recent 5 entries for mini statement table
   const recentEntries = timeline.slice(0, 5);
@@ -103,17 +126,29 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
             <div className="flex items-center justify-end gap-1">
               <span
                 className={`text-xs font-black tabular-nums ${
-                  (selectedCustomer?.currentBalance ?? 0) > 0 ? 'text-danger' : 'text-emerald-600'
+                  authoritativeBalance > 0
+                    ? 'text-danger'
+                    : authoritativeBalance < 0
+                    ? 'text-primary'
+                    : 'text-emerald-600'
                 }`}
               >
-                Rs {Math.abs(selectedCustomer?.currentBalance ?? 0).toLocaleString()}{' '}
-                {(selectedCustomer?.currentBalance ?? 0) > 0 ? 'Dr' : ''}
+                Rs {Math.abs(authoritativeBalance).toLocaleString()}{' '}
+                {authoritativeBalance > 0 ? 'Dr' : authoritativeBalance < 0 ? 'Cr' : ''}
               </span>
-              {(selectedCustomer?.currentBalance ?? 0) > 0 && (
+              {authoritativeBalance > 0 ? (
                 <span className="px-1 py-0.2 rounded text-[9px] font-black uppercase bg-danger/10 text-danger border border-danger/20">
                   Outstanding
                 </span>
-              )}
+              ) : authoritativeBalance < 0 ? (
+                <span className="px-1 py-0.2 rounded text-[9px] font-black uppercase bg-primary/10 text-primary border border-primary/20">
+                  Advance
+                </span>
+              ) : selectedCustomer ? (
+                <span className="px-1 py-0.2 rounded text-[9px] font-black uppercase bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                  Settled
+                </span>
+              ) : null}
             </div>
           </div>
         </div>

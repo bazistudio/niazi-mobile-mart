@@ -37,12 +37,18 @@ export function useLedger(initialParty?: SelectedParty | null) {
     enabled: !!selectedParty,
   });
 
-  const timeline = ledgerResponse?.data?.timeline || [];
+  // Backend returns statement chronologically (oldest ASC).
+  // Reverse to display newest/latest invoices and payments on TOP and oldest at BOTTOM.
+  const rawTimeline = useMemo(() => {
+    const list = ledgerResponse?.data?.timeline || [];
+    return [...list].reverse();
+  }, [ledgerResponse?.data?.timeline]);
+
   const openInvoices = ledgerResponse?.data?.openInvoices || [];
   const allocations = ledgerResponse?.data?.allocations || [];
 
   const filteredTimeline = useMemo(() => {
-    let filtered = timeline;
+    let filtered = rawTimeline;
 
     if (activeTab === 'invoices') {
       filtered = filtered.filter(t => t.type === 'invoice' || t.type === 'supplier_invoice' || t.type === 'sale');
@@ -59,7 +65,7 @@ export function useLedger(initialParty?: SelectedParty | null) {
     }
 
     return filtered;
-  }, [timeline, activeTab, searchQuery]);
+  }, [rawTimeline, activeTab, searchQuery]);
 
   return {
     selectedParty,
@@ -69,9 +75,10 @@ export function useLedger(initialParty?: SelectedParty | null) {
     searchQuery,
     setSearchQuery,
     timeline: filteredTimeline,
-    rawTimeline: timeline,
+    rawTimeline,
     openInvoices,
     allocations,
+    statement: ledgerResponse?.data?.statement ?? null,
     isLedgerLoading,
     refetchLedger
   };
