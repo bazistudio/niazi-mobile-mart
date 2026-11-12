@@ -68,39 +68,48 @@ export const InvoiceReceipt: React.FC = () => {
           let specs: string | undefined;
           try {
             const rawItem = i as any;
-            const targetId = rawItem.productId || rawItem.id;
-            let matchedProduct: any = null;
+            // 1. Primary & authoritative: use snapshot captured at sale time
+            if (rawItem.specs && typeof rawItem.specs === 'string' && rawItem.specs.trim().length > 0) {
+              specs = rawItem.specs.trim();
+            } else {
+              // 2. Safe fallback for legacy invoices without snapshots:
+              // Match by stable product identifier first
+              const targetId = rawItem.productId || rawItem.id;
+              let matchedProduct: any = null;
 
-            if (targetId) {
-              matchedProduct = inventoryProducts.find(p => (p.id || (p as any)._id) === targetId);
-            }
+              if (targetId) {
+                matchedProduct = inventoryProducts.find(p => (p.id || (p as any)._id) === targetId);
+              }
 
-            if (!matchedProduct && i.name) {
-              const exactMatches = inventoryProducts.filter(p => p.name && p.name.trim().toLowerCase() === i.name.trim().toLowerCase());
-              if (exactMatches.length === 1) {
-                matchedProduct = exactMatches[0];
+              // Only fall back to name matching if product ID was genuinely not present
+              // and there is strictly 1 unambiguous match in inventory
+              if (!matchedProduct && !targetId && i.name) {
+                const exactMatches = inventoryProducts.filter(p => p.name && p.name.trim().toLowerCase() === i.name.trim().toLowerCase());
+                if (exactMatches.length === 1) {
+                  matchedProduct = exactMatches[0];
+                }
               }
-            }
 
-            if (matchedProduct) {
-              const specList: string[] = [];
-              if (matchedProduct.category && matchedProduct.category !== '-' && matchedProduct.category.trim().length > 0 && matchedProduct.category.toLowerCase() !== 'uncategorized') {
-                specList.push(matchedProduct.category);
-              }
-              if (matchedProduct.quality && matchedProduct.quality !== '-' && matchedProduct.quality.trim().length > 0) {
-                specList.push(matchedProduct.quality);
-              }
-              if (matchedProduct.color && matchedProduct.color !== '-' && matchedProduct.color.trim().length > 0) {
-                specList.push(matchedProduct.color);
-              }
-              if (matchedProduct.brand && matchedProduct.brand !== '-' && matchedProduct.brand.trim().length > 0) {
-                specList.push(matchedProduct.brand);
-              }
-              if (matchedProduct.company && matchedProduct.company !== '-' && matchedProduct.company.trim().length > 0) {
-                specList.push(matchedProduct.company);
-              }
-              if (specList.length > 0) {
-                specs = specList.join(' • ');
+              if (matchedProduct) {
+                const specList: string[] = [];
+                if (matchedProduct.category && matchedProduct.category !== '-' && matchedProduct.category.trim().length > 0 && matchedProduct.category.toLowerCase() !== 'uncategorized') {
+                  specList.push(matchedProduct.category);
+                }
+                if (matchedProduct.quality && matchedProduct.quality !== '-' && matchedProduct.quality.trim().length > 0) {
+                  specList.push(matchedProduct.quality);
+                }
+                if (matchedProduct.color && matchedProduct.color !== '-' && matchedProduct.color.trim().length > 0) {
+                  specList.push(matchedProduct.color);
+                }
+                if (matchedProduct.brand && matchedProduct.brand !== '-' && matchedProduct.brand.trim().length > 0) {
+                  specList.push(matchedProduct.brand);
+                }
+                if (matchedProduct.company && matchedProduct.company !== '-' && matchedProduct.company.trim().length > 0) {
+                  specList.push(matchedProduct.company);
+                }
+                if (specList.length > 0) {
+                  specs = specList.join(' • ');
+                }
               }
             }
           } catch (lookupErr) {

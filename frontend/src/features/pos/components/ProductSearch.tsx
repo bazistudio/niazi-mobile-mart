@@ -167,6 +167,15 @@ export const ProductSearch = () => {
   };
 
   const handleAdd = (product: any) => {
+    const specParts = [
+      product.category && product.category !== '-' && product.category.toLowerCase() !== 'uncategorized' ? product.category : '',
+      product.quality && product.quality !== '-' ? product.quality : '',
+      product.color && product.color !== '-' ? product.color : '',
+      product.brand && product.brand !== '-' ? product.brand : '',
+      product.company && product.company !== '-' ? product.company : '',
+    ].filter(p => Boolean(p && String(p).trim().length > 0));
+    const specsSnapshot = specParts.length > 0 ? specParts.join(' • ') : undefined;
+
     const dbProduct = {
       id: product.id || product._id,
       sku: product.sku,
@@ -176,7 +185,8 @@ export const ProductSearch = () => {
       salePrice: product.price ?? product.salePrice ?? 0,
       stock: product.stock,
       reservedStock: 0,
-      lastUpdated: Date.now()
+      lastUpdated: Date.now(),
+      specs: specsSnapshot,
     };
     addToCart(dbProduct, targetBucket === 'return');
     setSearchTerm('');

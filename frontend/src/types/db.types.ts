@@ -14,6 +14,7 @@ export interface DBInventory {
   stock: number;
   reservedStock: number;
   lastUpdated: number;
+  specs?: string;
 }
 
 export interface DBLedgerEntry {

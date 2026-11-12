@@ -18,11 +18,14 @@ export interface InvoiceDocument {
   cashier?: string | null;
 
   items: {
+    productId?: string;
+    id?: string;
     name: string;
     qty: number;
     price: number;
     discount: number;
     subtotal: number;
+    specs?: string;
   }[];
 
   summary: {
@@ -61,11 +64,14 @@ export class DocumentService {
       cashier: extras?.cashier ?? null,
 
       items: transaction.items.map(i => ({
-        name: i.productName,
-        qty: i.quantity,
-        price: i.unitPrice,
-        discount: i.discount,
-        subtotal: i.subtotal
+        productId: i.productId || i.id,
+        id: i.id || i.productId,
+        name: i.productName || i.name || 'Item',
+        qty: i.quantity || 1,
+        price: i.unitPrice ?? i.price ?? 0,
+        discount: i.discount || 0,
+        subtotal: i.subtotal ?? ((i.unitPrice ?? i.price ?? 0) * (i.quantity || 1)),
+        specs: i.specs || undefined,
       })),
 
       summary: {

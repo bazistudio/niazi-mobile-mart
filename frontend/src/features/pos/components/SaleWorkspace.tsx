@@ -120,6 +120,15 @@ export const SaleWorkspace: React.FC = () => {
           return;
         }
 
+        const specParts = [
+          matchedProduct.category && matchedProduct.category !== '-' && matchedProduct.category.toLowerCase() !== 'uncategorized' ? matchedProduct.category : '',
+          matchedProduct.quality && matchedProduct.quality !== '-' ? matchedProduct.quality : '',
+          matchedProduct.color && matchedProduct.color !== '-' ? matchedProduct.color : '',
+          matchedProduct.brand && matchedProduct.brand !== '-' ? matchedProduct.brand : '',
+          matchedProduct.company && matchedProduct.company !== '-' ? matchedProduct.company : '',
+        ].filter(p => Boolean(p && String(p).trim().length > 0));
+        const specsSnapshot = specParts.length > 0 ? specParts.join(' • ') : undefined;
+
         const dbProduct: DBInventory = {
           id: matchedProduct.id || (matchedProduct as any)._id,
           sku: matchedProduct.sku || '',
@@ -130,6 +139,7 @@ export const SaleWorkspace: React.FC = () => {
           stock: matchedProduct.stock ?? 0,
           reservedStock: 0,
           lastUpdated: Date.now(),
+          specs: specsSnapshot,
         };
 
         addToCart(dbProduct, isReturnMode);

@@ -241,6 +241,15 @@ export function InventoryProductsPage({ mode = 'products' }: InventoryProductsPa
    * Double-click handler: adds product to active POS cart and navigates directly to POS.
    */
   const handleRowDoubleClick = useCallback((product: InventoryProduct) => {
+    const specParts = [
+      product.category && product.category !== '-' && product.category.toLowerCase() !== 'uncategorized' ? product.category : '',
+      product.quality && product.quality !== '-' ? product.quality : '',
+      product.color && product.color !== '-' ? product.color : '',
+      product.brand && product.brand !== '-' ? product.brand : '',
+      product.company && product.company !== '-' ? product.company : '',
+    ].filter(p => Boolean(p && String(p).trim().length > 0));
+    const specsSnapshot = specParts.length > 0 ? specParts.join(' • ') : undefined;
+
     const dbItem: DBInventory = {
       id: product.id,
       sku: product.sku || '',
@@ -251,6 +260,7 @@ export function InventoryProductsPage({ mode = 'products' }: InventoryProductsPa
       stock: product.stock ?? 0,
       reservedStock: 0,
       lastUpdated: Date.now(),
+      specs: specsSnapshot,
     };
 
     addToCart(dbItem, false);

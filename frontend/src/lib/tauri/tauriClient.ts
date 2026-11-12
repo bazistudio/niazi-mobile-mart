@@ -2430,6 +2430,10 @@ export interface SaleLine {
   discount: number;
   line_total: number;
   created_at: string;
+  specs?: string;
+  line_type?: 'PRODUCT' | 'MOBILE';
+  imei1?: string;
+  device_id?: string;
 }
 
 export interface SalePayment {

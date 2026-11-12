@@ -40,6 +40,7 @@ export interface CartItem {
   costPrice: number;
   maxStock: number;
   quantity: number;
+  specs?: string;
 }
 
 // Phase 1B/F: Per-line return metadata populated by getSaleReturnableInfo().
@@ -433,7 +434,8 @@ export const usePosStore = create<PosStore>()(
               unitPrice: product.salePrice,
               costPrice: product.costPrice,
               maxStock: product.stock,
-              quantity: 1
+              quantity: 1,
+              specs: product.specs || undefined,
             };
             
             return isReturn 
@@ -751,12 +753,14 @@ export const usePosStore = create<PosStore>()(
               ...session.cart.map(item => ({
                 productId: item.productId,
                 quantity: item.quantity,
-                price: item.unitPrice
+                price: item.unitPrice,
+                specs: item.specs,
               })),
               ...session.returnedItems.map(item => ({
                 productId: item.productId,
                 quantity: -Math.abs(item.quantity),
-                price: item.unitPrice
+                price: item.unitPrice,
+                specs: item.specs,
               }))
             ],
             customerId: effectiveCustomer?.id === 'walk-in' ? undefined : effectiveCustomer?.id,

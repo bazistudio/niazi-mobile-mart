@@ -6,6 +6,7 @@ export interface CreateOrderPayload {
     quantity: number;
     price: number;
     discount?: number;
+    specs?: string;
   }[];
   customerId?: string;
   paymentMethod: string;
@@ -217,6 +218,18 @@ export const salesApi = {
         notes: payload.notes || null,
         idempotency_key: payload.idempotencyKey || null,
       });
+
+      // Augment mapped lines with client-provided sale-time specifications if backend lines did not already provide them
+      if (Array.isArray(saleResult.lines)) {
+        saleResult.lines.forEach((line) => {
+          if (!line.specs) {
+            const clientItem = payload.items.find(pi => pi.productId === line.product_id);
+            if (clientItem?.specs) {
+              line.specs = clientItem.specs;
+            }
+          }
+        });
+      }
 
       const order = mapSaleToOrder(saleResult.sale, saleResult.lines, saleResult.payments);
       order.creditAmount = saleResult.credit_amount;

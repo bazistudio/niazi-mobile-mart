@@ -57,6 +57,15 @@ export const ProductCardGrid: React.FC<ProductCardGridProps> = ({
       return;
     }
 
+    const specParts = [
+      product.category && product.category !== '-' && product.category.toLowerCase() !== 'uncategorized' ? product.category : '',
+      product.quality && product.quality !== '-' ? product.quality : '',
+      product.color && product.color !== '-' ? product.color : '',
+      product.brand && product.brand !== '-' ? product.brand : '',
+      product.company && product.company !== '-' ? product.company : '',
+    ].filter(p => Boolean(p && String(p).trim().length > 0));
+    const specsSnapshot = specParts.length > 0 ? specParts.join(' • ') : undefined;
+
     const dbProduct: DBInventory = {
       id: product.id || (product as any)._id,
       sku: product.sku || '',
@@ -67,6 +76,7 @@ export const ProductCardGrid: React.FC<ProductCardGridProps> = ({
       stock: product.stock ?? 0,
       reservedStock: 0,
       lastUpdated: Date.now(),
+      specs: specsSnapshot,
     };
 
     addToCart(dbProduct, isReturnMode);
