@@ -289,9 +289,24 @@ export const CartSummary: React.FC = () => {
         phone1: shopHeader?.phone || (activeShop as any)?.phone || '',
       };
       const authUser = useAuthStore.getState().user;
+      const creditDue = orderData.creditAmount ?? Math.max((orderData.totalAmount || 0) - (orderData.paidAmount ?? orderData.totalPaid ?? (orderData.totalAmount || 0)), 0);
+      const isCreditSale = creditDue > 0 || (orderData.paymentMethod || '').toUpperCase().includes('CREDIT');
+      let prevBal: number | undefined = undefined;
+      let currBal: number | undefined = undefined;
+      if (targetCustomer && (typeof (targetCustomer as any).currentBalance === 'number' || orderData.customerBalanceAfter !== undefined)) {
+        if (typeof orderData.customerBalanceAfter === 'number') {
+          currBal = orderData.customerBalanceAfter;
+          prevBal = currBal - (isCreditSale ? creditDue : 0);
+        } else if (typeof (targetCustomer as any).currentBalance === 'number') {
+          prevBal = Number((targetCustomer as any).currentBalance);
+          currBal = prevBal + (isCreditSale ? creditDue : 0);
+        }
+      }
       const invoiceExtras = {
         customer: targetCustomer ?? null,
         cashier: authUser ? (authUser.role ? `${authUser.name} (${authUser.role})` : authUser.name) : null,
+        previousBalance: prevBal,
+        currentBalance: currBal,
       };
       const mappedTransaction: any = {
         transactionId: orderData.orderNumber || orderData.transactionId || orderData._id || `TXN-${Date.now()}`,
@@ -502,9 +517,24 @@ export const CartSummary: React.FC = () => {
         if (shouldPrint) {
           // DEF-SALE-06: pass real customer and cashier to receipt
           const authUser = useAuthStore.getState().user;
+          const creditDue = mappedTransaction.remainingDue || 0;
+          const isCreditSale = creditDue > 0 || (orderData.paymentMethod || '').toUpperCase().includes('CREDIT');
+          let prevBal: number | undefined = undefined;
+          let currBal: number | undefined = undefined;
+          if (targetCustomer && (typeof (targetCustomer as any).currentBalance === 'number' || orderData.customerBalanceAfter !== undefined)) {
+            if (typeof orderData.customerBalanceAfter === 'number') {
+              currBal = orderData.customerBalanceAfter;
+              prevBal = currBal - (isCreditSale ? creditDue : 0);
+            } else if (typeof (targetCustomer as any).currentBalance === 'number') {
+              prevBal = Number((targetCustomer as any).currentBalance);
+              currBal = prevBal + (isCreditSale ? creditDue : 0);
+            }
+          }
           const invoiceExtras = {
             customer: targetCustomer ?? null,
             cashier: authUser ? (authUser.role ? `${authUser.name} (${authUser.role})` : authUser.name) : null,
+            previousBalance: prevBal,
+            currentBalance: currBal,
           };
           const invoice = DocumentService.buildInvoice(mappedTransaction as any, realShopProfile as any, invoiceExtras);
           // Set in store to trigger unified thermal printing in InvoiceReceipt.tsx

@@ -7,7 +7,7 @@ import { customerApi } from '@/services/customer.api';
 import { shopApi } from '@/services/shop.api';
 import { ledgerApi } from '@/services/ledger.api';
 import { platformAdapter } from '@/lib/platformAdapter';
-import { InvoiceDocument } from '../services/document/document.service';
+import { InvoiceDocument, DocumentService } from '../services/document/document.service';
 import type { ExchangeResultDto, SaleReturnableLineDto } from '@/lib/tauri/tauriClient';
 import { getQueryClient } from '@/components/providers/ReactQueryProvider';
 import { queryKeys } from '@/lib/react-query/queryKeys';
@@ -23,6 +23,8 @@ import {
 import { returnsApi } from '@/services/returns.api';
 import { useCashStore } from '@/features/cash';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
+import { useAuthStore } from '@/lib/auth/core/auth.store';
+import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
 
 // Migrate legacy POS storage key if present
 if (typeof window !== 'undefined' && !localStorage.getItem('niazi-pos')) {
@@ -963,6 +965,65 @@ export const usePosStore = create<PosStore>()(
               method,
               'POS Return',
             );
+
+            // Auto-trigger 80mm return invoice print
+            try {
+              const activeShop = useOrganizationStore.getState().activeShop;
+              const printerStore = usePrinterStore.getState();
+              const shopHeader = printerStore.shopHeader;
+              const realShopProfile = {
+                name: shopHeader?.name || activeShop?.name || 'Niazi Mobile Mart',
+                address: shopHeader?.address || (activeShop as any)?.address || 'Main Branch',
+                phone1: shopHeader?.phone || (activeShop as any)?.phone || '',
+              };
+              const authUser = useAuthStore.getState().user;
+              const returnedAmount = result?.sales_return?.total_amount ?? cartPayload.reduce((sum, item: any) => sum + (item.unitPrice || 0) * (item.quantity || 1), 0);
+              const customerBalAfter = result?.customer_balance_after ?? null;
+              let prevBal: number | undefined = undefined;
+              let currBal: number | undefined = undefined;
+              if (customerBalAfter !== null) {
+                currBal = Number(customerBalAfter);
+                prevBal = method === 'CREDIT' ? currBal + returnedAmount : currBal;
+              } else if (activeSession.customer && typeof (activeSession.customer as any).currentBalance === 'number') {
+                prevBal = Number((activeSession.customer as any).currentBalance);
+                currBal = method === 'CREDIT' ? prevBal - returnedAmount : prevBal;
+              }
+
+              const returnTransaction = {
+                transactionId: result?.sales_return?.return_number || `RET-${Date.now().toString().slice(-6)}`,
+                items: (result?.lines || cartPayload).map((line: any) => ({
+                  productId: line.product_id || line.productId,
+                  id: line.id || line.product_id || line.productId,
+                  productName: line.product_name_snapshot || line.productName || 'Returned Item',
+                  quantity: line.quantity,
+                  unitPrice: line.unit_price || line.unitPrice || 0,
+                  discount: 0,
+                  subtotal: (line.unit_price || line.unitPrice || 0) * (line.quantity || 1),
+                })),
+                subtotal: returnedAmount,
+                discountTotal: 0,
+                grandTotal: returnedAmount,
+                totalPaid: method === 'CASH' ? returnedAmount : 0,
+                remainingDue: method === 'CREDIT' ? returnedAmount : 0,
+                changeReturned: 0,
+                paymentBreakdown: [{ method: method === 'CASH' ? 'Cash Refund' : 'Customer Credit', amount: returnedAmount }],
+                createdAt: Date.now(),
+              };
+
+              const invoiceExtras = {
+                customer: activeSession.customer ?? null,
+                cashier: authUser ? (authUser.role ? `${authUser.name} (${authUser.role})` : authUser.name) : null,
+                previousBalance: prevBal,
+                currentBalance: currBal,
+              };
+
+              const invoice = DocumentService.buildInvoice(returnTransaction as any, realShopProfile as any, invoiceExtras);
+              get().setLastInvoice(invoice);
+              DocumentService.logPrint(invoice.invoiceId, 'PRINT').catch(() => {});
+            } catch (printErr) {
+              console.warn('[processReturn] auto return receipt generation non-fatal error:', printErr);
+            }
+
             get().clearCart(); // also clears isReturnMode
             platformAdapter.emitEvent('inventory-updated');
             try {
@@ -1157,6 +1218,64 @@ export const usePosStore = create<PosStore>()(
             toast.success("Cash refund recorded. Drawer balance updated.");
           } else {
             toast.success("Invoice Return processed successfully.");
+          }
+
+          // Auto-trigger 80mm return invoice print
+          try {
+            const activeShop = useOrganizationStore.getState().activeShop;
+            const printerStore = usePrinterStore.getState();
+            const shopHeader = printerStore.shopHeader;
+            const realShopProfile = {
+              name: shopHeader?.name || activeShop?.name || 'Niazi Mobile Mart',
+              address: shopHeader?.address || (activeShop as any)?.address || 'Main Branch',
+              phone1: shopHeader?.phone || (activeShop as any)?.phone || '',
+            };
+            const authUser = useAuthStore.getState().user;
+            const returnedAmount = result?.sales_return?.total_amount ?? session.cart.reduce((sum, item: any) => sum + (item.unitPrice || 0) * (item.quantity || 1), 0);
+            const customerBalAfter = result?.customer_balance_after ?? null;
+            let prevBal: number | undefined = undefined;
+            let currBal: number | undefined = undefined;
+            if (customerBalAfter !== null) {
+              currBal = Number(customerBalAfter);
+              prevBal = refundMethod === 'CREDIT' ? currBal + returnedAmount : currBal;
+            } else if (session.customer && typeof (session.customer as any).currentBalance === 'number') {
+              prevBal = Number((session.customer as any).currentBalance);
+              currBal = refundMethod === 'CREDIT' ? prevBal - returnedAmount : prevBal;
+            }
+
+            const returnTransaction = {
+              transactionId: result?.sales_return?.return_number || `RET-${Date.now().toString().slice(-6)}`,
+              items: (result?.lines || session.cart).map((line: any) => ({
+                productId: line.product_id || line.productId,
+                id: line.id || line.product_id || line.productId,
+                productName: line.product_name_snapshot || line.productName || 'Returned Item',
+                quantity: line.quantity,
+                unitPrice: line.unit_price || line.unitPrice || 0,
+                discount: 0,
+                subtotal: (line.unit_price || line.unitPrice || 0) * (line.quantity || 1),
+              })),
+              subtotal: returnedAmount,
+              discountTotal: 0,
+              grandTotal: returnedAmount,
+              totalPaid: refundMethod === 'CASH' ? returnedAmount : 0,
+              remainingDue: refundMethod === 'CREDIT' ? returnedAmount : 0,
+              changeReturned: 0,
+              paymentBreakdown: [{ method: refundMethod === 'CASH' ? 'Cash Refund' : 'Customer Credit', amount: returnedAmount }],
+              createdAt: Date.now(),
+            };
+
+            const invoiceExtras = {
+              customer: session.customer ?? null,
+              cashier: authUser ? (authUser.role ? `${authUser.name} (${authUser.role})` : authUser.name) : null,
+              previousBalance: prevBal,
+              currentBalance: currBal,
+            };
+
+            const invoice = DocumentService.buildInvoice(returnTransaction as any, realShopProfile as any, invoiceExtras);
+            get().setLastInvoice(invoice);
+            DocumentService.logPrint(invoice.invoiceId, 'PRINT').catch(() => {});
+          } catch (printErr) {
+            console.warn('[processInvoiceReturn] auto return receipt generation non-fatal error:', printErr);
           }
 
           get().clearCart();

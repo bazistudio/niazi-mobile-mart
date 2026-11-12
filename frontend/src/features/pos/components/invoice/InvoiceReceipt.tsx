@@ -136,6 +136,8 @@ export const InvoiceReceipt: React.FC = () => {
         change: invoice.summary.change,
         // FINDING-02: pass outstanding balance so thermal formatter can print it
         due: invoice.summary.due,
+        previousBalance: invoice.summary.previousBalance,
+        currentBalance: invoice.summary.currentBalance,
         shop: effectiveShop,
         returnPolicy: effectiveShop.returnPolicy || 'Goods once sold can only be returned or exchanged within 3 days with original receipt.',
         warrantyInstructions: effectiveShop.warrantyInstructions || undefined,

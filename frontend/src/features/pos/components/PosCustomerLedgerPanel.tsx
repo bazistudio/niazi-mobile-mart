@@ -44,11 +44,12 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
 
   const { timeline, statement, isLedgerLoading, refetchLedger } = useLedger(ledgerQueryArg);
 
-  // Derive authoritative live balance: prefer store currentBalance if populated,
-  // otherwise fallback to statement current_balance from the live ledger
-  const authoritativeBalance = selectedCustomer?.currentBalance !== undefined
-    ? selectedCustomer.currentBalance
-    : (typeof statement?.current_balance === 'number' ? statement.current_balance : 0);
+  // Derive authoritative live balance: only applicable when a real customer is selected
+  const authoritativeBalance = selectedCustomer
+    ? (selectedCustomer.currentBalance !== undefined
+        ? selectedCustomer.currentBalance
+        : (typeof statement?.current_balance === 'number' ? statement.current_balance : 0))
+    : 0;
 
   // Synchronize store customer balance if ledger returns authoritative balance and store lacked it
   React.useEffect(() => {

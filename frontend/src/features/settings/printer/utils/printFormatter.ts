@@ -232,6 +232,8 @@ export const printFormatter = {
       change: order.changeReturned ?? order.change ?? order.changeAmount,
       // FINDING-02: outstanding balance owed after this sale
       due: order.remainingDue ?? order.creditAmount ?? order.due,
+      previousBalance: typeof order.previousBalance === 'number' ? order.previousBalance : (order.summary && typeof order.summary.previousBalance === 'number' ? order.summary.previousBalance : undefined),
+      currentBalance: typeof order.currentBalance === 'number' ? order.currentBalance : (order.summary && typeof order.summary.currentBalance === 'number' ? order.summary.currentBalance : undefined),
       shop,
       returnPolicy: order.returnPolicy || shop.returnPolicy || 'Goods once sold can only be returned/exchanged within 3 days with original receipt.',
       warrantyInstructions: order.warrantyInstructions || shop.warrantyInstructions || undefined
@@ -509,21 +511,32 @@ const formatA4 = (invoice: UnifiedInvoice, settings: PrinterSettings, title: str
           <span>Payment Method:</span>
           <span style="text-transform: uppercase;">${invoice.paymentMethod || 'Cash'}</span>
         </div>
-        ${typeof invoice.previousBalance === 'number' ? `
+        ${typeof invoice.previousBalance === 'number' ? (() => {
+          const isReturn = (invoice.total || 0) < 0 || (invoice.items || []).some(i => i.qty < 0);
+          const isCredit = (invoice.due ?? 0) > 0 || (invoice.paymentMethod || '').toUpperCase().includes('CREDIT');
+          const midLabel = isReturn ? 'Return / Refund:' : (isCredit ? 'New Invoice (Credit):' : 'Payment Received:');
+          const midSign = isReturn ? '-' : (isCredit ? '+' : '-');
+          const calculatedBal = typeof invoice.currentBalance === 'number'
+            ? invoice.currentBalance
+            : (isReturn
+                ? (invoice.previousBalance - Math.abs(invoice.total || 0))
+                : (invoice.previousBalance + (invoice.due ?? invoice.total ?? 0)));
+          return `
         <div style="margin-top: 10px; border-top: 1px dashed #444; padding-top: 6px;">
           <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px; color: #c0392b;">
             <span>Previous Remaining Balance:</span>
             <span style="font-weight: bold;">Rs ${Math.abs(invoice.previousBalance).toLocaleString()} ${invoice.previousBalance < 0 ? 'CR' : 'DR'}</span>
           </div>
           <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px; color: #27ae60;">
-            <span>Payment Received:</span>
-            <span style="font-weight: bold;">- Rs ${(invoice.total || 0).toLocaleString()}</span>
+            <span>${midLabel}</span>
+            <span style="font-weight: bold;">${midSign} Rs ${Math.abs(invoice.due ?? invoice.total ?? 0).toLocaleString()}</span>
           </div>
           <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 900; color: #2980b9; border-top: 1px solid #000; padding-top: 4px;">
             <span>Current Remaining Balance:</span>
-            <span>Rs ${Math.abs(typeof invoice.currentBalance === 'number' ? invoice.currentBalance : (invoice.previousBalance - (invoice.total || 0))).toLocaleString()} ${(typeof invoice.currentBalance === 'number' ? invoice.currentBalance : (invoice.previousBalance - (invoice.total || 0))) < 0 ? 'CR' : 'DR'}</span>
+            <span>Rs ${Math.abs(calculatedBal).toLocaleString()} ${calculatedBal < 0 ? 'CR' : 'DR'}</span>
           </div>
-        </div>` : ''}
+        </div>`;
+        })() : ''}
         ${invoice.due && invoice.due > 0 ? `
         <div style="display: flex; justify-content: space-between; margin-top: 6px; font-weight: bold; color: #c0392b; font-size: 13px; border-top: 1px dashed #000; padding-top: 4px;">
           <span>Balance Due:</span>
@@ -661,21 +674,32 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
           <span>Payment Method:</span>
           <span style="font-weight: bold; text-transform: uppercase;">${invoice.paymentMethod || 'Cash'}</span>
         </div>
-        ${typeof invoice.previousBalance === 'number' ? `
+        ${typeof invoice.previousBalance === 'number' ? (() => {
+          const isReturn = (invoice.total || 0) < 0 || (invoice.items || []).some(i => i.qty < 0);
+          const isCredit = (invoice.due ?? 0) > 0 || (invoice.paymentMethod || '').toUpperCase().includes('CREDIT');
+          const midLabel = isReturn ? 'Return / Refund:' : (isCredit ? 'New Invoice (Credit):' : 'Payment Received:');
+          const midSign = isReturn ? '-' : (isCredit ? '+' : '');
+          const calculatedBal = typeof invoice.currentBalance === 'number'
+            ? invoice.currentBalance
+            : (isReturn
+                ? (invoice.previousBalance - Math.abs(invoice.total || 0))
+                : (invoice.previousBalance + (invoice.due ?? invoice.total ?? 0)));
+          return `
         <div style="border-top: 1px dashed #000; margin-top: 5px; padding-top: 4px; font-size: 10.5px;">
           <div style="display: flex; justify-content: space-between; margin-bottom: 2px; color: #000;">
             <span>Previous Remaining Balance:</span>
             <span style="font-weight: 900;">Rs ${Math.abs(invoice.previousBalance).toLocaleString()} ${invoice.previousBalance < 0 ? 'CR' : 'DR'}</span>
           </div>
           <div style="display: flex; justify-content: space-between; margin-bottom: 2px; color: #000;">
-            <span>Payment Received:</span>
-            <span style="font-weight: 900;">Rs ${(invoice.total || 0).toLocaleString()}</span>
+            <span>${midLabel}</span>
+            <span style="font-weight: 900;">${midSign} Rs ${Math.abs(invoice.due ?? invoice.total ?? 0).toLocaleString()}</span>
           </div>
           <div style="display: flex; justify-content: space-between; font-size: 11.5px; font-weight: 900; border-top: 1px solid #000; margin-top: 2px; padding-top: 2px;">
             <span>Current Remaining Balance:</span>
-            <span>Rs ${Math.abs(typeof invoice.currentBalance === 'number' ? invoice.currentBalance : (invoice.previousBalance - (invoice.total || 0))).toLocaleString()} ${(typeof invoice.currentBalance === 'number' ? invoice.currentBalance : (invoice.previousBalance - (invoice.total || 0))) < 0 ? 'CR' : 'DR'}</span>
+            <span>Rs ${Math.abs(calculatedBal).toLocaleString()} ${calculatedBal < 0 ? 'CR' : 'DR'}</span>
           </div>
-        </div>` : ''}
+        </div>`;
+        })() : ''}
         
         ${invoice.tendered && invoice.tendered > 0 ? `
         <div style="display: flex; justify-content: space-between; font-size: 10.5px;">

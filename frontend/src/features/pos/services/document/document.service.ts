@@ -36,6 +36,8 @@ export interface InvoiceDocument {
     paid: number;
     due: number;
     change: number;
+    previousBalance?: number;
+    currentBalance?: number;
   };
 
   paymentBreakdown: {
@@ -80,7 +82,9 @@ export class DocumentService {
         total: transaction.grandTotal,
         paid: transaction.totalPaid,
         due: transaction.remainingDue,
-        change: transaction.changeReturned
+        change: transaction.changeReturned,
+        previousBalance: extras?.previousBalance ?? transaction.previousBalance,
+        currentBalance: extras?.currentBalance ?? transaction.currentBalance,
       },
 
       paymentBreakdown: transaction.paymentBreakdown || [],

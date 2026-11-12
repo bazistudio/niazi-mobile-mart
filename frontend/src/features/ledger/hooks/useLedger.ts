@@ -25,9 +25,7 @@ export function useLedger(initialParty?: SelectedParty | null) {
 
   // Sync state with incoming props
   React.useEffect(() => {
-    if (initialParty) {
-      setSelectedParty(initialParty);
-    }
+    setSelectedParty(initialParty || null);
   }, [initialParty?.id, initialParty?.balance, initialParty?.name]);
 
   // Fetch Ledger data for selected party
