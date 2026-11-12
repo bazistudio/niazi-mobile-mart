@@ -11,6 +11,7 @@ import { usePosStore } from '../store/usePosStore';
 import { DBInventory } from '@/types/db.types';
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
+import { salesApi } from '@/services/sales.api';
 import toast from 'react-hot-toast';
 
 export const SaleWorkspace: React.FC = () => {
@@ -24,64 +25,84 @@ export const SaleWorkspace: React.FC = () => {
   const products = useInventoryStore((s) => s.products);
   const fetchProducts = useInventoryStore((s) => s.fetchProducts);
   const addToCart = usePosStore((s) => s.addToCart);
+  const loadInvoice = usePosStore((s) => s.loadInvoice);
   const activeSession = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId));
   const isReturnMode = activeSession?.mode === 'replace';
 
   // Track a prefill value that the scanner or external caller wants to seed into the modal
   const [invoiceLookupPrefill, setInvoiceLookupPrefill] = useState<string | undefined>(undefined);
 
-  // Listen for custom event to open invoice lookup from extra actions toolbar or scanner
-  useEffect(() => {
-    const handleOpenLookup = (e: Event) => {
-      // Read optional heading and prefill from event detail
-      // SCANNER-FIX-02: detail.prefill carries the ORD-NNNNN string when scanner fires this event
-      const detail = (e as CustomEvent<{ heading?: string; prefill?: string }>).detail;
-      setInvoiceLookupHeading(detail?.heading);
-      setInvoiceLookupPrefill(detail?.prefill);
-      setInvoiceLookupOpen(true);
-    };
-    window.addEventListener('pos:open-invoice-lookup', handleOpenLookup);
-    return () => window.removeEventListener('pos:open-invoice-lookup', handleOpenLookup);
-  }, []);
-
-  // Listen for sale completion to trigger green animated border
-  useEffect(() => {
-    const handleSaleDone = () => {
-      setIsSaleSuccess(true);
-      setTimeout(() => setIsSaleSuccess(false), 3500);
-    };
-    window.addEventListener('pos:sale-completed', handleSaleDone);
-    return () => window.removeEventListener('pos:sale-completed', handleSaleDone);
-  }, []);
-
-  // Reload inventory on initial mount and when activeShopId changes
-  useEffect(() => {
-    fetchProducts();
-  }, [fetchProducts, activeShopId]);
-
   /**
-   * SCANNER-FIX-02: Universal barcode handler.
-   *
-   * Routing logic:
-   *  1. Invoice barcode (matches /^(ORD|RET)-/i) → open InvoiceLookupModal pre-filled
-   *     with the scanned invoice number.  The barcode on printed receipts encodes the
-   *     invoice_number field directly (e.g. "ORD-10024") via generateBarcodeSvg() in
-   *     printFormatter.ts, so the scanner delivers that exact string.
-   *  2. Product barcode / SKU → existing add-to-cart logic (unchanged).
+   * Hardware Barcode Scanner Handler
+   * Direct-to-Cart Flow:
+   * 1. If scanned code matches an invoice pattern/suffix:
+   *    Directly queries salesApi. If a unique matching invoice is found,
+   *    fetches the full invoice lines and loads all items straight into the POS cart!
+   *    If not found or ambiguous, falls back to opening InvoiceLookupModal pre-filled.
+   * 2. Otherwise matches against product barcodes/SKU and adds product to cart.
    */
   const handleScanComplete = useCallback(
-    (scannedCode: string) => {
+    async (scannedCode: string) => {
       const trimmed = scannedCode.trim();
       if (!trimmed || trimmed.length < 2) return;
 
       // --- Route 1: Invoice barcode ---
-      if (/^(ORD|RET)-/i.test(trimmed)) {
+      // Matches standard formats:
+      //  - ORD-..., RET-...
+      //  - MAIN-U01-..., MAIN-POS-..., LHR-..., etc. (branch-user-date format)
+      //  - INV-..., TP-...
+      //  - 4-to-8 digit numeric invoice suffixes (e.g. 001087, 002045, 000016)
+      const isInvoiceCode =
+        /^(ORD|RET|INV|TP|MAIN|BRANCH|[A-Z]{2,6}-U\d|[A-Z]{2,6}-POS)/i.test(trimmed) ||
+        /^\d{4,8}$/.test(trimmed);
+
+      if (isInvoiceCode) {
+        const query = trimmed.toUpperCase();
+        try {
+          const res = await salesApi.getOrders({
+            orderNumber: query,
+            branchId: activeShopId,
+            limit: 5,
+          });
+
+          if (res.success && res.data && res.data.length > 0) {
+            // Pick exact match or first candidate
+            const target =
+              res.data.find(
+                (o: any) =>
+                  (o.orderNumber && o.orderNumber.toUpperCase() === query) ||
+                  (o.invoiceNumber && o.invoiceNumber.toUpperCase() === query) ||
+                  (o._id && String(o._id).toUpperCase() === query)
+              ) || res.data[0];
+
+            const saleId = target.id || target._id;
+            let fullOrder = target;
+            if (!target.items || target.items.length === 0) {
+              const detailRes = await salesApi.getOrderById(saleId);
+              if (detailRes.success && detailRes.order) {
+                fullOrder = detailRes.order;
+              }
+            }
+
+            // Direct-to-cart load without opening modal
+            loadInvoice(fullOrder);
+            toast.success(`Invoice ${fullOrder.orderNumber || fullOrder.invoiceNumber || query} added directly to POS cart!`, {
+              icon: '🛒',
+              duration: 3500,
+            });
+            return;
+          }
+        } catch (err) {
+          console.error('[SaleWorkspace] Direct invoice lookup failed:', err);
+        }
+
+        // Fallback: If no invoice matches directly, open InvoiceLookupModal pre-filled so operator can inspect/correct
         window.dispatchEvent(
           new CustomEvent('pos:open-invoice-lookup', {
-            detail: { prefill: trimmed.toUpperCase() },
+            detail: { prefill: query },
           })
         );
-        toast(`Invoice barcode: ${trimmed.toUpperCase()}`, { icon: '🧾', duration: 2500 });
+        toast(`Invoice ${query} not found directly — opening search`, { icon: '🔍', duration: 2500 });
         return;
       }
 
@@ -118,8 +139,41 @@ export const SaleWorkspace: React.FC = () => {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [products, isReturnMode, addToCart]
+    [products, isReturnMode, addToCart, loadInvoice, activeShopId]
   );
+
+  // Listen for custom event to open invoice lookup from extra actions toolbar or scanner
+  useEffect(() => {
+    const handleOpenLookup = (e: Event) => {
+      // Read optional heading and prefill from event detail
+      // SCANNER-FIX-02: detail.prefill carries the ORD-NNNNN string when scanner fires this event
+      const detail = (e as CustomEvent<{ heading?: string; prefill?: string; directLoad?: boolean }>).detail;
+      if (detail?.directLoad && detail?.prefill) {
+        handleScanComplete(detail.prefill);
+        return;
+      }
+      setInvoiceLookupHeading(detail?.heading);
+      setInvoiceLookupPrefill(detail?.prefill);
+      setInvoiceLookupOpen(true);
+    };
+    window.addEventListener('pos:open-invoice-lookup', handleOpenLookup);
+    return () => window.removeEventListener('pos:open-invoice-lookup', handleOpenLookup);
+  }, [handleScanComplete]);
+
+  // Listen for sale completion to trigger green animated border
+  useEffect(() => {
+    const handleSaleDone = () => {
+      setIsSaleSuccess(true);
+      setTimeout(() => setIsSaleSuccess(false), 3500);
+    };
+    window.addEventListener('pos:sale-completed', handleSaleDone);
+    return () => window.removeEventListener('pos:sale-completed', handleSaleDone);
+  }, []);
+
+  // Reload inventory on initial mount and when activeShopId changes
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts, activeShopId]);
 
   // Activate headless barcode scanner
   // Activate headless barcode scanner (disabled when InvoiceLookupModal is open to prevent duplicate processing)

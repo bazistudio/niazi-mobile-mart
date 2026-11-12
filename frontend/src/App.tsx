@@ -5,6 +5,7 @@ import ReactQueryProvider from '@/components/providers/ReactQueryProvider';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import AuthHydrator from '@/components/auth/AuthHydrator';
 import { GlobalPrintPreviewModal } from '@/lib/printer';
+import { GlobalBarcodeRouter } from '@/components/barcode/GlobalBarcodeRouter';
 import { UpdateModal } from '@/components/updater/UpdateModal';
 import { AutoUpdaterBanner } from '@/components/updater/AutoUpdaterBanner';
 import { UpdaterProvider } from '@/context/UpdaterContext';
@@ -59,6 +60,9 @@ export default function App() {
 
             {/* Core Application Routes & Layout Shell */}
             <AppRoutes />
+
+            {/* Global Hardware Barcode Scanner Router */}
+            <GlobalBarcodeRouter />
 
             {/* Global UI Feedback & Overlays */}
             <AutoUpdaterBanner />

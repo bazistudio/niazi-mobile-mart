@@ -61,7 +61,8 @@ export const InvoiceLookupModal: React.FC<InvoiceLookupModalProps> = ({
       const trimmed = scannedCode.trim().toUpperCase();
       if (!trimmed || trimmed.length < 2) return;
       // Only handle invoice-pattern scans inside the modal; ignore product barcodes
-      if (!/^(ORD|RET)-/i.test(trimmed)) return;
+      const isInvoiceCode = /^(ORD|RET|INV|TP|MAIN|BRANCH|[A-Z]{2,6}-U\d|[A-Z]{2,6}-POS)/i.test(trimmed);
+      if (!isInvoiceCode) return;
       setSearchTerm(trimmed);
       setDebouncedTerm(trimmed); // bypass 400ms debounce
     },
@@ -105,9 +106,28 @@ export const InvoiceLookupModal: React.FC<InvoiceLookupModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSelectInvoice = (invoice: any) => {
-    loadInvoice(invoice);
-    onClose();
+  const handleSelectInvoice = async (invoice: any) => {
+    try {
+      setIsLoading(true);
+      const saleId = invoice.id || invoice._id;
+      // If invoice has no items loaded yet (from list search), fetch full order details
+      if (!invoice.items || invoice.items.length === 0) {
+        const full = await salesApi.getOrderById(saleId);
+        if (full.success && full.order) {
+          loadInvoice(full.order);
+          onClose();
+          return;
+        }
+      }
+      loadInvoice(invoice);
+      onClose();
+    } catch (err) {
+      console.error('Failed to load full invoice details', err);
+      loadInvoice(invoice);
+      onClose();
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (

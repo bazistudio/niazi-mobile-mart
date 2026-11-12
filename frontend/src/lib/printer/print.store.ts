@@ -26,10 +26,9 @@ export const usePrintStore = create<PrintState>((set, get) => ({
   isPrinting: false,
 
   openPreview: (payload) => {
-    if (get().isPreviewOpen || get().isPrinting) return;
     set({ currentPayload: payload, isPreviewOpen: true, isPrinting: true });
   },
-  closePreview: () => set({ isPreviewOpen: false }),
+  closePreview: () => set({ isPreviewOpen: false, isPrinting: false }),
   setPrinting: (isPrinting) => set({ isPrinting }),
   clearPayload: () => set({ currentPayload: null, isPreviewOpen: false, isPrinting: false })
 }));

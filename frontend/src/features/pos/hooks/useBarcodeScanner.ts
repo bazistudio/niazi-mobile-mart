@@ -28,7 +28,7 @@ interface UseBarcodeScannerProps {
 export const useBarcodeScanner = ({
   onScan,
   enabled = true,
-  maxKeystrokeGap = 50,
+  maxKeystrokeGap = 80,
   minLength = 2,
 }: UseBarcodeScannerProps) => {
   const bufferRef = useRef<string>('');
@@ -102,7 +102,8 @@ export const useBarcodeScanner = ({
       // Scanner terminator: Enter or Tab
       if (e.key === 'Enter' || e.key === 'Tab') {
         const buf = bufferRef.current;
-        if (buf.length >= minLength && isBurstSpeed) {
+        // Accept scan if buffer length >= minLength
+        if (buf.length >= minLength) {
           e.preventDefault();
           cleanLeakedChars();
           bufferRef.current = '';
