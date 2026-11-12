@@ -23,10 +23,20 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
   stats: null,
   isLoading: false,
   isStatsLoading: false,
-  filters: {
-    page: 1,
-    limit: 10,
-  },
+  filters: (() => {
+    // Pre-seed today's UTC bounds so the very first fetch is already date-scoped.
+    // This avoids a race where HistoryPage and HistoryFilters both call setFilters
+    // on mount and the first fetch returns unfiltered (all-time) data.
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const endOfDay   = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    return {
+      page: 1,
+      limit: 10,
+      startDate: startOfDay.toISOString(),
+      endDate:   endOfDay.toISOString(),
+    };
+  })(),
   error: null,
 
   setFilters: (newFilters) => {

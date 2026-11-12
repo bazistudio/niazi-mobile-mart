@@ -10,6 +10,7 @@ export const HistoryTable: React.FC = () => {
     switch (type) {
       case 'sale': return <span className="px-2 py-1 bg-green-100 text-green-700 rounded-md text-xs font-bold">SALE</span>;
       case 'purchase': return <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-md text-xs font-bold">PURCHASE</span>;
+      case 'return': return <span className="px-2 py-1 bg-rose-100 text-rose-700 rounded-md text-xs font-bold">RETURN</span>;
       case 'payment': return <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-md text-xs font-bold">PAYMENT</span>;
       case 'expense': return <span className="px-2 py-1 bg-red-100 text-red-700 rounded-md text-xs font-bold">EXPENSE</span>;
       case 'import': return <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded-md text-xs font-bold">IMPORT</span>;

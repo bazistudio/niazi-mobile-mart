@@ -3,24 +3,20 @@ import { httpFetch } from '@/lib/tauri/tauriClient';
 
 export const historyApi = {
   getHistory: async (filters?: HistoryFilterParams): Promise<{ data: HistoryItem[]; total: number }> => {
-    try {
-      const params = new URLSearchParams();
-      if (filters?.page) params.set('page', String(filters.page));
-      if (filters?.limit) params.set('limit', String(filters.limit));
-      if (filters?.type) params.set('type', filters.type);
-      if (filters?.startDate) params.set('startDate', filters.startDate);
-      if (filters?.endDate) params.set('endDate', filters.endDate);
-      if (filters?.search) params.set('search', filters.search);
-      // Pass branch_id when an org-admin has selected a specific branch.
-      // The backend ignores this for non-org-admins (locks to identity.branch_id server-side).
-      if (filters?.branch_id) params.set('branch_id', filters.branch_id);
+    const params = new URLSearchParams();
+    if (filters?.page) params.set('page', String(filters.page));
+    if (filters?.limit) params.set('limit', String(filters.limit));
+    if (filters?.type) params.set('type', filters.type);
+    if (filters?.startDate) params.set('startDate', filters.startDate);
+    if (filters?.endDate) params.set('endDate', filters.endDate);
+    if (filters?.search) params.set('search', filters.search);
+    if (filters?.status) params.set('status', filters.status);
+    // Pass branch_id when an org-admin has selected a specific branch.
+    // The backend ignores this for non-org-admins (locks to identity.branch_id server-side).
+    if (filters?.branch_id) params.set('branch_id', filters.branch_id);
 
-      const qs = params.toString();
-      return await httpFetch<{ data: HistoryItem[]; total: number }>(`/api/history${qs ? '?' + qs : ''}`);
-    } catch (err) {
-      console.error('Failed to fetch financial history:', err);
-      return { data: [], total: 0 };
-    }
+    const qs = params.toString();
+    return await httpFetch<{ data: HistoryItem[]; total: number }>(`/api/history${qs ? '?' + qs : ''}`);
   },
 
   getStats: async (branchId?: string | null): Promise<HistoryStats> => {

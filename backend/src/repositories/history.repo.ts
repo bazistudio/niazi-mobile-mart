@@ -76,6 +76,7 @@ function buildWhereFragments(
     branchCol: string;
     dateCol: string;
     searchCols?: string[]; // columns used in ILIKE search
+    statusExpr?: string;   // SQL expression that produces 'paid'|'pending'|'partial' for this arm
   }
 ): { clause: string; params: unknown[]; nextIdx: number } {
   const params: unknown[] = [];
@@ -87,11 +88,12 @@ function buildWhereFragments(
     params.push(filter.branch_id);
   }
   if (filter?.startDate) {
-    clause += ` AND ${opts.dateCol} >= $${idx++}`;
+    // Both sides cast to ::timestamptz because created_at is TEXT in PostgreSQL
+    clause += ` AND ${opts.dateCol}::timestamptz >= $${idx++}::timestamptz`;
     params.push(filter.startDate);
   }
   if (filter?.endDate) {
-    clause += ` AND ${opts.dateCol} <= $${idx++}`;
+    clause += ` AND ${opts.dateCol}::timestamptz <= $${idx++}::timestamptz`;
     params.push(filter.endDate);
   }
   if (filter?.search && opts.searchCols && opts.searchCols.length > 0) {
@@ -99,6 +101,12 @@ function buildWhereFragments(
     clause += ` AND (${conditions})`;
     params.push(`%${filter.search}%`);
     idx++;
+  }
+  // Status filter — only applied when the arm has variable status (sales/purchases).
+  // Arms that always emit a fixed status (payments, expenses, returns) skip this.
+  if (filter?.status && opts.statusExpr) {
+    clause += ` AND (${opts.statusExpr}) = $${idx++}`;
+    params.push(filter.status);
   }
 
   return { clause, params, nextIdx: idx };
@@ -120,12 +128,16 @@ export async function listHistoryItems(
 
   // Determine which type(s) to include
   const typeFilter = filter?.type?.toLowerCase();
+  const statusFilter = filter?.status?.toLowerCase();
+  // Arms that always emit 'paid' (payment, expense, return) can be skipped entirely
+  // when the caller filters for a status that is never 'paid'.
+  const fixedPaidExcluded = !!statusFilter && statusFilter !== 'paid';
   const include = {
     sale: !typeFilter || typeFilter === 'sale',
     purchase: !typeFilter || typeFilter === 'purchase',
-    payment: !typeFilter || typeFilter === 'payment',
-    expense: !typeFilter || typeFilter === 'expense',
-    return: !typeFilter || typeFilter === 'return',
+    payment: (!typeFilter || typeFilter === 'payment') && !fixedPaidExcluded,
+    expense: (!typeFilter || typeFilter === 'expense') && !fixedPaidExcluded,
+    return: (!typeFilter || typeFilter === 'return') && !fixedPaidExcluded,
   };
 
   // We build one UNION ALL query so that ORDER BY and LIMIT/OFFSET apply to
@@ -142,6 +154,7 @@ export async function listHistoryItems(
       branchCol: 'branch_id',
       dateCol: 'created_at',
       searchCols: ['invoice_number', 'customer_name_snapshot'],
+      statusExpr: `CASE WHEN payment_status = 'PAID' THEN 'paid' WHEN payment_status = 'PARTIALLY_PAID' THEN 'partial' ELSE 'pending' END`,
     });
     paramIdx = nextIdx;
     allParams.push(...params);
@@ -171,8 +184,9 @@ export async function listHistoryItems(
   if (include.purchase) {
     const { clause, params, nextIdx } = buildWhereFragments(filter, paramIdx, {
       branchCol: 'branch_id',
-      dateCol: 'created_at',
+      dateCol: 'p.created_at',
       searchCols: ['purchase_number'],
+      statusExpr: `CASE WHEN p.payment_status = 'PAID' THEN 'paid' WHEN p.payment_status = 'PARTIALLY_PAID' THEN 'partial' ELSE 'pending' END`,
     });
     paramIdx = nextIdx;
     allParams.push(...params);
@@ -219,11 +233,11 @@ export async function listHistoryItems(
         allParams.push(filter.branch_id);
       }
       if (filter?.startDate) {
-        custClause += ` AND cle.created_at >= $${paramIdx++}`;
+        custClause += ` AND cle.created_at::timestamptz >= $${paramIdx++}::timestamptz`;
         allParams.push(filter.startDate);
       }
       if (filter?.endDate) {
-        custClause += ` AND cle.created_at <= $${paramIdx++}`;
+        custClause += ` AND cle.created_at::timestamptz <= $${paramIdx++}::timestamptz`;
         allParams.push(filter.endDate);
       }
       if (filter?.search) {
@@ -263,11 +277,11 @@ export async function listHistoryItems(
         allParams.push(filter.branch_id);
       }
       if (filter?.startDate) {
-        suppClause += ` AND sle.created_at >= $${paramIdx++}`;
+        suppClause += ` AND sle.created_at::timestamptz >= $${paramIdx++}::timestamptz`;
         allParams.push(filter.startDate);
       }
       if (filter?.endDate) {
-        suppClause += ` AND sle.created_at <= $${paramIdx++}`;
+        suppClause += ` AND sle.created_at::timestamptz <= $${paramIdx++}::timestamptz`;
         allParams.push(filter.endDate);
       }
       if (filter?.search) {
@@ -303,8 +317,8 @@ export async function listHistoryItems(
   if (include.expense) {
     const { clause, params, nextIdx } = buildWhereFragments(filter, paramIdx, {
       branchCol: 'branch_id',
-      dateCol: 'created_at',
-      searchCols: ['expense_number', 'description'],
+      dateCol: 'e.created_at',
+      searchCols: ['e.expense_number', 'e.description'],
     });
     paramIdx = nextIdx;
     allParams.push(...params);
