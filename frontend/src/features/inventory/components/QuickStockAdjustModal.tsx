@@ -510,7 +510,7 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
                   </div>
                 </div>
                 <div className="text-[10px] text-neutral-400 leading-tight">
-                  Recalculates global WAC valuation
+                  Backend recalculates WAC using global stock
                 </div>
               </div>
 
@@ -550,7 +550,7 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-neutral-500 font-medium">New Weighted Average Cost (WAC):</span>
+                <span className="text-neutral-500 font-medium">New WAC (est., branch stock only):</span>
                 <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-[#006970]/20 text-[#006970] dark:text-[#00B4BB] font-black tabular-nums">
                   Rs {projectedWac.toLocaleString()}
                 </span>

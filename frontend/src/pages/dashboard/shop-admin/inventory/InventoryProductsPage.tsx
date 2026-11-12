@@ -31,19 +31,22 @@ interface InventoryProductsPageProps {
 }
 
 /**
- * Compute margin amount and percentage from sale price and average cost (WAC).
- * Margin Amount = Sale Price − Average Cost
- * Margin % = (Margin Amount / Sale Price) × 100
+ * Compute latest-cost profit and margin % from sale price and latest purchase cost.
+ * Approved formula (2026-11-12):
+ *   Latest Cost Profit = Sale Price − Latest Purchase Cost (products.purchase_price)
+ *   Latest Cost Margin % = (Latest Cost Profit / Sale Price) × 100
  * Returns safe zero values when sale price is zero to avoid division-by-zero.
+ * Preserves negative values (loss scenario) accurately.
  */
-function computeMargin(salePrice: number, averageCost: number): { marginAmount: number; marginPct: number } {
+function computeLatestCostMargin(salePrice: number, purchasePrice: number): { profitAmount: number; marginPct: number } {
   const sp = salePrice || 0;
-  const ac = averageCost || 0;
-  if (sp === 0) return { marginAmount: 0, marginPct: 0 };
-  const marginAmount = sp - ac;
-  const marginPct = (marginAmount / sp) * 100;
-  return { marginAmount, marginPct };
+  const pp = purchasePrice || 0;
+  if (sp === 0) return { profitAmount: 0, marginPct: 0 };
+  const profitAmount = sp - pp;
+  const marginPct = (profitAmount / sp) * 100;
+  return { profitAmount, marginPct };
 }
+
 
 export function InventoryProductsPage({ mode = 'products' }: InventoryProductsPageProps) {
   const navigate = useNavigate();
@@ -342,13 +345,14 @@ export function InventoryProductsPage({ mode = 'products' }: InventoryProductsPa
             ),
           },
           {
+            // Margin uses latest purchase cost as approved in cost policy (2026-11-12)
             key: 'marginAmount',
             label: 'Margin (Rs.)',
             render: (row: InventoryProduct) => {
-              const { marginAmount } = computeMargin(row.price || 0, row.averageCost || 0);
+              const { profitAmount } = computeLatestCostMargin(row.price || 0, row.purchasePrice || 0);
               return (
                 <span className="font-bold text-slate-900 dark:text-slate-100">
-                  {(row.price || 0) === 0 ? '—' : `Rs. ${marginAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+                  {(row.price || 0) === 0 ? '—' : `Rs. ${profitAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
                 </span>
               );
             },

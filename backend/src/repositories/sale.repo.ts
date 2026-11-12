@@ -376,10 +376,18 @@ export async function completeSaleTx(
     const salePrice = Number(prod['sale_price'] ?? 0);
     const purchasePrice = Number(prod['purchase_price'] ?? 0);
     const avgCost = Number(prod['average_cost'] ?? 0);
-    // DEF-10: Authoritative cost is average_cost (WAC) when available, else purchase_price.
-    // The legacy 3× cap that replaced a valid WAC with stale purchase_price has been removed
-    // as it silently distorted COGS whenever WAC legitimately exceeded the last purchase price.
-    const costPrice = avgCost > 0 ? avgCost : purchasePrice;
+    // COST-POLICY (approved 2026-11-12): two distinct cost roles, kept separate:
+    //
+    // 1. minPriceBasis — Minimum selling-price floor (approved policy: latest purchase cost).
+    //    Uses products.purchase_price, which is overwritten on every restock to the new unit cost.
+    //    Safe fallback: average_cost (WAC) for legacy records where purchase_price is absent.
+    //    Never silently treat zero cost as a valid floor.
+    //
+    // 2. costPriceSnapshot — COGS cost recorded in sale_lines.cost_price_snapshot.
+    //    Continues to use WAC (average_cost) when available, else purchase_price.
+    //    This preserves historical WAC-based COGS accounting unchanged.
+    const minPriceBasis = purchasePrice > 0 ? purchasePrice : (avgCost > 0 ? avgCost : 0);
+    const costPriceSnapshot = avgCost > 0 ? avgCost : purchasePrice;
 
     const lineDisc = Math.max(Number(item.discount ?? 0), 0);
     // Custom sale price override: item.unit_price or item.price takes precedence if provided and valid.
@@ -395,16 +403,17 @@ export async function completeSaleTx(
     // No user (including Organization ADMIN) may sell a product at or below its applicable cost price.
     // Price must be strictly greater than costPrice.
     // If costPrice <= 0 or unavailable, fail closed.
-    if (costPrice <= 0 || isNaN(costPrice)) {
+    if (minPriceBasis <= 0 || isNaN(minPriceBasis)) {
       throw new SaleRepoError(
-        `Cost price for product "${prod['name']}" is not configured or invalid (Rs. ${costPrice}). Cannot verify minimum selling price security.`,
+        `Purchase cost for product "${prod['name']}" is not configured or invalid (Rs. ${minPriceBasis}). Cannot verify minimum selling price security.`,
         400
       );
     }
 
-    if (effectiveUnitPrice <= costPrice) {
+    if (effectiveUnitPrice <= minPriceBasis) {
+      const minAllowed = minPriceBasis + 1;
       throw new SaleRepoError(
-        `Selling price (Rs. ${effectiveUnitPrice.toLocaleString()}) cannot be equal to or below product cost (Rs. ${costPrice.toLocaleString()}) for product "${prod['name']}". Selling price must be strictly higher than cost.`,
+        `Selling price (Rs. ${effectiveUnitPrice.toLocaleString()}) cannot be equal to or below the latest purchase cost (Rs. ${minPriceBasis.toLocaleString()}) for product "${prod['name']}". Minimum allowed selling price is Rs. ${minAllowed.toLocaleString()}.`,
         400
       );
     }
@@ -417,7 +426,7 @@ export async function completeSaleTx(
       product_name: prod['name'] as string,
       sku: prod['sku'] as string,
       unit_price: effectiveUnitPrice,
-      cost_price: costPrice,
+      cost_price: costPriceSnapshot,  // WAC for COGS accounting (approved policy §1E)
       quantity: item.quantity,
       discount: lineDisc,
       line_total: lineTotal,
