@@ -1019,7 +1019,7 @@ export async function updateProduct(
     await client.query('BEGIN');
 
     const currentRes = await client.query(
-      `SELECT ${selectCols} FROM products WHERE id = $1`,
+      `SELECT ${selectCols} FROM products WHERE id = $1 FOR UPDATE`,
       [id]
     );
     if (currentRes.rows.length === 0) {
@@ -1073,10 +1073,19 @@ export async function updateProduct(
       dto.purchase_price !== undefined && dto.purchase_price !== null
         ? dto.purchase_price
         : current.purchase_price;
+    // Manual cost revaluation (approved rule, 2026-11-13):
+    // Priority: explicit dto.average_cost > explicit dto.purchase_price > existing average_cost.
+    //
+    // When a product's purchase price is explicitly edited, the inventory cost basis is
+    // manually revalued to the new purchase price. This is NOT a WAC restock receipt —
+    // no stock movement is created and the WAC formula is not applied.
+    // A subsequent restock will correctly blend C_old (now = newPurchasePrice) via WAC.
     const newAvgCost =
       dto.average_cost !== undefined && dto.average_cost !== null
-        ? dto.average_cost
-        : current.average_cost;
+        ? dto.average_cost                // explicit avg_cost override takes highest priority
+        : dto.purchase_price !== undefined && dto.purchase_price !== null
+          ? dto.purchase_price            // manual price edit → revalue average_cost to match
+          : current.average_cost;         // no cost field in payload → preserve existing WAC
     const newSalePrice =
       dto.sale_price !== undefined && dto.sale_price !== null
         ? dto.sale_price
