@@ -29,6 +29,8 @@ import path from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 
 import { buildAuthRouter } from '../routes/auth.routes.js';
+import { hashArgon2 } from '../services/argon2.service.js';
+import { issueToken } from '../services/jwt.service.js';
 import {
   MAX_LOGIN_ATTEMPTS,
   LOGIN_LOCKOUT_MS,
@@ -186,8 +188,12 @@ describe('Authentication Security — DB-backed', { skip: SKIP_DB ? 'DATABASE_UR
   });
 
   after(async () => {
-    await cleanup(pool, createdUserIds);
-    await pool.end();
+    try {
+      await cleanup(pool, createdUserIds);
+    } catch {}
+    try {
+      await pool.end();
+    } catch {}
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
@@ -501,6 +507,380 @@ describe('Authentication Security — DB-backed', { skip: SKIP_DB ? 'DATABASE_UR
         null,
         'login_locked_until_ms must be set after concurrent failures exceed threshold',
       );
+    });
+  });
+
+  // ─── AS-13 / AS-14: Database-backed Admin Recovery & Password Change ──────
+
+  describe('AS-13 / AS-14: Database-backed Admin Recovery & Password Change', () => {
+    after(async () => {
+      // Null out test recovery keys to prevent interference with other suites
+      try {
+        await pool.query(
+          "UPDATE users SET recovery_key_hash = NULL WHERE username LIKE 'active_adm_%' OR username LIKE 'inact_adm_%' OR username LIKE 'dis_adm_%' OR username LIKE 'cashier_%' OR username LIKE 'db_rec_%'"
+        );
+      } catch {}
+    });
+
+    test('findAdminsWithRecoveryKey only returns active admin users with recovery_key_hash', async () => {
+      // 1. Active ADMIN with recovery_key_hash -> should be found
+      const activeAdminId = uuidv4();
+      createdUserIds.push(activeAdminId);
+      await pool.query(
+        `INSERT INTO users (id, name, username, login_key_hash, role, status, is_active, recovery_key_hash, created_at, updated_at)
+         VALUES ($1, 'Active Admin', $2, 'hash1', 'ADMIN', 'ACTIVE', 1, 'some_argon2_hash', NOW(), NOW())`,
+        [activeAdminId, `active_adm_${activeAdminId.slice(0, 8)}`],
+      );
+
+      // 2. Inactive ADMIN (is_active = 0) with recovery_key_hash -> should NOT be found
+      const inactiveAdminId = uuidv4();
+      createdUserIds.push(inactiveAdminId);
+      await pool.query(
+        `INSERT INTO users (id, name, username, login_key_hash, role, status, is_active, recovery_key_hash, created_at, updated_at)
+         VALUES ($1, 'Inactive Admin', $2, 'hash2', 'ADMIN', 'ACTIVE', 0, 'some_argon2_hash', NOW(), NOW())`,
+        [inactiveAdminId, `inact_adm_${inactiveAdminId.slice(0, 8)}`],
+      );
+
+      // 3. Disabled ADMIN (status = 'DISABLED') with recovery_key_hash -> should NOT be found
+      const disabledAdminId = uuidv4();
+      createdUserIds.push(disabledAdminId);
+      await pool.query(
+        `INSERT INTO users (id, name, username, login_key_hash, role, status, is_active, recovery_key_hash, created_at, updated_at)
+         VALUES ($1, 'Disabled Admin', $2, 'hash3', 'ADMIN', 'DISABLED', 1, 'some_argon2_hash', NOW(), NOW())`,
+        [disabledAdminId, `dis_adm_${disabledAdminId.slice(0, 8)}`],
+      );
+
+      // 4. CASHIER with recovery_key_hash -> should NOT be found
+      const cashierId = uuidv4();
+      createdUserIds.push(cashierId);
+      await pool.query(
+        `INSERT INTO users (id, name, username, login_key_hash, role, status, is_active, recovery_key_hash, created_at, updated_at)
+         VALUES ($1, 'Cashier User', $2, 'hash4', 'CASHIER', 'ACTIVE', 1, 'some_argon2_hash', NOW(), NOW())`,
+        [cashierId, `cashier_${cashierId.slice(0, 8)}`],
+      );
+
+      const admins = await authRepo.findAdminsWithRecoveryKey();
+      const adminIds = admins.map((a) => a.id);
+
+      assert.ok(adminIds.includes(activeAdminId), 'Active admin with recovery key must be found');
+      assert.ok(!adminIds.includes(inactiveAdminId), 'Inactive admin (is_active=0) must be excluded');
+      assert.ok(!adminIds.includes(disabledAdminId), 'Disabled admin (status=DISABLED) must be excluded');
+      assert.ok(!adminIds.includes(cashierId), 'Non-admin role must be excluded');
+    });
+
+    test('consumeRecoveryKeyAndResetPassword nulls recovery_key_hash and preserves is_active status', async () => {
+      const adminId = uuidv4();
+      createdUserIds.push(adminId);
+      await pool.query(
+        `INSERT INTO users (id, name, username, login_key_hash, role, status, is_active, recovery_key_hash, failed_login_attempts, login_locked_until_ms, created_at, updated_at)
+         VALUES ($1, 'Target Admin', $2, 'oldhash', 'ADMIN', 'ACTIVE', 1, 'active_rec_hash', 3, 999999999, NOW(), NOW())`,
+        [adminId, `target_adm_${adminId.slice(0, 8)}`],
+      );
+
+      const success = await authRepo.consumeRecoveryKeyAndResetPassword(adminId, 'new_argon2_hash');
+      assert.equal(success, true, 'consumeRecoveryKeyAndResetPassword must succeed');
+
+      const res = await pool.query(
+        'SELECT login_key_hash, recovery_key_hash, failed_login_attempts, login_locked_until_ms, is_active FROM users WHERE id = $1',
+        [adminId],
+      );
+      const row = res.rows[0];
+
+      assert.equal(row.login_key_hash, 'new_argon2_hash', 'Password hash must be updated');
+      assert.equal(row.recovery_key_hash, null, 'Recovery key hash must be NULL (consumed)');
+      assert.equal(row.failed_login_attempts, 0, 'Failed attempts must be cleared');
+      assert.equal(row.login_locked_until_ms, null, 'Login lockout must be cleared');
+      assert.equal(row.is_active, 1, 'is_active status must be preserved');
+
+      // Attempting to consume again must fail (already consumed)
+      const secondAttempt = await authRepo.consumeRecoveryKeyAndResetPassword(adminId, 'another_hash');
+      assert.equal(secondAttempt, false, 'Second consumption of consumed key must return false');
+    });
+
+    test('POST /api/v1/auth/admin-recovery consumes database one-time key and updates password', async () => {
+      const adminId = uuidv4();
+      createdUserIds.push(adminId);
+      const adminUsername = `db_rec_${adminId.slice(0, 8)}`;
+      const rawRecoveryKey = 'NZRCV-TEST-UNIT-RECO-VERY';
+      const keyHash = await hashArgon2(rawRecoveryKey);
+
+      await pool.query(
+        `INSERT INTO users (id, name, username, login_key_hash, role, status, is_active, recovery_key_hash, created_at, updated_at)
+         VALUES ($1, 'DB Rec Admin', $2, 'dummy', 'ADMIN', 'ACTIVE', 1, $3, NOW(), NOW())`,
+        [adminId, adminUsername, keyHash],
+      );
+
+      const resp = await fetch(`${baseUrl}/api/v1/auth/admin-recovery`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recovery_key: rawRecoveryKey,
+          target_username: adminUsername,
+          new_password: 'RecoveredPass123!',
+        }),
+      });
+
+      assert.equal(resp.status, 200, 'Endpoint should return 200 on valid DB key');
+      const body = await resp.json() as { success?: boolean };
+      assert.equal(body.success, true);
+
+      // Verify DB row
+      const checkRes = await pool.query('SELECT recovery_key_hash FROM users WHERE id = $1', [adminId]);
+      assert.equal(checkRes.rows[0].recovery_key_hash, null, 'One-time key hash must be cleared from DB');
+
+      // Attempting to reuse the exact same key must now fail with 401
+      const reuseResp = await fetch(`${baseUrl}/api/v1/auth/admin-recovery`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recovery_key: rawRecoveryKey,
+          target_username: adminUsername,
+          new_password: 'AnotherPass123!',
+        }),
+      });
+      assert.equal(reuseResp.status, 401, 'Reused one-time key must be rejected with 401');
+    });
+  });
+
+  // ─── AS-15: Authenticated POST /change-password HTTP Integration Tests ───
+
+  describe('AS-15: Authenticated POST /change-password HTTP Integration Tests', () => {
+    function createAuthToken(userId: string, username: string, role = 'CASHIER'): string {
+      return issueToken({
+        userId,
+        username,
+        role,
+        accessProfile: {
+          allowed_pages: ['*'],
+          allowed_actions: ['*'],
+          limits: {
+            max_discount_percent: 5.0,
+            can_price_override: false,
+            can_refund: false,
+            can_void_sale: false,
+            can_view_profit: false,
+          },
+        },
+        branchId: '00000000-0000-0000-0000-000000000002',
+      });
+    }
+
+    test('1. Unauthenticated request returns 401', async () => {
+      const resp = await fetch(`${baseUrl}/api/v1/auth/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          current_password: 'OldPassword123!',
+          new_password: 'NewPassword123!',
+        }),
+      });
+      assert.equal(resp.status, 401, 'Missing token must return 401');
+    });
+
+    test('2 & 8 & 9 & 10. Valid current password allows change, updates hash, rejects old & accepts new password', async () => {
+      const initialPassword = 'InitialSecretPass123!';
+      const initialHash = await hashArgon2(initialPassword);
+      const user = await createTestUser(pool);
+      createdUserIds.push(user.id);
+
+      // Set valid argon2 initial password
+      await pool.query('UPDATE users SET login_key_hash = $1 WHERE id = $2', [initialHash, user.id]);
+
+      const token = createAuthToken(user.id, user.username);
+      const updatedPassword = 'BrandNewSecretPass456!';
+
+      // Perform change-password
+      const resp = await fetch(`${baseUrl}/api/v1/auth/change-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          current_password: initialPassword,
+          new_password: updatedPassword,
+        }),
+      });
+
+      assert.equal(resp.status, 200, 'Valid password change request must return 200');
+      const body = await resp.json() as { success?: boolean; error?: string };
+      assert.equal(body.success, true);
+
+      // Check DB hash updated
+      const row = await pool.query('SELECT login_key_hash FROM users WHERE id = $1', [user.id]);
+      const newDbHash = row.rows[0].login_key_hash;
+      assert.notEqual(newDbHash, initialHash, 'Stored Argon2 hash must be updated');
+
+      // Old password fails subsequent login
+      const oldLoginResp = await fetch(`${baseUrl}/api/v1/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: user.username,
+          password: initialPassword,
+        }),
+      });
+      assert.equal(oldLoginResp.status, 401, 'Old password must fail subsequent authentication');
+
+      // New password succeeds subsequent login
+      const newLoginResp = await fetch(`${baseUrl}/api/v1/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: user.username,
+          password: updatedPassword,
+        }),
+      });
+      assert.equal(newLoginResp.status, 200, 'New password must succeed subsequent authentication');
+    });
+
+    test('3. Invalid current password is rejected with 401', async () => {
+      const initialPassword = 'ActualPassword123!';
+      const initialHash = await hashArgon2(initialPassword);
+      const user = await createTestUser(pool);
+      createdUserIds.push(user.id);
+      await pool.query('UPDATE users SET login_key_hash = $1 WHERE id = $2', [initialHash, user.id]);
+
+      const token = createAuthToken(user.id, user.username);
+
+      const resp = await fetch(`${baseUrl}/api/v1/auth/change-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          current_password: 'WrongCurrentPassword!',
+          new_password: 'NewValidPassword123!',
+        }),
+      });
+
+      assert.equal(resp.status, 401, 'Invalid current password must return 401');
+    });
+
+    test('4. Missing current password is rejected with 400', async () => {
+      const user = await createTestUser(pool);
+      createdUserIds.push(user.id);
+      const token = createAuthToken(user.id, user.username);
+
+      const resp = await fetch(`${baseUrl}/api/v1/auth/change-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          new_password: 'NewValidPassword123!',
+        }),
+      });
+
+      assert.equal(resp.status, 400, 'Missing current password must return 400');
+    });
+
+    test('5. Missing new password is rejected with 400', async () => {
+      const user = await createTestUser(pool);
+      createdUserIds.push(user.id);
+      const token = createAuthToken(user.id, user.username);
+
+      const resp = await fetch(`${baseUrl}/api/v1/auth/change-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          current_password: 'SomePassword123!',
+        }),
+      });
+
+      assert.equal(resp.status, 400, 'Missing new password must return 400');
+    });
+
+    test('6. Invalid new password (< 6 chars) is rejected with 400', async () => {
+      const user = await createTestUser(pool);
+      createdUserIds.push(user.id);
+      const token = createAuthToken(user.id, user.username);
+
+      const resp = await fetch(`${baseUrl}/api/v1/auth/change-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          current_password: 'ValidCurrentPass123!',
+          new_password: 'short',
+        }),
+      });
+
+      assert.equal(resp.status, 400, 'Short new password must return 400');
+    });
+
+    test('7. Caller cannot change another user password via payload user_id', async () => {
+      // Victim user
+      const victimPass = 'VictimPass123!';
+      const victimHash = await hashArgon2(victimPass);
+      const victim = await createTestUser(pool);
+      createdUserIds.push(victim.id);
+      await pool.query('UPDATE users SET login_key_hash = $1 WHERE id = $2', [victimHash, victim.id]);
+
+      // Attacker user
+      const attackerPass = 'AttackerPass123!';
+      const attackerHash = await hashArgon2(attackerPass);
+      const attacker = await createTestUser(pool);
+      createdUserIds.push(attacker.id);
+      await pool.query('UPDATE users SET login_key_hash = $1 WHERE id = $2', [attackerHash, attacker.id]);
+
+      const attackerToken = createAuthToken(attacker.id, attacker.username);
+
+      // Attacker attempts to provide victim's id or target username in body
+      const resp = await fetch(`${baseUrl}/api/v1/auth/change-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${attackerToken}`,
+        },
+        body: JSON.stringify({
+          user_id: victim.id,
+          target_username: victim.username,
+          current_password: attackerPass,
+          new_password: 'AttackerNewPassword123!',
+        }),
+      });
+
+      assert.equal(resp.status, 200, 'Attacker changes own password only');
+
+      // Verify victim's password remains unchanged
+      const victimCheck = await pool.query('SELECT login_key_hash FROM users WHERE id = $1', [victim.id]);
+      assert.equal(victimCheck.rows[0].login_key_hash, victimHash, 'Victim password hash must remain untouched');
+    });
+
+    test('11. Inactive account cannot change its password', async () => {
+      const pass = 'InactiveUserPass123!';
+      const hash = await hashArgon2(pass);
+      const user = await createTestUser(pool);
+      createdUserIds.push(user.id);
+      await pool.query('UPDATE users SET login_key_hash = $1, is_active = 0, status = $2 WHERE id = $3', [
+        hash,
+        'DISABLED',
+        user.id,
+      ]);
+
+      const token = createAuthToken(user.id, user.username);
+
+      const resp = await fetch(`${baseUrl}/api/v1/auth/change-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          current_password: pass,
+          new_password: 'BrandNewPass123!',
+        }),
+      });
+
+      assert.equal(resp.status, 401, 'Inactive/disabled user token must be rejected by auth middleware');
     });
   });
 });

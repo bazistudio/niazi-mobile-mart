@@ -26,8 +26,8 @@ export function LoginForm() {
 
   const from = (location.state as any)?.from?.pathname || "/dashboard";
 
-  // Mode: "login" or "forgot"
-  const [mode, setMode] = useState<"login" | "forgot">("login");
+  // Mode: "login" or "forgot" or "recover"
+  const [mode, setMode] = useState<"login" | "forgot" | "recover">("login");
 
   // Sign In state
   const [formData, setFormData] = useState<LoginFormData>({
@@ -38,6 +38,16 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [lockoutSecondsRemaining, setLockoutSecondsRemaining] = useState<number | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+
+  // In-card Admin Recovery State
+  const [recoveryData, setRecoveryData] = useState({
+    recoveryKey: "",
+    username: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [recoverySuccess, setRecoverySuccess] = useState(false);
 
   const [isServerUnreachable, setIsServerUnreachable] = useState(false);
   const [isRetryingServer, setIsRetryingServer] = useState(false);
@@ -353,7 +363,7 @@ export function LoginForm() {
             </div>
           </form>
         </div>
-      ) : (
+      ) : mode === "forgot" ? (
         <div>
           {/* Forgot Password / Offline Recovery View */}
           <div className="text-center mb-6">
@@ -388,13 +398,18 @@ export function LoginForm() {
               <p className="text-[11px] text-amber-800 leading-relaxed">
                 System administrators can reset their access using the secret one-time recovery key generated during initial setup.
               </p>
-              <Link
-                to="/auth/recover-admin"
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("recover");
+                  setError(null);
+                  setRecoverySuccess(false);
+                }}
                 className="w-full mt-1 relative group overflow-hidden bg-gradient-to-b from-amber-600 to-amber-700 text-white font-medium py-2.5 px-4 rounded-xl text-xs transition-all duration-150 shadow-[0_3px_0_#92400e,0_8px_16px_rgba(245,158,11,0.25)] hover:brightness-105 active:translate-y-1 flex items-center justify-center gap-2 cursor-pointer"
               >
-                <span>Enter One-Time Recovery Key</span>
+                <span>Reset Admin Password with Recovery Key</span>
                 <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-              </Link>
+              </button>
             </div>
 
             {/* Back to Login */}
@@ -410,6 +425,226 @@ export function LoginForm() {
             </div>
           </div>
         </div>
+      ) : mode === "recover" ? (
+        <div>
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-amber-300 p-[1px] shadow-sm mb-3">
+              <div className="w-full h-full rounded-2xl bg-gradient-to-b from-amber-600 to-amber-700 flex items-center justify-center text-white shadow-inner">
+                <KeyRound className="w-6 h-6 text-amber-100 drop-shadow" />
+              </div>
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Change Admin Password</h1>
+            <p className="text-xs text-slate-500 mt-1">
+              Reset your admin password using your one-time recovery key
+            </p>
+          </div>
+
+          {recoverySuccess ? (
+            <div className="text-center py-4 space-y-4">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-600">
+                <CheckCircle2 className="w-7 h-7" />
+              </div>
+              <h2 className="text-base font-bold text-slate-900">Password Changed Successfully!</h2>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Your administrator password has been updated and your one-time recovery key consumed. You can now sign in with your new password.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("login");
+                  setError(null);
+                  setRecoverySuccess(false);
+                }}
+                className="w-full bg-primary hover:bg-primary-hover text-white font-medium py-2.5 px-4 rounded-xl text-sm transition-all duration-150 shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <span>Back to Sign In</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setError(null);
+
+                const cleanKey = recoveryData.recoveryKey.trim().toUpperCase();
+                if (!cleanKey) {
+                  setError("Please enter your one-time recovery key.");
+                  return;
+                }
+
+                if (recoveryData.newPassword.length < 6) {
+                  setError("New password must be at least 6 characters long.");
+                  return;
+                }
+
+                if (recoveryData.newPassword !== recoveryData.confirmPassword) {
+                  setError("Passwords do not match.");
+                  return;
+                }
+
+                setIsLoading(true);
+                try {
+                  await tauriClient.adminRecoverAccess(
+                    cleanKey,
+                    recoveryData.newPassword,
+                    recoveryData.username.trim() || undefined
+                  );
+                  setRecoverySuccess(true);
+                } catch (err: any) {
+                  setError(
+                    err.message ||
+                    err.response?.data?.error ||
+                    "Recovery failed. Ensure the key is correct and has not already been consumed."
+                  );
+                } finally {
+                  setIsLoading(false);
+                }
+              }}
+              className="flex flex-col gap-4"
+            >
+              {error && (
+                <div role="alert" className="p-3 rounded-xl bg-danger/10 border border-danger/20 flex items-start gap-2.5 text-xs text-danger shadow-sm">
+                  <AlertCircle className="w-4 h-4 text-danger shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              {/* Recovery Key Input */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+                  One-Time Recovery Key
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-muted">
+                    <KeyRound className="w-4 h-4" />
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    placeholder="NZRCV-XXXX-XXXX-XXXX-XXXX"
+                    value={recoveryData.recoveryKey}
+                    onChange={(e) =>
+                      setRecoveryData((prev) => ({ ...prev, recoveryKey: e.target.value.toUpperCase() }))
+                    }
+                    className="w-full pl-10 pr-3.5 py-2.5 bg-surface text-text-primary border border-border rounded-xl text-sm font-mono placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-focus-ring/20 transition-all uppercase"
+                  />
+                </div>
+                <span className="text-[11px] text-text-muted">
+                  Format: NZRCV-XXXX-XXXX-XXXX-XXXX
+                </span>
+              </div>
+
+              {/* Username Input (Optional helper) */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+                  Admin Username (Optional)
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-muted">
+                    <Mail className="w-4 h-4" />
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="e.g. admin"
+                    value={recoveryData.username}
+                    onChange={(e) =>
+                      setRecoveryData((prev) => ({ ...prev, username: e.target.value }))
+                    }
+                    className="w-full pl-10 pr-3.5 py-2.5 bg-surface text-text-primary border border-border rounded-xl text-sm placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-focus-ring/20 transition-all"
+                  />
+                </div>
+              </div>
+
+              {/* New Password */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+                  New Password
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-muted">
+                    <Lock className="w-4 h-4" />
+                  </div>
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    required
+                    placeholder="Min 6 characters"
+                    value={recoveryData.newPassword}
+                    onChange={(e) =>
+                      setRecoveryData((prev) => ({ ...prev, newPassword: e.target.value }))
+                    }
+                    className="w-full pl-10 pr-11 py-2.5 bg-surface text-text-primary border border-border rounded-xl text-sm placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-focus-ring/20 transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((prev) => !prev)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-text-muted hover:text-text-secondary"
+                  >
+                    {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Confirm Password */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+                  Confirm New Password
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-muted">
+                    <Lock className="w-4 h-4" />
+                  </div>
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    required
+                    placeholder="Re-enter password"
+                    value={recoveryData.confirmPassword}
+                    onChange={(e) =>
+                      setRecoveryData((prev) => ({ ...prev, confirmPassword: e.target.value }))
+                    }
+                    className="w-full pl-10 pr-3.5 py-2.5 bg-surface text-text-primary border border-border rounded-xl text-sm placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-focus-ring/20 transition-all"
+                  />
+                </div>
+              </div>
+
+              {/* Submit Recovery */}
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full bg-gradient-to-b from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-medium py-2.5 px-4 rounded-xl text-sm transition-all duration-150 shadow-sm disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer mt-1"
+              >
+                {isLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Updating Password…</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Save New Password</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+
+              {/* Cancel back to login */}
+              <div className="text-center pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("login");
+                    setError(null);
+                  }}
+                  className="inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Cancel</span>
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      ) : (
+        <div />
       )}
     </div>
   );

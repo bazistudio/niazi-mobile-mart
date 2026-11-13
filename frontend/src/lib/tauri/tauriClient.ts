@@ -469,6 +469,16 @@ export const tauriClient = {
   },
 
   async authChangePassword(currentPassword: string, newPassword: string): Promise<void> {
+    if (getApiBaseUrl()) {
+      await httpFetch<void>('/api/v1/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+      });
+      return;
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('auth_change_password', { currentPassword, newPassword });
@@ -575,13 +585,24 @@ export const tauriClient = {
     }
   },
 
-  async adminRecoverAccess(recoveryToken: string, newLoginKey: string): Promise<void> {
+  async adminRecoverAccess(recoveryToken: string, newLoginKey: string, targetUsername?: string): Promise<void> {
+    if (getApiBaseUrl()) {
+      await httpFetch<void>('/api/v1/auth/admin-recovery', {
+        method: 'POST',
+        body: JSON.stringify({
+          recovery_key: recoveryToken,
+          new_password: newLoginKey,
+          target_username: targetUsername,
+        }),
+      });
+      return;
+    }
     if (isTauriEnvironment()) {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('admin_recover_access', { recoveryToken, newLoginKey });
       return;
     }
-    throw new Error('Native Tauri environment required for emergency recovery');
+    throw new Error('API Base URL or Native Tauri environment required for emergency recovery');
   },
 
   async adminCreateUser(payload: {

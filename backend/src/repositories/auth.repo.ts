@@ -202,6 +202,44 @@ export class AuthRepo {
   }
 
   /**
+   * List all eligible active admin users with an active recovery key hash.
+   * Excludes inactive, suspended, or disabled administrators.
+   * Used by the recovery flow to verify the one-time NZRCV key.
+   */
+  async findAdminsWithRecoveryKey(): Promise<UserRow[]> {
+    const result = await this.pool.query(
+      `SELECT ${SELECT_USER_COLS} FROM users
+       WHERE recovery_key_hash IS NOT NULL
+         AND is_active = 1
+         AND UPPER(status) = 'ACTIVE'
+         AND UPPER(role) IN ('ADMIN', 'SUPER_ADMIN', 'OWNER', 'MULTI_ADMIN')`
+    );
+    return (result.rows as Record<string, unknown>[]).map(mapRow);
+  }
+
+  /**
+   * Atomically reset password, clear lockout, and consume (NULL out) recovery_key_hash.
+   * Strictly preserves the account's existing active status without forcing is_active = true.
+   */
+  async consumeRecoveryKeyAndResetPassword(
+    userId: string,
+    newHash: string
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE users
+         SET login_key_hash = $2,
+             recovery_key_hash = NULL,
+             failed_login_attempts = 0,
+             login_locked_until_ms = NULL,
+             must_change_password = 0,
+             updated_at = NOW()
+       WHERE id = $1 AND recovery_key_hash IS NOT NULL`,
+      [userId, newHash]
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  /**
    * ATOMIC failed login record.
    *
    * Increments failed_login_attempts AND conditionally sets login_locked_until_ms in a

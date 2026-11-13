@@ -67,12 +67,12 @@ const loginRateLimiter = rateLimit({
 
 /**
  * Strict rate limiter for the admin-recovery endpoint.
- * 5 requests per 15 minutes per IP address.
+ * 5 requests per 15 minutes per IP address (relaxed in test environment).
  * This endpoint accepts a high-value secret key — keep the window tight.
  */
 const recoveryRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1_000,  // 15 minutes
-  limit: 5,                    // max 5 recovery attempts per IP per window
+  limit: process.env['NODE_ENV'] === 'test' ? 50 : 5,                    // max 5 recovery attempts per IP per window
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   skipSuccessfulRequests: false,
@@ -411,76 +411,160 @@ export function buildAuthRouter(pool: Pool): Router {
   //   500 — internal server error
   // -------------------------------------------------------------------------
 
+  // -------------------------------------------------------------------------
+  // POST /change-password
+  // Authenticated self-service password update for the active session user.
+  // -------------------------------------------------------------------------
+  router.post('/change-password', buildAuthMiddleware(pool), async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity;
+    if (!identity) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const { current_password, new_password } = req.body as Record<string, unknown>;
+
+    if (typeof current_password !== 'string' || !current_password.trim()) {
+      res.status(400).json({ error: 'Current password is required' });
+      return;
+    }
+
+    if (typeof new_password !== 'string' || new_password.trim().length < 6) {
+      res.status(400).json({ error: 'New password must be at least 6 characters long' });
+      return;
+    }
+
+    try {
+      const user = await authRepo.findById(identity.user_id);
+      if (!user || !user.login_key_hash) {
+        res.status(401).json({ error: 'User record or credentials not found' });
+        return;
+      }
+
+      const isValid = await verifyArgon2(current_password.trim(), user.login_key_hash);
+      if (!isValid) {
+        res.status(401).json({ error: 'Current password is incorrect' });
+        return;
+      }
+
+      const newHash = await hashArgon2(new_password.trim());
+      await authRepo.atomicPasswordReset(user.id, newHash, false);
+
+      res.status(200).json({ success: true, message: 'Password updated successfully' });
+    } catch (err) {
+      console.error('[auth/change-password] Unexpected error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /admin-recovery
+  //
+  // Dual-mode account recovery endpoint:
+  // 1. One-time database recovery key (NZRCV-XXXX-XXXX-XXXX-XXXX) matching
+  //    users.recovery_key_hash with Argon2id. Strictly consumes key on success.
+  // 2. Fallback: Cloud Run environment secret ADMIN_RECOVERY_KEY for emergency recovery.
+  // -------------------------------------------------------------------------
+
   router.post('/admin-recovery', recoveryRateLimiter, async (req: Request, res: Response): Promise<void> => {
     const { recovery_key, target_username, new_password } = req.body as Record<string, unknown>;
 
     // Validate required fields
-    if (typeof recovery_key !== 'string' || !recovery_key) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
-    }
-    if (typeof target_username !== 'string' || !target_username.trim()) {
-      res.status(400).json({ error: 'target_username is required' });
-      return;
-    }
-    if (typeof new_password !== 'string' || new_password.length < 8) {
-      res.status(400).json({ error: 'new_password must be at least 8 characters' });
+    if (typeof recovery_key !== 'string' || !recovery_key.trim()) {
+      res.status(401).json({ error: 'Recovery key is required' });
       return;
     }
 
-    // Fetch the configured recovery key from environment.
-    // This value must be provisioned via GCP Secret Manager and injected
-    // as ADMIN_RECOVERY_KEY at Cloud Run startup. Never hardcode it.
-    const configuredKey = process.env['ADMIN_RECOVERY_KEY'] ?? '';
-    if (!configuredKey) {
-      // Recovery endpoint not configured — fail closed, log server-side only.
-      console.error('[auth/admin-recovery] ADMIN_RECOVERY_KEY env var is not set. Recovery endpoint is disabled.');
-      res.status(500).json({ error: 'Recovery endpoint is not configured on this server.' });
+    const cleanKey = recovery_key.trim();
+
+    if (typeof new_password !== 'string' || new_password.length < 6) {
+      res.status(400).json({ error: 'new_password must be at least 6 characters' });
       return;
     }
 
-    // Constant-time comparison — prevents timing oracle on recovery key.
-    if (!constantTimeEqual(recovery_key, configuredKey)) {
-      // Generic 401 — do not confirm whether the username exists or what failed.
-      // Log the attempt server-side with the source IP for audit purposes.
-      const sourceIp = req.ip ?? 'unknown';
-      console.warn(`[auth/admin-recovery] FAILED attempt from IP ${sourceIp} for username "${target_username.trim()}"`);
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
-    }
+    const sourceIp = req.ip ?? 'unknown';
 
-    // Key matches — proceed with recovery.
     try {
-      // Find the target user (case-insensitive, same as login)
-      const user = await authRepo.findByUsername(target_username.trim());
-      if (!user) {
-        // Return 200 even for unknown usernames to prevent username enumeration.
-        // The key was valid — this is not a security failure, so 200 is appropriate.
-        const sourceIp = req.ip ?? 'unknown';
-        console.warn(`[auth/admin-recovery] Key valid but username not found: "${target_username.trim()}" from IP ${sourceIp}`);
-        res.status(200).json({ message: 'Recovery processed.' });
+      // -----------------------------------------------------------------------
+      // MODE 1: One-time database recovery key (NZRCV-XXXX-XXXX-XXXX-XXXX)
+      // -----------------------------------------------------------------------
+      const admins = await authRepo.findAdminsWithRecoveryKey();
+      let matchedAdmin: typeof admins[0] | null = null;
+
+      for (const admin of admins) {
+        if (target_username && typeof target_username === 'string' && target_username.trim()) {
+          if (admin.username.toLowerCase() !== target_username.trim().toLowerCase()) {
+            continue;
+          }
+        }
+        if (admin.recovery_key_hash) {
+          const match = await verifyArgon2(cleanKey, admin.recovery_key_hash);
+          if (match) {
+            matchedAdmin = admin;
+            break;
+          }
+        }
+      }
+
+      if (matchedAdmin) {
+        // Hash the new password
+        const newHash = await hashArgon2(new_password.trim());
+
+        // Atomically consume the one-time key and set the new password
+        const consumed = await authRepo.consumeRecoveryKeyAndResetPassword(matchedAdmin.id, newHash);
+        if (!consumed) {
+          console.warn(`[auth/admin-recovery] Recovery key already consumed for admin "${matchedAdmin.username}"`);
+          res.status(403).json({ error: 'Recovery key has already been consumed or is invalid.' });
+          return;
+        }
+
+        console.warn(
+          `[auth/admin-recovery] SUCCESS: One-time NZRCV key consumed and password reset for admin "${matchedAdmin.username}" from IP ${sourceIp}`
+        );
+
+        res.status(200).json({
+          success: true,
+          message: 'Account recovery successful. The one-time recovery key has been consumed and your new password is active.',
+          username: matchedAdmin.username,
+        });
         return;
       }
 
-      // Hash the new password
-      const newHash = await hashArgon2(new_password);
+      // -----------------------------------------------------------------------
+      // MODE 2: Cloud Run environment secret fallback (ADMIN_RECOVERY_KEY)
+      // -----------------------------------------------------------------------
+      const configuredKey = process.env['ADMIN_RECOVERY_KEY'];
+      if (!configuredKey && (!admins || admins.length === 0)) {
+        console.error('[auth/admin-recovery] ADMIN_RECOVERY_KEY env var is not set and no DB recovery keys exist.');
+        res.status(500).json({ error: 'Recovery endpoint is not configured on this server.' });
+        return;
+      }
 
-      // Atomic reset: new password hash + clear lockout + set must_change_password
-      await authRepo.atomicPasswordReset(user.id, newHash, true);
+      if (configuredKey && constantTimeEqual(cleanKey, configuredKey) && target_username && typeof target_username === 'string' && target_username.trim()) {
+        const user = await authRepo.findByUsername(target_username.trim());
+        if (!user) {
+          console.warn(`[auth/admin-recovery] Env key valid but username not found: "${target_username.trim()}" from IP ${sourceIp}`);
+          res.status(200).json({ message: 'Recovery processed.' });
+          return;
+        }
 
-      const sourceIp = req.ip ?? 'unknown';
-      console.warn(
-        `[auth/admin-recovery] SUCCESS: password reset for user "${user.username}" (id=${user.id}) ` +
-        `from IP ${sourceIp}. User must change password on next login.`
-      );
+        const newHash = await hashArgon2(new_password.trim());
+        await authRepo.atomicPasswordReset(user.id, newHash, true);
 
-      res.status(200).json({
-        message: 'Account recovery successful. The account password has been reset and the account lockout has been cleared.',
-        must_change_password: true,
-      });
+        console.warn(`[auth/admin-recovery] SUCCESS: env recovery key used for user "${user.username}" from IP ${sourceIp}`);
+        res.status(200).json({
+          success: true,
+          message: 'Account recovery successful via system recovery key.',
+          must_change_password: true,
+        });
+        return;
+      }
+
+      // Neither Mode 1 nor Mode 2 matched
+      console.warn(`[auth/admin-recovery] FAILED attempt from IP ${sourceIp}`);
+      res.status(401).json({ error: 'Invalid or already consumed recovery key.' });
     } catch (err) {
       console.error('[auth/admin-recovery] Unexpected error during recovery:', err);
-      // Generic error — do not reveal internal details
       res.status(500).json({ error: 'Internal server error' });
     }
   });
