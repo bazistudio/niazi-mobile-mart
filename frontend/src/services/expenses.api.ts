@@ -5,7 +5,9 @@ import {
   CreateExpenseCategoryDto,
   UpdateExpenseCategoryDto,
   CreateExpenseDto,
+  UpdateExpenseDto,
   ExpenseFilterDto,
+  ExpenseSummary,
 } from '@/lib/tauri/tauriClient';
 
 export const expensesApi = {
@@ -25,8 +27,8 @@ export const expensesApi = {
     return await tauriClient.expenseCreate(dto);
   },
 
-  cancelExpense: async (id: string, _reason?: string): Promise<Expense> => {
-    return await tauriClient.expenseCancel(id);
+  cancelExpense: async (id: string, reason?: string | null): Promise<Expense> => {
+    return await tauriClient.expenseCancel(id, reason);
   },
 
   getExpenses: async (filter?: ExpenseFilterDto): Promise<Expense[]> => {
@@ -35,5 +37,13 @@ export const expensesApi = {
 
   getExpenseById: async (id: string): Promise<Expense | null> => {
     return await tauriClient.expenseGetById(id);
+  },
+
+  updateExpense: async (id: string, dto: UpdateExpenseDto): Promise<Expense> => {
+    return await tauriClient.expenseUpdate(id, dto);
+  },
+
+  getExpenseSummary: async (filter?: ExpenseFilterDto): Promise<ExpenseSummary> => {
+    return await tauriClient.expenseSummary(filter);
   },
 };

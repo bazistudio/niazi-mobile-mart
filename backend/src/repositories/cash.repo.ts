@@ -318,7 +318,10 @@ export async function getDailySummary(
         } else if (mType === 'SUPPLIER_PAYMENT') {
           supplierPayments += amt;
         } else if (mType === 'EXPENSE') {
-          cashExpenses += amt;
+          // DEFECT-01 FIX: OUT = new expense (add), IN = compensating reversal (subtract).
+          // Append-only cash movement ledger: cancellations and cash→non-cash edits
+          // insert a direction=IN row to reverse the original OUT expense.
+          if (dir === 'OUT') cashExpenses += amt; else cashExpenses -= amt;
         } else if (mType === 'CASH_ADJUSTMENT') {
           if (dir === 'IN') cashInAdjustments += amt; else cashOutAdjustments += amt;
         }
@@ -405,7 +408,8 @@ export async function getDailySummary(
     } else if (mType === 'SUPPLIER_PAYMENT') {
       supplierPayments += amt;
     } else if (mType === 'EXPENSE') {
-      cashExpenses += amt;
+      // DEFECT-01 FIX: OUT = new expense (add), IN = compensating reversal (subtract).
+      if (dir === 'OUT') cashExpenses += amt; else cashExpenses -= amt;
     } else if (mType === 'CASH_ADJUSTMENT') {
       if (dir === 'IN') cashInAdjustments += amt; else cashOutAdjustments += amt;
     }

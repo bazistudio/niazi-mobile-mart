@@ -6,7 +6,6 @@ import {
   X,
   Plus,
   ReceiptText,
-  Building2,
   Store,
   Tag,
   Zap,
@@ -19,14 +18,33 @@ import {
   Banknote,
   Smartphone,
   Loader2,
-  Calendar,
-  FileText,
+  Calculator,
+  Package,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
+}
+
+/**
+ * FIX-01: Returns the current calendar date in Asia/Karachi (PKT, UTC+5).
+ * Uses local date components to avoid the UTC midnight-shift that causes
+ * new Date().toISOString().split('T')[0] to return yesterday between
+ * 00:00–04:59 PKT (since UTC is 5 hours behind PKT).
+ * Returns: YYYY-MM-DD string in Pakistan Standard Time.
+ */
+function getPKTDateString(): string {
+  const now = new Date();
+  // PKT is UTC+5; add 5 hours to UTC time to get PKT wall-clock date
+  const pktOffset = 5 * 60; // minutes
+  const utcMinutes = now.getTime() / 60000;
+  const pktDate = new Date((utcMinutes + pktOffset) * 60000);
+  const y = pktDate.getUTCFullYear();
+  const m = String(pktDate.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(pktDate.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 // Preset common expense templates with icons
@@ -44,13 +62,15 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
   // Form states
   const [categoryId, setCategoryId] = useState('');
+  const [quantity, setQuantity] = useState('1');
+  const [unitPrice, setUnitPrice] = useState('');
   const [amount, setAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'BANK_TRANSFER' | 'OTHER'>('CASH');
+  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'BANK_TRANSFER' | 'EASYPAISA' | 'JAZZCASH' | 'CARD' | 'OTHER'>('CASH');
   const [description, setDescription] = useState('');
   const [notes, setNotes] = useState('');
-  const [expenseDate, setExpenseDate] = useState(new Date().toISOString().split('T')[0]);
+  // FIX-01: PKT-safe date initialisation — not .toISOString() which returns UTC
+  const [expenseDate, setExpenseDate] = useState(getPKTDateString());
   const [referenceNo, setReferenceNo] = useState('');
-  const [expenseScope, setExpenseScope] = useState<'BRANCH' | 'ORGANIZATION'>('BRANCH');
 
   // Category quick-add inline state
   const [isAddingCategory, setIsAddingCategory] = useState(false);
@@ -62,13 +82,15 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
       if (categories.length > 0 && !categoryId) {
         setCategoryId(categories[0].id);
       }
+      setQuantity('1');
+      setUnitPrice('');
       setAmount('');
       setPaymentMethod('CASH');
       setDescription('');
       setNotes('');
       setReferenceNo('');
-      setExpenseScope('BRANCH');
-      setExpenseDate(new Date().toISOString().split('T')[0]);
+      // EXP-FIX-03 / FIX-01: reset to PKT business date, not UTC date
+      setExpenseDate(getPKTDateString());
       setIsAddingCategory(false);
       setNewCategoryName('');
     }
@@ -76,13 +98,51 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
   if (!isOpen) return null;
 
+  // Handle Quantity change: recalculate total if unitPrice is provided
+  const handleQuantityChange = (val: string) => {
+    setQuantity(val);
+    const q = parseFloat(val);
+    const up = parseFloat(unitPrice);
+    if (!isNaN(q) && q > 0 && !isNaN(up) && up > 0) {
+      setAmount(String(Math.round(q * up)));
+    }
+  };
+
+  // Handle Unit Price change: recalculate total using quantity (defaults to 1 if empty)
+  const handleUnitPriceChange = (val: string) => {
+    setUnitPrice(val);
+    const up = parseFloat(val);
+    const q = parseFloat(quantity) || 1;
+    if (!isNaN(up) && up > 0 && q > 0) {
+      setAmount(String(Math.round(q * up)));
+    } else if (val === '') {
+      setAmount('');
+    }
+  };
+
+  // Handle direct Total Amount change: if user types lump sum directly
+  const handleTotalAmountChange = (val: string) => {
+    setAmount(val);
+    const tot = parseFloat(val);
+    const q = parseFloat(quantity);
+    if (!isNaN(tot) && tot > 0) {
+      if (!isNaN(q) && q > 1) {
+        setUnitPrice(String(Math.round(tot / q)));
+      } else {
+        setUnitPrice(val);
+      }
+    } else if (val === '') {
+      setUnitPrice('');
+    }
+  };
+
   // Handle Preset Click: selects category if exists, or fills description
   const handlePresetClick = (preset: typeof QUICK_EXPENSE_PRESETS[0]) => {
     setDescription(preset.defaultDesc);
-    // Try to find matching category by name (case-insensitive)
     const matching = categories.find(
-      (c) => c.name.toLowerCase().includes(preset.name.toLowerCase()) ||
-             preset.name.toLowerCase().includes(c.name.toLowerCase())
+      (c) =>
+        c.name.toLowerCase().includes(preset.name.toLowerCase()) ||
+        preset.name.toLowerCase().includes(c.name.toLowerCase())
     );
     if (matching) {
       setCategoryId(matching.id);
@@ -123,8 +183,22 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
       toast.error('Please select an expense category');
       return;
     }
-    // Description is optional — trim if provided, otherwise null/empty
-    const trimmedDescription = description.trim() || null;
+
+    const parsedQty = Math.max(1, Math.round(parseFloat(quantity) || 1));
+    const parsedUnitPrice = unitPrice ? Math.round(parseFloat(unitPrice)) : numAmount;
+
+    // Build description with quantity & unit breakdown when quantity > 1 or unitPrice is explicitly entered
+    let finalDescription = description.trim();
+    const breakdownTag =
+      parsedQty > 1 || (unitPrice.trim() !== '' && parsedUnitPrice > 0)
+        ? `[Qty: ${parsedQty} × Rs. ${parsedUnitPrice.toLocaleString()} = Rs. ${numAmount.toLocaleString()}]`
+        : '';
+
+    if (breakdownTag) {
+      finalDescription = finalDescription
+        ? `${finalDescription} ${breakdownTag}`
+        : breakdownTag;
+    }
 
     // Combine notes and reference number if provided
     let combinedNotes = notes.trim();
@@ -134,19 +208,18 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
         : `Ref #: ${referenceNo.trim()}`;
     }
 
-    const branchId =
-      expenseScope === 'BRANCH'
-        ? (activeShop?.id || activeShop?._id || null)
-        : null;
+    // EXP-FIX-03: Always use branch scope — no org-wide null override
+    const branchId = activeShop?.id || activeShop?._id || null;
 
     await addExpense({
       category_id: categoryId,
       branch_id: branchId,
       amount: numAmount,
+      quantity: parsedQty,
+      unit_price: parsedUnitPrice,
       payment_method: paymentMethod,
-      description: trimmedDescription,
+      description: finalDescription || null,
       notes: combinedNotes ? combinedNotes : null,
-      // expenseDate is already YYYY-MM-DD from the date input — do NOT wrap in new Date()
       expense_date: expenseDate || null,
     });
 
@@ -154,84 +227,70 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
   };
 
   const branchLabel = activeShop?.name || 'Active Branch';
+  const parsedQtyPreview = Math.max(1, Math.round(parseFloat(quantity) || 1));
+  const parsedUnitPreview = Math.round(parseFloat(unitPrice) || 0);
+  const parsedTotalPreview = Math.round(parseFloat(amount) || 0);
 
   return (
     <div
-      className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-3 sm:p-4 bg-overlay backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 sm:p-6 bg-overlay backdrop-blur-sm animate-fade-in"
       role="dialog"
       aria-modal="true"
       aria-labelledby="record-expense-title"
     >
-      <div className="bg-surface rounded-2xl shadow-modal w-full max-w-[475px] overflow-hidden border border-border flex flex-col max-h-[75vh] animate-scale-up">
+      {/* Expanded +30px all around: max-w-[535px] (+60px width), max-h-[86vh] (+60px height), p-[30px] outer feel */}
+      <div className="bg-surface rounded-2xl shadow-modal w-full max-w-[535px] overflow-hidden border border-border flex flex-col max-h-[86vh] animate-scale-up">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-surface sticky top-0 z-10">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-surface sticky top-0 z-10">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold shadow-2xs">
               <ReceiptText className="w-4 h-4" />
             </div>
             <div>
-              <h2 id="record-expense-title" className="text-sm font-bold text-text-primary tracking-tight">
+              <h2
+                id="record-expense-title"
+                className="text-sm font-bold text-text-primary tracking-tight"
+              >
                 Record Business Expense
               </h2>
-              <p className="text-[11px] text-text-secondary leading-none">
-                Overheads, utilities & daily expenditures
+              <p className="text-[11px] font-bold text-text-secondary uppercase tracking-wider mt-0.5">
+                Overheads, utilities & unit-quantity expenditures
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 text-text-muted hover:text-danger hover:bg-surface-hover rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring cursor-pointer"
+            className="p-2 text-text-muted hover:text-danger hover:bg-surface-hover rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring cursor-pointer"
             aria-label="Close dialog"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-4 overflow-y-auto space-y-3.5 custom-scrollbar flex-1">
-          {/* 1. Branch / Scope Segmented Pills */}
-          <div>
-            <div className="grid grid-cols-2 gap-1.5 p-1 bg-surface-hover rounded-lg border border-border">
-              <button
-                type="button"
-                onClick={() => setExpenseScope('BRANCH')}
-                className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                  expenseScope === 'BRANCH'
-                    ? 'bg-surface text-primary shadow-xs border border-border/80'
-                    : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                <Store className="w-3.5 h-3.5 text-primary" />
-                <span className="truncate">{branchLabel}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setExpenseScope('ORGANIZATION')}
-                className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                  expenseScope === 'ORGANIZATION'
-                    ? 'bg-surface text-primary shadow-xs border border-border/80'
-                    : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                <Building2 className="w-3.5 h-3.5 text-primary" />
-                <span>Organization-Wide</span>
-              </button>
-            </div>
+        {/* Form Body — Expanded padding (px-6 py-5) */}
+        <form
+          onSubmit={handleSubmit}
+          className="px-6 py-5 overflow-y-auto space-y-4 custom-scrollbar flex-1"
+        >
+          {/* EXP-FIX-03: Branch label (read-only, ORGANIZATION scope removed) */}
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-surface-hover border border-border">
+            <Store className="w-3.5 h-3.5 text-primary shrink-0" />
+            <span className="text-[11px] font-bold text-text-primary truncate">{branchLabel}</span>
+            <span className="ml-auto text-[10px] font-bold text-text-muted uppercase tracking-wider">Branch Expense</span>
           </div>
 
           {/* 2. Category Selection with "+ New Category" button */}
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-[11px] font-semibold text-text-secondary uppercase tracking-wider">
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-[11px] font-bold text-text-secondary uppercase tracking-wider">
                 Expense Category *
               </label>
               {!isAddingCategory ? (
                 <button
                   type="button"
                   onClick={() => setIsAddingCategory(true)}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:text-primary-hover transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:text-primary-hover uppercase tracking-wider transition-colors cursor-pointer"
                 >
                   <Plus className="w-3 h-3" />
                   <span>New Category</span>
@@ -240,7 +299,7 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 <button
                   type="button"
                   onClick={() => setIsAddingCategory(false)}
-                  className="text-[11px] text-text-muted hover:text-text-primary transition-colors cursor-pointer"
+                  className="text-[11px] font-bold text-text-muted hover:text-text-primary uppercase tracking-wider transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -249,25 +308,25 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
             {/* Inline Quick-Add Category Form */}
             {isAddingCategory ? (
-              <div className="p-2 mb-2 bg-primary/5 border border-primary/20 rounded-lg space-y-1.5 animate-fade-in">
-                <p className="text-[11px] font-medium text-text-primary flex items-center gap-1">
+              <div className="p-3 mb-2 bg-primary/5 border border-primary/20 rounded-xl space-y-2 animate-fade-in">
+                <p className="text-[11px] font-bold text-text-primary uppercase tracking-wider flex items-center gap-1.5">
                   <Tag className="w-3 h-3 text-primary" />
                   <span>Create new category for future use</span>
                 </p>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-2">
                   <input
                     type="text"
                     value={newCategoryName}
                     onChange={(e) => setNewCategoryName(e.target.value)}
-                    placeholder="e.g. Generator Fuel, Water"
-                    className="flex-1 px-2.5 py-1 text-xs bg-surface border border-border rounded-lg text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
+                    placeholder="e.g. Generator Fuel, Water Bottles"
+                    className="flex-1 px-3 py-1.5 text-[11px] font-bold bg-surface border border-border rounded-lg text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
                     autoFocus
                   />
                   <button
                     type="button"
                     disabled={isSavingCategory || !newCategoryName.trim()}
                     onClick={handleCreateCategory}
-                    className="px-2.5 py-1 text-xs font-semibold bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors disabled:opacity-disabled flex items-center gap-1 cursor-pointer"
+                    className="px-3 py-1.5 text-[11px] font-bold bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors disabled:opacity-disabled flex items-center gap-1 cursor-pointer uppercase tracking-wider"
                   >
                     {isSavingCategory ? (
                       <Loader2 className="w-3 h-3 animate-spin" />
@@ -283,7 +342,7 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 required
                 value={categoryId}
                 onChange={(e) => setCategoryId(e.target.value)}
-                className="w-full px-2.5 py-1.5 border border-border rounded-lg bg-surface text-xs text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring shadow-2xs"
+                className="w-full px-3 py-2 border border-border rounded-xl bg-surface text-[11px] font-bold text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring shadow-2xs"
               >
                 <option value="" disabled>
                   Select Category
@@ -299,8 +358,8 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
             )}
 
             {/* Quick-Preset Category Pills */}
-            <div className="mt-1.5">
-              <div className="flex flex-wrap gap-1">
+            <div className="mt-2">
+              <div className="flex flex-wrap gap-1.5">
                 {QUICK_EXPENSE_PRESETS.map((preset, idx) => {
                   const Icon = preset.icon;
                   return (
@@ -308,7 +367,7 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
                       key={idx}
                       type="button"
                       onClick={() => handlePresetClick(preset)}
-                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-surface-hover hover:bg-primary/10 text-text-secondary hover:text-primary border border-border hover:border-primary/30 transition-all cursor-pointer shadow-2xs"
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold bg-surface-hover hover:bg-primary/10 text-text-secondary hover:text-primary border border-border hover:border-primary/30 transition-all cursor-pointer shadow-2xs"
                     >
                       <Icon className="w-2.5 h-2.5 text-primary" />
                       <span>{preset.name}</span>
@@ -319,147 +378,188 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
             </div>
           </div>
 
-          {/* 3. Amount & Payment Method Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {/* Amount */}
-            <div>
-              <label className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
-                Amount (PKR) *
-              </label>
-              <div className="relative">
-                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-text-muted">
-                  Rs.
+          {/* 3. Quantity, One-Piece Unit Price & Total Amount Calculator Section */}
+          <div className="p-3.5 bg-surface-hover/60 border border-border rounded-xl space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-text-secondary uppercase tracking-wider flex items-center gap-1.5">
+                <Calculator className="w-3.5 h-3.5 text-primary" />
+                <span>Quantity & Unit Price Calculator</span>
+              </span>
+              {parsedUnitPreview > 0 && parsedTotalPreview > 0 && (
+                <span className="px-2 py-0.5 rounded-md bg-primary/10 text-primary text-[11px] font-bold">
+                  {parsedQtyPreview} × Rs. {parsedUnitPreview.toLocaleString()} = Rs.{' '}
+                  {parsedTotalPreview.toLocaleString()}
                 </span>
-                <input
-                  required
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="0"
-                  className="w-full pl-8 pr-2.5 py-1.5 border border-border rounded-lg bg-surface text-sm font-bold text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring shadow-2xs"
-                />
-              </div>
+              )}
             </div>
 
-            {/* Payment Method Cards */}
-            <div>
-              <label className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
-                Payment Channel *
-              </label>
-              <div className="grid grid-cols-3 gap-1">
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('CASH')}
-                  className={`flex flex-col items-center justify-center py-1 px-1 rounded-lg border text-center transition-all cursor-pointer ${
-                    paymentMethod === 'CASH'
-                      ? 'bg-primary/10 border-primary text-primary font-bold shadow-2xs'
-                      : 'bg-surface border-border text-text-secondary hover:bg-surface-hover'
-                  }`}
-                >
-                  <Banknote className="w-3 h-3 mb-0.5" />
-                  <span className="text-[10px]">Cash</span>
-                </button>
+            <div className="grid grid-cols-3 gap-2.5">
+              {/* Quantity */}
+              <div>
+                <label className="block text-[11px] font-bold text-text-secondary uppercase tracking-wider mb-1">
+                  Quantity (Qty)
+                </label>
+                <div className="relative">
+                  <Package className="w-3.5 h-3.5 text-text-muted absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={quantity}
+                    onChange={(e) => handleQuantityChange(e.target.value)}
+                    placeholder="1"
+                    className="w-full pl-7 pr-2.5 py-2 border border-border rounded-lg bg-surface text-[11px] font-bold text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring shadow-2xs"
+                  />
+                </div>
+              </div>
 
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('BANK_TRANSFER')}
-                  className={`flex flex-col items-center justify-center py-1 px-1 rounded-lg border text-center transition-all cursor-pointer ${
-                    paymentMethod === 'BANK_TRANSFER'
-                      ? 'bg-primary/10 border-primary text-primary font-bold shadow-2xs'
-                      : 'bg-surface border-border text-text-secondary hover:bg-surface-hover'
-                  }`}
-                >
-                  <CreditCard className="w-3 h-3 mb-0.5" />
-                  <span className="text-[10px]">Bank</span>
-                </button>
+              {/* 1 Piece / Unit Price */}
+              <div>
+                <label className="block text-[11px] font-bold text-text-secondary uppercase tracking-wider mb-1">
+                  1 Piece Price (PKR)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-text-muted">
+                    Rs.
+                  </span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={unitPrice}
+                    onChange={(e) => handleUnitPriceChange(e.target.value)}
+                    placeholder="e.g. 50"
+                    className="w-full pl-8 pr-2.5 py-2 border border-border rounded-lg bg-surface text-[11px] font-bold text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring shadow-2xs"
+                  />
+                </div>
+              </div>
 
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('OTHER')}
-                  className={`flex flex-col items-center justify-center py-1 px-1 rounded-lg border text-center transition-all cursor-pointer ${
-                    paymentMethod === 'OTHER'
-                      ? 'bg-primary/10 border-primary text-primary font-bold shadow-2xs'
-                      : 'bg-surface border-border text-text-secondary hover:bg-surface-hover'
-                  }`}
-                >
-                  <Smartphone className="w-3 h-3 mb-0.5" />
-                  <span className="text-[10px]">Online</span>
-                </button>
+              {/* Total Amount */}
+              <div>
+                <label className="block text-[11px] font-bold text-primary uppercase tracking-wider mb-1">
+                  Total Amount *
+                </label>
+                <div className="relative">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-primary">
+                    Rs.
+                  </span>
+                  <input
+                    required
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={amount}
+                    onChange={(e) => handleTotalAmountChange(e.target.value)}
+                    placeholder="e.g. 300"
+                    className="w-full pl-8 pr-2.5 py-2 border border-primary/50 rounded-lg bg-surface text-[11px] font-bold text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring shadow-2xs"
+                  />
+                </div>
               </div>
             </div>
           </div>
 
-          {/* 4. Expense Date & Reference Number */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          {/* 4. Payment Method Channel — EXP-FIX-04: CARD and OTHER added */}
+          <div>
+            <label className="block text-[11px] font-bold text-text-secondary uppercase tracking-wider mb-1.5">
+              Payment Channel *
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {(
+                [
+                  { method: 'CASH', label: 'Cash', Icon: Banknote },
+                  { method: 'BANK_TRANSFER', label: 'Bank', Icon: CreditCard },
+                  { method: 'EASYPAISA', label: 'EasyPaisa', Icon: Smartphone },
+                  { method: 'JAZZCASH', label: 'JazzCash', Icon: Smartphone },
+                  { method: 'CARD', label: 'Card', Icon: CreditCard },
+                  { method: 'OTHER', label: 'Other', Icon: Banknote },
+                ] as const
+              ).map(({ method, label, Icon }) => (
+                <button
+                  key={method}
+                  type="button"
+                  onClick={() => setPaymentMethod(method)}
+                  className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl border text-center transition-all cursor-pointer ${
+                    paymentMethod === method
+                      ? 'bg-primary/10 border-primary text-primary font-bold shadow-2xs'
+                      : 'bg-surface border-border text-text-secondary hover:bg-surface-hover'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5 shrink-0" />
+                  <span className="text-[11px] font-bold uppercase tracking-wider truncate">{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 5. Expense Date & Reference Number */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
+              <label className="block text-[11px] font-bold text-text-secondary uppercase tracking-wider mb-1">
                 Expense Date
               </label>
               <input
                 type="date"
                 value={expenseDate}
                 onChange={(e) => setExpenseDate(e.target.value)}
-                className="w-full px-2.5 py-1 border border-border rounded-lg bg-surface text-xs text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring shadow-2xs"
+                className="w-full px-3 py-2 border border-border rounded-xl bg-surface text-[11px] font-bold text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring shadow-2xs"
               />
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
-                Ref / Bill # <span className="text-text-muted font-normal">(Opt)</span>
+              <label className="block text-[11px] font-bold text-text-secondary uppercase tracking-wider mb-1">
+                Ref / Bill # <span className="text-text-muted">(Opt)</span>
               </label>
               <input
                 type="text"
                 value={referenceNo}
                 onChange={(e) => setReferenceNo(e.target.value)}
                 placeholder="e.g. Consumer or Bill #"
-                className="w-full px-2.5 py-1 border border-border rounded-lg bg-surface text-xs text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring shadow-2xs"
+                className="w-full px-3 py-2 border border-border rounded-xl bg-surface text-[11px] font-bold text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring shadow-2xs"
               />
             </div>
           </div>
 
-          {/* 5. Description */}
+          {/* 6. Description */}
           <div>
-            <label className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
-              Description / Purpose <span className="text-text-muted font-normal">(Opt)</span>
+            <label className="block text-[11px] font-bold text-text-secondary uppercase tracking-wider mb-1">
+              Description / Purpose <span className="text-text-muted">(Opt)</span>
             </label>
             <input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="e.g. Electricity bill for October, Monthly Shop Rent"
-              className="w-full px-2.5 py-1 border border-border rounded-lg bg-surface text-xs text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring shadow-2xs"
+              placeholder="e.g. Water bottles for shop, Monthly Electricity Bill"
+              className="w-full px-3 py-2 border border-border rounded-xl bg-surface text-[11px] font-bold text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring shadow-2xs"
             />
           </div>
 
-          {/* 6. Notes */}
+          {/* 7. Notes */}
           <div>
-            <label className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
-              Remarks <span className="text-text-muted font-normal">(Opt)</span>
+            <label className="block text-[11px] font-bold text-text-secondary uppercase tracking-wider mb-1">
+              Remarks <span className="text-text-muted">(Opt)</span>
             </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              rows={1}
-              placeholder="Paid to landlord / Utility paid via cash drawer"
-              className="w-full px-2.5 py-1 border border-border rounded-lg bg-surface text-xs text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring resize-none shadow-2xs"
+              rows={2}
+              placeholder="Paid to vendor / Utility paid via cash drawer"
+              className="w-full px-3 py-2 border border-border rounded-xl bg-surface text-[11px] font-bold text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring resize-none shadow-2xs"
             />
           </div>
 
           {/* Footer Actions */}
-          <div className="pt-2 border-t border-border flex items-center justify-end gap-2 sticky bottom-0 bg-surface">
+          <div className="pt-3 border-t border-border flex items-center justify-end gap-2.5 sticky bottom-0 bg-surface">
             <button
               type="button"
               onClick={onClose}
-              className="px-3 py-1.5 text-xs font-semibold text-text-secondary hover:text-text-primary bg-surface-hover rounded-lg transition-colors cursor-pointer border border-border"
+              className="px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-text-secondary hover:text-text-primary bg-surface-hover rounded-xl transition-colors cursor-pointer border border-border"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isAdding || !categoryId || !amount}
-              className="px-4 py-1.5 text-xs font-bold text-white bg-primary hover:bg-primary-hover active:bg-primary-active rounded-lg transition-all shadow-2xs hover:shadow-xs disabled:opacity-disabled flex items-center gap-1.5 cursor-pointer"
+              className="px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-white bg-primary hover:bg-primary-hover active:bg-primary-active rounded-xl transition-all shadow-2xs hover:shadow-xs disabled:opacity-disabled flex items-center gap-1.5 cursor-pointer"
             >
               {isAdding ? (
                 <>
@@ -479,4 +579,3 @@ export const ExpenseCreateModal: React.FC<Props> = ({ isOpen, onClose }) => {
     </div>
   );
 };
-

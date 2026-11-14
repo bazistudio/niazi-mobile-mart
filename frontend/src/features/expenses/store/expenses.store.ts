@@ -5,6 +5,9 @@ import toast from 'react-hot-toast';
 
 export interface ExpenseFilterState {
   search?: string;
+  branch_id?: string;
+  organization_id?: string;      // FEATURE-01: ADMIN org-wide mode
+  created_by_user_id?: string;   // FEATURE-01: filter by creator
   category_id?: string;
   payment_method?: string;
   status?: string;
@@ -22,6 +25,9 @@ interface ExpensesState {
   filters: ExpenseFilterState;
   isGlobalModalOpen: boolean;
   error: string | null;
+  /** DEFECT-03 FIX: Incremented after every successful create/update/cancel mutation.
+   * ExpenseStatsCards watches this to trigger a summary re-fetch without polling. */
+  mutationRevision: number;
 
   setGlobalModalOpen: (open: boolean) => void;
   setFilters: (filters: Partial<ExpenseFilterState>) => void;
@@ -29,6 +35,7 @@ interface ExpensesState {
   fetchExpenses: () => Promise<void>;
   addExpense: (dto: CreateExpenseDto) => Promise<void>;
   cancelExpense: (id: string, reason?: string) => Promise<void>;
+  updateExpense: (id: string, dto: import('@/lib/tauri/tauriClient').UpdateExpenseDto) => Promise<void>;
 }
 
 export const useExpensesStore = create<ExpensesState>((set, get) => ({
@@ -39,6 +46,7 @@ export const useExpensesStore = create<ExpensesState>((set, get) => ({
   isGlobalModalOpen: false,
   filters: { limit: 100, offset: 0 },
   error: null,
+  mutationRevision: 0,
 
   setGlobalModalOpen: (open) => set({ isGlobalModalOpen: open }),
 
@@ -62,29 +70,22 @@ export const useExpensesStore = create<ExpensesState>((set, get) => ({
     try {
       set({ isLoading: true, error: null });
       const { filters } = get();
+      // EXP-FIX-07: forward branch_id; EXP-FIX-08: pass search to server (server-side)
       const filterDto: ExpenseFilterDto = {
+        branch_id: filters.branch_id || undefined,
+        organization_id: filters.organization_id || undefined,   // FEATURE-01
+        created_by_user_id: filters.created_by_user_id || undefined, // FEATURE-01
         category_id: filters.category_id || undefined,
         payment_method: filters.payment_method || undefined,
         status: filters.status || undefined,
+        search: filters.search?.trim() || undefined,
         start_date: filters.start_date || undefined,
         end_date: filters.end_date || undefined,
         limit: filters.limit,
         offset: filters.offset,
       };
 
-      let items = await expensesApi.getExpenses(filterDto);
-
-      // In-memory search filter if search term provided
-      if (filters.search && filters.search.trim() !== '') {
-        const query = filters.search.toLowerCase().trim();
-        items = items.filter((exp) =>
-          exp.expense_number.toLowerCase().includes(query) ||
-          (exp.description && exp.description.toLowerCase().includes(query)) ||
-          (exp.notes && exp.notes.toLowerCase().includes(query)) ||
-          (exp.category_name && exp.category_name.toLowerCase().includes(query))
-        );
-      }
-
+      const items = await expensesApi.getExpenses(filterDto);
       set({ items, isLoading: false });
     } catch (error: any) {
       set({ error: error.message || 'Failed to fetch expenses', isLoading: false });
@@ -96,7 +97,8 @@ export const useExpensesStore = create<ExpensesState>((set, get) => ({
       set({ isAdding: true, error: null });
       await expensesApi.createExpense(dto);
       await get().fetchExpenses();
-      set({ isAdding: false });
+      // DEFECT-03 FIX: increment mutationRevision so stats cards re-fetch
+      set((s) => ({ isAdding: false, mutationRevision: s.mutationRevision + 1 }));
       toast.success('Expense recorded successfully');
     } catch (error: any) {
       const errorMsg = error?.message || 'Failed to record expense';
@@ -111,9 +113,27 @@ export const useExpensesStore = create<ExpensesState>((set, get) => ({
       set({ isLoading: true, error: null });
       await expensesApi.cancelExpense(id, reason);
       await get().fetchExpenses();
+      // DEFECT-03 FIX: increment mutationRevision
+      set((s) => ({ mutationRevision: s.mutationRevision + 1 }));
       toast.success('Expense cancelled successfully');
     } catch (error: any) {
       const errorMsg = error?.message || 'Failed to cancel expense';
+      set({ error: errorMsg, isLoading: false });
+      toast.error(errorMsg);
+      throw error;
+    }
+  },
+
+  updateExpense: async (id, dto) => {
+    try {
+      set({ isLoading: true, error: null });
+      await expensesApi.updateExpense(id, dto);
+      await get().fetchExpenses();
+      // DEFECT-03 FIX: increment mutationRevision
+      set((s) => ({ mutationRevision: s.mutationRevision + 1 }));
+      toast.success('Expense updated successfully');
+    } catch (error: any) {
+      const errorMsg = error?.message || 'Failed to update expense';
       set({ error: errorMsg, isLoading: false });
       toast.error(errorMsg);
       throw error;

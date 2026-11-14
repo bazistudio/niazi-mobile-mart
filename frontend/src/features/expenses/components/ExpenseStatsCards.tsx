@@ -1,84 +1,75 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useExpensesStore } from '../store/expenses.store';
-import { Wallet, Tag, CheckCircle2, Ban } from 'lucide-react';
+import { expensesApi } from '../services/expenses.api';
+import { ExpenseSummary } from '@/lib/tauri/tauriClient';
+import { Wallet, Tag, CheckCircle2, Ban, Loader2 } from 'lucide-react';
 
 export const ExpenseStatsCards: React.FC = () => {
-  const { items, isLoading } = useExpensesStore();
+  const { isLoading, filters, mutationRevision } = useExpensesStore();
+  const [summary, setSummary] = useState<ExpenseSummary | null>(null);
+  const [isFetching, setIsFetching] = useState(false);
 
-  const stats = useMemo(() => {
-    let totalCompleted = 0;
-    let cashExpenses = 0;
-    let completedCount = 0;
-    let cancelledCount = 0;
-    const categoryTotals: Record<string, number> = {};
-
-    items.forEach((exp) => {
-      if (exp.status === 'COMPLETED') {
-        totalCompleted += exp.amount;
-        completedCount++;
-        if (exp.payment_method === 'CASH') {
-          cashExpenses += exp.amount;
-        }
-        const cat = exp.category_name || 'Operational';
-        categoryTotals[cat] = (categoryTotals[cat] || 0) + exp.amount;
-      } else {
-        cancelledCount++;
+  // EXP-M02: Wire to authoritative summary API instead of in-memory aggregation
+  useEffect(() => {
+    const fetchSummary = async () => {
+      try {
+        setIsFetching(true);
+        const data = await expensesApi.getExpenseSummary({
+          branch_id: filters.branch_id,
+          category_id: filters.category_id,
+          start_date: filters.start_date,
+          end_date: filters.end_date,
+        });
+        setSummary(data);
+      } catch {
+        // silent — summary is non-critical; keep prior data
+      } finally {
+        setIsFetching(false);
       }
-    });
-
-    let topCategory = '—';
-    let topCategoryAmount = 0;
-    Object.entries(categoryTotals).forEach(([cat, amt]) => {
-      if (amt > topCategoryAmount) {
-        topCategoryAmount = amt;
-        topCategory = cat;
-      }
-    });
-
-    return {
-      totalCompleted,
-      cashExpenses,
-      completedCount,
-      cancelledCount,
-      topCategory,
-      topCategoryAmount,
     };
-  }, [items]);
+    fetchSummary();
+  // DEFECT-03 FIX: mutationRevision increments after every create/update/cancel,
+  // forcing a re-fetch of the summary even when filter values are unchanged.
+  }, [filters.branch_id, filters.category_id, filters.start_date, filters.end_date, mutationRevision]);
 
-  if (isLoading && items.length === 0) {
+  if ((isLoading || isFetching) && !summary) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="animate-pulse h-24 bg-gray-200 dark:bg-neutral-800 rounded-xl"></div>
-        <div className="animate-pulse h-24 bg-gray-200 dark:bg-neutral-800 rounded-xl"></div>
-        <div className="animate-pulse h-24 bg-gray-200 dark:bg-neutral-800 rounded-xl"></div>
-        <div className="animate-pulse h-24 bg-gray-200 dark:bg-neutral-800 rounded-xl"></div>
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="animate-pulse h-24 bg-gray-200 dark:bg-neutral-800 rounded-xl" />
+        ))}
       </div>
     );
   }
 
+  const topMethod = summary?.by_payment_method?.reduce(
+    (best, cur) => (!best || cur.total_amount > best.total_amount ? cur : best),
+    null as ExpenseSummary['by_payment_method'][number] | null
+  );
+
   const cards = [
     {
       title: 'Total Expenses',
-      value: `PKR ${stats.totalCompleted.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-      subValue: `${stats.completedCount} active records`,
+      value: `PKR ${(summary?.total_amount ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+      subValue: `${summary?.total_count ?? 0} active records`,
       icon: Wallet,
       color: 'text-blue-600',
       bg: 'bg-blue-100 dark:bg-blue-900/30',
     },
     {
       title: 'Physical Cash Expenses',
-      value: `PKR ${stats.cashExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+      value: `PKR ${(summary?.cash_total ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
       subValue: 'Deducted from cash drawer',
       icon: CheckCircle2,
       color: 'text-emerald-600',
       bg: 'bg-emerald-100 dark:bg-emerald-900/30',
     },
     {
-      title: 'Top Category',
-      value: stats.topCategory,
+      title: 'Top Payment Channel',
+      value: topMethod?.payment_method ?? '—',
       subValue:
-        stats.topCategoryAmount > 0
-          ? `PKR ${stats.topCategoryAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+        topMethod
+          ? `PKR ${topMethod.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
           : 'No data',
       icon: Tag,
       color: 'text-purple-600',
@@ -86,7 +77,7 @@ export const ExpenseStatsCards: React.FC = () => {
     },
     {
       title: 'Cancelled Expenses',
-      value: `${stats.cancelledCount}`,
+      value: `${summary?.cancelled_count ?? 0}`,
       subValue: 'Immutable reversals',
       icon: Ban,
       color: 'text-neutral-500',
@@ -106,15 +97,18 @@ export const ExpenseStatsCards: React.FC = () => {
             <div className={`p-3.5 rounded-xl ${card.bg}`}>
               <Icon className={`w-6 h-6 ${card.color}`} />
             </div>
-            <div>
-              <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 truncate">
                 {card.title}
               </p>
-              <h3 className="text-xl font-bold text-neutral-900 dark:text-white mt-0.5">
+              <h3 className="text-xl font-bold text-neutral-900 dark:text-white mt-0.5 truncate">
                 {card.value}
               </h3>
-              <p className="text-xs text-neutral-400 mt-1">{card.subValue}</p>
+              <p className="text-xs text-neutral-400 mt-1 truncate">{card.subValue}</p>
             </div>
+            {isFetching && (
+              <Loader2 className="w-3.5 h-3.5 text-neutral-400 animate-spin shrink-0" />
+            )}
           </div>
         );
       })}

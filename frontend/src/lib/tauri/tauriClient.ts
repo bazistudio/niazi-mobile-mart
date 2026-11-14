@@ -1626,6 +1626,7 @@ export const tauriClient = {
     try {
       const params = new URLSearchParams();
       if (filter?.branch_id) params.append('branch_id', filter.branch_id);
+      if (filter?.created_by_user_id) params.append('created_by_user_id', filter.created_by_user_id); // FEATURE-01
       if (filter?.category_id) params.append('category_id', filter.category_id);
       if (filter?.payment_method) params.append('payment_method', filter.payment_method);
       if (filter?.status) params.append('status', filter.status);
@@ -1648,10 +1649,11 @@ export const tauriClient = {
     }
   },
 
-  async expenseCancel(id: string, _reason?: string): Promise<Expense> {
+  async expenseCancel(id: string, reason?: string | null): Promise<Expense> {
     try {
       return await httpFetch<Expense>(`/api/expenses/${encodeURIComponent(id)}/cancel`, {
         method: 'POST',
+        body: JSON.stringify({ reason: reason ?? null }),
       });
     } catch (e) {
       // Phase 1A: Re-throw ALL errors without IPC fallback.
@@ -1660,6 +1662,35 @@ export const tauriClient = {
       //     may have already cancelled the expense, and a second IPC call risks a
       //     double-cancel or conflicting state.
       throw e;
+    }
+  },
+
+  async expenseUpdate(id: string, dto: UpdateExpenseDto): Promise<Expense> {
+    try {
+      return await httpFetch<Expense>(`/api/expenses/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(dto),
+      });
+    } catch (e) {
+      // Re-throw ALL errors without IPC fallback — PUT may have already committed.
+      throw e;
+    }
+  },
+
+  async expenseSummary(filter?: ExpenseFilterDto): Promise<ExpenseSummary> {
+    try {
+      const params = new URLSearchParams();
+      if (filter?.branch_id) params.append('branch_id', filter.branch_id);
+      if (filter?.start_date) params.append('start_date', filter.start_date);
+      if (filter?.end_date) params.append('end_date', filter.end_date);
+      if (filter?.category_id) params.append('category_id', filter.category_id);
+      // FEATURE-01: Note — organization_id for ADMIN org-wide is resolved server-side from JWT; no param needed
+      const qs = params.toString();
+      return await httpFetch<ExpenseSummary>(`/api/expenses/summary${qs ? `?${qs}` : ''}`);
+    } catch (e) {
+      if (typeof (e as any).status === 'number') throw e;
+      // Network failure fallback: return zeroed summary
+      return { total_amount: 0, total_count: 0, cash_total: 0, non_cash_total: 0, cancelled_count: 0, by_payment_method: [], by_branch: [] };
     }
   },
 
@@ -2769,23 +2800,30 @@ export interface Expense {
   id: string;
   expense_number: string;
   category_id: string;
+  category_name?: string | null;
   branch_id: string;
+  branch_name?: string | null;      // FEATURE-01: originating branch name
   amount: number;
+  quantity?: number | null;
+  unit_price?: number | null;
   payment_method: string;
   description: string | null;
   notes: string | null;
   expense_date: string;
   status: ExpenseStatus;
   performed_by: string | null;
+  performed_by_name?: string | null;    // authenticated creator name
+  performed_by_role?: string | null;    // FEATURE-01: creator role
   created_at: string;
   updated_at: string;
-  category_name?: string | null;
 }
 
 export interface CreateExpenseDto {
   category_id: string;
   branch_id?: string | null;
   amount: number;
+  quantity?: number | null;
+  unit_price?: number | null;
   payment_method?: string | null;
   description?: string | null;
   notes?: string | null;
@@ -2795,6 +2833,8 @@ export interface CreateExpenseDto {
 export interface ExpenseFilterDto {
   search?: string | null;
   branch_id?: string | null;
+  organization_id?: string | null;      // FEATURE-01: ADMIN org-wide scope
+  created_by_user_id?: string | null;   // FEATURE-01: filter by creator
   category_id?: string | null;
   status?: string | null;
   payment_method?: string | null;
@@ -2802,6 +2842,42 @@ export interface ExpenseFilterDto {
   end_date?: string | null;
   limit?: number | null;
   offset?: number | null;
+}
+
+export interface UpdateExpenseDto {
+  category_id?: string | null;
+  amount?: number;
+  quantity?: number | null;
+  unit_price?: number | null;
+  payment_method?: string | null;
+  description?: string;
+  notes?: string | null;
+  expense_date?: string | null;
+  reason?: string | null;
+}
+
+export interface ExpenseSummaryByMethod {
+  payment_method: string;
+  total_amount: number;
+  count: number;
+}
+
+export interface ExpenseSummaryByBranch {
+  branch_id: string;
+  branch_name: string | null;
+  total_amount: number;
+  total_count: number;
+  cash_total: number;
+}
+
+export interface ExpenseSummary {
+  total_amount: number;
+  total_count: number;
+  cash_total: number;
+  non_cash_total: number;
+  cancelled_count: number;
+  by_payment_method: ExpenseSummaryByMethod[];
+  by_branch: ExpenseSummaryByBranch[];  // FEATURE-01: branch-wise totals for ADMIN
 }
 
 export type CashSessionStatus = 'OPEN' | 'CLOSED';

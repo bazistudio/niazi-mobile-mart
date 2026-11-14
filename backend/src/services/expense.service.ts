@@ -24,7 +24,9 @@ import {
   type CreateExpenseCategoryDto,
   type UpdateExpenseCategoryDto,
   type CreateExpenseDto,
+  type UpdateExpenseDto,
   type ExpenseFilterDto,
+  type ExpenseSummary,
 } from '../repositories/expense.repo';
 
 // ─── Service Error ─────────────────────────────────────────────────────────────
@@ -48,7 +50,9 @@ export type {
   CreateExpenseCategoryDto,
   UpdateExpenseCategoryDto,
   CreateExpenseDto,
+  UpdateExpenseDto,
   ExpenseFilterDto,
+  ExpenseSummary,
 };
 
 // ─── Valid payment methods (mirrors Rust CHECK constraint) ───────────────────
@@ -144,6 +148,37 @@ export class ExpenseService {
       );
     }
 
+    // Validate quantity if provided — positive integer
+    if (dto.quantity !== undefined && dto.quantity !== null) {
+      if (!Number.isInteger(dto.quantity) || dto.quantity <= 0) {
+        throw new ExpenseServiceError('quantity must be a positive integer', 400, 'VALIDATION');
+      }
+    }
+
+    // Validate unit_price if provided — positive integer
+    if (dto.unit_price !== undefined && dto.unit_price !== null) {
+      if (!Number.isInteger(dto.unit_price) || dto.unit_price <= 0) {
+        throw new ExpenseServiceError('unit_price must be a positive integer (whole PKR rupees)', 400, 'VALIDATION');
+      }
+    }
+
+    // DEFECT-02a: Enforce amount = quantity × unit_price invariant at creation time.
+    // Applies only when both quantity and unit_price are explicitly provided.
+    // Integer arithmetic — no floating-point risk at PKR whole-rupee scale.
+    if (
+      dto.quantity !== undefined && dto.quantity !== null &&
+      dto.unit_price !== undefined && dto.unit_price !== null
+    ) {
+      const expectedAmount = dto.quantity * dto.unit_price;
+      if (dto.amount !== expectedAmount) {
+        throw new ExpenseServiceError(
+          `Expense amount must equal quantity multiplied by unit price (${dto.quantity} × ${dto.unit_price} = ${expectedAmount}, got ${dto.amount})`,
+          400,
+          'VALIDATION'
+        );
+      }
+    }
+
     // Validate payment method
     if (dto.payment_method) {
       const pm = dto.payment_method.toUpperCase();
@@ -211,16 +246,112 @@ export class ExpenseService {
   }
 
   /**
+   * Update an expense (EXP-FIX-05).
+   * Append-only cash correction: compensating movements inserted atomically.
+   * Reuses expense:create permission (no separate expense:update permission exists).
+   */
+  async updateExpense(id: string, dto: UpdateExpenseDto, userId?: string | null, organizationId?: string | null): Promise<Expense> {
+    if (!id?.trim()) {
+      throw new ExpenseServiceError('Expense ID is required', 400, 'VALIDATION');
+    }
+
+    // DEFECT-02a: Partial-update effective-value invariant check.
+    // Resolve effective values: supplied value (if present) or persisted value (if not supplied).
+    // Fetch only when any numeric field is touched; description-only updates skip this.
+    const touchesNumericFields =
+      dto.quantity !== undefined ||
+      dto.unit_price !== undefined ||
+      dto.amount !== undefined;
+
+    if (touchesNumericFields) {
+      // Read-only preflight fetch; the repo will re-lock at mutation time.
+      const existing = await this.getExpenseById(id);
+
+      const effectiveQty       = dto.quantity   !== undefined ? dto.quantity   : (existing.quantity   ?? null);
+      const effectiveUnitPrice = dto.unit_price !== undefined ? dto.unit_price : (existing.unit_price ?? null);
+      const effectiveAmount    = dto.amount     !== undefined ? dto.amount     : existing.amount;
+
+      // Enforce invariant only when both qty and unit_price are known (non-null) after resolution.
+      if (effectiveQty !== null && effectiveUnitPrice !== null) {
+        const expectedAmount = effectiveQty * effectiveUnitPrice;
+        if (effectiveAmount !== expectedAmount) {
+          throw new ExpenseServiceError(
+            `Expense amount must equal quantity multiplied by unit price (${effectiveQty} × ${effectiveUnitPrice} = ${expectedAmount}, got ${effectiveAmount})`,
+            400,
+            'VALIDATION'
+          );
+        }
+      }
+    }
+
+    if (dto.amount !== undefined) {
+      const amount = dto.amount;
+      if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+        throw new ExpenseServiceError('Expense amount must be a positive number', 400, 'VALIDATION');
+      }
+      if (!Number.isInteger(amount)) {
+        throw new ExpenseServiceError('Expense amount must be a whole number (PKR rupees, no decimals)', 400, 'VALIDATION');
+      }
+    }
+    if (dto.quantity !== undefined && dto.quantity !== null) {
+      if (!Number.isInteger(dto.quantity) || dto.quantity <= 0) {
+        throw new ExpenseServiceError('quantity must be a positive integer', 400, 'VALIDATION');
+      }
+    }
+    if (dto.unit_price !== undefined && dto.unit_price !== null) {
+      if (!Number.isInteger(dto.unit_price) || dto.unit_price <= 0) {
+        throw new ExpenseServiceError('unit_price must be a positive integer (whole PKR rupees)', 400, 'VALIDATION');
+      }
+    }
+    if (dto.payment_method) {
+      const pm = dto.payment_method.toUpperCase();
+      if (!VALID_PAYMENT_METHODS.has(pm)) {
+        throw new ExpenseServiceError(
+          `Invalid payment method '${dto.payment_method}'. Must be one of: ${[...VALID_PAYMENT_METHODS].join(', ')}`,
+          400,
+          'VALIDATION'
+        );
+      }
+    }
+    if (dto.expense_date && !/^\d{4}-\d{2}-\d{2}$/.test(dto.expense_date)) {
+      throw new ExpenseServiceError('expense_date must be in YYYY-MM-DD format', 400, 'VALIDATION');
+    }
+    try {
+      return await this.repo.updateExpense(id, dto, userId, organizationId);
+    } catch (err: unknown) {
+      throw this.translateError(err, 'update_expense');
+    }
+  }
+
+  /**
+   * Get authoritative expense summary (EXP-M02).
+   * Aggregates totals for a branch or organization, filtered by date range.
+   */
+  async getExpenseSummary(filter: ExpenseFilterDto): Promise<ExpenseSummary> {
+    if (filter.start_date && !/^\d{4}-\d{2}-\d{2}$/.test(filter.start_date)) {
+      throw new ExpenseServiceError('start_date must be in YYYY-MM-DD format', 400, 'VALIDATION');
+    }
+    if (filter.end_date && !/^\d{4}-\d{2}-\d{2}$/.test(filter.end_date)) {
+      throw new ExpenseServiceError('end_date must be in YYYY-MM-DD format', 400, 'VALIDATION');
+    }
+    try {
+      return await this.repo.getExpenseSummary(filter);
+    } catch (err: unknown) {
+      throw this.translateError(err, 'get_expense_summary');
+    }
+  }
+
+  /**
    * Cancel an expense.
    * Append-only: marks CANCELLED + inserts compensating cash movement IN for CASH payments.
    * Mirrors expense_service.rs::cancel_expense.
    */
-  async cancelExpense(id: string, userId?: string | null, organizationId?: string | null): Promise<Expense> {
+  async cancelExpense(id: string, userId?: string | null, organizationId?: string | null, reason?: string | null): Promise<Expense> {
     if (!id?.trim()) {
       throw new ExpenseServiceError('Expense ID is required', 400, 'VALIDATION');
     }
     try {
-      return await this.repo.cancelExpense(id, userId, organizationId);
+      return await this.repo.cancelExpense(id, userId, organizationId, reason);
     } catch (err: unknown) {
       throw this.translateError(err, 'cancel_expense');
     }

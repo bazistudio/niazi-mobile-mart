@@ -40,7 +40,7 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 import { buildAuthMiddleware, authorizePermission, isOrgAdmin } from '../auth';
 import { ExpenseService, ExpenseServiceError } from '../services/expense.service';
-import type { ExpenseFilterDto } from '../services/expense.service';
+import type { ExpenseFilterDto, UpdateExpenseDto, ExpenseSummary } from '../services/expense.service';
 // Workstream C: writeChangeLogEntry removed from routes — now called inside the
 // database transaction in expense.repo.ts for atomicity. Import no longer needed here.
 
@@ -234,13 +234,27 @@ export function buildExpenseRouter(pool: Pool): Router {
   router.get('/', async (req: Request, res: Response): Promise<void> => {
     if (!requireExpensePermission(req, res)) return;
 
+    const identity = req.identity!;
+    const orgAdmin = isOrgAdmin(identity);
     const requestedBranchId = req.query['branch_id'] as string | undefined;
     const effectiveBranchId = resolveBranch(req, res, requestedBranchId);
     if (effectiveBranchId === 'UNAUTHORIZED') return;
 
+    // FEATURE-01: ADMIN org-wide — when no branch is specified, scope by organization_id
+    // Non-ADMIN users always see only their branch (enforced by resolveBranch + branch_id filter)
+    const organizationId: string | null =
+      orgAdmin && !effectiveBranchId
+        ? (identity.organization_id ?? null)
+        : null;
+
     const filter: ExpenseFilterDto = {
       category_id: (req.query['category_id'] as string | undefined) ?? null,
       branch_id: effectiveBranchId,
+      organization_id: organizationId,
+      // FEATURE-01: created_by_user_id filter — only ADMIN may filter by other users
+      created_by_user_id: orgAdmin
+        ? ((req.query['created_by_user_id'] as string | undefined) ?? null)
+        : null,
       payment_method: (req.query['payment_method'] as string | undefined) ?? null,
       status: (req.query['status'] as string | undefined) ?? null,
       search: (req.query['search'] as string | undefined) ?? null,
@@ -305,6 +319,8 @@ export function buildExpenseRouter(pool: Pool): Router {
           category_id: body['category_id'] as string,
           branch_id: effectiveBranchId,
           amount: Number(body['amount']),
+          quantity: body['quantity'] !== undefined && body['quantity'] !== null ? Number(body['quantity']) : null,
+          unit_price: body['unit_price'] !== undefined && body['unit_price'] !== null ? Number(body['unit_price']) : null,
           payment_method:
             (body['payment_method'] as string | null | undefined) ?? null,
           description,
@@ -321,6 +337,44 @@ export function buildExpenseRouter(pool: Pool): Router {
   });
 
   // -------------------------------------------------------------------------
+  // GET /summary — Authoritative expense summary (EXP-M02)
+  // Returns aggregated totals for the resolved branch (or org if ADMIN).
+  // Permission: expenses (no sub-permission)
+  // MUST be registered BEFORE GET /:id to avoid path collision.
+  // -------------------------------------------------------------------------
+
+  router.get('/summary', async (req: Request, res: Response): Promise<void> => {
+    if (!requireExpensePermission(req, res)) return;
+
+    const identity = req.identity!;
+    const orgAdmin = isOrgAdmin(identity);
+    const requestedBranchId = req.query['branch_id'] as string | undefined;
+    const effectiveBranchId = resolveBranch(req, res, requestedBranchId);
+    if (effectiveBranchId === 'UNAUTHORIZED') return;
+
+    // FEATURE-01: ADMIN org-wide summary — when no branch specified, use organization_id scope
+    const organizationId: string | null =
+      orgAdmin && !effectiveBranchId
+        ? (identity.organization_id ?? null)
+        : null;
+
+    const filter: ExpenseFilterDto = {
+      branch_id: effectiveBranchId,
+      organization_id: organizationId,
+      category_id: (req.query['category_id'] as string | undefined) ?? null,
+      start_date: (req.query['start_date'] as string | undefined) ?? null,
+      end_date: (req.query['end_date'] as string | undefined) ?? null,
+    };
+
+    try {
+      const summary: ExpenseSummary = await service.getExpenseSummary(filter);
+      res.status(200).json(summary);
+    } catch (err: unknown) {
+      handleError(res, err, 'get_expense_summary');
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // GET /:id — Get expense by ID
   // Mirrors expense_get_by_id IPC command (branch access check).
   // Permission: expenses (no sub-permission)
@@ -332,10 +386,28 @@ export function buildExpenseRouter(pool: Pool): Router {
     const identity = req.identity!;
     const { id } = req.params as { id: string };
 
+    // SEC-01: Fail closed — organization_id must be present in JWT
+    if (!identity.organization_id) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Organization identity missing' });
+      return;
+    }
+
     try {
       const expense = await service.getExpenseById(id);
 
-      // Branch access check — mirrors IPC expense_get_by_id branch check
+      // SEC-01: Organization boundary check — applies to ALL roles including ADMIN
+      // Prevents cross-organization expense access even when user has ADMIN role.
+      // branch_organization_id is derived from persisted branches table (server-side JOIN),
+      // never from client-supplied data.
+      if (!expense.branch_organization_id || expense.branch_organization_id !== identity.organization_id) {
+        res.status(403).json({
+          error: 'FORBIDDEN',
+          message: 'Access to this expense is not authorized',
+        });
+        return;
+      }
+
+      // Branch access check — mirrors IPC expense_get_by_id branch check (non-ADMIN only)
       if (!isOrgAdmin(identity) && identity.branch_id && expense.branch_id !== identity.branch_id) {
         res.status(403).json({
           error: 'FORBIDDEN',
@@ -347,6 +419,73 @@ export function buildExpenseRouter(pool: Pool): Router {
       res.status(200).json(expense);
     } catch (err: unknown) {
       handleError(res, err, 'get_expense_by_id');
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // PUT /:id — Edit an expense (EXP-FIX-05)
+  // Append-only cash corrections applied atomically.
+  // Reuses expense:create permission (no separate expense:update permission).
+  // Returns 200 with updated expense.
+  // -------------------------------------------------------------------------
+
+  router.put('/:id', async (req: Request, res: Response): Promise<void> => {
+    if (!requireExpenseCreatePermission(req, res)) return;
+
+    const identity = req.identity!;
+    const { id } = req.params as { id: string };
+    const body = req.body as Record<string, unknown>;
+
+    // SEC-01: Fail closed — organization_id must be present in JWT
+    if (!identity.organization_id) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Organization identity missing' });
+      return;
+    }
+
+    // Authorization check: load existing expense (org boundary + branch access)
+    try {
+      const existing = await service.getExpenseById(id);
+
+      // SEC-01: Organization boundary check — applies to ALL roles including ADMIN
+      // branch_organization_id comes from a server-side JOIN, never from the client.
+      if (!existing.branch_organization_id || existing.branch_organization_id !== identity.organization_id) {
+        res.status(403).json({
+          error: 'FORBIDDEN',
+          message: 'Access to this expense is not authorized',
+        });
+        return;
+      }
+
+      // Branch access check for non-ADMIN users (pre-existing behavior preserved)
+      if (!isOrgAdmin(identity) && identity.branch_id && existing.branch_id !== identity.branch_id) {
+        res.status(403).json({
+          error: 'FORBIDDEN',
+          message: 'Access to this branch is not authorized',
+        });
+        return;
+      }
+
+      const dto: UpdateExpenseDto = {
+        category_id: body['category_id'] !== undefined ? (body['category_id'] as string | null) : undefined,
+        amount: body['amount'] !== undefined && body['amount'] !== null ? Number(body['amount']) : undefined,
+        quantity: body['quantity'] !== undefined ? (body['quantity'] !== null ? Number(body['quantity']) : null) : undefined,
+        unit_price: body['unit_price'] !== undefined ? (body['unit_price'] !== null ? Number(body['unit_price']) : null) : undefined,
+        payment_method: body['payment_method'] !== undefined ? (body['payment_method'] as string | null) : undefined,
+        description: body['description'] !== undefined ? (body['description'] as string) : undefined,
+        notes: body['notes'] !== undefined ? (body['notes'] as string | null) : undefined,
+        expense_date: body['expense_date'] !== undefined ? (body['expense_date'] as string | null) : undefined,
+        reason: (body['reason'] as string | null | undefined) ?? null,
+      };
+
+      const updated = await service.updateExpense(
+        id,
+        dto,
+        identity.user_id,
+        identity.organization_id ?? null
+      );
+      res.status(200).json(updated);
+    } catch (err: unknown) {
+      handleError(res, err, 'update_expense');
     }
   });
 
@@ -375,11 +514,17 @@ export function buildExpenseRouter(pool: Pool): Router {
         return;
       }
 
+      // EXP-FIX-06: accept optional reason from request body, persist to change_log
+      const reason = typeof (req.body as Record<string, unknown>)['reason'] === 'string'
+        ? ((req.body as Record<string, unknown>)['reason'] as string).trim() || null
+        : null;
+
       // Workstream C: organizationId threaded to repo for in-transaction audit log.
       const cancelled = await service.cancelExpense(
         id,
         identity.user_id,
-        identity.organization_id ?? null  // Workstream C: in-transaction audit log
+        identity.organization_id ?? null,
+        reason
       );
       res.status(200).json(cancelled);
     } catch (err: unknown) {

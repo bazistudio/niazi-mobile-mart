@@ -15,6 +15,9 @@ import { dashboardApi } from '@/services/dashboard.api';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { queryKeys } from '@/lib/react-query/queryKeys';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
+import { expensesApi } from '@/services/expenses.api';
+import { ExpenseSummary } from '@/lib/tauri/tauriClient';
+import { ReceiptText, Wallet, Ban } from 'lucide-react';
 
 export const ShopAdminDashboard = () => {
   const [filter, setFilter] = useState<'today' | 'week' | 'month'>('today');
@@ -22,6 +25,23 @@ export const ShopAdminDashboard = () => {
 
   // Canonical branch context from store: reactive to topbar branch switcher
   const activeShopId = useOrganizationStore((s) => s.activeShopId || s.activeShop?._id || null);
+
+  // Gate 5: Expense analytics for dashboard
+  const [expenseSummary, setExpenseSummary] = React.useState<ExpenseSummary | null>(null);
+  const [isExpenseFetching, setIsExpenseFetching] = React.useState(false);
+
+  React.useEffect(() => {
+    // DEFECT-06 FIX: Use local date components instead of .toISOString() which
+    // returns UTC and shifts to the previous day between 00:00–04:59 PKT (UTC+5).
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    setIsExpenseFetching(true);
+    expensesApi
+      .getExpenseSummary({ branch_id: activeShopId, start_date: today, end_date: today })
+      .then(setExpenseSummary)
+      .catch(() => {/* non-critical */})
+      .finally(() => setIsExpenseFetching(false));
+  }, [activeShopId]);
 
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -206,6 +226,78 @@ export const ShopAdminDashboard = () => {
           />
         </div>
       </section>
+
+      {/* Gate 5: Expense Analytics Strip */}
+      {(expenseSummary || isExpenseFetching) && (
+        <section aria-labelledby="expense-analytics-heading">
+          <div className="rounded-2xl bg-surface border border-border shadow-card p-5 sm:p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 id="expense-analytics-heading" className="text-sm font-bold text-text-primary flex items-center gap-2">
+                  <ReceiptText className="w-4 h-4 text-orange-500" />
+                  Today's Expense Overview
+                </h3>
+                <p className="text-xs text-text-muted mt-0.5">Business expenses recorded today (COMPLETED only)</p>
+              </div>
+              {isExpenseFetching && (
+                <span className="text-xs text-text-muted animate-pulse">Refreshing…</span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {/* Total Expenses */}
+              <div className="p-4 rounded-xl bg-orange-50 dark:bg-orange-950/20 border border-orange-100 dark:border-orange-900/40">
+                <div className="flex items-center gap-2 mb-2">
+                  <Wallet className="w-4 h-4 text-orange-500" />
+                  <span className="text-xs text-text-muted">Total Expenses</span>
+                </div>
+                <p className="text-lg font-bold text-text-primary">
+                  PKR {(expenseSummary?.total_amount ?? 0).toLocaleString()}
+                </p>
+                <p className="text-xs text-text-muted mt-0.5">
+                  {expenseSummary?.total_count ?? 0} records
+                </p>
+              </div>
+
+              {/* Cash Expenses */}
+              <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/40">
+                <div className="flex items-center gap-2 mb-2">
+                  <ReceiptText className="w-4 h-4 text-red-500" />
+                  <span className="text-xs text-text-muted">Cash Expenses</span>
+                </div>
+                <p className="text-lg font-bold text-text-primary">
+                  PKR {(expenseSummary?.cash_total ?? 0).toLocaleString()}
+                </p>
+                <p className="text-xs text-text-muted mt-0.5">Deducted from drawer</p>
+              </div>
+
+              {/* Non-Cash Expenses */}
+              <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/40">
+                <div className="flex items-center gap-2 mb-2">
+                  <Wallet className="w-4 h-4 text-blue-500" />
+                  <span className="text-xs text-text-muted">Non-Cash</span>
+                </div>
+                <p className="text-lg font-bold text-text-primary">
+                  PKR {(expenseSummary?.non_cash_total ?? 0).toLocaleString()}
+                </p>
+                <p className="text-xs text-text-muted mt-0.5">Card, Bank, Digital</p>
+              </div>
+
+              {/* Cancelled */}
+              <div className="p-4 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-100 dark:border-neutral-700">
+                <div className="flex items-center gap-2 mb-2">
+                  <Ban className="w-4 h-4 text-neutral-400" />
+                  <span className="text-xs text-text-muted">Cancelled</span>
+                </div>
+                <p className="text-lg font-bold text-text-primary">
+                  {expenseSummary?.cancelled_count ?? 0}
+                </p>
+                <p className="text-xs text-text-muted mt-0.5">Reversed entries</p>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* 4. Inventory Brain Section */}
       <section aria-labelledby="inventory-heading">

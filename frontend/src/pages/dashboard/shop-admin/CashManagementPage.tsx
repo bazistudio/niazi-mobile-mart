@@ -31,7 +31,10 @@ import {
   Check,
   ChevronDown,
   Store,
+  ReceiptText,
 } from 'lucide-react';
+import { expensesApi } from '@/services/expenses.api';
+import { Expense } from '@/lib/tauri/tauriClient';
 
 // ─── PKR currency formatter (matches project conventions) ─────────────────────
 const fmt = (val: number | null | undefined): string =>
@@ -510,6 +513,106 @@ const OrgCashOverview: React.FC<{
   );
 };
 
+
+// ─── Gate 4: Expense History Panel for Cash Management ─────────────────────────
+const BranchExpenseHistoryPanel: React.FC<{ branchId?: string | null; refreshToken?: number }> = ({ branchId, refreshToken }) => {
+  const [expenses, setExpenses] = React.useState<Expense[]>([]);
+  const [isFetching, setIsFetching] = React.useState(false);
+
+  React.useEffect(() => {
+    // DEFECT-06 FIX: Use local date components instead of .toISOString() which
+    // returns UTC and shifts to the previous day between 00:00–04:59 PKT (UTC+5).
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const today = `${y}-${m}-${d}`;
+    const fetchExpenses = async () => {
+      try {
+        setIsFetching(true);
+        const data = await expensesApi.getExpenses({
+          branch_id: branchId || undefined,
+          payment_method: 'CASH',
+          status: 'COMPLETED',
+          start_date: today,
+          end_date: today,
+          limit: 20,
+        });
+        setExpenses(data);
+      } catch {
+        // non-critical panel
+      } finally {
+        setIsFetching(false);
+      }
+    };
+    fetchExpenses();
+  // DEFECT-05 FIX: refreshToken increments in BranchCashView after every
+  // successful expense creation, forcing this panel to re-fetch.
+  }, [branchId, refreshToken]);
+
+  const totalCashExpenses = expenses.reduce((s, e) => s + e.amount, 0);
+
+  return (
+    <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl overflow-hidden shadow-sm">
+      <div className="px-4 py-3 border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
+        <h3 className="font-semibold text-neutral-900 dark:text-white text-sm flex items-center gap-2">
+          <ReceiptText className="w-4 h-4 text-orange-500" />
+          Today's Cash Expenses
+        </h3>
+        <div className="flex items-center gap-3">
+          {totalCashExpenses > 0 && (
+            <span className="text-xs font-bold text-orange-600 dark:text-orange-400">
+              {fmt(totalCashExpenses)}
+            </span>
+          )}
+          {isFetching && <RefreshCw className="w-3.5 h-3.5 text-neutral-400 animate-spin" />}
+        </div>
+      </div>
+
+      {expenses.length === 0 ? (
+        <div className="py-8 text-center text-sm text-neutral-400">
+          {isFetching ? 'Loading…' : 'No CASH expenses recorded today.'}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="text-xs font-semibold text-neutral-500 uppercase tracking-wide border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-800/40">
+                <th className="py-2 pl-4 pr-2">Exp #</th>
+                <th className="py-2 px-2">Category</th>
+                <th className="py-2 px-2">Description</th>
+                <th className="py-2 px-2 text-right">Amount</th>
+                <th className="py-2 pl-2 pr-4">By</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+              {expenses.map((exp) => (
+                <tr key={exp.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800/40 transition-colors">
+                  <td className="py-2 pl-4 pr-2 font-mono text-xs text-orange-600 dark:text-orange-400 whitespace-nowrap">
+                    {exp.expense_number}
+                  </td>
+                  <td className="py-2 px-2 text-neutral-700 dark:text-neutral-300 text-xs whitespace-nowrap">
+                    {exp.category_name || '—'}
+                  </td>
+                  <td className="py-2 px-2 text-neutral-500 dark:text-neutral-400 text-xs max-w-xs truncate">
+                    {exp.description || exp.notes || '—'}
+                  </td>
+                  <td className="py-2 px-2 text-right font-bold text-neutral-900 dark:text-white text-xs whitespace-nowrap">
+                    PKR {exp.amount.toLocaleString()}
+                  </td>
+                  <td className="py-2 pl-2 pr-4 text-xs text-neutral-400 whitespace-nowrap">
+                    {exp.performed_by_name || '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ─── Branch-specific view with Searchable Branch Selector (matches screenshot) ──
 interface BranchCashViewProps {
   explicitBranchId?: string;
@@ -536,6 +639,9 @@ const BranchCashView: React.FC<BranchCashViewProps> = ({
   const [isReceivePaymentModalActive, setIsReceivePaymentModalActive] = useState(false);
   const [isExpenseModalActive, setIsExpenseModalActive] = useState(false);
   const [isSupplierPaymentModalActive, setIsSupplierPaymentModalActive] = useState(false);
+  // DEFECT-05 FIX: Incrementing this token forces BranchExpenseHistoryPanel to re-fetch
+  // after a cash expense is recorded on this page.
+  const [expenseRefreshToken, setExpenseRefreshToken] = useState(0);
 
   // Fetch organization branches so Admin can switch branches right from this view
   const { data: orgSummary, isLoading: isOrgSummaryLoading } = useQuery({
@@ -551,6 +657,8 @@ const BranchCashView: React.FC<BranchCashViewProps> = ({
 
   const handleVoucherSuccess = () => {
     fetchCurrentState(effectiveBranchId);
+    // DEFECT-05 FIX: increment token so BranchExpenseHistoryPanel re-fetches
+    setExpenseRefreshToken((t) => t + 1);
   };
 
   return (
@@ -634,6 +742,9 @@ const BranchCashView: React.FC<BranchCashViewProps> = ({
       <div className="space-y-4">
         <CashMovementsTable />
       </div>
+
+      {/* Gate 4: Cash expense history panel — CASH expenses affecting this drawer today */}
+      <BranchExpenseHistoryPanel branchId={effectiveBranchId || null} refreshToken={expenseRefreshToken} />
 
       <div className="space-y-4">
         <CashSessionHistoryTable />
