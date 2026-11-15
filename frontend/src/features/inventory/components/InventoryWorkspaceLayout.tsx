@@ -3,6 +3,7 @@ import { Link, useLocation, Outlet } from 'react-router-dom';
 import { InventoryFilterProvider, useInventoryFilters } from './InventoryFilterContext';
 import { InventoryFilterBar } from './InventoryFilterBar';
 import { useInventoryUIStore } from '@/features/inventory/store/inventory-ui.store';
+import { useDemandStore } from '@/features/inventory/store/demand.store';
 import { usePermissions } from '@/lib/auth/usePermissions';
 import { PERMISSIONS } from '@/constants/permissions';
 import { useProducts } from '@/features/inventory/hooks/useProducts';
@@ -13,18 +14,23 @@ function WorkspaceHeaderActions({
   canViewStock,
   isProducts,
   isStock,
-  isImport,
+  isLowStock,
+  isDemand,
+  isPurchases,
 }: {
   isOrgAdmin: boolean;
   canViewInvestVolume: boolean;
   canViewStock: boolean;
   isProducts: boolean;
   isStock: boolean;
-  isImport: boolean;
+  isLowStock: boolean;
+  isDemand: boolean;
+  isPurchases: boolean;
 }) {
   const [formatInMillions, setFormatInMillions] = useState(false);
   const { setAddProductOpen } = useInventoryUIStore();
   const { filters } = useInventoryFilters();
+  const demandCount = useDemandStore((s) => s.demandItems.length);
 
   // Query products reflecting active filters (Category, Brand, Company, Color, Quality, Search)
   const { products: filteredProducts } = useProducts({
@@ -89,14 +95,45 @@ function WorkspaceHeaderActions({
 
         {isOrgAdmin && (
           <Link
-            to="/dashboard/shop-admin/inventory/import"
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-              isImport
+            to="/dashboard/shop-admin/inventory/low-stock"
+            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
+              isLowStock
                 ? 'border-[#006970] text-[#006970] dark:border-[#00B4BB] dark:text-[#00B4BB]'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
             }`}
           >
-            Import
+            <span>Low Stock</span>
+          </Link>
+        )}
+
+        {isOrgAdmin && (
+          <Link
+            to="/dashboard/shop-admin/inventory/demand"
+            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
+              isDemand
+                ? 'border-[#006970] text-[#006970] dark:border-[#00B4BB] dark:text-[#00B4BB]'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+            }`}
+          >
+            <span>Demand</span>
+            {demandCount > 0 && (
+              <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold bg-[#006970] text-white rounded-full">
+                {demandCount}
+              </span>
+            )}
+          </Link>
+        )}
+
+        {isOrgAdmin && (
+          <Link
+            to="/dashboard/shop-admin/inventory/purchases"
+            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
+              isPurchases
+                ? 'border-[#006970] text-[#006970] dark:border-[#00B4BB] dark:text-[#00B4BB]'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+            }`}
+          >
+            <span>Purchases</span>
           </Link>
         )}
       </nav>
@@ -138,19 +175,18 @@ export function InventoryWorkspaceLayout({ children }: { children?: React.ReactN
   const isOrgAdmin = role === 'SUPER_ADMIN' || role === 'MULTI_ADMIN' || role === 'OWNER' || role === 'ADMIN';
   const canViewStock = hasPermission(PERMISSIONS.INVENTORY_VIEW);
   const normalizedRole = (role || '').toUpperCase();
-  // Universal invest volume visibility: all authenticated internal staff.
-  // Mirrors canViewProductCost() policy — PUBLIC_USER and unauthenticated excluded.
   const canViewInvestVolume = normalizedRole !== '' && normalizedRole !== 'PUBLIC_USER';
 
-  // Basic check for which tab is active based on the URL path
   const isProducts = pathname === '/dashboard/shop-admin/inventory';
   const isStock = pathname.includes('/dashboard/shop-admin/inventory/stock');
-  const isImport = pathname.includes('/dashboard/shop-admin/inventory/import');
+  const isLowStock = pathname.includes('/dashboard/shop-admin/inventory/low-stock');
+  const isDemand = pathname.includes('/dashboard/shop-admin/inventory/demand') || pathname.includes('/dashboard/shop-admin/inventory/import');
+  const isPurchases = pathname.includes('/dashboard/shop-admin/inventory/purchases');
 
   return (
     <InventoryFilterProvider>
       <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-900">
-        {/* Compact Workspace Header (Max ~100px height) */}
+        {/* Compact Workspace Header */}
         <header className="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm sticky top-0 z-20">
           <WorkspaceHeaderActions
             isOrgAdmin={isOrgAdmin}
@@ -158,7 +194,9 @@ export function InventoryWorkspaceLayout({ children }: { children?: React.ReactN
             canViewStock={canViewStock}
             isProducts={isProducts}
             isStock={isStock}
-            isImport={isImport}
+            isLowStock={isLowStock}
+            isDemand={isDemand}
+            isPurchases={isPurchases}
           />
 
           {/* Bottom Row: Integrated Filter Bar */}
@@ -167,7 +205,7 @@ export function InventoryWorkspaceLayout({ children }: { children?: React.ReactN
           </div>
         </header>
 
-        {/* Main Content Area (Maximized for Data) */}
+        {/* Main Content Area */}
         <main className="flex-1 overflow-hidden flex flex-col relative">
           {children || <Outlet />}
         </main>

@@ -212,8 +212,12 @@ export const supplierApi = {
   }> => {
     try {
       const detail = await tauriClient.supplierGetDetail(id);
-      const totalPurchases = detail.recent_purchases.reduce((acc, p) => acc + p.total_amount, 0);
-      const lastTx = detail.recent_purchases[0]?.created_at || detail.recent_payments[0]?.created_at || null;
+      // Defensive null-safety: backend now always returns arrays, but guard against
+      // any old cached response or network edge case to prevent TypeError crashes.
+      const recentPurchasesSafe = Array.isArray(detail.recent_purchases) ? detail.recent_purchases : [];
+      const recentPaymentsSafe  = Array.isArray(detail.recent_payments)  ? detail.recent_payments  : [];
+      const totalPurchases = recentPurchasesSafe.reduce((acc: number, p: any) => acc + (p.total_amount ?? 0), 0);
+      const lastTx = recentPurchasesSafe[0]?.created_at || recentPaymentsSafe[0]?.created_at || detail.last_transaction_date || null;
       return {
         success: true,
         data: {
@@ -223,7 +227,7 @@ export const supplierApi = {
             payable: detail.outstanding_balance,
             purchaseCount: detail.recent_purchases.length,
             lastTransactionDate: lastTx,
-            recentPurchases: detail.recent_purchases,
+            recentPurchases: recentPurchasesSafe,
           },
         },
       };

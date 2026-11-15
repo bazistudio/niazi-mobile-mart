@@ -83,12 +83,50 @@ export interface SupplierSummaryDto {
   created_at: string;
 }
 
+// ─── RecentPurchase / RecentPayment shapes (used in SupplierDetailDto) ─────────
+
+export interface RecentPurchaseLine {
+  id: string;
+  product_name_snapshot: string;
+  sku_snapshot: string | null;
+  quantity: number;
+  unit_cost: number;
+  line_total: number;
+}
+
+export interface RecentPurchase {
+  id: string;
+  purchase_number: string;
+  total_amount: number;
+  paid_amount: number;
+  credit_amount: number;
+  payment_status: string;
+  status: string;
+  notes: string | null;
+  created_at: string;
+  lines: RecentPurchaseLine[];
+}
+
+export interface RecentPayment {
+  id: string;
+  reference_number: string | null;
+  entry_type: string;
+  debit: number;
+  credit: number;
+  balance_after: number;
+  description: string | null;
+  performed_by: string | null;
+  created_at: string;
+}
+
 export interface SupplierDetailDto {
   supplier: Supplier;
   outstanding_balance: number;
   total_purchases_count: number;
   total_purchases_amount: number;
   last_transaction_date: string | null;
+  recent_purchases: RecentPurchase[];
+  recent_payments: RecentPayment[];
 }
 
 export interface CreateSupplierDto {
@@ -365,12 +403,91 @@ export class SupplierRepo {
       // Non-fatal
     }
 
+    // ---- Recent purchases (last 10, with their purchase_lines) ----------------
+    let recentPurchases: RecentPurchase[] = [];
+    try {
+      const purchaseRows = await this.pool.query(
+        `SELECT id, purchase_number, total_amount, paid_amount, credit_amount,
+                payment_status, status, notes, created_at
+         FROM purchases
+         WHERE supplier_id = $1 AND status = 'COMPLETED'
+         ORDER BY created_at DESC LIMIT 10`,
+        [id]
+      );
+      if (purchaseRows.rows.length > 0) {
+        const purchaseIds = purchaseRows.rows.map((r: Record<string, unknown>) => String(r['id']));
+        const linesResult = await this.pool.query(
+          `SELECT purchase_id, id, product_name_snapshot, sku_snapshot,
+                  quantity, unit_cost, line_total
+           FROM purchase_lines
+           WHERE purchase_id = ANY($1::uuid[])
+           ORDER BY created_at`,
+          [purchaseIds]
+        );
+        const linesMap = new Map<string, RecentPurchaseLine[]>();
+        for (const lr of linesResult.rows) {
+          const pid = String(lr['purchase_id']);
+          if (!linesMap.has(pid)) linesMap.set(pid, []);
+          linesMap.get(pid)!.push({
+            id:                    String(lr['id']),
+            product_name_snapshot: String(lr['product_name_snapshot']),
+            sku_snapshot:          lr['sku_snapshot'] != null ? String(lr['sku_snapshot']) : null,
+            quantity:              Math.round(Number(lr['quantity'] ?? 0)),
+            unit_cost:             Math.round(Number(lr['unit_cost'] ?? 0)),
+            line_total:            Math.round(Number(lr['line_total'] ?? 0)),
+          });
+        }
+        recentPurchases = purchaseRows.rows.map((r: Record<string, unknown>): RecentPurchase => ({
+          id:             String(r['id']),
+          purchase_number: String(r['purchase_number']),
+          total_amount:   Math.round(Number(r['total_amount'] ?? 0)),
+          paid_amount:    Math.round(Number(r['paid_amount'] ?? 0)),
+          credit_amount:  Math.round(Number(r['credit_amount'] ?? 0)),
+          payment_status: String(r['payment_status']),
+          status:         String(r['status']),
+          notes:          r['notes'] != null ? String(r['notes']) : null,
+          created_at:     String(r['created_at']),
+          lines:          linesMap.get(String(r['id'])) ?? [],
+        }));
+      }
+    } catch {
+      // Non-fatal: return empty array on error
+    }
+
+    // ---- Recent payments (last 10 PAYMENT entries in ledger) ----------------
+    let recentPayments: RecentPayment[] = [];
+    try {
+      const pmtRows = await this.pool.query(
+        `SELECT id, reference_number, entry_type, debit, credit,
+                balance_after, description, performed_by, created_at
+         FROM supplier_ledger_entries
+         WHERE supplier_id = $1 AND entry_type = 'PAYMENT'
+         ORDER BY created_at DESC LIMIT 10`,
+        [id]
+      );
+      recentPayments = pmtRows.rows.map((r: Record<string, unknown>): RecentPayment => ({
+        id:             String(r['id']),
+        reference_number: r['reference_number'] != null ? String(r['reference_number']) : null,
+        entry_type:     String(r['entry_type']),
+        debit:          Math.round(Number(r['debit'] ?? 0)),
+        credit:         Math.round(Number(r['credit'] ?? 0)),
+        balance_after:  Math.round(Number(r['balance_after'] ?? 0)),
+        description:    r['description'] != null ? String(r['description']) : null,
+        performed_by:   r['performed_by'] != null ? String(r['performed_by']) : null,
+        created_at:     String(r['created_at']),
+      }));
+    } catch {
+      // Non-fatal: return empty array on error
+    }
+
     return {
       supplier,
       outstanding_balance: balance,
       total_purchases_count: purchasesCount,
       total_purchases_amount: purchasesAmount,
       last_transaction_date: lastTxDate,
+      recent_purchases: recentPurchases,
+      recent_payments: recentPayments,
     };
   }
 

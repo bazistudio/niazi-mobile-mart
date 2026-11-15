@@ -1539,6 +1539,43 @@ export const tauriClient = {
     return await httpFetch<PurchaseLine[]>(`/api/purchases/` + purchaseId + `/lines`, { method: 'GET' });
   },
 
+  // ── Demand Domain ──────────────────────────────────────────────────────────
+  async demandSave(dto: SaveDemandDto): Promise<SaveDemandResultDto> {
+    return await httpFetch<SaveDemandResultDto>('/api/purchases/demands', {
+      method: 'POST',
+      body: JSON.stringify(dto),
+    });
+  },
+
+  async demandList(filter?: DemandFilterDto): Promise<SupplierDemand[]> {
+    const params = new URLSearchParams();
+    if (filter) {
+      Object.entries(filter).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          params.append(key, String(value));
+        }
+      });
+    }
+    const qs = params.toString() ? '?' + params.toString() : '';
+    return await httpFetch<SupplierDemand[]>('/api/purchases/demands' + qs, { method: 'GET' });
+  },
+
+  async demandGet(id: string): Promise<SupplierDemand | null> {
+    try {
+      return await httpFetch<SupplierDemand>('/api/purchases/demands/' + encodeURIComponent(id), { method: 'GET' });
+    } catch (e: any) {
+      if (e.status === 404) return null;
+      throw e;
+    }
+  },
+
+  async demandUpdateStatus(id: string, status: 'ORDERED' | 'CANCELLED'): Promise<SupplierDemand> {
+    return await httpFetch<SupplierDemand>('/api/purchases/demands/' + encodeURIComponent(id) + '/status', {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+  },
+
   // â”€â”€ Expense Domain (Phase 17) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Workstream D: expense functions now use httpFetch for browser mode;
   // Tauri IPC remains the path for the desktop app.
@@ -2607,6 +2644,9 @@ export interface SupplierSummaryDto {
 export interface SupplierDetailDto {
   supplier: Supplier;
   outstanding_balance: number;
+  total_purchases_count: number;
+  total_purchases_amount: number;
+  last_transaction_date: string | null;
   recent_purchases: Purchase[];
   recent_payments: SupplierLedgerEntry[];
 }
@@ -2752,7 +2792,10 @@ export interface CompletePurchaseDto {
   discount?: number | null;
   paid_amount?: number | null;
   payment_method?: string | null;
+  supplier_invoice_ref?: string | null;
+  demand_id?: string | null;
   notes?: string | null;
+  idempotency_key?: string | null; // client-generated UUID to prevent duplicate submit on retry
 }
 
 export interface PurchaseResultDto {
@@ -2771,6 +2814,71 @@ export interface PurchaseFilterDto {
   end_date?: string | null;
   limit?: number | null;
   offset?: number | null;
+}
+
+// ── Demand Types ──────────────────────────────────────────────────────────────
+export type DemandStatus = 'DRAFT' | 'ORDERED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CANCELLED';
+
+export interface DemandItemInput {
+  product_id: string;
+  requested_quantity: number;
+  estimated_unit_cost?: number | null;
+}
+
+export interface SaveDemandDto {
+  id?: string | null;
+  supplier_id?: string | null;
+  customer_id?: string | null;
+  branch_id?: string | null;
+  items: DemandItemInput[];
+  notes?: string | null;
+}
+
+export interface SupplierDemandItem {
+  id: string;
+  demand_id: string;
+  product_id: string;
+  product_name?: string | null;
+  sku?: string | null;
+  requested_quantity: number;
+  received_quantity: number;
+  estimated_unit_cost: number;
+  actual_unit_cost: number | null;
+  estimated_line_total: number;
+  actual_line_total: number | null;
+  fulfilled_purchase_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SupplierDemand {
+  id: string;
+  demand_number: string;
+  supplier_id: string | null;
+  customer_id: string | null;
+  branch_id: string;
+  status: DemandStatus;
+  total_estimated_amount: number;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  supplier_name?: string | null;
+  customer_name?: string | null;
+  items?: SupplierDemandItem[];
+}
+
+export interface DemandFilterDto {
+  supplier_id?: string | null;
+  branch_id?: string | null;
+  status?: string | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface SaveDemandResultDto {
+  demand: SupplierDemand;
+  items: SupplierDemandItem[];
 }
 
 // â”€â”€ Type Definitions for Expenses & Cash Management (Phase 17) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

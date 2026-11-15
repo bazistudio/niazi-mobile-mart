@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { supplierApi } from '@/services/supplier.api';
+import { purchaseApi } from '@/services/purchase.api';
 import { LedgerBook } from '@/features/ledger/components/LedgerBook';
-import { Phone, MapPin, FileText, ShoppingCart, DollarSign, Calendar, Printer, Edit, CreditCard, ArrowLeft, Building2, ChevronDown, ChevronUp, Download } from 'lucide-react';
+import { Phone, MapPin, FileText, ShoppingCart, DollarSign, Calendar, Printer, Edit, CreditCard, ArrowLeft, Building2, ChevronDown, ChevronUp, Download, ClipboardList, ChevronRight, Loader2 } from 'lucide-react';
 import { usePrintStore } from '@/lib/printer';
 import { downloadHtmlAsPdf } from '@/lib/printer/pdfExport';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
@@ -24,8 +26,17 @@ export const SupplierProfile: React.FC<SupplierProfileProps> = ({ id }) => {
   const { settings, shopHeader, isHydrated, fetchSettings } = usePrinterStore();
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [expandedPurchases, setExpandedPurchases] = useState<Record<string, boolean>>({});
+  const [expandedDemands, setExpandedDemands] = useState<Record<string, boolean>>({});
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+
+  // Load demands for this supplier (persistent demand history)
+  const { data: supplierDemands = [], isFetching: isFetchingDemands } = useQuery({
+    queryKey: ['supplier-demands', id],
+    queryFn: () => purchaseApi.listDemands({ supplier_id: id, limit: 50, offset: 0 }),
+    enabled: !!id,
+    staleTime: 60_000,
+  });
 
   useEffect(() => {
     fetchSettings();
@@ -93,8 +104,12 @@ export const SupplierProfile: React.FC<SupplierProfileProps> = ({ id }) => {
 
   const { supplier, stats } = detail;
   const actualBalance = supplier.currentBalance || 0;
-  const isAdvance = actualBalance > 0;
-  const isPayable = actualBalance < 0;
+  // ACCOUNTING CONVENTION: outstanding_balance = SUM(debit) - SUM(credit)
+  //   Positive = payable owed to supplier (shop owes supplier)
+  //   Negative = advance given to supplier (supplier owes shop / overpayment)
+  //   Zero     = settled
+  const isPayable = actualBalance > 0;
+  const isAdvance = actualBalance < 0;
 
   const handlePrintFullLedger = () => {
     if (!isHydrated || !settings || !shopHeader || !rawTimeline) {
@@ -137,7 +152,7 @@ export const SupplierProfile: React.FC<SupplierProfileProps> = ({ id }) => {
   };
 
   const handleNewPurchase = () => {
-    navigate(`/dashboard/shop-admin/import?supplierId=${supplier.id}`);
+    navigate(`/dashboard/shop-admin/inventory/demand?supplierId=${supplier.id}`);
   };
 
   return (
@@ -326,6 +341,84 @@ export const SupplierProfile: React.FC<SupplierProfileProps> = ({ id }) => {
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Demand History Widget */}
+          <div className="bg-white dark:bg-gray-900 rounded-2xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest">Demand History</h3>
+              {isFetchingDemands && <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400" />}
+            </div>
+            {supplierDemands.length === 0 && !isFetchingDemands ? (
+              <div className="text-sm text-gray-500 text-center py-6 bg-gray-50 dark:bg-gray-800/50 rounded-xl">
+                <ClipboardList className="w-7 h-7 mx-auto mb-2 text-gray-300 dark:text-gray-700" />
+                No demand orders
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {supplierDemands.map((d: any) => {
+                  const isExp = expandedDemands[d.id];
+                  const statusColors: Record<string, string> = {
+                    DRAFT: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+                    ORDERED: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+                    PARTIALLY_RECEIVED: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+                    RECEIVED: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+                    CANCELLED: 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-300',
+                  };
+                  const badgeCls = statusColors[d.status] || 'bg-gray-100 text-gray-700';
+                  const totalReq = d.items?.reduce((s: number, i: any) => s + (i.requested_quantity || 0), 0) ?? 0;
+                  const totalRec = d.items?.reduce((s: number, i: any) => s + (i.received_quantity || 0), 0) ?? 0;
+                  return (
+                    <div key={d.id} className="border border-gray-100 dark:border-gray-800 rounded-xl overflow-hidden bg-white dark:bg-gray-800/20">
+                      <div
+                        className="flex justify-between items-center text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/80 p-3 transition-colors"
+                        onClick={() => setExpandedDemands(prev => ({ ...prev, [d.id]: !prev[d.id] }))}
+                      >
+                        <div className="flex items-center gap-2">
+                          <button className="text-gray-400 hover:text-[#006970]">
+                            {isExp ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                          </button>
+                          <div>
+                            <div className="font-bold text-gray-900 dark:text-white tracking-tight text-xs">{d.demand_number}</div>
+                            <div className="text-[10px] text-gray-500 mt-0.5">{new Date(d.created_at).toLocaleDateString()}</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wide ${badgeCls}`}>
+                            {d.status?.replace('_', ' ')}
+                          </span>
+                          <div className="text-right">
+                            <div className="text-xs font-black text-gray-900 dark:text-white tabular-nums">
+                              Rs {Number(d.total_estimated_amount).toLocaleString()}
+                            </div>
+                            <div className="text-[10px] text-gray-500">{totalRec}/{totalReq} rcvd</div>
+                          </div>
+                        </div>
+                      </div>
+                      {isExp && d.items && d.items.length > 0 && (
+                        <div className="px-3 pb-3 pt-1 bg-gray-50 dark:bg-gray-800/80 border-t border-gray-100 dark:border-gray-800">
+                          <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex justify-between pb-1">
+                            <span>Product</span><span>Req / Rcvd</span>
+                          </div>
+                          {d.items.map((item: any) => (
+                            <div key={item.id} className="flex justify-between text-xs text-gray-700 dark:text-gray-300 font-medium py-0.5">
+                              <span className="truncate max-w-[130px]">{item.product_name || item.product_id}</span>
+                              <span className="tabular-nums shrink-0">{item.received_quantity}/{item.requested_quantity}</span>
+                            </div>
+                          ))}
+                          <button
+                            className="mt-2 text-[10px] font-bold text-[#006970] hover:underline flex items-center gap-1"
+                            onClick={() => navigate(`/dashboard/shop-admin/inventory/demand?supplierId=${d.supplier_id}`)}
+                          >
+                            <ClipboardList className="w-3 h-3" /> Open Demand Page
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 

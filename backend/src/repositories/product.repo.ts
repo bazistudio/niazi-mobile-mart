@@ -9,6 +9,15 @@
 import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { NIAZI_ORGANIZATION_ID, CENTRAL_WAREHOUSE_ID } from '../auth';
+// Lazy import to avoid circular dependency — purchase.repo imports pool, not product.repo
+let _completePurchase: typeof import('./purchase.repo').completePurchase | null = null;
+async function getCompletePurchase() {
+  if (!_completePurchase) {
+    const mod = await import('./purchase.repo');
+    _completePurchase = mod.completePurchase;
+  }
+  return _completePurchase;
+}
 
 // Well-known system branch IDs (mirrors seeded UUIDs in migration 001/030)
 const MAIN_BRANCH_ID = '00000000-0000-0000-0000-000000000002';
@@ -1939,6 +1948,64 @@ export async function receiveStock(
   const productId = dto.product_id.trim();
   const branchId  = dto.branch_id.trim();
   const now       = new Date().toISOString();
+
+  // ── Supplier purchase delegation ───────────────────────────────────────────
+  // When a supplier is specified and unit_cost > 0, this represents a priced
+  // supplier purchase. Delegate to completePurchase() so the full supplier
+  // accounting path runs (purchase invoice, supplier DEBIT, optional payment).
+  // This ensures there is exactly one authoritative purchase creation path.
+  if (dto.supplier_id && cNew > 0) {
+    const completePurchaseFn = await getCompletePurchase();
+    const purchaseResult = await completePurchaseFn(pool, {
+      supplier_id:  dto.supplier_id,
+      branch_id:    branchId,
+      lines: [{
+        product_id: productId,
+        quantity:   qRec,
+        unit_cost:  cNew,
+      }],
+      paid_amount:   0,     // No cash payment at stock receive time; pay separately
+      payment_method: null,
+      notes: dto.notes ?? null,
+    }, performedBy ?? null);
+
+    // Query the resulting stock and WAC after completePurchase committed
+    const [stockRow, productRow] = await Promise.all([
+      pool.query<{ quantity: number }>(
+        'SELECT quantity FROM stock WHERE product_id = $1 AND branch_id = $2',
+        [productId, branchId]
+      ),
+      pool.query<{ average_cost: number; purchase_price: number; sale_price: number }>(
+        'SELECT average_cost, purchase_price, sale_price FROM products WHERE id = $1',
+        [productId]
+      ),
+    ]);
+    const newQty2  = Number(stockRow.rows[0]?.quantity ?? qRec);
+    const newWAC   = Math.round(Number(productRow.rows[0]?.average_cost ?? cNew));
+    const newPurch = Math.round(Number(productRow.rows[0]?.purchase_price ?? cNew));
+
+    // FIX: Return the actual stock_movements.id for the IN row created by
+    // completePurchase(), not the purchase invoice UUID. Callers that store
+    // movement_id expect a stock_movements primary key (UUID).
+    const movementRow = await pool.query<{ id: string }>(
+      `SELECT id FROM stock_movements
+       WHERE reference_id = $1
+         AND product_id   = $2
+         AND branch_id    = $3
+         AND movement_type = 'IN'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [purchaseResult.purchase_id, productId, branchId]
+    );
+    const actualMovementId = movementRow.rows[0]?.id ?? purchaseResult.purchase_id;
+
+    return {
+      new_quantity:       newQty2,
+      new_average_cost:   newWAC,
+      new_purchase_price: newPurch,
+      movement_id:        actualMovementId, // actual stock_movements.id (IN row)
+    };
+  }
 
   const client: PoolClient = await pool.connect();
   try {

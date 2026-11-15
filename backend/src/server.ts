@@ -53,6 +53,7 @@ import { createSearchRouter } from './routes/search.routes';
 import { buildAuthRouter } from './routes/auth.routes';
 import { buildUsersRouter } from './routes/users.routes';
 import { buildSupplierRouter } from './routes/supplier.routes';
+import { buildPurchaseRouter } from './routes/purchase.routes';
 import { buildExpenseRouter } from './routes/expense.routes';
 import { buildBranchRouter } from './routes/branch.routes';
 import { buildSyncRouter } from './routes/sync.routes';
@@ -226,6 +227,13 @@ async function main(): Promise<void> {
   const supplierRouter = buildSupplierRouter(pool);
   app.use('/api/suppliers', supplierRouter);
   app.use('/api/v1/suppliers', supplierRouter);
+
+  // -------------------------------------------------------------------------
+  // Purchase routes — TypeScript Online Authority
+  // -------------------------------------------------------------------------
+  const purchaseRouter = buildPurchaseRouter(pool);
+  app.use('/api/purchases', purchaseRouter);
+  app.use('/api/v1/purchases', purchaseRouter);
 
   // -------------------------------------------------------------------------
   // Expense routes — TypeScript Online Authority

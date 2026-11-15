@@ -9,7 +9,9 @@ import { ProductsPage } from '@/pages/dashboard/shop-admin/ProductsPage';
 import { InventoryWorkspaceLayout } from '@/features/inventory/components/InventoryWorkspaceLayout';
 import { InventoryProductsPage } from '@/pages/dashboard/shop-admin/inventory/InventoryProductsPage';
 import { InventoryStockPage } from '@/pages/dashboard/shop-admin/inventory/InventoryStockPage';
-import { InventoryImportPage } from '@/pages/dashboard/shop-admin/inventory/InventoryImportPage';
+import { InventoryLowStockPage } from '@/pages/dashboard/shop-admin/inventory/InventoryLowStockPage';
+import { InventoryDemandPage } from '@/pages/dashboard/shop-admin/inventory/InventoryDemandPage';
+import { InventoryPurchasesPage } from '@/pages/dashboard/shop-admin/inventory/InventoryPurchasesPage';
 import { MobileInventoryPage } from '@/pages/dashboard/shop-admin/MobileInventoryPage';
 import { AddMobilePage } from '@/pages/dashboard/shop-admin/AddMobilePage';
 import { MobileSalePage } from '@/pages/dashboard/shop-admin/MobileSalePage';
@@ -82,7 +84,10 @@ export const shopAdminCoreRoutes = (
           </PermissionGuard>
         }
       />
-      <Route path="import" element={<InventoryImportPage />} />
+      <Route path="low-stock" element={<InventoryLowStockPage />} />
+      <Route path="demand" element={<InventoryDemandPage />} />
+      <Route path="purchases" element={<InventoryPurchasesPage />} />
+      <Route path="import" element={<Navigate to="/dashboard/shop-admin/inventory/demand" replace />} />
     </Route>
 
     {/* Dedicated Mobile Inventory & Serialized Asset Management */}
