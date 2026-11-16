@@ -34,9 +34,19 @@ import {
   removeRepairPartTx,
   addRepairPaymentTx,
   completeRepairJobTx,
+  updateRepairJobTx,
+  deleteRepairJobTx,
   RepairRepoError,
   RepairJobFilters,
 } from '../repositories/repair.repo';
+
+// Helper: check if caller has repair management privileges (Branch Admin or REPAIR_MECHANIC)
+function canManageRepairs(identity: RequestIdentity): boolean {
+  if (!identity) return false;
+  if (isBranchAdmin(identity)) return true;
+  const role = String(identity.role || '').toUpperCase();
+  return role === 'REPAIR_MECHANIC';
+}
 
 export function buildRepairRouter(pool: Pool): Router {
   const router = Router();
@@ -102,8 +112,8 @@ export function buildRepairRouter(pool: Pool): Router {
   router.post('/', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      if (!isBranchAdmin(identity)) {
-        res.status(403).json({ error: 'Forbidden: creating repair jobs requires Admin or ShopAdmin role' });
+      if (!canManageRepairs(identity)) {
+        res.status(403).json({ error: 'Forbidden: creating repair jobs requires Admin, ShopAdmin, or Repair Mechanic role' });
         return;
       }
 
@@ -153,8 +163,8 @@ export function buildRepairRouter(pool: Pool): Router {
   router.put('/:id/status', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      if (!isBranchAdmin(identity)) {
-        res.status(403).json({ error: 'Forbidden: updating repair status requires Admin or ShopAdmin role' });
+      if (!canManageRepairs(identity)) {
+        res.status(403).json({ error: 'Forbidden: updating repair status requires Admin, ShopAdmin, or Repair Mechanic role' });
         return;
       }
 
@@ -192,8 +202,8 @@ export function buildRepairRouter(pool: Pool): Router {
   router.post('/:id/parts', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      if (!isBranchAdmin(identity)) {
-        res.status(403).json({ error: 'Forbidden: adding parts requires Admin or ShopAdmin role' });
+      if (!canManageRepairs(identity)) {
+        res.status(403).json({ error: 'Forbidden: adding parts requires Admin, ShopAdmin, or Repair Mechanic role' });
         return;
       }
 
@@ -234,8 +244,8 @@ export function buildRepairRouter(pool: Pool): Router {
   router.delete('/:id/parts/:partId', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      if (!isBranchAdmin(identity)) {
-        res.status(403).json({ error: 'Forbidden: removing parts requires Admin or ShopAdmin role' });
+      if (!canManageRepairs(identity)) {
+        res.status(403).json({ error: 'Forbidden: removing parts requires Admin, ShopAdmin, or Repair Mechanic role' });
         return;
       }
 
@@ -306,8 +316,8 @@ export function buildRepairRouter(pool: Pool): Router {
   router.post('/:id/finish', async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
-      if (!isBranchAdmin(identity)) {
-        res.status(403).json({ error: 'Forbidden: finishing a repair job requires Admin or ShopAdmin role' });
+      if (!canManageRepairs(identity)) {
+        res.status(403).json({ error: 'Forbidden: finishing a repair job requires Admin, ShopAdmin, or Repair Mechanic role' });
         return;
       }
 
@@ -347,6 +357,67 @@ export function buildRepairRouter(pool: Pool): Router {
         return;
       }
       res.status(500).json({ error: err.message || 'Failed to finish repair job' });
+    }
+  });
+
+  // ── PUT /api/repairs/:id — edit / refill update ────────────────────────────
+  router.put('/:id', async (req: Request, res: Response) => {
+    try {
+      const identity = req.identity as RequestIdentity;
+      if (!canManageRepairs(identity)) {
+        res.status(403).json({ error: 'Forbidden: editing repair jobs requires Admin, ShopAdmin, or Repair Mechanic role' });
+        return;
+      }
+
+      const id = req.params['id'] as string;
+      const body = req.body ?? {};
+      const dto = {
+        customer_name: body.customer_name || body.customerName,
+        customer_phone: body.customer_phone || body.customerPhone,
+        device: body.device ? {
+          type: body.device.type || '',
+          brand: body.device.brand || '',
+          model: body.device.model || '',
+          color: body.device.color || '',
+          imei: body.device.imei || '',
+          password: body.device.password || null,
+        } : undefined,
+        problem_description: body.problem_description || body.problemDescription,
+        technician_id: body.technician_id || body.technicianId,
+        priority: body.priority,
+        estimated_cost: body.estimated_cost !== undefined ? Number(body.estimated_cost) : undefined,
+        internal_notes: body.internal_notes || body.internalNotes,
+      };
+
+      const updated = await updateRepairJobTx(pool, id, dto, identity.user_id, identity.organization_id || '');
+      res.status(200).json(updated);
+    } catch (err: any) {
+      if (err instanceof RepairRepoError) {
+        res.status(err.statusCode).json({ error: err.message });
+        return;
+      }
+      res.status(500).json({ error: err.message || 'Failed to update repair job' });
+    }
+  });
+
+  // ── DELETE /api/repairs/:id — cancel and delete repair job ─────────────────
+  router.delete('/:id', async (req: Request, res: Response) => {
+    try {
+      const identity = req.identity as RequestIdentity;
+      if (!canManageRepairs(identity)) {
+        res.status(403).json({ error: 'Forbidden: deleting repair jobs requires Admin, ShopAdmin, or Repair Mechanic role' });
+        return;
+      }
+
+      const id = req.params['id'] as string;
+      const result = await deleteRepairJobTx(pool, id, identity.user_id, identity.organization_id || '');
+      res.status(200).json(result);
+    } catch (err: any) {
+      if (err instanceof RepairRepoError) {
+        res.status(err.statusCode).json({ error: err.message });
+        return;
+      }
+      res.status(500).json({ error: err.message || 'Failed to delete repair job' });
     }
   });
 

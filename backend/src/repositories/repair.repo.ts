@@ -20,6 +20,7 @@
 import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { writeChangeLogEntry } from './change_log.repo';
+import { calculateAndPersistCommission } from '../services/repair-commission.service';
 
 // ─── DTOs ────────────────────────────────────────────────────────────────────
 
@@ -135,7 +136,10 @@ function rowToRepairJob(row: Record<string, unknown>, parts: unknown[], payments
     .reduce((s, p) => s + (Number(p.qty) * Number(p.price)), 0);
   const laborCharges = parseJsonField<Array<{ amount: number }>>(row['labor_charges'], []);
   const laborTotal = laborCharges.reduce((s, l) => s + Number(l.amount ?? 0), 0);
-  const grandTotal = partsTotal + laborTotal + Number(row['additional_charges'] ?? 0) - Number(row['discount'] ?? 0);
+  const estCost = Number(row['estimated_cost'] ?? 0);
+  // If estimated_cost is booked higher than parts + labor (e.g. booked job agreement), grandTotal honors the booked quote
+  const calculatedSum = partsTotal + laborTotal + Number(row['additional_charges'] ?? 0) - Number(row['discount'] ?? 0);
+  const grandTotal = Math.max(estCost, calculatedSum);
   const totalPaid = (payments as Array<{ amount: number }>).reduce((s, p) => s + Number(p.amount), 0);
 
   const warranty = row['warranty_period']
@@ -522,33 +526,32 @@ export async function createRepairJobTx(
       let sessionId: string | null = null;
       let cmId: string | null = null;
 
+      // Lab Cash Management Policy:
+      // Repair lab cash is kept in the technician's bench hold / lab register,
+      // and not forcefully injected into the front-counter POS sales register.
+      // If an open POS cash session exists, link it optionally; otherwise record
+      // as independent Lab Cash (session_id = NULL).
       if (adv.method.toUpperCase() === 'CASH' && branchId) {
-        // Validate open session for this branch
         const sessRes = await client.query(
           "SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' ORDER BY opened_at DESC LIMIT 1 FOR UPDATE",
           [branchId]
         );
-        if (sessRes.rows.length === 0) {
-          throw new RepairRepoError(
-            'No open cash session found for this branch. Open a cash session before recording CASH payments.',
-            422
-          );
+        if (sessRes.rows.length > 0) {
+          sessionId = (sessRes.rows[0] as Record<string, unknown>)['id'] as string;
+          cmId = await insertCashMovement(client, {
+            sessionId,
+            branchId,
+            movementType: 'REPAIR_ADVANCE',
+            direction: 'IN',
+            amount: adv.amount,
+            referenceId: id,
+            referenceNumber: jobId,
+            paymentMethod: 'CASH',
+            description: `Repair advance for job ${jobId}`,
+            performedBy: userId,
+            now,
+          });
         }
-        sessionId = (sessRes.rows[0] as Record<string, unknown>)['id'] as string;
-
-        cmId = await insertCashMovement(client, {
-          sessionId,
-          branchId,
-          movementType: 'REPAIR_ADVANCE',
-          direction: 'IN',
-          amount: adv.amount,
-          referenceId: id,
-          referenceNumber: jobId,
-          paymentMethod: 'CASH',
-          description: `Repair advance for job ${jobId}`,
-          performedBy: userId,
-          now,
-        });
       }
 
       await client.query(
@@ -646,6 +649,177 @@ export async function updateRepairStatus(
   const updated = await getRepairJobById(pool, realId);
   if (!updated) throw new RepairRepoError('Failed to retrieve updated repair job', 500);
   return updated;
+}
+
+// ─── Update Repair Job Details (Refill / Edit) ──────────────────────────────
+export async function updateRepairJobTx(
+  pool: Pool,
+  jobId: string,
+  dto: Partial<CreateRepairJobDto>,
+  userId: string | null,
+  organizationId: string
+): Promise<unknown> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const existing = await client.query(
+      'SELECT id, job_id, status, branch_id FROM repair_jobs WHERE id::text = $1 OR job_id = $1 FOR UPDATE',
+      [jobId]
+    );
+    if (existing.rows.length === 0) {
+      throw new RepairRepoError(`Repair job '${jobId}' not found`, 404);
+    }
+    const row = existing.rows[0] as Record<string, unknown>;
+    const realId = row['id'] as string;
+    const humanJobId = row['job_id'] as string;
+    const branchId = row['branch_id'] as string | null;
+
+    if (row['status'] === 'Delivered') {
+      throw new RepairRepoError('Cannot edit details of a delivered repair job', 409);
+    }
+
+    const now = new Date().toISOString();
+
+    await client.query(
+      `UPDATE repair_jobs SET
+         customer_name = COALESCE($1, customer_name),
+         customer_phone = COALESCE($2, customer_phone),
+         device_brand = COALESCE($3, device_brand),
+         device_model = COALESCE($4, device_model),
+         device_imei = COALESCE($5, device_imei),
+         device_password = COALESCE($6, device_password),
+         problem_description = COALESCE($7, problem_description),
+         technician_id = COALESCE($8, technician_id),
+         estimated_cost = COALESCE($9, estimated_cost),
+         priority = COALESCE($10, priority),
+         internal_notes = COALESCE($11, internal_notes),
+         updated_at = $12
+       WHERE id = $13`,
+      [
+        dto.customer_name ? dto.customer_name.trim() : null,
+        dto.customer_phone ? dto.customer_phone.trim() : null,
+        dto.device?.brand ? dto.device.brand.trim() : null,
+        dto.device?.model ? dto.device.model.trim() : null,
+        dto.device?.imei ? dto.device.imei.trim() : null,
+        dto.device?.password ? dto.device.password.trim() : null,
+        dto.problem_description ? dto.problem_description.trim() : null,
+        dto.technician_id ? dto.technician_id.trim() : null,
+        dto.estimated_cost !== undefined ? Number(dto.estimated_cost) : null,
+        dto.priority || null,
+        dto.internal_notes || null,
+        now,
+        realId,
+      ]
+    );
+
+    await writeChangeLogEntry(client, {
+      organizationId,
+      branchId: branchId || '',
+      eventType: 'REPAIR_JOB_UPDATED',
+      entityType: 'repair_job',
+      entityId: realId,
+      payloadStr: JSON.stringify({ jobId: humanJobId, updatedBy: userId, now }),
+    });
+
+    await client.query('COMMIT');
+
+    const updated = await getRepairJobById(pool, realId);
+    if (!updated) throw new RepairRepoError('Failed to retrieve updated repair job', 500);
+    return updated;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// ─── Delete Repair Job (With stock restoration) ─────────────────────────────
+export async function deleteRepairJobTx(
+  pool: Pool,
+  jobId: string,
+  userId: string | null,
+  organizationId: string
+): Promise<{ success: boolean; jobId: string }> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const existing = await client.query(
+      'SELECT id, job_id, status, branch_id FROM repair_jobs WHERE id::text = $1 OR job_id = $1 FOR UPDATE',
+      [jobId]
+    );
+    if (existing.rows.length === 0) {
+      throw new RepairRepoError(`Repair job '${jobId}' not found`, 404);
+    }
+    const row = existing.rows[0] as Record<string, unknown>;
+    const realId = row['id'] as string;
+    const humanJobId = row['job_id'] as string;
+    const branchId = row['branch_id'] as string | null;
+
+    if (row['status'] === 'Delivered') {
+      throw new RepairRepoError('Cannot delete a completed/delivered repair job', 409);
+    }
+
+    // Restore stock for all deducted parts
+    const partsRes = await client.query(
+      'SELECT id, product_id, qty, stock_deducted, branch_id FROM repair_parts WHERE repair_job_id = $1',
+      [realId]
+    );
+
+    const now = new Date().toISOString();
+
+    for (const part of partsRes.rows) {
+      if (part['stock_deducted'] && part['product_id']) {
+        const partBranchId = (part['branch_id'] as string) || branchId;
+        if (partBranchId) {
+          const smId = uuidv4();
+          await client.query(
+            `INSERT INTO stock_movements (
+               id, product_id, branch_id, movement_type, quantity,
+               reason, performed_by, created_at
+             ) VALUES ($1,$2,$3,'IN',$4,$5,$6,$7)`,
+            [
+              smId,
+              part['product_id'],
+              partBranchId,
+              Number(part['qty']),
+              `REPAIR_CANCEL_RESTORE:${humanJobId}`,
+              userId,
+              now,
+            ]
+          );
+
+          await client.query(
+            `UPDATE stock SET quantity = quantity + $1, updated_at = $2
+             WHERE product_id = $3 AND branch_id = $4`,
+            [Number(part['qty']), now, part['product_id'], partBranchId]
+          );
+        }
+      }
+    }
+
+    // Delete repair job (foreign keys repair_parts and repair_payments CASCADE automatically)
+    await client.query('DELETE FROM repair_jobs WHERE id = $1', [realId]);
+
+    await writeChangeLogEntry(client, {
+      organizationId,
+      branchId: branchId || '',
+      eventType: 'REPAIR_JOB_DELETED',
+      entityType: 'repair_job',
+      entityId: realId,
+      payloadStr: JSON.stringify({ jobId: humanJobId, deletedBy: userId, now }),
+    });
+
+    await client.query('COMMIT');
+    return { success: true, jobId: humanJobId };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // ─── A3: addRepairPartTx ──────────────────────────────────────────────────────
@@ -958,27 +1132,22 @@ export async function addRepairPaymentTx(
         "SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' ORDER BY opened_at DESC LIMIT 1 FOR UPDATE",
         [branchId]
       );
-      if (sessRes.rows.length === 0) {
-        throw new RepairRepoError(
-          'No open cash session found for this branch. Open a cash session before recording CASH payments.',
-          422
-        );
+      if (sessRes.rows.length > 0) {
+        sessionId = (sessRes.rows[0] as Record<string, unknown>)['id'] as string;
+        cmId = await insertCashMovement(client, {
+          sessionId,
+          branchId,
+          movementType: 'REPAIR_ADVANCE',
+          direction: 'IN',
+          amount: dto.amount,
+          referenceId: realId,
+          referenceNumber: humanJobId,
+          paymentMethod: 'CASH',
+          description: `Repair payment for job ${humanJobId}`,
+          performedBy: userId,
+          now,
+        });
       }
-      sessionId = (sessRes.rows[0] as Record<string, unknown>)['id'] as string;
-
-      cmId = await insertCashMovement(client, {
-        sessionId,
-        branchId,
-        movementType: 'REPAIR_ADVANCE',
-        direction: 'IN',
-        amount: dto.amount,
-        referenceId: realId,
-        referenceNumber: humanJobId,
-        paymentMethod: 'CASH',
-        description: `Repair payment for job ${humanJobId}`,
-        performedBy: userId,
-        now,
-      });
     }
 
     await client.query(
@@ -1124,7 +1293,9 @@ export async function completeRepairJobTx(
       ? Number(dto.discount)
       : Number(job['discount'] ?? 0);
 
-    const netTotal = partsTotal + laborTotal + additionalCharges - discount;
+    const estCost = Number(job['estimated_cost'] ?? 0);
+    const calculatedSum = partsTotal + laborTotal + additionalCharges - discount;
+    const netTotal = Math.max(estCost, calculatedSum);
 
     // Sum valid payments already recorded
     const paidRes = await client.query(
@@ -1145,32 +1316,32 @@ export async function completeRepairJobTx(
       const method = sp.method.toUpperCase();
       settlementPayId = uuidv4();
 
-      if (method === 'CASH') {
+      // Lab Cash Management Policy:
+      // Repair lab cash is kept in the technician's bench hold / lab register,
+      // and not forcefully injected into the front-counter POS sales register.
+      // If an open POS cash session exists, link it optionally; otherwise record
+      // as independent Lab Cash (session_id = NULL).
+      if (method === 'CASH' && branchId) {
         const sessRes = await client.query(
           "SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' ORDER BY opened_at DESC LIMIT 1 FOR UPDATE",
           [branchId]
         );
-        if (sessRes.rows.length === 0) {
-          throw new RepairRepoError(
-            'No open cash session for this branch. Open a cash session before CASH settlement.',
-            422
-          );
+        if (sessRes.rows.length > 0) {
+          settlementSessionId = (sessRes.rows[0] as Record<string, unknown>)['id'] as string;
+          settlementCmId = await insertCashMovement(client, {
+            sessionId: settlementSessionId,
+            branchId,
+            movementType: 'REPAIR_SETTLEMENT',
+            direction: 'IN',
+            amount: sp.amount,
+            referenceId: realId,
+            referenceNumber: invoiceNumber,
+            paymentMethod: 'CASH',
+            description: `Repair settlement for invoice ${invoiceNumber}`,
+            performedBy: userId,
+            now,
+          });
         }
-        settlementSessionId = (sessRes.rows[0] as Record<string, unknown>)['id'] as string;
-
-        settlementCmId = await insertCashMovement(client, {
-          sessionId: settlementSessionId,
-          branchId,
-          movementType: 'REPAIR_SETTLEMENT',
-          direction: 'IN',
-          amount: sp.amount,
-          referenceId: realId,
-          referenceNumber: invoiceNumber,
-          paymentMethod: 'CASH',
-          description: `Repair settlement for invoice ${invoiceNumber}`,
-          performedBy: userId,
-          now,
-        });
       }
 
       await client.query(
@@ -1240,6 +1411,22 @@ export async function completeRepairJobTx(
       ]
     );
 
+    // ── Mechanic commission & organization profit-share ─────────────────────
+    // Calculated and persisted INSIDE this transaction before COMMIT.
+    // ON CONFLICT (repair_job_id) DO NOTHING ensures idempotency on retry.
+    // Never throws for missing config / shortfall — those become status records.
+    const technicianId = job['technician_id'] as string | null;
+    const commissionResult = await calculateAndPersistCommission(client, {
+      repairJobId: realId,
+      branchId,
+      organizationId,
+      technicianId,
+      invoiceNumber,
+      netTotal,
+      deliveredAt: now,
+      performedBy: userId,
+    });
+
     // ── Audit log ─────────────────────────────────────────────────────────────
     await writeChangeLogEntry(client, {
       organizationId,
@@ -1250,6 +1437,13 @@ export async function completeRepairJobTx(
       payloadStr: JSON.stringify({
         invoiceNumber, humanJobId, netTotal, totalPaid, settlementStatus,
         settlementPayId, customerId,
+        commission: {
+          status: commissionResult.status,
+          commissionable_amount: commissionResult.commissionable_amount,
+          org_commission: commissionResult.org_commission,
+          mechanic_commission: commissionResult.mechanic_commission,
+          shortfall: commissionResult.shortfall,
+        },
       }),
     });
 

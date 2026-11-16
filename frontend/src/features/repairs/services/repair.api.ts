@@ -163,4 +163,24 @@ export const repairApi = {
   finishRepair: async (id: string, payload: FinishRepairPayload): Promise<RepairJob> => {
     return httpClient.post<RepairJob>(`/api/repairs/${encodeURIComponent(id)}/finish`, payload);
   },
+
+  /**
+   * Update an existing repair job's details (refill/edit).
+   */
+  updateRepairJob: async (
+    id: string,
+    payload: Partial<CreateRepairJobPayload>
+  ): Promise<RepairJob> => {
+    return httpClient.put<RepairJob>(`/api/repairs/${encodeURIComponent(id)}`, payload);
+  },
+
+  /**
+   * Permanently delete an active, un-delivered repair job.
+   * Restores any deducted stock automatically on the server.
+   */
+  deleteRepairJob: async (id: string): Promise<{ success: boolean; jobId: string }> => {
+    return httpClient.delete<{ success: boolean; jobId: string }>(
+      `/api/repairs/${encodeURIComponent(id)}`
+    );
+  },
 };

@@ -152,9 +152,9 @@ const FinishDeliverModal: React.FC<FinishModalProps> = ({ job, onClose, onConfir
                 className="w-full h-8 px-2 text-xs rounded-lg bg-surface border border-border text-text-primary focus:outline-none focus:border-primary"
               >
                 <option value="Cash">Cash</option>
-                <option value="Card">Card</option>
+                <option value="EasyPaisa">EasyPaisa</option>
+                <option value="JazzCash">JazzCash</option>
                 <option value="Bank">Bank</option>
-                <option value="Online">Online</option>
               </select>
             </div>
             <div>
