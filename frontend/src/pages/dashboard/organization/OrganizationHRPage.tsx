@@ -204,7 +204,7 @@ export function saveStaffExtraConfig(staffId: string, cfg: Partial<StaffExtraCon
 
 interface StaffSalaryCellProps {
   staff: StaffUser;
-  onOpenConfigModal: (staff: StaffUser) => void;
+  onOpenConfigModal: (staff: StaffUser, currentConfig?: any) => void;
 }
 
 const StaffSalaryCell: React.FC<StaffSalaryCellProps> = ({ staff, onOpenConfigModal }) => {
@@ -220,7 +220,7 @@ const StaffSalaryCell: React.FC<StaffSalaryCellProps> = ({ staff, onOpenConfigMo
   // Initialize edit value when opening quick edit
   const handleStartEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setEditSalary(salaryConfig?.monthly_salary ?? 0);
+    setEditSalary(Number(salaryConfig?.monthly_salary ?? 0));
     setErrorMsg(null);
     setIsEditing(true);
   };
@@ -241,12 +241,22 @@ const StaffSalaryCell: React.FC<StaffSalaryCellProps> = ({ staff, onOpenConfigMo
     setErrorMsg(null);
     try {
       const todayStr = new Date().toISOString().slice(0, 10);
+      const isCommission =
+        salaryConfig?.salary_type === 'COMMISSION_PERCENTAGE' ||
+        extraCfg.employmentType === 'COMMISSION_PERCENTAGE';
       await saveStaffSalaryConfig({
         staffId: staff._id,
-        salary_type: 'MONTHLY',
-        monthly_salary: editSalary,
+        salary_type: isCommission ? 'COMMISSION_PERCENTAGE' : 'MONTHLY',
+        monthly_salary: isCommission ? (editSalary > 0 ? editSalary : null) : editSalary,
+        commission_percentage: isCommission
+          ? (salaryConfig?.commission_percentage !== null && salaryConfig?.commission_percentage !== undefined
+              ? Number(salaryConfig.commission_percentage)
+              : (extraCfg.commissionPercentage !== undefined && extraCfg.commissionPercentage !== null
+                  ? extraCfg.commissionPercentage
+                  : undefined))
+          : undefined,
         effective_from: todayStr,
-        overtime_multiplier: salaryConfig?.overtime_multiplier ?? 1.5,
+        overtime_multiplier: Number(salaryConfig?.overtime_multiplier ?? 1.5),
       });
       await queryClient.invalidateQueries({
         queryKey: queryKeys.hr.salaryConfig(staff._id),
@@ -309,17 +319,34 @@ const StaffSalaryCell: React.FC<StaffSalaryCellProps> = ({ staff, onOpenConfigMo
     );
   }
 
-  const currentSalary = salaryConfig?.monthly_salary;
+  const currentSalary =
+    salaryConfig?.monthly_salary !== null && salaryConfig?.monthly_salary !== undefined
+      ? Number(salaryConfig.monthly_salary)
+      : null;
+  const isCommissionMode =
+    salaryConfig?.salary_type === 'COMMISSION_PERCENTAGE' ||
+    (!salaryConfig && extraCfg.employmentType === 'COMMISSION_PERCENTAGE');
+  const activeCommissionPct =
+    salaryConfig?.commission_percentage !== null && salaryConfig?.commission_percentage !== undefined
+      ? Number(salaryConfig.commission_percentage)
+      : (extraCfg.commissionPercentage !== undefined && extraCfg.commissionPercentage !== null ? extraCfg.commissionPercentage : null);
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      {extraCfg.employmentType === 'COMMISSION_PERCENTAGE' ? (
+      {isCommissionMode ? (
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
-            <span className="text-[10px]">⚙</span>
-            {extraCfg.commissionPercentage || 50}% Profit Share
-          </span>
-          {currentSalary !== undefined && currentSalary !== null && currentSalary > 0 && (
+          {activeCommissionPct !== null ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+              <span className="text-[10px]">⚙</span>
+              {activeCommissionPct}% Profit Share
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-200/50">
+              <span className="text-[10px]">⚙</span>
+              Commission Not Set
+            </span>
+          )}
+          {currentSalary !== null && currentSalary > 0 && (
             <span className="text-[11px] text-gray-500 font-medium">
               + ₨ {currentSalary.toLocaleString('en-PK')} base
             </span>
@@ -330,7 +357,7 @@ const StaffSalaryCell: React.FC<StaffSalaryCellProps> = ({ staff, onOpenConfigMo
             </span>
           )}
         </div>
-      ) : currentSalary !== undefined && currentSalary !== null && currentSalary > 0 ? (
+      ) : currentSalary !== null && currentSalary > 0 ? (
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="font-semibold text-gray-900 dark:text-white text-xs">
             ₨ {currentSalary.toLocaleString('en-PK')}
@@ -366,7 +393,7 @@ const StaffSalaryCell: React.FC<StaffSalaryCellProps> = ({ staff, onOpenConfigMo
 
       <button
         type="button"
-        onClick={() => onOpenConfigModal(staff)}
+        onClick={() => onOpenConfigModal(staff, salaryConfig)}
         title="Full Compensation & Percentage Configuration"
         className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors cursor-pointer"
       >
@@ -397,6 +424,7 @@ const StaffTab: React.FC<StaffTabProps> = ({
 
   // Modal for editing full salary & overtime config directly from staff table
   const [modalStaff, setModalStaff] = useState<StaffUser | null>(null);
+  const [modalInitialBackendConfig, setModalInitialBackendConfig] = useState<any>(null);
 
   const filtered = useMemo(() => {
     let list = staff;
@@ -544,10 +572,11 @@ const StaffTab: React.FC<StaffTabProps> = ({
                     <td className="px-4 py-3">
                       <StaffSalaryCell
                         staff={s}
-                        onOpenConfigModal={(staffUser) => {
+                        onOpenConfigModal={(staffUser, currentConfig) => {
                           if (onConfigureStaff) {
                             onConfigureStaff(staffUser);
                           } else {
+                            setModalInitialBackendConfig(currentConfig ?? null);
                             setModalStaff(staffUser);
                           }
                         }}
@@ -639,14 +668,30 @@ const StaffTab: React.FC<StaffTabProps> = ({
             </div>
             {(() => {
               const extraCfg = getStaffExtraConfig(modalStaff._id);
+              const backendSalary =
+                modalInitialBackendConfig?.monthly_salary !== null &&
+                modalInitialBackendConfig?.monthly_salary !== undefined
+                  ? Number(modalInitialBackendConfig.monthly_salary)
+                  : 0;
+              const backendCommissionPct =
+                modalInitialBackendConfig?.commission_percentage !== null &&
+                modalInitialBackendConfig?.commission_percentage !== undefined
+                  ? Number(modalInitialBackendConfig.commission_percentage)
+                  : (extraCfg.commissionPercentage !== undefined && extraCfg.commissionPercentage !== null
+                      ? extraCfg.commissionPercentage
+                      : undefined);
+              const resolvedEmploymentType =
+                modalInitialBackendConfig?.salary_type === 'COMMISSION_PERCENTAGE'
+                  ? 'COMMISSION_PERCENTAGE'
+                  : extraCfg.employmentType;
               return (
                 <StaffSalaryConfiguration
                   staff={modalStaff}
                   initialConfig={{
                     staffId: modalStaff._id,
-                    monthlySalary: 0,
-                    employmentType: extraCfg.employmentType,
-                    commissionPercentage: extraCfg.commissionPercentage ?? 50,
+                    monthlySalary: backendSalary,
+                    employmentType: resolvedEmploymentType,
+                    commissionPercentage: backendCommissionPct,
                     standardShiftHours: extraCfg.standardShiftHours,
                     individualBonus: extraCfg.individualBonus,
                     bonusReason: extraCfg.bonusReason,
@@ -663,10 +708,15 @@ const StaffTab: React.FC<StaffTabProps> = ({
                     await saveStaffSalaryConfig({
                       staffId: modalStaff._id,
                       salary_type: derivedSalaryType,
-                      monthly_salary: config.monthlySalary || undefined,
+                      // For commission-only mechanics, send null monthly_salary so DB stores NULL.
+                      // Backend chk_salary_rate_present is satisfied by commission_percentage IS NOT NULL.
+                      monthly_salary:
+                        config.employmentType === 'COMMISSION_PERCENTAGE'
+                          ? null
+                          : (config.monthlySalary ?? 0),
                       commission_percentage:
                         config.employmentType === 'COMMISSION_PERCENTAGE'
-                          ? (config.commissionPercentage ?? 50)
+                          ? config.commissionPercentage
                           : undefined,
                       effective_from: todayStr,
                       overtime_multiplier: overtimeConfig.overtimeMultiplier,
@@ -674,7 +724,7 @@ const StaffTab: React.FC<StaffTabProps> = ({
                     // 2. Persist part-time shift hours, employment type, mechanic commission % and individual bonus
                     saveStaffExtraConfig(modalStaff._id, {
                       employmentType: config.employmentType || (config.standardShiftHours < 11 ? 'PART_TIME' : 'FULL_TIME'),
-                      commissionPercentage: config.commissionPercentage ?? 50,
+                      commissionPercentage: config.commissionPercentage,
                       standardShiftHours: config.standardShiftHours,
                       individualBonus: config.individualBonus || 0,
                       bonusReason: config.bonusReason || '',
@@ -684,6 +734,7 @@ const StaffTab: React.FC<StaffTabProps> = ({
                       queryKey: queryKeys.hr.salaryConfig(modalStaff._id),
                     });
                     setModalStaff(null);
+                    setModalInitialBackendConfig(null);
                   }}
                 />
               );

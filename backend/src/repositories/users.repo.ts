@@ -43,6 +43,7 @@ export interface UserRow {
   must_change_password: boolean;
   access_profile: AccessProfile;
   branch_id: string | null;
+  branch_name: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -73,7 +74,8 @@ export interface UpdateUserInput {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const SELECT_SAFE_COLS = `
+// Columns for INSERT/UPDATE RETURNING (no table alias, no branch JOIN).
+const RETURNING_SAFE_COLS = `
   id,
   name,
   username,
@@ -83,9 +85,28 @@ const SELECT_SAFE_COLS = `
   must_change_password,
   access_profile,
   branch_id,
+  NULL::text AS branch_name,
   created_at::text AS created_at,
   updated_at::text AS updated_at
 `;
+
+// Columns for SELECT queries that JOIN branches (uses table alias u./b.).
+const SELECT_SAFE_COLS = `
+  u.id,
+  u.name,
+  u.username,
+  u.role,
+  u.status,
+  u.is_active,
+  u.must_change_password,
+  u.access_profile,
+  u.branch_id,
+  b.name AS branch_name,
+  u.created_at::text AS created_at,
+  u.updated_at::text AS updated_at
+`;
+
+const FROM_USERS_WITH_BRANCH = `FROM users u LEFT JOIN branches b ON b.id = u.branch_id`;
 
 function mapSafeRow(row: Record<string, unknown>): UserRow {
   const role = (row['role'] as string) ?? '';
@@ -121,6 +142,7 @@ function mapSafeRow(row: Record<string, unknown>): UserRow {
     must_change_password: Boolean(row['must_change_password']),
     access_profile,
     branch_id: (row['branch_id'] as string | null) ?? null,
+    branch_name: (row['branch_name'] as string | null) ?? null,
     created_at: row['created_at'] as string,
     updated_at: row['updated_at'] as string,
   };
@@ -133,28 +155,28 @@ function mapSafeRow(row: Record<string, unknown>): UserRow {
 export class UsersRepo {
   constructor(private readonly pool: Pool) {}
 
-  /** List all users (sanitized — no credential fields). */
+  /** List all users (sanitized — no credential fields). Includes branch_name via LEFT JOIN. */
   async listAll(): Promise<UserRow[]> {
     const result = await this.pool.query(
-      `SELECT ${SELECT_SAFE_COLS} FROM users ORDER BY created_at ASC`
+      `SELECT ${SELECT_SAFE_COLS} ${FROM_USERS_WITH_BRANCH} ORDER BY u.created_at ASC`
     );
     return (result.rows as Record<string, unknown>[]).map(mapSafeRow);
   }
 
-  /** Get one user by ID (sanitized). */
+  /** Get one user by ID (sanitized). Includes branch_name via LEFT JOIN. */
   async findById(id: string): Promise<UserRow | null> {
     const result = await this.pool.query(
-      `SELECT ${SELECT_SAFE_COLS} FROM users WHERE id = $1 LIMIT 1`,
+      `SELECT ${SELECT_SAFE_COLS} ${FROM_USERS_WITH_BRANCH} WHERE u.id = $1 LIMIT 1`,
       [id]
     );
     if (result.rows.length === 0) return null;
     return mapSafeRow(result.rows[0] as Record<string, unknown>);
   }
 
-  /** Get one user by username (sanitized). */
+  /** Get one user by username (sanitized). Includes branch_name via LEFT JOIN. */
   async findByUsername(username: string): Promise<UserRow | null> {
     const result = await this.pool.query(
-      `SELECT ${SELECT_SAFE_COLS} FROM users WHERE lower(username) = lower($1) LIMIT 1`,
+      `SELECT ${SELECT_SAFE_COLS} ${FROM_USERS_WITH_BRANCH} WHERE lower(u.username) = lower($1) LIMIT 1`,
       [username]
     );
     if (result.rows.length === 0) return null;
@@ -198,7 +220,7 @@ export class UsersRepo {
          0, 0,
          $11, NOW(), NOW()
        )
-       RETURNING ${SELECT_SAFE_COLS}`,
+       RETURNING ${RETURNING_SAFE_COLS}`,
       [
         id,
         input.name,
@@ -290,7 +312,7 @@ export class UsersRepo {
       `UPDATE users
          SET ${setClauses.join(', ')}
        WHERE id = $1
-       RETURNING ${SELECT_SAFE_COLS}`,
+       RETURNING ${RETURNING_SAFE_COLS}`,
       params
     );
 
@@ -313,7 +335,7 @@ export class UsersRepo {
              is_active = false,
              updated_at = NOW()
        WHERE id = $1
-       RETURNING ${SELECT_SAFE_COLS}`,
+       RETURNING ${RETURNING_SAFE_COLS}`,
       [id]
     );
     if (result.rows.length === 0) return null;
@@ -346,7 +368,7 @@ export class UsersRepo {
              updated_at = NOW()
        WHERE id = $1
          AND status = 'PENDING'
-       RETURNING ${SELECT_SAFE_COLS}`,
+       RETURNING ${RETURNING_SAFE_COLS}`,
       [id]
     );
     if (result.rows.length === 0) return null;
@@ -366,7 +388,7 @@ export class UsersRepo {
              updated_at = NOW()
        WHERE id = $1
          AND status = 'PENDING'
-       RETURNING ${SELECT_SAFE_COLS}`,
+       RETURNING ${RETURNING_SAFE_COLS}`,
       [id]
     );
     if (result.rows.length === 0) return null;
@@ -453,7 +475,7 @@ export class UsersRepo {
              updated_at = NOW()
        WHERE id = $1
          AND status = 'ACTIVE'
-       RETURNING ${SELECT_SAFE_COLS}`,
+       RETURNING ${RETURNING_SAFE_COLS}`,
       [id]
     );
     if (result.rows.length === 0) return null;
@@ -473,7 +495,7 @@ export class UsersRepo {
              updated_at = NOW()
        WHERE id = $1
          AND status = 'DISABLED'
-       RETURNING ${SELECT_SAFE_COLS}`,
+       RETURNING ${RETURNING_SAFE_COLS}`,
       [id]
     );
     if (result.rows.length === 0) return null;
@@ -505,7 +527,7 @@ export class UsersRepo {
    */
   async listByBranch(branchId: string): Promise<UserRow[]> {
     const result = await this.pool.query(
-      `SELECT ${SELECT_SAFE_COLS} FROM users WHERE branch_id = $1 ORDER BY created_at ASC`,
+      `SELECT ${SELECT_SAFE_COLS} ${FROM_USERS_WITH_BRANCH} WHERE u.branch_id = $1 ORDER BY u.created_at ASC`,
       [branchId]
     );
     return (result.rows as Record<string, unknown>[]).map(mapSafeRow);
@@ -589,7 +611,7 @@ export class UsersRepo {
          SET access_profile = $2::jsonb,
              updated_at = NOW()
        WHERE id = $1
-       RETURNING ${SELECT_SAFE_COLS}`,
+       RETURNING ${RETURNING_SAFE_COLS}`,
       [id, JSON.stringify(profileToStore)]
     );
     if (result.rows.length === 0) return null;

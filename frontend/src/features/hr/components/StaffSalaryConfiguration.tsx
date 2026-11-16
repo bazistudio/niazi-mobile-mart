@@ -62,8 +62,10 @@ export const StaffSalaryConfiguration: React.FC<StaffSalaryConfigurationProps> =
   const [monthlySalary, setMonthlySalary] = useState(
     initialConfig?.monthlySalary ?? 0
   );
-  const [commissionPercentage, setCommissionPercentage] = useState(
-    initialConfig?.commissionPercentage ?? 50
+  const [commissionPercentage, setCommissionPercentage] = useState<number | null>(
+    initialConfig?.commissionPercentage !== null && initialConfig?.commissionPercentage !== undefined
+      ? Number(initialConfig.commissionPercentage)
+      : null
   );
   const [standardShiftHours, setStandardShiftHours] = useState(
     initialConfig?.standardShiftHours ?? DEFAULT_ATTENDANCE_RULES.standardShiftHours
@@ -104,8 +106,6 @@ export const StaffSalaryConfiguration: React.FC<StaffSalaryConfigurationProps> =
       }
       if (monthlySalary === 0) setMonthlySalary(15000);
     } else if (type === 'COMMISSION_PERCENTAGE') {
-      // For repair mechanics: Pakistan market standard is 50% profit share & Rs 0 base salary
-      if (commissionPercentage <= 0) setCommissionPercentage(50);
       setMonthlySalary(0); // Rs 0 base salary
     }
   };
@@ -131,13 +131,23 @@ export const StaffSalaryConfiguration: React.FC<StaffSalaryConfigurationProps> =
 
   const handleSave = async () => {
     if (!onSave) return;
+    if (employmentType === 'COMMISSION_PERCENTAGE') {
+      if (commissionPercentage === null || commissionPercentage === undefined || isNaN(commissionPercentage)) {
+        setSaveError('Please enter a valid commission percentage between 0 and 100.');
+        return;
+      }
+      if (commissionPercentage < 0 || commissionPercentage > 100) {
+        setSaveError('Commission percentage must be between 0 and 100.');
+        return;
+      }
+    }
     setIsSaving(true);
     setSaveError(null);
     try {
       const config: HRSalaryConfig = {
         staffId: staff._id,
         employmentType,
-        commissionPercentage: employmentType === 'COMMISSION_PERCENTAGE' ? commissionPercentage : undefined,
+        commissionPercentage: employmentType === 'COMMISSION_PERCENTAGE' ? (commissionPercentage ?? undefined) : undefined,
         monthlySalary,
         standardShiftHours,
         individualBonus,
@@ -290,7 +300,9 @@ export const StaffSalaryConfiguration: React.FC<StaffSalaryConfigurationProps> =
               </span>
             </div>
             <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300">
-              Mechanic: {commissionPercentage}% | Shop: {100 - commissionPercentage}%
+              {commissionPercentage !== null
+                ? `Mechanic: ${commissionPercentage}% | Shop: ${100 - commissionPercentage}%`
+                : 'Mechanic: Not Set | Shop: Not Set'}
             </span>
           </div>
           <div className="p-3 sm:p-3.5 space-y-3 bg-white dark:bg-gray-900">
@@ -299,15 +311,26 @@ export const StaffSalaryConfiguration: React.FC<StaffSalaryConfigurationProps> =
               <div className="space-y-1">
                 <label className="text-xs font-medium text-gray-700 dark:text-gray-300 flex items-center justify-between">
                   <span>Mechanic Profit Share (%)</span>
-                  <span className="text-[11px] text-amber-600 font-semibold">{commissionPercentage}% Real Profit</span>
+                  <span className="text-[11px] text-amber-600 font-semibold">
+                    {commissionPercentage !== null ? `${commissionPercentage}% Real Profit` : 'Not Configured'}
+                  </span>
                 </label>
                 <div className="relative">
                   <input
                     type="number"
-                    min={1}
+                    min={0}
                     max={100}
-                    value={commissionPercentage || ''}
-                    onChange={(e) => setCommissionPercentage(Math.min(100, Math.max(1, Number(e.target.value))))}
+                    placeholder="Enter percentage (0-100)"
+                    value={commissionPercentage !== null ? commissionPercentage : ''}
+                    onChange={(e) => {
+                      const val = e.target.value.trim();
+                      if (val === '') {
+                        setCommissionPercentage(null);
+                      } else {
+                        const num = Number(val);
+                        setCommissionPercentage(isNaN(num) ? null : Math.min(100, Math.max(0, num)));
+                      }
+                    }}
                     className="w-full pl-3 pr-8 py-1.5 text-xs sm:text-sm bg-gray-50 dark:bg-gray-800 border border-amber-300 dark:border-amber-700
                       rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 font-bold text-gray-900 dark:text-white"
                   />
@@ -367,7 +390,7 @@ export const StaffSalaryConfiguration: React.FC<StaffSalaryConfigurationProps> =
                 Automatic Accounting on Delivered Jobs:
               </div>
               <p className="leading-snug">
-                Real Profit = Customer Billed - Parts Cost &nbsp;|&nbsp; Mechanic Earns = Real Profit × {commissionPercentage}% &nbsp;|&nbsp; Shop Retains = Real Profit × {100 - commissionPercentage}%
+                Real Profit = Customer Billed - Parts Cost &nbsp;|&nbsp; Mechanic Earns = Real Profit × {commissionPercentage !== null ? `${commissionPercentage}%` : '[—]%'} &nbsp;|&nbsp; Shop Retains = Real Profit × {commissionPercentage !== null ? `${100 - commissionPercentage}%` : '[—]%'}
               </p>
             </div>
           </div>

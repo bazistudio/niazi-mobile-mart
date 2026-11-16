@@ -429,6 +429,7 @@ export const settingsApi = {
         status: (u.status ? u.status.toLowerCase() : (u.is_active ? 'active' : 'inactive')) as any,
         mustChangePassword: u.must_change_password,
         branchId: u.branch_id ?? undefined,
+        branchName: u.branch_name ?? undefined,
         createdAt: u.created_at,
       };
     });

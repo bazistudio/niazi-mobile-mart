@@ -277,6 +277,18 @@ export async function getAttendanceSummary(
 
 // ─── Salary Config ────────────────────────────────────────────────────────────
 
+
+function normalizeSalaryConfigRow(row: StaffSalaryConfigRow): StaffSalaryConfigRow {
+  return {
+    ...row,
+    monthly_salary: row.monthly_salary !== null && row.monthly_salary !== undefined ? Number(row.monthly_salary) as any : null,
+    daily_rate: row.daily_rate !== null && row.daily_rate !== undefined ? Number(row.daily_rate) as any : null,
+    hourly_rate: row.hourly_rate !== null && row.hourly_rate !== undefined ? Number(row.hourly_rate) as any : null,
+    overtime_multiplier: row.overtime_multiplier !== null && row.overtime_multiplier !== undefined ? Number(row.overtime_multiplier) as any : (1.5 as any),
+    commission_percentage: row.commission_percentage !== null && row.commission_percentage !== undefined ? Number(row.commission_percentage) as any : null,
+  };
+}
+
 /**
  * Get active (open-ended) salary config for a user.
  */
@@ -290,7 +302,7 @@ export async function getActiveSalaryConfig(
      LIMIT 1`,
     [user_id]
   );
-  return result.rows[0] ?? null;
+  return result.rows[0] ? normalizeSalaryConfigRow(result.rows[0]) : null;
 }
 
 /**
@@ -306,7 +318,7 @@ export async function getSalaryConfigHistory(
      ORDER BY effective_from DESC`,
     [user_id]
   );
-  return result.rows;
+  return result.rows.map(normalizeSalaryConfigRow);
 }
 
 /**
@@ -330,6 +342,33 @@ export async function setSalaryConfig(
     now_utc: string;
   }
 ): Promise<StaffSalaryConfigRow> {
+  // Verify configured_by exists in users to avoid FK constraint error
+  let safeConfiguredBy: string | null = params.configured_by || null;
+  if (safeConfiguredBy) {
+    const userCheck = await client.query<{ id: string }>(
+      `SELECT id FROM users WHERE id = $1 LIMIT 1`,
+      [safeConfiguredBy]
+    );
+    if (!userCheck.rows[0]) {
+      safeConfiguredBy = null;
+    }
+  }
+
+  // For MONTHLY and COMMISSION_PERCENTAGE, coerce null/undefined monthly_salary to 0 to satisfy
+  // chk_salary_rate_present (042 form requires monthly_salary/daily_rate/hourly_rate to be non-null).
+  // For COMMISSION_PERCENTAGE, monthly_salary acts as the optional guaranteed base retainer (default 0).
+  const safeMonthlySalary =
+    params.salary_type === 'COMMISSION_PERCENTAGE'
+      ? (params.monthly_salary ?? 0)
+      : (params.salary_type === 'MONTHLY' ? (params.monthly_salary ?? 0) : params.monthly_salary);
+
+  // For COMMISSION_PERCENTAGE, commission_percentage is required (must not be null/undefined).
+  // Callers must validate this before invoking setSalaryConfig.
+  if (params.salary_type === 'COMMISSION_PERCENTAGE' && (params.commission_percentage === null || params.commission_percentage === undefined)) {
+    throw new Error('commission_percentage is required when salary_type is COMMISSION_PERCENTAGE');
+  }
+  const safeCommissionPercentage = params.commission_percentage;
+
   // Close previous active config (set effective_to = day before effective_from)
   await client.query(
     `UPDATE staff_salary_configs
@@ -351,17 +390,17 @@ export async function setSalaryConfig(
       params.user_id,
       params.organization_id,
       params.salary_type,
-      params.monthly_salary,
+      safeMonthlySalary,
       params.daily_rate,
       params.hourly_rate,
       params.overtime_multiplier,
-      params.commission_percentage,
+      safeCommissionPercentage,
       params.effective_from,
-      params.configured_by,
+      safeConfiguredBy,
       params.now_utc,
     ]
   );
-  return result.rows[0];
+  return normalizeSalaryConfigRow(result.rows[0]);
 }
 
 // ─── Shift Templates ──────────────────────────────────────────────────────────

@@ -219,6 +219,32 @@ export async function setStaffSalaryConfig(
     configured_by: string;
   }
 ): Promise<StaffSalaryConfigRow> {
+  // Look up the target user's branch_id before opening the transaction.
+  // change_log.branch_id is NOT NULL, so we must supply a valid branch.
+  // Fall back to the organization's first branch when the user has no branch assignment.
+  let salaryBranchId: string | null = null;
+  try {
+    const branchRes = await pool.query<{ branch_id: string | null }>(
+      'SELECT branch_id FROM users WHERE id = $1 LIMIT 1',
+      [params.user_id]
+    );
+    salaryBranchId = branchRes.rows[0]?.branch_id ?? null;
+    if (!salaryBranchId) {
+      const orgBranchRes = await pool.query<{ id: string }>(
+        `SELECT id FROM branches WHERE organization_id = $1
+           AND is_active = 1
+           AND name NOT ILIKE '%central%'
+           AND name NOT ILIKE '%warehouse%'
+         ORDER BY created_at ASC LIMIT 1`,
+        [params.organization_id]
+      );
+      salaryBranchId = orgBranchRes.rows[0]?.id ?? null;
+    }
+  } catch {
+    // salaryBranchId stays null; transaction will fail if DB enforces NOT NULL,
+    // which is the correct behavior — avoids a silent bad write.
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -242,7 +268,7 @@ export async function setStaffSalaryConfig(
       entity_id: result.id,
       changed_by: params.configured_by,
       organization_id: params.organization_id,
-      branch_id: null,
+      branch_id: salaryBranchId,
       metadata: { user_id: params.user_id, salary_type: params.salary_type },
     });
     await client.query('COMMIT');

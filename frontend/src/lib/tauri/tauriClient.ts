@@ -52,6 +52,7 @@ export interface SanitizedUser {
   has_pin: boolean;
   access_profile: StaffAccessProfile;
   branch_id?: string | null;
+  branch_name?: string | null;
   created_at: string;
 }
 

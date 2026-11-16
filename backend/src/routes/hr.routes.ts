@@ -115,11 +115,7 @@ export function buildHrRouter(pool: Pool): Router {
     }
     try {
       const config = await getStaffSalaryConfig(pool, getParamStr(req.params['userId']));
-      if (!config) {
-        res.status(404).json({ error: 'No active salary config for this user' });
-        return;
-      }
-      res.status(200).json(config);
+      res.status(200).json(config ?? null);
     } catch (err) {
       sendError(res, err);
     }
@@ -174,6 +170,27 @@ export function buildHrRouter(pool: Pool): Router {
       if (!effective_from || !/^\d{4}-\d{2}-\d{2}$/.test(effective_from)) {
         res.status(400).json({ error: 'effective_from must be YYYY-MM-DD' });
         return;
+      }
+
+      // Commission-specific validation
+      if (salary_type === 'COMMISSION_PERCENTAGE') {
+        if (commission_percentage === undefined || commission_percentage === null) {
+          res.status(400).json({ error: 'commission_percentage is required for COMMISSION_PERCENTAGE salary type' });
+          return;
+        }
+        const pct = Number(commission_percentage);
+        if (isNaN(pct)) {
+          res.status(400).json({ error: 'commission_percentage must be a valid number' });
+          return;
+        }
+        if (pct < 0) {
+          res.status(400).json({ error: 'commission_percentage must not be negative' });
+          return;
+        }
+        if (pct > 100) {
+          res.status(400).json({ error: 'commission_percentage must not exceed 100' });
+          return;
+        }
       }
 
       const config = await setStaffSalaryConfig(pool, {
