@@ -64,7 +64,7 @@ export const shopAdminNavigation: NavigationGroup[] = [
   {
     label: 'Reports',
     items: [
-      { name: 'History', href: '/dashboard/shop-admin/history', icon: History, permission: PERMISSIONS.REPORTS_VIEW },
+      { name: 'History', href: '/dashboard/shop-admin/history', icon: History, permission: PERMISSIONS.SALES_VIEW },
     ],
   },
   {
