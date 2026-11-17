@@ -175,6 +175,16 @@ export const repairApi = {
   },
 
   /**
+   * Transfer repair job to another branch or mechanic.
+   */
+  transferRepairJob: async (
+    id: string,
+    payload: { targetBranchId: string; targetTechnicianId?: string | null; reason?: string }
+  ): Promise<RepairJob> => {
+    return httpClient.post<RepairJob>(`/api/repairs/${encodeURIComponent(id)}/transfer`, payload);
+  },
+
+  /**
    * Permanently delete an active, un-delivered repair job.
    * Restores any deducted stock automatically on the server.
    */

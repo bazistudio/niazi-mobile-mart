@@ -35,6 +35,9 @@ export function DashboardRedirectPage() {
           navigate("/dashboard/shop-admin", { replace: true });
         }
         break;
+      case "REPAIR_MECHANIC":
+        navigate("/dashboard/shop-admin/repairs", { replace: true });
+        break;
       case "SHOP_ADMIN":
       case "MANAGER":
       case "CASHIER":

@@ -22,6 +22,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { writeChangeLogEntry } from './change_log.repo';
 import { calculateAndPersistCommission } from '../services/repair-commission.service';
 
+const CANONICAL_MAIN_BRANCH_ID = '00000000-0000-0000-0000-000000000002';
+
 // ─── DTOs ────────────────────────────────────────────────────────────────────
 
 export interface DeviceInfoDto {
@@ -101,6 +103,7 @@ export interface CompleteRepairJobDto {
 }
 
 export interface RepairJobFilters {
+  organization_id?: string;
   status?: string;
   branch_id?: string;
   customer_id?: string;
@@ -344,6 +347,10 @@ export async function listRepairJobs(
   const params: unknown[] = [];
   let paramIdx = 1;
 
+  if (filters.organization_id) {
+    conditions.push(`b.organization_id = $${paramIdx++}`);
+    params.push(filters.organization_id);
+  }
   if (filters.status) {
     conditions.push(`rj.status = $${paramIdx++}`);
     params.push(filters.status);
@@ -364,7 +371,7 @@ export async function listRepairJobs(
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const countRes = await pool.query(
-    `SELECT COUNT(*) AS total FROM repair_jobs rj ${whereClause}`,
+    `SELECT COUNT(*) AS total FROM repair_jobs rj LEFT JOIN branches b ON b.id = rj.branch_id ${whereClause}`,
     params
   );
   const total = Number((countRes.rows[0] as Record<string, unknown>)?.['total'] ?? 0);
@@ -374,6 +381,7 @@ export async function listRepairJobs(
        rj.*,
        u.name AS technician_name
      FROM repair_jobs rj
+     LEFT JOIN branches b ON b.id = rj.branch_id
      LEFT JOIN users u ON u.id = rj.technician_id
      ${whereClause}
      ORDER BY rj.created_at DESC
@@ -715,7 +723,7 @@ export async function updateRepairJobTx(
 
     await writeChangeLogEntry(client, {
       organizationId,
-      branchId: branchId || '',
+      branchId: branchId || CANONICAL_MAIN_BRANCH_ID,
       eventType: 'REPAIR_JOB_UPDATED',
       entityType: 'repair_job',
       entityId: realId,
@@ -726,6 +734,98 @@ export async function updateRepairJobTx(
 
     const updated = await getRepairJobById(pool, realId);
     if (!updated) throw new RepairRepoError('Failed to retrieve updated repair job', 500);
+    return updated;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// ─── Transfer Repair Job (Branch-to-Branch & Mechanic-to-Mechanic) ─────────
+export async function transferRepairJobTx(
+  pool: Pool,
+  jobId: string,
+  targetBranchId: string,
+  targetTechnicianId: string | null,
+  reason: string,
+  userId: string | null,
+  organizationId: string
+): Promise<unknown> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const existing = await client.query(
+      'SELECT id, job_id, status, branch_id, technician_id, timeline FROM repair_jobs WHERE id::text = $1 OR job_id = $1 FOR UPDATE',
+      [jobId]
+    );
+    if (existing.rows.length === 0) {
+      throw new RepairRepoError(`Repair job '${jobId}' not found`, 404);
+    }
+    const row = existing.rows[0] as Record<string, unknown>;
+    const realId = row['id'] as string;
+    const humanJobId = row['job_id'] as string;
+    const sourceBranchId = row['branch_id'] as string | null;
+    const sourceTechId = row['technician_id'] as string | null;
+
+    if (row['status'] === 'Delivered') {
+      throw new RepairRepoError('Cannot transfer a delivered repair job', 409);
+    }
+
+    const branchRes = await client.query('SELECT name FROM branches WHERE id = $1', [targetBranchId]);
+    const targetBranchName = (branchRes.rows[0] as any)?.name || 'Destination Branch';
+
+    let targetTechName = 'Unassigned';
+    if (targetTechnicianId) {
+      const techRes = await client.query('SELECT name FROM users WHERE id = $1', [targetTechnicianId]);
+      targetTechName = (techRes.rows[0] as any)?.name || 'Technician';
+    }
+
+    const timeline = parseJsonField<unknown[]>(row['timeline'], []);
+    const now = new Date().toISOString();
+    timeline.push({
+      _id: uuidv4(),
+      status: row['status'] as string,
+      timestamp: now,
+      user: { _id: userId ?? null, name: 'System', email: '' },
+      description: `Job Transferred to ${targetBranchName} (${targetTechName})`,
+      note: reason?.trim() ? `Transfer Note: ${reason.trim()}` : `Transferred to ${targetBranchName}`,
+    });
+
+    await client.query(
+      `UPDATE repair_jobs SET
+         branch_id = $1,
+         technician_id = $2,
+         timeline = $3,
+         updated_at = $4
+       WHERE id = $5`,
+      [targetBranchId, targetTechnicianId || null, JSON.stringify(timeline), now, realId]
+    );
+
+    await writeChangeLogEntry(client, {
+      organizationId,
+      branchId: targetBranchId || CANONICAL_MAIN_BRANCH_ID,
+      eventType: 'REPAIR_JOB_TRANSFERRED',
+      entityType: 'repair_job',
+      entityId: realId,
+      payloadStr: JSON.stringify({
+        jobId: humanJobId,
+        fromBranchId: sourceBranchId,
+        fromTechId: sourceTechId,
+        toBranchId: targetBranchId,
+        toTechId: targetTechnicianId,
+        reason,
+        transferredBy: userId,
+        now,
+      }),
+    });
+
+    await client.query('COMMIT');
+
+    const updated = await getRepairJobById(pool, realId);
+    if (!updated) throw new RepairRepoError('Failed to retrieve transferred repair job', 500);
     return updated;
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -1451,8 +1551,8 @@ export async function completeRepairJobTx(
     try {
       const recipientsRes = await client.query<{ id: string }>(
         `SELECT id FROM users
-         WHERE (role IN ('ADMIN', 'OWNER', 'SUPER_ADMIN') AND is_active = true)
-            OR (role = 'SHOP_ADMIN' AND branch_id = $1 AND is_active = true)`,
+         WHERE (role IN ('ADMIN', 'OWNER', 'SUPER_ADMIN') AND (is_active = 1 OR is_active::text = 'true'))
+            OR (role = 'SHOP_ADMIN' AND branch_id = $1 AND (is_active = 1 OR is_active::text = 'true'))`,
         [branchId]
       );
       const deviceLabel = `${job['device_brand']} ${job['device_model']}`;

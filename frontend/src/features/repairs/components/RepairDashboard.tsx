@@ -23,6 +23,7 @@ import {
   RotateCcw,
   Edit,
   Trash2,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { RepairFormDrawer } from './modals/RepairFormDrawer';
@@ -34,6 +35,7 @@ import { Badge } from '@/components/ui';
 import type { BadgeProps } from '@/components/ui';
 import { useStaff } from '@/features/settings/hooks/useStaff';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { useCashStore } from '@/features/cash/store/cash.store';
 import { CashSessionOpenModal } from '@/features/cash/components/CashSessionOpenModal';
 import { CashSessionCloseModal } from '@/features/cash/components/CashSessionCloseModal';
@@ -52,7 +54,12 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
   const isMechanicUser = currentUser?.role === 'REPAIR_MECHANIC';
   const isOrgAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'OWNER';
 
-  const [selectedBranchId, setSelectedBranchId] = useState<string>('');
+  const activeShop = useOrganizationStore((s) => s.activeShop);
+  const activeShopId = useOrganizationStore((s) => s.activeShopId || s.activeShop?._id || null);
+
+  const currentBranchId = currentUser?.shopId || currentUser?.branchId || currentUser?.branch_id || null;
+
+  const [selectedBranchId, setSelectedBranchId] = useState<string>('USE_GLOBAL_SWITCHER');
 
   const { data: branchList = [] } = useQuery({
     queryKey: ['branches-list'],
@@ -62,6 +69,38 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
     },
     enabled: isOrgAdmin,
   });
+
+  const branchMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const b of branchList as any[]) {
+      const bId = b.id || b._id;
+      if (bId) map.set(bId, b.name);
+    }
+    return map;
+  }, [branchList]);
+
+  // Sync selectedBranchId when activeShopId changes in topbar switcher if user has not picked a specific dropdown override
+  React.useEffect(() => {
+    if (selectedBranchId === 'USE_GLOBAL_SWITCHER') {
+      // keep following global switcher
+    }
+  }, [activeShopId, selectedBranchId]);
+
+  // Effective branch ID:
+  // If org admin explicitly selected 'ALL', view all branches.
+  // If org admin selected 'USE_GLOBAL_SWITCHER', follow activeShopId from topbar switcher.
+  // If org admin selected a specific branch ID, use that.
+  // Otherwise, fallback to currentUser branch.
+  const effectiveBranchId = useMemo(() => {
+    if (isOrgAdmin) {
+      if (selectedBranchId === 'ALL') return undefined;
+      if (selectedBranchId === 'USE_GLOBAL_SWITCHER') {
+        return activeShopId || undefined;
+      }
+      return selectedBranchId || undefined;
+    }
+    return currentBranchId || activeShopId || undefined;
+  }, [isOrgAdmin, selectedBranchId, activeShopId, currentBranchId]);
 
   // Navigation Tabs: 'jobs' = Repair Jobs & Service Desk, 'parts_lab' = Parts Consumption & Lab Movement, 'lab_cash_ledger' = Lab Cash Register & Ledger
   const [activeTab, setActiveTab] = useState<RepairDashboardTab>('jobs');
@@ -92,20 +131,16 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
 
   const { data: staffList = [] } = useStaff();
 
-  // Mechanic selector: current branch + repair-mechanic role only (never cashiers/other staff).
-  const currentBranchId = currentUser?.shopId || currentUser?.branchId || currentUser?.branch_id || null;
+  // Mechanic selector: branchMechanics filtered to effectiveBranchId (or currentBranchId)
   const branchMechanics = useMemo(() => {
     return staffList.filter((s) => {
       const roleKey = `${s.roleId || ''} ${s.roleName || ''}`.toUpperCase();
       const isMechanicRole = roleKey.includes('MECHANIC');
-      const matchesBranch = currentBranchId ? s.branchId === currentBranchId : true;
+      const targetBranch = effectiveBranchId || currentBranchId;
+      const matchesBranch = targetBranch ? s.branchId === targetBranch : true;
       return isMechanicRole && matchesBranch;
     });
-  }, [staffList, currentBranchId]);
-
-  const effectiveBranchId = isOrgAdmin
-    ? (selectedBranchId || undefined)
-    : (currentBranchId || undefined);
+  }, [staffList, effectiveBranchId, currentBranchId]);
 
   const { data: response, isLoading } = useQuery({
     queryKey: ['repairs', statusFilter, effectiveMechanicFilter, effectiveBranchId],
@@ -154,10 +189,10 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
           settlement_payment:
             settlementAmount > 0
               ? {
-                  amount: settlementAmount,
-                  method: paymentMethod,
-                  reference: paymentReference || null,
-                }
+                amount: settlementAmount,
+                method: paymentMethod,
+                reference: paymentReference || null,
+              }
               : null,
           delivery_notes: deliveryNotes || 'Settled and completed via Lab Cash Register',
         });
@@ -184,6 +219,40 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
     },
     onError: (err: any) => {
       toast.error(err?.message || 'Failed to complete repair settlement');
+    },
+  });
+
+  const [transferringJob, setTransferringJob] = useState<any | null>(null);
+  const [transferTargetBranchId, setTransferTargetBranchId] = useState<string>('');
+  const [transferTargetTechId, setTransferTargetTechId] = useState<string>('');
+  const [transferReason, setTransferReason] = useState<string>('');
+
+  const transferRepairMutation = useMutation({
+    mutationFn: async ({
+      jobId,
+      targetBranchId,
+      targetTechnicianId,
+      reason,
+    }: {
+      jobId: string;
+      targetBranchId: string;
+      targetTechnicianId?: string | null;
+      reason: string;
+    }) => {
+      return await repairApi.transferRepairJob(jobId, {
+        targetBranchId,
+        targetTechnicianId: targetTechnicianId || null,
+        reason,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['repairs'] });
+      toast.success('Repair job transferred successfully!');
+      setTransferringJob(null);
+      setTransferReason('');
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || 'Failed to transfer repair job');
     },
   });
 
@@ -342,11 +411,10 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
           <button
             type="button"
             onClick={() => setActiveTab('jobs')}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-              activeTab === 'jobs'
-                ? 'bg-primary text-text-inverse shadow-xs'
-                : 'bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary border border-border'
-            }`}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'jobs'
+              ? 'bg-primary text-text-inverse shadow-xs'
+              : 'bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary border border-border'
+              }`}
           >
             <Wrench className="w-4 h-4" />
             Repair Jobs &amp; Service Desk
@@ -354,11 +422,10 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
           <button
             type="button"
             onClick={() => setActiveTab('parts_lab')}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-              activeTab === 'parts_lab'
-                ? 'bg-primary text-text-inverse shadow-xs'
-                : 'bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary border border-border'
-            }`}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'parts_lab'
+              ? 'bg-primary text-text-inverse shadow-xs'
+              : 'bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary border border-border'
+              }`}
           >
             <FlaskConical className="w-4 h-4" />
             Parts Consumption &amp; Lab Movement
@@ -366,11 +433,10 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
           <button
             type="button"
             onClick={() => setActiveTab('lab_cash_ledger')}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-              activeTab === 'lab_cash_ledger'
-                ? 'bg-primary text-text-inverse shadow-xs'
-                : 'bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary border border-border'
-            }`}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${activeTab === 'lab_cash_ledger'
+              ? 'bg-primary text-text-inverse shadow-xs'
+              : 'bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary border border-border'
+              }`}
           >
             <DollarSign className="w-4 h-4" />
             Lab Cash Register &amp; Ledger
@@ -453,11 +519,10 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
                     key={pill.label}
                     type="button"
                     onClick={() => setStatusFilter(pill.value)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
-                      isSelected
-                        ? 'bg-primary text-text-inverse shadow-xs'
-                        : 'bg-surface text-text-secondary hover:bg-surface-hover border border-border'
-                    }`}
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${isSelected
+                      ? 'bg-primary text-text-inverse shadow-xs'
+                      : 'bg-surface text-text-secondary hover:bg-surface-hover border border-border'
+                      }`}
                   >
                     {pill.label}
                   </button>
@@ -576,7 +641,10 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
                   onChange={(e) => setSelectedBranchId(e.target.value)}
                   aria-label="Filter by branch"
                 >
-                  <option value="">All Branches</option>
+                  <option value="USE_GLOBAL_SWITCHER">
+                    Current Scope: {activeShop ? activeShop.name : 'All Shops'}
+                  </option>
+                  <option value="ALL">All Branches (Consolidated)</option>
                   {branchList.map((b: any) => (
                     <option key={b.id || b._id} value={b.id || b._id}>
                       {b.name}
@@ -606,32 +674,35 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
                 <table className="w-full text-sm text-left">
                   <thead className="bg-surface-hover border-b border-border">
                     <tr>
-                      {['Job ID', 'Customer', 'Device', 'Mechanic', 'Status', 'Estimated / Bill', 'Balance', 'Actions'].map(
-                        (h, i) => (
-                          <th
-                            key={h}
-                            scope="col"
-                            className={`px-3 py-2.5 text-[11px] font-semibold text-text-muted uppercase tracking-wider ${
-                              i === 5 || i === 6 ? 'text-right' : i === 4 || i === 7 ? 'text-center' : ''
-                            }`}
-                          >
-                            {h}
-                          </th>
-                        )
-                      )}
+                      {['Job ID', isOrgAdmin ? 'Branch' : null, 'Customer', 'Device', 'Mechanic', 'Status', 'Estimated / Bill', 'Balance', 'Actions']
+                        .filter(Boolean)
+                        .map((h, i) => {
+                          const isNumeric = h === 'Estimated / Bill' || h === 'Balance';
+                          const isCenter = h === 'Status' || h === 'Actions';
+                          return (
+                            <th
+                              key={h as string}
+                              scope="col"
+                              className={`px-3 py-2.5 text-[11px] font-semibold text-text-muted uppercase tracking-wider ${isNumeric ? 'text-right' : isCenter ? 'text-center' : ''
+                                }`}
+                            >
+                              {h}
+                            </th>
+                          );
+                        })}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {isLoading ? (
                       <tr>
-                        <td colSpan={8} className="px-4 py-8 text-center text-text-muted">
+                        <td colSpan={isOrgAdmin ? 9 : 8} className="px-4 py-8 text-center text-text-muted">
                           <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2 text-primary" />
                           Loading repair jobs…
                         </td>
                       </tr>
                     ) : filteredJobs.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="px-4 py-8 text-center text-text-muted">
+                        <td colSpan={isOrgAdmin ? 9 : 8} className="px-4 py-8 text-center text-text-muted">
                           No repair jobs match your search or filter criteria.
                         </td>
                       </tr>
@@ -643,6 +714,8 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
                           job.status === 'Repair In Progress' ||
                           job.status === 'On Hold';
 
+                        const jobBranchName = branchMap.get(job.branch_id || job.branchId) || 'Main Branch';
+
                         return (
                           <tr
                             key={job.id || job._id}
@@ -652,6 +725,13 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
                             <td className="px-3 py-2.5 font-bold text-primary font-mono text-xs whitespace-nowrap">
                               {job.jobId}
                             </td>
+                            {isOrgAdmin && (
+                              <td className="px-3 py-2.5 whitespace-nowrap">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-primary/10 text-primary border border-primary/20">
+                                  {jobBranchName}
+                                </span>
+                              </td>
+                            )}
                             <td className="px-3 py-2.5">
                               <div className="font-semibold text-text-primary text-xs">
                                 {job.customerId?.name || 'Walk-in Customer'}
@@ -711,6 +791,19 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
                                   >
                                     <CheckCircle2 className="w-3 h-3" />
                                     <span>Done Job</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setTransferringJob(job);
+                                      setTransferTargetBranchId(job.branch_id || job.branchId || '');
+                                      setTransferTargetTechId(job.technician_id || (job.technicianId as any)?._id || (job.technicianId as any)?.id || '');
+                                    }}
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-white border border-amber-500/30 transition-all shadow-xs"
+                                    title="Transfer job between branches or mechanics"
+                                  >
+                                    <ArrowRightLeft className="w-3 h-3" />
+                                    <span>Transfer</span>
                                   </button>
                                   <button
                                     type="button"
@@ -855,6 +948,126 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
           }
           isPending={finishRepairMutation.isPending}
         />
+      )}
+
+      {/* Transfer Repair Job Modal */}
+      {transferringJob && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-md bg-surface border border-border rounded-2xl shadow-modal overflow-hidden flex flex-col">
+            <div className="px-5 py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 flex items-center justify-between text-white shrink-0">
+              <div className="flex items-center gap-2">
+                <ArrowRightLeft className="w-5 h-5" />
+                <div>
+                  <h3 className="text-sm font-bold">Transfer Repair Job</h3>
+                  <p className="text-[11px] opacity-90">{transferringJob.jobId} • {transferringJob.device?.brand} {transferringJob.device?.model}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTransferringJob(null)}
+                className="p-1 rounded-lg hover:bg-white/10 text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!transferTargetBranchId) {
+                  toast.error('Please select destination branch');
+                  return;
+                }
+                transferRepairMutation.mutate({
+                  jobId: transferringJob.id || transferringJob._id,
+                  targetBranchId: transferTargetBranchId,
+                  targetTechnicianId: transferTargetTechId || null,
+                  reason: transferReason,
+                });
+              }}
+              className="p-5 space-y-3.5 text-xs text-text-primary"
+            >
+              <div>
+                <label className="block text-[11px] font-semibold text-text-secondary mb-1">
+                  Destination Branch *
+                </label>
+                <select
+                  value={transferTargetBranchId}
+                  onChange={(e) => {
+                    setTransferTargetBranchId(e.target.value);
+                    setTransferTargetTechId('');
+                  }}
+                  className="w-full h-8 px-2.5 rounded-lg bg-background border border-border text-xs text-text-primary focus:outline-none focus:border-primary"
+                  required
+                >
+                  <option value="">Select Branch</option>
+                  {branchList.map((b: any) => (
+                    <option key={b.id || b._id} value={b.id || b._id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-text-secondary mb-1">
+                  Destination Mechanic / Technician
+                </label>
+                <select
+                  value={transferTargetTechId}
+                  onChange={(e) => setTransferTargetTechId(e.target.value)}
+                  className="w-full h-8 px-2.5 rounded-lg bg-background border border-border text-xs text-text-primary focus:outline-none focus:border-primary"
+                >
+                  <option value="">Unassigned / Desk</option>
+                  {staffList
+                    .filter((s: any) => {
+                      const roleKey = `${s.roleId || ''} ${s.roleName || ''}`.toUpperCase();
+                      const isMechanic = roleKey.includes('MECHANIC');
+                      const matchBranch = transferTargetBranchId ? s.branchId === transferTargetBranchId : true;
+                      return isMechanic && matchBranch;
+                    })
+                    .map((s: any) => (
+                      <option key={s._id || s.id} value={s._id || s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-text-secondary mb-1">
+                  Reason for Transfer (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={transferReason}
+                  onChange={(e) => setTransferReason(e.target.value)}
+                  placeholder="e.g. Specialized micro-soldering / technician workload..."
+                  className="w-full p-2 rounded-lg bg-background border border-border text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary resize-none"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setTransferringJob(null)}
+                  disabled={transferRepairMutation.isPending}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-surface border border-border text-text-secondary hover:bg-surface-hover transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={transferRepairMutation.isPending}
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-amber-500 text-white hover:bg-amber-600 shadow-xs transition-all flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <ArrowRightLeft className="w-4 h-4" />
+                  <span>{transferRepairMutation.isPending ? 'Transferring…' : 'Confirm Transfer'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* Quick Cash Session Modals */}

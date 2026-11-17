@@ -177,16 +177,41 @@ export class AuthRepo {
   constructor(private readonly pool: Pool) {}
 
   /**
-   * Find a user by username (case-insensitive, matching Rust lower() comparison).
-   * Returns the full row including credential hashes.
+   * Find a user by identifier (case-insensitive username with safe display-name fallback).
+   *
+   * Security & Priority Contract:
+   * 1. Exact username match (case-insensitive) always takes absolute precedence.
+   * 2. If no exact username exists, checks for a display-name (`name`) match.
+   * 3. Ambiguity Rejection: If multiple eligible accounts share the display name,
+   *    the lookup safely returns `null` (rejection) to prevent arbitrary account selection.
+   * 4. Returns the full row including credential hashes for downstream verification.
    */
   async findByUsername(username: string): Promise<UserRow | null> {
-    const result = await this.pool.query(
+    const cleanId = username.trim();
+
+    // Step 1: Exact case-insensitive username match has highest priority
+    const userResult = await this.pool.query(
       `SELECT ${SELECT_USER_COLS} FROM users WHERE lower(username) = lower($1) LIMIT 1`,
-      [username]
+      [cleanId]
     );
-    if (result.rows.length === 0) return null;
-    return mapRow(result.rows[0] as Record<string, unknown>);
+    if (userResult.rows.length > 0) {
+      return mapRow(userResult.rows[0] as Record<string, unknown>);
+    }
+
+    // Step 2: Fallback to case-insensitive display name (`name`)
+    // Query up to 2 rows to detect potential ambiguity
+    const nameResult = await this.pool.query(
+      `SELECT ${SELECT_USER_COLS} FROM users WHERE lower(name) = lower($1) LIMIT 2`,
+      [cleanId]
+    );
+
+    // If exactly one match exists, resolve that account
+    if (nameResult.rows.length === 1) {
+      return mapRow(nameResult.rows[0] as Record<string, unknown>);
+    }
+
+    // If 0 matches or multiple ambiguous matches (> 1), reject by returning null
+    return null;
   }
 
   /**

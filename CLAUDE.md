@@ -1,15 +1,38 @@
-# NIAZI MOBILE MART — CLAUDE CODE PROJECT & TECHNICAL HANDOVER DOCUMENT
+# NIAZI MOBILE MART — CLAUDE CODE OPERATIONAL RULES & HANDOVER PROTOCOL
 
-## 1. FROZEN RELEASE-CANDIDATE BASELINE
+> [!IMPORTANT]
+> **PROTECTED UPDATE PROTOCOL (MANDATORY FOR CLAUDE CODE):**
+> 1. **Phase 1 — Read-Only Forensic Audit Only:**
+>    - First verify repository root, branch, exact HEAD SHA, and `git status`.
+>    - Trace code paths across frontend, backend API, database schema, and existing tests.
+>    - Evidence-based root cause analysis — do NOT guess or extrapolate.
+>    - List exact files requiring edits and why.
+>    - **HARD STOP:** Never make edits, write migrations, run destructive commands, or commit changes during the audit. Stop and wait for explicit user approval.
+> 2. **Phase 2 — Implementation & Verification:**
+>    - Modify ONLY approved, scoped files. Never refactor unrelated code.
+>    - Always run verification checks:
+>      - Frontend: `./frontend/node_modules/.bin/tsc -p frontend/tsconfig.json --noEmit`
+>      - Backend: `./backend/node_modules/.bin/tsc -p backend/tsconfig.json --noEmit`
+>    - Ensure backend server runs on port 8080 (`npm run dev` in `backend/`).
+>    - Ensure frontend runs on port 5173 (`npm run dev` in `frontend/`).
+>    - Ensure PostgreSQL runs on port 5432.
+>
+> **Token Optimization Rules:**
+> - Rely on `.claudeignore` to avoid scanning `dist/`, `node_modules/`, and `.shelter_*`.
+> - Do not re-scan the entire repository. Read only the specific files relevant to the scoped defect.
+> - Run `/compact` periodically to keep token context concise.
 
+---
+
+## 1. CURRENT REPOSITORY STATUS
 ```text
-Repository:         bazistudio/niazi-mobile-mart
-Branch:             main
-Version:            1.2.33
-Commit SHA:         fe1ab006a5394ea50f8afb816d8b9ff7951653f6
-Working Tree:       CLEAN
-Release Tag:        NOT CREATED
-Cloud Deployment:   NOT PERFORMED
+Repository:         D:\niazi mobile mart
+Active Branch:      finalize/release-100-finish-v1app
+Base Release Tag:   v1.3.46 / 1.3.59
+Backend Authority:  TypeScript Express Backend (port 8080)
+Frontend:           React 19, Vite 6, TypeScript (port 5173)
+Database:           PostgreSQL (port 5432)
+Migrations Dir:     src-tauri/migrations/postgres (001 through 045)
 ```
 
 ---

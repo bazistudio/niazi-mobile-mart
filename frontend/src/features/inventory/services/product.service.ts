@@ -1,6 +1,7 @@
 import { tauriClient } from '@/lib/tauri/tauriClient';
 import { shopApi } from '@/services/shop.api';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
+import { useAuthStore } from '@/lib/auth/core/auth.store';
 import { platformAdapter } from '@/lib/platformAdapter';
 import { InventoryProduct, PaginationParams, StockStatus } from '../types';
 import { categoryService } from './category.service';
@@ -11,13 +12,25 @@ import { qualityService } from './quality.service';
 
 function getActiveBranchId(): string | null {
   try {
+    const authUser = useAuthStore.getState().user;
+    const isOrgAdmin =
+      authUser?.role === 'ADMIN' ||
+      authUser?.role === 'OWNER' ||
+      authUser?.role === 'SUPER_ADMIN' ||
+      authUser?.role === 'MULTI_ADMIN';
+    const userAssignedBranch = authUser?.branch_id || authUser?.branchId || authUser?.shopId || null;
+
+    if (!isOrgAdmin && userAssignedBranch && userAssignedBranch.length === 36) {
+      return userAssignedBranch;
+    }
+
     const store = useOrganizationStore.getState();
-    const branchId = store.activeShop?._id || store.activeShop?.id || store.activeShopId;
+    const branchId = store.activeShop?._id || store.activeShop?.id || store.activeShopId || userAssignedBranch;
     if (branchId && branchId.length === 36) {
       return branchId;
     }
   } catch {}
-  return null;
+  return '00000000-0000-0000-0000-000000000002';
 }
 
 export const productService = {

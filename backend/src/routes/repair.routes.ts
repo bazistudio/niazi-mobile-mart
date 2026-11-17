@@ -36,6 +36,7 @@ import {
   completeRepairJobTx,
   updateRepairJobTx,
   deleteRepairJobTx,
+  transferRepairJobTx,
   RepairRepoError,
   RepairJobFilters,
 } from '../repositories/repair.repo';
@@ -80,6 +81,9 @@ export function buildRepairRouter(pool: Pool): Router {
         }
         filters.branch_id = requestedBranchId;
       }
+
+      // Enforce organization isolation derived from authenticated identity
+      filters.organization_id = identity.organization_id;
 
       const result = await listRepairJobs(pool, filters);
       res.status(200).json(result);
@@ -397,6 +401,46 @@ export function buildRepairRouter(pool: Pool): Router {
         return;
       }
       res.status(500).json({ error: err.message || 'Failed to update repair job' });
+    }
+  });
+
+  // ── POST /api/repairs/:id/transfer — transfer job across branches or mechanics ─
+  router.post('/:id/transfer', async (req: Request, res: Response) => {
+    try {
+      const identity = req.identity as RequestIdentity;
+      if (!canManageRepairs(identity)) {
+        res.status(403).json({ error: 'Forbidden: transferring repair jobs requires Admin, ShopAdmin, or Repair Mechanic role' });
+        return;
+      }
+
+      const id = req.params['id'] as string;
+      const body = req.body || {};
+      const targetBranchId = body.target_branch_id || body.targetBranchId;
+      const targetTechnicianId = body.target_technician_id || body.targetTechnicianId || null;
+      const reason = body.reason || 'Branch/mechanic workload transfer';
+
+      if (!targetBranchId) {
+        res.status(400).json({ error: 'target_branch_id is required for transfer' });
+        return;
+      }
+
+      const transferred = await transferRepairJobTx(
+        pool,
+        id,
+        targetBranchId,
+        targetTechnicianId,
+        reason,
+        identity.user_id,
+        identity.organization_id || ''
+      );
+
+      res.status(200).json(transferred);
+    } catch (err: any) {
+      if (err instanceof RepairRepoError) {
+        res.status(err.statusCode).json({ error: err.message });
+        return;
+      }
+      res.status(500).json({ error: err.message || 'Failed to transfer repair job' });
     }
   });
 

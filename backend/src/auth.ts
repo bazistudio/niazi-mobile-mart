@@ -296,7 +296,14 @@ function hasPageAccess(profile: StaffAccessProfile, page: string, role?: UserRol
     return profile.allowed_pages.some((p) => p === '*' || p === page);
   }
   const r = String(role || '').toUpperCase();
-  if (r === 'SALESMAN' || r === 'CASHIER' || r === 'STAFF' || r === 'MANAGER' || r === 'ACCOUNTANT') {
+  if (
+    r === 'SALESMAN' ||
+    r === 'CASHIER' ||
+    r === 'STAFF' ||
+    r === 'MANAGER' ||
+    r === 'ACCOUNTANT' ||
+    r === 'REPAIR_MECHANIC'
+  ) {
     return true;
   }
   return false;
@@ -304,7 +311,7 @@ function hasPageAccess(profile: StaffAccessProfile, page: string, role?: UserRol
 
 /**
  * Mirrors StaffAccessProfile::has_action_access() in access_control.rs.
- * Falls back to allowing staff roles (SALESMAN, CASHIER, STAFF, MANAGER) when allowed_actions is empty.
+ * Falls back to allowing staff roles (SALESMAN, CASHIER, STAFF, MANAGER, REPAIR_MECHANIC) when allowed_actions is empty.
  *
  * IMPORTANT: This general fallback is intentional for most operations (POS, expenses, etc.).
  * For product mutation actions (products:edit, products:delete, product:create), callers MUST
@@ -315,7 +322,14 @@ function hasActionAccess(profile: StaffAccessProfile, action: string, role?: Use
     return profile.allowed_actions.some((a) => a === '*' || a === action);
   }
   const r = String(role || '').toUpperCase();
-  if (r === 'SALESMAN' || r === 'CASHIER' || r === 'STAFF' || r === 'MANAGER' || r === 'ACCOUNTANT') {
+  if (
+    r === 'SALESMAN' ||
+    r === 'CASHIER' ||
+    r === 'STAFF' ||
+    r === 'MANAGER' ||
+    r === 'ACCOUNTANT' ||
+    r === 'REPAIR_MECHANIC'
+  ) {
     return true;
   }
   return false;

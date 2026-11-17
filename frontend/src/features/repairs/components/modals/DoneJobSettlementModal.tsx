@@ -14,9 +14,15 @@ import {
   Banknote,
   AlertCircle,
   FileText,
+  Printer,
 } from 'lucide-react';
 import type { RepairJob } from '../../types/repair.types';
 import { useStaffSalaryConfig } from '@/features/hr/hooks/useHR';
+import { usePrintStore } from '@/lib/printer';
+import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
+import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
+import type { UnifiedInvoice, PrinterSettings, ShopHeader } from '@/features/settings/printer/types/printer.types';
 
 interface DoneJobSettlementModalProps {
   job: RepairJob;
@@ -28,6 +34,7 @@ interface DoneJobSettlementModalProps {
     paymentReference?: string;
     deliveryNotes?: string;
     markDelivered: boolean;
+    shouldPrint?: boolean;
   }) => void;
   isPending: boolean;
 }
@@ -39,15 +46,16 @@ export const DoneJobSettlementModal: React.FC<DoneJobSettlementModalProps> = ({
   onConfirm,
   isPending,
 }) => {
-  if (!isOpen) return null;
-
-  // Resolve technician ID
+  // Resolve technician ID (not a hook — computed before hooks run)
   const techId =
     typeof job.technicianId === 'string'
       ? job.technicianId
       : (job.technicianId as any)?._id || (job.technicianId as any)?.id || '';
 
   const { data: salaryConfig } = useStaffSalaryConfig(techId);
+  const { openPreview } = usePrintStore();
+  const { settings, shopHeader } = usePrinterStore();
+  const activeShop = useOrganizationStore((s) => s.activeShop);
 
   // Configured Commission percentage (default 60% if COMMISSION_PERCENTAGE, fallback 50%)
   const mechanicCommissionPct =
@@ -91,6 +99,70 @@ export const DoneJobSettlementModal: React.FC<DoneJobSettlementModalProps> = ({
   const [paymentReference, setPaymentReference] = useState<string>('');
   const [deliveryNotes, setDeliveryNotes] = useState<string>('');
   const [markDelivered, setMarkDelivered] = useState<boolean>(true);
+  const [shouldPrintInvoice, setShouldPrintInvoice] = useState<boolean>(false);
+
+  const printSettlementReceipt = () => {
+    const effectiveShop: ShopHeader = shopHeader || {
+      name: activeShop?.name || 'Niazi Mobile Mart',
+      address: (activeShop as any)?.address || '',
+      phone: (activeShop as any)?.phone || '',
+      email: '',
+      taxNumber: '',
+      footerText: 'Repair complete & delivered. Customer verified device at pickup.',
+    };
+    const effectiveSettings: PrinterSettings = settings || {
+      enabled: true,
+      printerType: 'THERMAL_80MM',
+      connectionType: 'BROWSER_PRINT',
+      paperSize: { width: '80mm' },
+      layout: { orientation: 'portrait', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0 },
+      font: { size: 12, family: 'monospace' },
+      invoice: { showLogo: false, showShopInfo: true, showBarcode: true, showQR: false, showTax: false, showDiscount: false },
+      autoPrint: false,
+      printCopyCount: 1,
+    };
+    const partsItems = partsUsed.map((p: any) => ({
+      name: `Part: ${p.productName || (p.productId as any)?.name || 'Part'}`,
+      qty: Number(p.qty || 1),
+      price: Number(p.price || p.cost || 0),
+      total: Number(p.qty || 1) * Number(p.price || p.cost || 0),
+    }));
+    const unified: UnifiedInvoice = {
+      invoiceNo: `SETTLE-${job.jobId}`,
+      date: new Date().toLocaleString(),
+      customer: {
+        name: `${(job.customerId as any)?.name || (job as any).customer_name || 'Walk-in'} (${(job.customerId as any)?.phone || (job as any).customer_phone || 'N/A'})`,
+      },
+      cashier: (job.technicianId as any)?.name || 'Lab Bench',
+      items: [
+        {
+          name: (`Repair: ${job.device?.brand || ''} ${job.device?.model || ''}`).trim() || 'Repair Service',
+          qty: 1,
+          price: totalBilled,
+          total: totalBilled,
+        },
+        ...(job.device?.imei ? [{ name: `IMEI: ${job.device.imei}`, qty: 1, price: 0, total: 0 }] : []),
+        ...partsItems,
+      ],
+      subtotal: totalBilled,
+      discount: 0,
+      tax: 0,
+      total: totalBilled,
+      paymentMethod: paymentMethod.toLowerCase(),
+      tendered: paymentAmount,
+      change: 0,
+      due: Math.max(0, totalBilled - alreadyPaid - paymentAmount),
+      shop: effectiveShop,
+      returnPolicy: 'Repair warranty subject to terms. Customer verified device at pickup.',
+    };
+    const html = printFormatter.format(unified, effectiveSettings);
+    openPreview({
+      html,
+      documentType: 'SaleInvoice',
+      referenceId: job.jobId || '',
+      title: `Settlement Receipt - ${job.jobId}`,
+    });
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,8 +172,11 @@ export const DoneJobSettlementModal: React.FC<DoneJobSettlementModalProps> = ({
       paymentReference: paymentReference.trim() || undefined,
       deliveryNotes: deliveryNotes.trim() || undefined,
       markDelivered,
+      shouldPrint: shouldPrintInvoice,
     });
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 animate-in fade-in duration-200">
@@ -307,26 +382,51 @@ export const DoneJobSettlementModal: React.FC<DoneJobSettlementModalProps> = ({
                 Deliver Device to Customer &amp; Close Repair Job
               </label>
             </div>
+
+            {/* Checkbox: Print Settlement Receipt on Completion */}
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                type="checkbox"
+                id="printInvoiceCheck"
+                checked={shouldPrintInvoice}
+                onChange={(e) => setShouldPrintInvoice(e.target.checked)}
+                className="w-4 h-4 rounded text-primary border-border focus:ring-primary"
+              />
+              <label htmlFor="printInvoiceCheck" className="text-xs font-semibold text-text-primary cursor-pointer flex items-center gap-1.5">
+                <Printer className="w-3.5 h-3.5 text-text-muted" />
+                Print Delivery / Settlement Invoice on Completion
+              </label>
+            </div>
           </div>
 
           {/* Modal Actions */}
-          <div className="pt-2 flex items-center justify-end gap-2 border-t border-border">
+          <div className="pt-2 flex items-center justify-between gap-2 border-t border-border">
             <button
               type="button"
-              onClick={onClose}
-              disabled={isPending}
-              className="px-4 py-2 rounded-xl text-xs font-semibold bg-surface border border-border text-text-secondary hover:bg-surface-hover transition-colors"
+              onClick={printSettlementReceipt}
+              className="px-4 py-2 rounded-xl text-xs font-semibold bg-surface border border-border text-text-secondary hover:bg-surface-hover transition-colors flex items-center gap-1.5"
             >
-              Cancel
+              <Printer className="w-3.5 h-3.5" />
+              Print Receipt
             </button>
-            <button
-              type="submit"
-              disabled={isPending}
-              className="px-5 py-2 rounded-xl text-xs font-bold bg-primary text-text-inverse hover:bg-primary-hover shadow-xs transition-all flex items-center gap-1.5 disabled:opacity-50"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>{isPending ? 'Processing Settlement…' : 'Confirm Settlement & Done Job'}</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={isPending}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-surface border border-border text-text-secondary hover:bg-surface-hover transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isPending}
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-primary text-text-inverse hover:bg-primary-hover shadow-xs transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>{isPending ? 'Processing Settlement…' : 'Confirm Settlement & Done Job'}</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>

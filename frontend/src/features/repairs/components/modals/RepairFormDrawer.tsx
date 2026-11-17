@@ -34,6 +34,7 @@ interface RepairFormDrawerProps {
   embedded?: boolean;
   editingJob?: any;
   onClearEditing?: () => void;
+  onJobCreatedForSettlement?: (job: any) => void;
 }
 
 interface PartItem {
@@ -62,6 +63,7 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
   embedded = false,
   editingJob = null,
   onClearEditing,
+  onJobCreatedForSettlement,
 }) => {
   const queryClient = useQueryClient();
   const { openPreview } = usePrintStore();
@@ -69,6 +71,7 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
   const activeShop = useOrganizationStore((s) => s.activeShop);
   const activeShopId = useOrganizationStore((s) => s.activeShopId);
   const currentUser = useAuthStore((s) => s.user);
+  const isMechanicUser = currentUser?.role === 'REPAIR_MECHANIC';
   const { data: staffList = [] } = useStaff();
 
   // Strict double-submit guard ref
@@ -93,10 +96,36 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
   const [customerName, setCustomerName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
 
+  // Format 11-digit phone number with hyphen: 03XX-XXXXXXX
+  const formatMobileNumber = (val: string): string => {
+    // Only accept digits, max 11 digits
+    const digits = val.replace(/\D/g, '').slice(0, 11);
+    if (digits.length <= 4) return digits;
+    return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+  };
+
+  const handleMobileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setMobileNumber(formatMobileNumber(e.target.value));
+  };
+
   const [brand, setBrand] = useState('');
   const [model, setModel] = useState('');
   const [imei1, setImei1] = useState('');
   const [imei2, setImei2] = useState('');
+
+  // Format IMEI strictly up to 15 digits only
+  const formatImei = (val: string): string => {
+    return val.replace(/\D/g, '').slice(0, 15);
+  };
+
+  const handleImei1Change = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setImei1(formatImei(e.target.value));
+  };
+
+  const handleImei2Change = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setImei2(formatImei(e.target.value));
+  };
+
   const [passwordPattern, setPasswordPattern] = useState('');
 
   const [technicianId, setTechnicianId] = useState<string>(() =>
@@ -129,10 +158,13 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
   useEffect(() => {
     if (editingJob) {
       setCustomerName((editingJob.customerId as any)?.name || editingJob.customer_name || '');
-      setMobileNumber((editingJob.customerId as any)?.phone || editingJob.customer_phone || '');
+      setMobileNumber(formatMobileNumber((editingJob.customerId as any)?.phone || editingJob.customer_phone || ''));
       setBrand(editingJob.device?.brand || '');
       setModel(editingJob.device?.model || '');
-      setImei1(editingJob.device?.imei || '');
+      const rawImei = editingJob.device?.imei || '';
+      const parts = rawImei.split(' / ');
+      setImei1(formatImei(parts[0] || rawImei));
+      setImei2(formatImei(parts[1] || ''));
       setPasswordPattern(editingJob.device?.password || '');
       setProblemDescription(editingJob.problemDescription || editingJob.problem_description || '');
       setEstimatedCost(Number(editingJob.grandTotal || editingJob.estimatedCost || editingJob.estimated_cost || 0));
@@ -199,6 +231,22 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
       })
       .slice(0, 15);
   }, [productSearch, searchResults]);
+
+  const branchMechanics = useMemo(() => {
+    return staffList.filter((s: any) => {
+      const roleKey = `${s.roleId || ''} ${s.roleName || ''}`.toUpperCase();
+      return roleKey.includes('MECHANIC') && (effectiveBranchId ? s.branchId === effectiveBranchId : true);
+    });
+  }, [staffList, effectiveBranchId]);
+
+  // Auto-select the sole mechanic for this branch when booking a new job
+  useEffect(() => {
+    if (isMechanicUser || editingJob) return;
+    if (branchMechanics.length === 1) {
+      const solo = branchMechanics[0] as any;
+      setTechnicianId(solo._id || solo.id || '');
+    }
+  }, [branchMechanics, isMechanicUser, editingJob]);
 
   // Reset highlighted index to 0 when search query or results change
   useEffect(() => {
@@ -443,7 +491,7 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
   };
 
   const createJobMutation = useMutation({
-    mutationFn: async ({ shouldPrint, markRepaired }: { shouldPrint: boolean; markRepaired: boolean }) => {
+    mutationFn: async ({ shouldPrint, markRepaired, shouldSettle }: { shouldPrint: boolean; markRepaired: boolean; shouldSettle?: boolean }) => {
       // Guard against double clicks / concurrent duplicate calls
       if (isSubmittingRef.current) return null;
       isSubmittingRef.current = true;
@@ -520,6 +568,7 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
           advance_payment: advancePaid > 0
             ? { amount: advancePaid, method: advanceMethod }
             : null,
+          branch_id: effectiveBranchId || undefined,
         });
 
         if (!job?.id) throw new Error('Failed to create repair job');
@@ -535,11 +584,11 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
           });
         }
 
-        if (markRepaired) {
+        if (markRepaired && !shouldSettle) {
           await repairApi.updateStatus(job.id, 'Ready for Pickup', 'Marked as completed / repaired by technician.');
         }
 
-        return { job, shouldPrint, isEdit: false };
+        return { job, shouldPrint, isEdit: false, shouldSettle: shouldSettle ?? false };
       } finally {
         isSubmittingRef.current = false;
       }
@@ -551,7 +600,12 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
       if (data.shouldPrint && data.job?.jobId) {
         printBookingInvoice(data.job.jobId);
       }
-      handleClose();
+      if ((data as any).shouldSettle && onJobCreatedForSettlement) {
+        onJobCreatedForSettlement(data.job);
+        handleResetForm();
+      } else {
+        handleClose();
+      }
     },
     onError: (err: any) => {
       toast.error(err?.message || 'Failed to save repair job');
@@ -601,9 +655,10 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
               <input
                 type="text"
                 value={mobileNumber}
-                onChange={(e) => setMobileNumber(e.target.value)}
-                placeholder="03XXXXXXXXX (optional)"
-                className="w-full h-7 px-2 rounded-lg bg-surface border border-border text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary transition-colors"
+                onChange={handleMobileChange}
+                maxLength={12}
+                placeholder="0300-1234567"
+                className="w-full h-7 px-2 rounded-lg bg-surface border border-border text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary transition-colors font-mono"
               />
             </div>
           </div>
@@ -636,12 +691,13 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-[10px] font-semibold text-text-secondary mb-0.5">
-                IMEI 1 / Serial No <span className="text-text-muted font-normal">(Optional)</span>
+                IMEI 1 / Serial No <span className="text-text-muted font-normal">(15 digits)</span>
               </label>
               <input
                 type="text"
                 value={imei1}
-                onChange={(e) => setImei1(e.target.value)}
+                onChange={handleImei1Change}
+                maxLength={15}
                 placeholder="15-digit IMEI (optional)"
                 className="w-full h-7 px-2 rounded-lg bg-surface border border-border text-xs text-text-primary font-mono placeholder:text-text-muted focus:outline-none focus:border-primary transition-colors"
               />
@@ -657,6 +713,47 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
                 placeholder="PIN or Pattern (optional)"
                 className="w-full h-7 px-2 rounded-lg bg-surface border border-border text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary transition-colors"
               />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[10px] font-semibold text-text-secondary mb-0.5">
+                Mechanic / Technician
+              </label>
+              {isMechanicUser ? (
+                <div className="w-full h-7 px-2 rounded-lg bg-surface-hover border border-border text-xs text-text-muted flex items-center gap-1.5">
+                  <UserCheck className="w-3 h-3 shrink-0 text-primary" />
+                  <span className="truncate font-medium">{currentUser?.name}</span>
+                </div>
+              ) : (
+                <select
+                  value={technicianId}
+                  onChange={(e) => setTechnicianId(e.target.value)}
+                  className="w-full h-7 px-2 rounded-lg bg-surface border border-border text-xs text-text-primary focus:outline-none focus:border-primary transition-colors"
+                >
+                  <option value="">Desk / Walk-in</option>
+                  {branchMechanics.map((s: any) => (
+                    <option key={s._id || s.id} value={s._id || s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold text-text-secondary mb-0.5">
+                Priority
+              </label>
+              <select
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as any)}
+                className="w-full h-7 px-2 rounded-lg bg-surface border border-border text-xs text-text-primary focus:outline-none focus:border-primary transition-colors"
+              >
+                <option value="Low">Low</option>
+                <option value="Normal">Normal</option>
+                <option value="High">High</option>
+                <option value="Urgent">Urgent</option>
+              </select>
             </div>
           </div>
         </div>
@@ -1021,10 +1118,10 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
                     toast.error('Please enter device Brand and Model');
                     return;
                   }
-                  createJobMutation.mutate({ shouldPrint: false, markRepaired: true });
+                  createJobMutation.mutate({ shouldPrint: false, markRepaired: false, shouldSettle: true });
                 }}
                 className="h-9 px-3 rounded-xl font-bold text-xs bg-surface hover:bg-surface-hover text-primary border border-primary/40 hover:border-primary transition-colors flex items-center justify-center gap-1.5 shadow-xs disabled:opacity-50"
-                title="Mark device repair as finished/completed and ready for pickup"
+                title="Mark device repair as finished/completed and open payment settlement"
               >
                 <CheckCircle2 className="w-3.5 h-3.5 text-primary shrink-0" />
                 <span>Finish / Repaired</span>
@@ -1114,9 +1211,10 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
                   <input
                     type="text"
                     value={mobileNumber}
-                    onChange={(e) => setMobileNumber(e.target.value)}
-                    placeholder="03XXXXXXXXX"
-                    className="w-full h-8 px-2.5 rounded-lg bg-surface border border-border text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-focus-ring transition-colors"
+                    onChange={handleMobileChange}
+                    maxLength={12}
+                    placeholder="0300-1234567"
+                    className="w-full h-8 px-2.5 rounded-lg bg-surface border border-border text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-focus-ring transition-colors font-mono"
                   />
                 </div>
               </div>
@@ -1152,22 +1250,24 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-text-secondary mb-0.5">IMEI 1 / Serial No</label>
+                  <label className="block text-[11px] font-semibold text-text-secondary mb-0.5">IMEI 1 / Serial No (15 digits)</label>
                   <input
                     type="text"
                     value={imei1}
-                    onChange={(e) => setImei1(e.target.value)}
+                    onChange={handleImei1Change}
+                    maxLength={15}
                     placeholder="Primary 15-digit IMEI"
                     className="w-full h-8 px-2.5 rounded-lg bg-surface border border-border text-xs text-text-primary font-mono placeholder:text-text-muted focus:outline-none focus:border-primary transition-colors"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-text-secondary mb-0.5">IMEI 2 (Optional)</label>
+                  <label className="block text-[11px] font-semibold text-text-secondary mb-0.5">IMEI 2 (Optional, 15 digits)</label>
                   <input
                     type="text"
                     value={imei2}
-                    onChange={(e) => setImei2(e.target.value)}
+                    onChange={handleImei2Change}
+                    maxLength={15}
                     placeholder="Secondary IMEI (Dual-SIM)"
                     className="w-full h-8 px-2.5 rounded-lg bg-surface border border-border text-xs text-text-primary font-mono placeholder:text-text-muted focus:outline-none focus:border-primary transition-colors"
                   />
@@ -1182,6 +1282,50 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
                     placeholder="PIN, Password or 'Pattern 1-2-3'"
                     className="w-full h-8 px-2.5 rounded-lg bg-surface border border-border text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary transition-colors"
                   />
+                </div>
+              </div>
+            </div>
+
+            {/* Card 3: Mechanic & Priority */}
+            <div className="bg-surface border border-border rounded-xl p-3 shadow-card flex flex-col gap-2 shrink-0">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5 border-b border-border pb-1.5">
+                <UserCheck className="w-3.5 h-3.5" /> Mechanic &amp; Priority
+              </h3>
+              <div className="space-y-2">
+                <div>
+                  <label className="block text-[11px] font-semibold text-text-secondary mb-0.5">Mechanic / Technician</label>
+                  {isMechanicUser ? (
+                    <div className="w-full h-8 px-2.5 rounded-lg bg-surface-hover border border-border text-xs text-text-muted flex items-center gap-1.5">
+                      <UserCheck className="w-3.5 h-3.5 shrink-0 text-primary" />
+                      <span className="truncate font-medium">{currentUser?.name}</span>
+                    </div>
+                  ) : (
+                    <select
+                      value={technicianId}
+                      onChange={(e) => setTechnicianId(e.target.value)}
+                      className="w-full h-8 px-2.5 rounded-lg bg-surface border border-border text-xs text-text-primary focus:outline-none focus:border-primary transition-colors"
+                    >
+                      <option value="">Desk / Walk-in</option>
+                      {branchMechanics.map((s: any) => (
+                        <option key={s._id || s.id} value={s._id || s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-text-secondary mb-0.5">Priority</label>
+                  <select
+                    value={priority}
+                    onChange={(e) => setPriority(e.target.value as any)}
+                    className="w-full h-8 px-2.5 rounded-lg bg-surface border border-border text-xs text-text-primary focus:outline-none focus:border-primary transition-colors"
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Normal">Normal</option>
+                    <option value="High">High</option>
+                    <option value="Urgent">Urgent</option>
+                  </select>
                 </div>
               </div>
             </div>
@@ -1514,10 +1658,10 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
                   toast.error('Please enter customer name');
                   return;
                 }
-                createJobMutation.mutate({ shouldPrint: false, markRepaired: true });
+                createJobMutation.mutate({ shouldPrint: false, markRepaired: false, shouldSettle: true });
               }}
               className="h-9 px-4 rounded-xl font-bold text-xs bg-surface hover:bg-surface-hover text-primary border border-primary/40 hover:border-primary transition-colors flex items-center gap-1.5 shadow-xs disabled:opacity-50"
-              title="Mark device repair as finished/completed and ready for pickup"
+              title="Mark device repair as finished/completed and open payment settlement"
             >
               <CheckCircle2 className="w-3.5 h-3.5 text-primary" />
               <span>Finish Job / Repaired</span>
