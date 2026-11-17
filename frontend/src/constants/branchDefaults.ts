@@ -50,6 +50,7 @@ export const NON_MAIN_BRANCH_DEFAULT_HREFS: ReadonlySet<string> = new Set([
   '/dashboard/shop-admin/settings',     // Branch Settings (printer / invoice config)
   '/dashboard/shop-admin/ledger',       // Business Ledger (org-wide parties; branch-scoped expenses)
   '/dashboard/shop-admin/cash',         // Cash Management (backend enforces branch scope via canAccessBranch)
+  '/dashboard/shop-admin/repairs',      // Repair Service Ticketing (backend enforces branch scope)
 ]);
 
 /**

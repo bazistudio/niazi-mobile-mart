@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { repairApi } from '../services/repair.api';
+import { httpClient } from '@/lib/http/httpClient';
 import toast from 'react-hot-toast';
 import {
   Search,
@@ -49,6 +50,18 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
   const navigate = useNavigate();
   const currentUser = useAuthStore((s) => s.user);
   const isMechanicUser = currentUser?.role === 'REPAIR_MECHANIC';
+  const isOrgAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'OWNER';
+
+  const [selectedBranchId, setSelectedBranchId] = useState<string>('');
+
+  const { data: branchList = [] } = useQuery({
+    queryKey: ['branches-list'],
+    queryFn: async () => {
+      const res = await httpClient.get<{ id?: string; _id?: string; name: string }[] | { data: { id?: string; _id?: string; name: string }[] }>('/api/v1/branches');
+      return Array.isArray(res) ? res : ((res as any)?.data || []);
+    },
+    enabled: isOrgAdmin,
+  });
 
   // Navigation Tabs: 'jobs' = Repair Jobs & Service Desk, 'parts_lab' = Parts Consumption & Lab Movement, 'lab_cash_ledger' = Lab Cash Register & Ledger
   const [activeTab, setActiveTab] = useState<RepairDashboardTab>('jobs');
@@ -90,12 +103,17 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
     });
   }, [staffList, currentBranchId]);
 
+  const effectiveBranchId = isOrgAdmin
+    ? (selectedBranchId || undefined)
+    : (currentBranchId || undefined);
+
   const { data: response, isLoading } = useQuery({
-    queryKey: ['repairs', statusFilter, effectiveMechanicFilter],
+    queryKey: ['repairs', statusFilter, effectiveMechanicFilter, effectiveBranchId],
     queryFn: () =>
       repairApi.getRepairJobs({
         status: statusFilter || undefined,
         technician_id: effectiveMechanicFilter || undefined,
+        branch_id: effectiveBranchId,
         limit: 100,
       }),
   });
@@ -551,6 +569,21 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
                   </select>
                 )}
               </div>
+              {isOrgAdmin && (
+                <select
+                  className={selectClass}
+                  value={selectedBranchId}
+                  onChange={(e) => setSelectedBranchId(e.target.value)}
+                  aria-label="Filter by branch"
+                >
+                  <option value="">All Branches</option>
+                  {branchList.map((b: any) => (
+                    <option key={b.id || b._id} value={b.id || b._id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               <button
                 type="button"
                 onClick={() => window.print()}

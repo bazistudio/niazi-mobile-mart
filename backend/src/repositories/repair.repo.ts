@@ -1447,6 +1447,32 @@ export async function completeRepairJobTx(
       }),
     });
 
+    // ── Completion notifications (non-fatal) ──────────────────────────────────
+    try {
+      const recipientsRes = await client.query<{ id: string }>(
+        `SELECT id FROM users
+         WHERE (role IN ('ADMIN', 'OWNER', 'SUPER_ADMIN') AND is_active = true)
+            OR (role = 'SHOP_ADMIN' AND branch_id = $1 AND is_active = true)`,
+        [branchId]
+      );
+      const deviceLabel = `${job['device_brand']} ${job['device_model']}`;
+      const notifTitle = 'Repair Job Completed';
+      const notifMessage = `Device ${deviceLabel} completed by technician. Billed: Rs ${netTotal.toLocaleString()}`;
+      for (const recipient of recipientsRes.rows) {
+        await client.query(
+          `INSERT INTO notifications
+             (id, organization_id, branch_id, recipient_user_id, type, title, message,
+              reference_type, reference_id, is_read, created_at)
+           VALUES ($1,$2,$3,$4,'REPAIR_COMPLETE',$5,$6,'REPAIR_JOB',$7,false,$8)
+           ON CONFLICT (id) DO NOTHING`,
+          [uuidv4(), organizationId, branchId, recipient.id,
+           notifTitle, notifMessage, realId, now]
+        );
+      }
+    } catch {
+      // notifications are best-effort — do not roll back delivery on failure
+    }
+
     await client.query('COMMIT');
 
     const result = await getRepairJobById(pool, realId);

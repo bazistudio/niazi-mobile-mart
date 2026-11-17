@@ -58,6 +58,7 @@ import { buildExpenseRouter } from './routes/expense.routes';
 import { buildBranchRouter } from './routes/branch.routes';
 import { buildSyncRouter } from './routes/sync.routes';
 import { buildRepairRouter } from './routes/repair.routes';
+import { buildNotificationRouter } from './routes/notification.routes';
 import { createSettingsRouter } from './routes/settings.routes';
 import { buildRolesRouter } from './routes/roles.routes'; // DEF-08
 import { buildMobileRouter } from './routes/mobile.routes';
@@ -262,6 +263,13 @@ async function main(): Promise<void> {
   const repairRouter = buildRepairRouter(pool);
   app.use('/api/repairs', repairRouter);
   app.use('/api/v1/repairs', repairRouter);
+
+  // -------------------------------------------------------------------------
+  // Notification routes — repair completion & system notifications
+  // -------------------------------------------------------------------------
+  const notificationRouter = buildNotificationRouter(pool);
+  app.use('/api/notifications', notificationRouter);
+  app.use('/api/v1/notifications', notificationRouter);
 
   const productRouter = createProductRouter(pool);
   app.use('/api/products', productRouter);
