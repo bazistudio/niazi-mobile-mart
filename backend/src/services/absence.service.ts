@@ -24,7 +24,8 @@ export interface AbsenceProcessResult {
 
 export async function processAbsencesForDate(
   pool: Pool,
-  targetDate: string // YYYY-MM-DD
+  targetDate: string, // YYYY-MM-DD
+  organizationId: string = '00000000-0000-0000-0000-000000000001'
 ): Promise<AbsenceProcessResult> {
   const todayKarachi = getKarachiDate(new Date());
   if (targetDate >= todayKarachi) {
@@ -38,8 +39,8 @@ export async function processAbsencesForDate(
 
   const nowIso = new Date().toISOString();
 
-  // Find all active employees who have an active shift assignment on targetDate
-  // and where dayOfWeek is in working_days_json, but have NO staff_attendance record for targetDate.
+  // Find all active employees in the caller's organization who have an active shift assignment
+  // on targetDate and where dayOfWeek is in working_days_json, but have NO staff_attendance record.
   const eligibleSql = `
     SELECT
       u.id AS user_id,
@@ -57,14 +58,18 @@ export async function processAbsencesForDate(
     JOIN staff_shift_templates st ON st.id = ssa.shift_template_id
       AND st.is_active = 1
     WHERE u.is_active = 1
+      AND b.organization_id = $2
+      AND ssa.organization_id = $2
+      AND st.organization_id = $2
       AND NOT EXISTS (
         SELECT 1 FROM staff_attendance sa
         WHERE sa.user_id = u.id
           AND sa.attendance_date = $1
+          AND sa.organization_id = $2
       )
   `;
 
-  const eligibleRes = await pool.query(eligibleSql, [targetDate]);
+  const eligibleRes = await pool.query(eligibleSql, [targetDate, organizationId]);
   let absencesMarked = 0;
 
   for (const row of eligibleRes.rows) {
@@ -122,7 +127,8 @@ export async function processAbsencesForDate(
  */
 export async function backfillMissingAbsences(
   pool: Pool,
-  lookbackDays: number = 7
+  lookbackDays: number = 7,
+  organizationId: string = '00000000-0000-0000-0000-000000000001'
 ): Promise<AbsenceProcessResult[]> {
   const results: AbsenceProcessResult[] = [];
   const todayStr = getKarachiDate(new Date());
@@ -132,7 +138,7 @@ export async function backfillMissingAbsences(
     const target = new Date(Date.UTC(y, m - 1, d - i, 12, 0, 0));
     const targetDateStr = target.toISOString().slice(0, 10);
     try {
-      const res = await processAbsencesForDate(pool, targetDateStr);
+      const res = await processAbsencesForDate(pool, targetDateStr, organizationId);
       results.push(res);
     } catch (err) {
       console.error(`[absence.service] Error processing absences for ${targetDateStr}:`, err);

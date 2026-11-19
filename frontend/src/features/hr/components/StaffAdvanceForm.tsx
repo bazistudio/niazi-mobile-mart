@@ -57,9 +57,12 @@ export const StaffAdvanceForm: React.FC<StaffAdvanceFormProps> = ({
         requested_date: requestDate,
       });
       setSubmitSuccess(true);
-      // Invalidate the advance list for this staff member
+      // Invalidate the advance list for this staff member and organization advances
       await queryClient.invalidateQueries({
         queryKey: queryKeys.hr.advances(selectedStaff._id),
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ['hr', 'org-advances'],
       });
       onSuccess?.();
       // Reset form after short delay

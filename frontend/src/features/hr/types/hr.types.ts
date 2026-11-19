@@ -316,7 +316,9 @@ export interface BackendAttendanceRecord {
   branch_id: string | null;
   attendance_date: string;         // YYYY-MM-DD
   check_in_at: string | null;      // ISO UTC timestamp
+  first_login_at?: string | null;  // alias returned by some backend versions
   check_out_at: string | null;     // ISO UTC timestamp (manual or null)
+  checked_out_at?: string | null;  // alias returned by some backend versions
   status: 'PRESENT' | 'ABSENT' | 'LATE' | 'HALF_DAY' | 'LEAVE' | 'HOLIDAY' | 'WEEKLY_OFF';
   late_minutes: number;
   worked_minutes: number | null;
@@ -357,4 +359,187 @@ export interface ProgressReportResponse {
     completed: number;
     quoted_total: number;
   };
+}
+
+// ─── HR Policy Settings Types (Phase 2.1 / 2.2) ──────────────────────────────
+
+export interface HRPolicySettings {
+  id: string;
+  organization_id: string;
+  branch_id: string | null;
+  branch_name?: string | null;
+  standard_shift_minutes: number;
+  late_threshold_minutes: number;
+  lates_for_absence: number;
+  monthly_working_days: number;
+  overtime_multiplier: string | number;
+  overtime_eligible_monthly: boolean;
+  half_day_deduction_factor: string | number;
+  effective_from: string; // YYYY-MM-DD
+  effective_to: string | null; // YYYY-MM-DD
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EffectivePolicyResponse {
+  policy: HRPolicySettings;
+  is_override: boolean;
+  resolved_branch_id: string;
+}
+
+export interface CreatePolicyPayload {
+  branch_id?: string | null;
+  standard_shift_minutes: number;
+  late_threshold_minutes: number;
+  lates_for_absence: number;
+  monthly_working_days: number;
+  overtime_multiplier: number;
+  overtime_eligible_monthly: boolean;
+  half_day_deduction_factor: number;
+  effective_from: string;
+  effective_to?: string | null;
+}
+
+export interface RetirePolicyPayload {
+  effective_to: string; // YYYY-MM-DD
+}
+
+export interface HRPolicyAuditLog {
+  id: string;
+  policy_id: string;
+  organization_id: string;
+  branch_id: string | null;
+  action: 'CREATE' | 'UPDATE' | 'RETIRE';
+  old_values_json: string | null;
+  new_values_json: string;
+  changed_by: string;
+  changed_by_name?: string | null;
+  changed_at: string;
+}
+
+// ─── Daily Attendance Register & Bulk Types (DEF-HR-01 / DEF-HR-02) ──────────
+
+export type AttendanceStatusType =
+  | 'PRESENT'
+  | 'ABSENT'
+  | 'LATE'
+  | 'HALF_DAY'
+  | 'LEAVE'
+  | 'HOLIDAY'
+  | 'WEEKLY_OFF'
+  | 'NOT_MARKED';
+
+export interface DailyRegisterEmployeeRow {
+  user_id: string;
+  username: string;
+  full_name: string;
+  employee_code: string;
+  role: string;
+  branch_id: string | null;
+  branch_name: string | null;
+  attendance_date: string;
+  record_id: string | null;
+  status: AttendanceStatusType;
+  check_in_at: string | null;
+  check_out_at: string | null;
+  worked_minutes: number | null;
+  late_minutes: number;
+  shift_duration_minutes: number;
+  late_threshold_minutes: number;
+  source: string | null;
+  notes: string | null;
+  recorded_by: string | null;
+  updated_at: string | null;
+}
+
+export interface DailyRegisterSummary {
+  total_employees: number;
+  present: number;
+  late: number;
+  absent: number;
+  on_leave: number;
+  half_day: number;
+  holiday_or_off: number;
+  not_marked: number;
+  checked_in_open: number;
+  checked_out_complete: number;
+}
+
+export interface DailyRegisterResponse {
+  date: string;
+  branch_id: string | null;
+  summary: DailyRegisterSummary;
+  rows: DailyRegisterEmployeeRow[];
+}
+
+export interface AttendanceRangeResponse {
+  start_date: string;
+  end_date: string;
+  branch_id: string | null;
+  employees: Array<{
+    user_id: string;
+    username: string;
+    full_name: string;
+    employee_code: string;
+    role: string;
+    branch_id: string | null;
+    branch_name: string | null;
+  }>;
+  records: Array<{
+    id: string;
+    user_id: string;
+    branch_id: string | null;
+    attendance_date: string;
+    status: AttendanceStatusType;
+    check_in_at: string | null;
+    check_out_at: string | null;
+    worked_minutes: number | null;
+    late_minutes: number;
+    notes: string | null;
+    source: string;
+  }>;
+}
+
+export interface BulkAttendanceItemPayload {
+  user_id: string;
+  status: Exclude<AttendanceStatusType, 'NOT_MARKED'>;
+  check_in_at?: string | null;
+  check_out_at?: string | null;
+  notes?: string | null;
+}
+
+export interface BulkAttendancePayload {
+  date: string;
+  items: BulkAttendanceItemPayload[];
+  overwrite_existing: boolean;
+}
+
+export interface BulkAttendanceResult {
+  date: string;
+  updated_count: number;
+  skipped_count: number;
+  updated_user_ids: string[];
+  skipped: Array<{ user_id: string; reason: string }>;
+}
+
+export interface BackendOrgAdvance extends BackendStaffAdvance {
+  user_name?: string | null;
+  username?: string | null;
+  user_role?: string | null;
+  branch_name?: string | null;
+}
+
+export interface AbsenceProcessResponse {
+  success: boolean;
+  result?: {
+    date: string;
+    processedUsers: number;
+    absencesMarked: number;
+  };
+  results?: Array<{
+    date: string;
+    processedUsers: number;
+    absencesMarked: number;
+  }>;
 }

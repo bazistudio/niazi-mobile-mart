@@ -212,21 +212,33 @@ export async function getAttendanceForUserMonth(
   pool: Pool,
   user_id: string,
   year: number,
-  month: number
+  month: number,
+  organization_id?: string
 ): Promise<StaffAttendanceRow[]> {
   const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
   const endDate = `${year}-${String(month).padStart(2, '0')}-31`;
+  const whereOrg = organization_id ? ' AND organization_id = $4' : '';
+  const params: unknown[] = [user_id, startDate, endDate];
+  if (organization_id) params.push(organization_id);
+
   const result = await pool.query<StaffAttendanceRow>(
     `SELECT *,
-            first_login_at                AS check_in_at,
+            CASE
+              WHEN status IN ('ABSENT', 'LEAVE', 'HOLIDAY', 'WEEKLY_OFF', 'OFF')
+                   AND first_login_at = (attendance_date || 'T00:00:00Z')
+                   AND checked_out_at IS NULL
+                   AND worked_minutes IS NULL
+              THEN NULL
+              ELSE first_login_at
+            END                           AS check_in_at,
             checked_out_at               AS check_out_at,
             shift_duration_minutes_snap  AS shift_duration_minutes
      FROM staff_attendance
      WHERE user_id = $1
        AND attendance_date >= $2
-       AND attendance_date <= $3
+       AND attendance_date <= $3${whereOrg}
      ORDER BY attendance_date ASC`,
-    [user_id, startDate, endDate]
+    params
   );
   return result.rows;
 }
@@ -243,12 +255,16 @@ export async function getAttendanceSummary(
   total_days: number;
   present_days: number;
   absent_days: number;
+  half_day_count: number;
+  leave_days: number;
   late_count: number;
   approved_overtime_minutes: number;
 }> {
   const result = await pool.query<{
     present_days: string;
     absent_days: string;
+    half_day_count: string;
+    leave_days: string;
     late_count: string;
     total_days: string;
     approved_overtime_minutes: string;
@@ -256,6 +272,8 @@ export async function getAttendanceSummary(
     `SELECT
        COUNT(*) FILTER (WHERE status IN ('PRESENT','LATE')) AS present_days,
        COUNT(*) FILTER (WHERE status = 'ABSENT') AS absent_days,
+       COUNT(*) FILTER (WHERE status = 'HALF_DAY') AS half_day_count,
+       COUNT(*) FILTER (WHERE status = 'LEAVE') AS leave_days,
        COUNT(*) FILTER (WHERE status = 'LATE') AS late_count,
        COUNT(*) AS total_days,
        COALESCE(SUM(approved_overtime_minutes) FILTER (WHERE approved_overtime_minutes IS NOT NULL AND approved_overtime_minutes > 0), 0) AS approved_overtime_minutes
@@ -270,6 +288,8 @@ export async function getAttendanceSummary(
     total_days: parseInt(row?.total_days ?? '0', 10),
     present_days: parseInt(row?.present_days ?? '0', 10),
     absent_days: parseInt(row?.absent_days ?? '0', 10),
+    half_day_count: parseInt(row?.half_day_count ?? '0', 10),
+    leave_days: parseInt(row?.leave_days ?? '0', 10),
     late_count: parseInt(row?.late_count ?? '0', 10),
     approved_overtime_minutes: parseInt(row?.approved_overtime_minutes ?? '0', 10),
   };
@@ -655,24 +675,44 @@ export async function upsertSalaryRecord(
 
 export async function getSalaryRecordsByPeriod(
   pool: Pool,
-  payroll_period_id: string
+  payroll_period_id: string,
+  organization_id?: string,
+  branch_id?: string | null
 ): Promise<SalaryRecordRow[]> {
+  const conditions: string[] = ['sr.payroll_period_id = $1'];
+  const params: unknown[] = [payroll_period_id];
+
+  if (organization_id) {
+    params.push(organization_id);
+    conditions.push(`sr.organization_id = $${params.length}`);
+  }
+  if (branch_id) {
+    params.push(branch_id);
+    conditions.push(`u.branch_id = $${params.length}`);
+  }
+
   const result = await pool.query<SalaryRecordRow>(
     `SELECT
        sr.*,
        sr.payroll_period_id              AS period_id,
        u.name                            AS full_name,
+       u.username                        AS username,
        u.branch_id,
+       b.name                            AS branch_name,
+       sr.salary_type_snapshot           AS salary_type,
        sr.base_salary_snapshot           AS base_salary,
        sr.advance_recovery_amount        AS advance_deduction,
-       sr.net_payable                    AS gross_payable,
+       sr.manual_adjustment_amount       AS manual_adjustment,
+       sr.manual_adjustment_note         AS adjustment_note,
+       sr.gross_salary                   AS gross_payable,
        sr.total_paid                     AS paid_amount,
        sr.remaining_payable              AS remaining_amount
      FROM salary_records sr
      JOIN users u ON u.id = sr.user_id
-     WHERE sr.payroll_period_id = $1
+     LEFT JOIN branches b ON b.id = u.branch_id
+     WHERE ${conditions.join(' AND ')}
      ORDER BY u.name ASC`,
-    [payroll_period_id]
+    params
   );
   return result.rows;
 }
@@ -765,6 +805,59 @@ export async function getAdvancesForUser(
      WHERE user_id = $1 AND organization_id = $2
      ORDER BY created_at DESC`,
     [user_id, organization_id]
+  );
+  return result.rows;
+}
+
+export interface OrgAdvanceRow extends StaffAdvanceRow {
+  user_name: string;
+  username: string;
+  user_role: string;
+  branch_id: string | null;
+  branch_name: string | null;
+}
+
+/**
+ * List advances across the organization (or filtered to a specific branch / status).
+ * Joins users and branches so the UI can display employee name, role, and branch.
+ */
+export async function listAdvancesForOrg(
+  pool: Pool,
+  params: {
+    organization_id: string;
+    branch_id?: string | null;
+    status?: string | null;
+  }
+): Promise<OrgAdvanceRow[]> {
+  const conditions: string[] = ['sa.organization_id = $1'];
+  const values: unknown[] = [params.organization_id];
+
+  if (params.branch_id) {
+    values.push(params.branch_id);
+    conditions.push(`u.branch_id = $${values.length}`);
+  }
+  if (params.status) {
+    values.push(params.status);
+    conditions.push(`sa.status = $${values.length}`);
+  }
+
+  const result = await pool.query<OrgAdvanceRow>(
+    `SELECT sa.*,
+            sa.requested_amount                           AS amount,
+            sa.outstanding_balance                        AS outstanding_amount,
+            COALESCE(sa.disbursed_amount, '0')::numeric
+              - sa.outstanding_balance::numeric           AS recovered_amount,
+            u.name                                        AS user_name,
+            u.username                                    AS username,
+            u.role                                        AS user_role,
+            u.branch_id                                   AS branch_id,
+            b.name                                        AS branch_name
+     FROM staff_advances sa
+     INNER JOIN users u ON u.id = sa.user_id
+     LEFT JOIN branches b ON b.id = u.branch_id
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY sa.created_at DESC`,
+    values
   );
   return result.rows;
 }
@@ -905,8 +998,16 @@ export interface OrgActiveUserRow {
 
 export async function listOrgActiveUsers(
   pool: Pool,
-  organization_id: string
+  organization_id: string,
+  branch_id?: string | null
 ): Promise<OrgActiveUserRow[]> {
+  const params: unknown[] = [organization_id];
+  let branchClause = '';
+  if (branch_id) {
+    params.push(branch_id);
+    branchClause = ` AND u.branch_id = $${params.length}`;
+  }
+
   const result = await pool.query<OrgActiveUserRow>(
     `SELECT
        u.id          AS user_id,
@@ -920,14 +1021,14 @@ export async function listOrgActiveUsers(
        u.created_at
      FROM users u
      LEFT JOIN branches b ON b.id = u.branch_id
-     WHERE (b.organization_id = $1 OR u.branch_id IS NULL)
+     WHERE (b.organization_id = $1 OR (u.branch_id IS NULL AND u.role = 'ADMIN'))
        AND u.is_active = 1
        AND u.status NOT IN ('DISABLED','PENDING','REJECTED')
        AND u.role NOT IN (
          'SUPER_ADMIN','OWNER','MULTI_ADMIN','SHOPADMIN','BRANCH_ADMIN','PUBLIC_USER'
-       )
+       )${branchClause}
      ORDER BY u.name ASC`,
-    [organization_id]
+    params
   );
   return result.rows;
 }

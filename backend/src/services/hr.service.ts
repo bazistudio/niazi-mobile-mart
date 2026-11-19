@@ -44,10 +44,12 @@ import {
   recordAdvanceTransaction,
   updateAdvanceBalance,
   listOrgActiveUsers,
+  listAdvancesForOrg,
   StaffSalaryConfigRow,
   SalaryRecordRow,
 } from '../repositories/hr.repo';
 import { writeChangeLogEntry } from '../repositories/change_log.repo';
+import { resolveEffectivePolicyForCalculation } from './hr.policy.service';
 
 // ─── Constants (owner-confirmed) ──────────────────────────────────────────────
 
@@ -450,6 +452,14 @@ export async function generatePayroll(
 
       const baseSalary = parseFloat(config.monthly_salary ?? config.daily_rate ?? config.hourly_rate ?? '0');
 
+      // Resolve effective HR policy for this user's branch as of period_end (DEF-HR-05 fix)
+      const effectivePolicy = await resolveEffectivePolicyForCalculation(
+        pool,
+        organizationId,
+        user.branch_id,
+        period.period_end
+      );
+
       let absenceDeduction = 0;
       let lateAbsenceEquivalents = 0;
       let grossSalary = 0;
@@ -457,17 +467,26 @@ export async function generatePayroll(
       let overtimeAmount = 0;
 
       if (config.salary_type === 'MONTHLY') {
-        lateAbsenceEquivalents = Math.floor(attendance.late_count / LATES_PER_ABSENCE_EQUIVALENT);
-        const totalAbsences = attendance.absent_days + lateAbsenceEquivalents;
-        absenceDeduction = totalAbsences * (baseSalary / MONTHLY_WORKING_DAYS);
+        const latesForAbsence = effectivePolicy.lates_for_absence || LATES_PER_ABSENCE_EQUIVALENT;
+        const workingDaysDivisor = effectivePolicy.monthly_working_days || MONTHLY_WORKING_DAYS;
+        const halfDayFactor = effectivePolicy.half_day_deduction_factor ?? 0.5;
+        const standardShiftMins = effectivePolicy.standard_shift_minutes || DEFAULT_SHIFT_MINUTES;
+
+        lateAbsenceEquivalents = Math.floor(attendance.late_count / latesForAbsence);
+        const halfDayAbsenceEquivalents = (attendance.half_day_count ?? 0) * halfDayFactor;
+        const totalAbsences = attendance.absent_days + lateAbsenceEquivalents + halfDayAbsenceEquivalents;
+        absenceDeduction = Math.round(totalAbsences * (baseSalary / workingDaysDivisor) * 100) / 100;
         grossSalary = baseSalary;
-        // Approved overtime for monthly-salaried staff:
-        // (approved_overtime_minutes / 60) * (baseSalary / 26 / 11) * overtime_multiplier
-        overtimeMinutes = attendance.approved_overtime_minutes ?? 0;
-        const overtimeMultiplier = parseFloat(config.overtime_multiplier ?? String(DEFAULT_OVERTIME_MULTIPLIER));
-        const standardShiftHours = DEFAULT_SHIFT_MINUTES / 60; // 11 hours
-        const perHourRate = baseSalary / MONTHLY_WORKING_DAYS / standardShiftHours;
-        overtimeAmount = Math.round(((overtimeMinutes / 60) * perHourRate * overtimeMultiplier) * 100) / 100;
+
+        if (effectivePolicy.overtime_eligible_monthly) {
+          overtimeMinutes = attendance.approved_overtime_minutes ?? 0;
+          const overtimeMultiplier = parseFloat(
+            config.overtime_multiplier ?? String(effectivePolicy.overtime_multiplier || DEFAULT_OVERTIME_MULTIPLIER)
+          );
+          const standardShiftHours = standardShiftMins / 60;
+          const perHourRate = baseSalary / workingDaysDivisor / standardShiftHours;
+          overtimeAmount = Math.round(((overtimeMinutes / 60) * perHourRate * overtimeMultiplier) * 100) / 100;
+        }
       } else if (config.salary_type === 'DAILY') {
         const dailyRate = parseFloat(config.daily_rate ?? '0');
         grossSalary = attendance.present_days * dailyRate;
@@ -527,8 +546,22 @@ export async function generatePayroll(
   }
 }
 
-export async function getPayrollRecordsForPeriod(pool: Pool, periodId: string) {
-  return getSalaryRecordsByPeriod(pool, periodId);
+export async function getPayrollRecordsForPeriod(
+  pool: Pool,
+  periodId: string,
+  organizationId?: string,
+  branchId?: string | null
+) {
+  if (organizationId) {
+    const period = await getPayrollPeriodById(pool, periodId);
+    if (!period) {
+      throw new Error('Payroll period not found');
+    }
+    if (period.organization_id !== organizationId) {
+      throw new Error('Access denied: Payroll period belongs to another organization');
+    }
+  }
+  return getSalaryRecordsByPeriod(pool, periodId, organizationId, branchId);
 }
 
 // ─── Salary Payment ───────────────────────────────────────────────────────────
@@ -752,10 +785,25 @@ export async function getStaffAdvances(pool: Pool, userId: string, organizationI
   return getAdvancesForUser(pool, userId, organizationId);
 }
 
+export async function listOrgAdvances(
+  pool: Pool,
+  params: {
+    organization_id: string;
+    branch_id?: string | null;
+    status?: string | null;
+  }
+) {
+  return listAdvancesForOrg(pool, params);
+}
+
 // ─── Staff List ───────────────────────────────────────────────────────────────
 
-export async function listStaffForOrg(pool: Pool, organizationId: string) {
-  return listOrgActiveUsers(pool, organizationId);
+export async function listStaffForOrg(
+  pool: Pool,
+  organizationId: string,
+  branchId?: string | null
+) {
+  return listOrgActiveUsers(pool, organizationId, branchId);
 }
 
 // ─── Attendance Query ─────────────────────────────────────────────────────────
@@ -764,7 +812,8 @@ export async function getStaffAttendanceForMonth(
   pool: Pool,
   userId: string,
   year: number,
-  month: number
+  month: number,
+  organizationId?: string
 ) {
-  return getAttendanceForUserMonth(pool, userId, year, month);
+  return getAttendanceForUserMonth(pool, userId, year, month, organizationId);
 }
