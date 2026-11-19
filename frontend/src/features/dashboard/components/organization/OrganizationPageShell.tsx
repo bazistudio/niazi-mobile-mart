@@ -8,6 +8,7 @@ interface OrganizationPageShellProps {
   badge?: string;
   action?: React.ReactNode;
   children: React.ReactNode;
+  fullWidth?: boolean;
 }
 
 export const OrganizationPageShell: React.FC<OrganizationPageShellProps> = ({
@@ -16,9 +17,16 @@ export const OrganizationPageShell: React.FC<OrganizationPageShellProps> = ({
   badge,
   action,
   children,
+  fullWidth = false,
 }) => {
   return (
-    <div className="p-4 lg:p-8 max-w-7xl mx-auto space-y-6 bg-gray-50/50 dark:bg-gray-950/50 min-h-full">
+    <div
+      className={
+        fullWidth
+          ? 'py-4 px-0 w-full min-w-0 space-y-6 bg-gray-50/50 dark:bg-gray-950/50 min-h-full'
+          : 'p-4 lg:p-8 max-w-7xl mx-auto space-y-6 bg-gray-50/50 dark:bg-gray-950/50 min-h-full'
+      }
+    >
       {/* Breadcrumb & Navigation Anchor */}
       <div className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
         <Link 

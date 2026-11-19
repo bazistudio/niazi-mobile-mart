@@ -5,7 +5,7 @@
 import express, { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 
-import { buildAuthMiddleware, authorizePermission, isOrgAdmin, isBranchAdmin, canAccessBranch, RequestIdentity } from '../auth';
+import { buildAuthMiddleware, authorizePermission, isOrgAdmin, canAccessBranch, RequestIdentity } from '../auth';
 import {
   createSalesReturn,
   getSaleReturnableInfo,
@@ -76,9 +76,11 @@ export function createReturnsRouter(pool: Pool): Router {
   router.post('/', async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;
 
-    // Returns require management permissions (Admin or ShopAdmin)
-    if (!isBranchAdmin(identity)) {
-      res.status(403).json({ error: 'Access denied: Sales returns require Admin or ShopAdmin permissions' });
+    // Returns require branch operational access — any role with 'sales' page permission.
+    // Branch isolation is enforced below via canAccessBranch on the original sale's branch.
+    const returnDenied = authorizePermission(identity, 'sales', null);
+    if (returnDenied) {
+      res.status(403).json({ error: returnDenied });
       return;
     }
 

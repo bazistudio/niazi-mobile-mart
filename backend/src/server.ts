@@ -63,6 +63,7 @@ import { createSettingsRouter } from './routes/settings.routes';
 import { buildRolesRouter } from './routes/roles.routes'; // DEF-08
 import { buildMobileRouter } from './routes/mobile.routes';
 import { buildHrRouter } from './routes/hr.routes';
+import { buildAccountsRouter } from './routes/accounts.routes';
 import { BranchRepo } from './repositories/branch.repo';
 import {
   listBrands,
@@ -313,6 +314,13 @@ async function main(): Promise<void> {
   const rolesRouter = buildRolesRouter(pool);
   app.use('/api/roles', rolesRouter);
   app.use('/api/v1/roles', rolesRouter);
+
+  // -------------------------------------------------------------------------
+  // Business Accounts routes — Org-Admin Only, Phase 1
+  // -------------------------------------------------------------------------
+  const accountsRouter = buildAccountsRouter(pool);
+  app.use('/api/accounts', accountsRouter);
+  app.use('/api/v1/accounts', accountsRouter);
 
   // -------------------------------------------------------------------------
   // HR & Payroll routes — TypeScript Online Authority

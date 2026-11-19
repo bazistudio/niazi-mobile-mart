@@ -62,7 +62,8 @@ export const queryKeys = {
   // ─── HR Domain ────────────────────────────────────────────────────────────
   // Phase 2: HR backend endpoints are now live at /api/v1/hr/*.
   hr: {
-    staff: ['hr', 'staff'] as const,
+    staff: (branchId?: string | null) =>
+      branchId ? (['hr', 'staff', branchId] as const) : (['hr', 'staff'] as const),
     salaryConfigs: ['hr', 'salary-configs'] as const,
     salaryConfig: (staffId: string) => ['hr', 'salary-config', staffId] as const,
     salaryConfigHistory: (staffId: string) => ['hr', 'salary-config-history', staffId] as const,
@@ -70,16 +71,37 @@ export const queryKeys = {
     overtimeConfig: (staffId: string) => ['hr', 'overtime-config', staffId] as const,
     advances: (staffId?: string) =>
       staffId ? (['hr', 'advances', staffId] as const) : (['hr', 'advances'] as const),
+    orgAdvances: (branchId?: string | null, status?: string | null) =>
+      ['hr', 'org-advances', branchId ?? 'ALL', status ?? 'ALL'] as const,
     attendance: (staffId: string, month: number, year: number) =>
       ['hr', 'attendance', staffId, month, year] as const,
+    attendanceRegister: (date: string, branchId?: string | null) =>
+      ['hr', 'attendance-register', date, branchId ?? 'ALL'] as const,
+    attendanceRange: (startDate: string, endDate: string, branchId?: string | null) =>
+      ['hr', 'attendance-range', startDate, endDate, branchId ?? 'ALL'] as const,
     payrollPeriods: ['hr', 'payroll-periods'] as const,
-    payrollRecords: (periodId: string) => ['hr', 'payroll-records', periodId] as const,
+    payrollRecords: (periodId: string, branchId?: string | null) =>
+      branchId
+        ? (['hr', 'payroll-records', periodId, branchId] as const)
+        : (['hr', 'payroll-records', periodId] as const),
     payroll: (month?: number, year?: number) =>
       ['hr', 'payroll', month, year] as const,
     shiftTemplates: ['hr', 'shift-templates'] as const,
+    annualSummary: (staffId: string, year: number) =>
+      ['hr', 'annual-summary', staffId, year] as const,
+    policies: ['hr', 'policies'] as const,
+    effectivePolicy: (branchId?: string | null, date?: string) =>
+      ['hr', 'policies', 'effective', branchId ?? 'DEFAULT', date ?? 'TODAY'] as const,
+    policyAuditLogs: (policyId?: string, branchId?: string) =>
+      ['hr', 'policies', 'audit', policyId ?? 'ALL', branchId ?? 'ALL'] as const,
   },
   // ─── Repairs Domain ───────────────────────────────────────────────────────
   // repairApi.getRepairJobs({ technician_id }) is available — used in Progress Report.
+  // ─── Business Accounts Domain ─────────────────────────────────────────────
+  accounts: {
+    all: ['accounts'] as const,
+    statement: (id: string) => ['accounts', 'statement', id] as const,
+  },
   repairs: (filters?: {
     technician_id?: string;
     branch_id?: string;

@@ -121,7 +121,7 @@ export const useBarcodeScanner = ({
       }
 
       // Ignore modifier keys and functional keys (Shift, Ctrl, Alt, Arrow keys, etc.)
-      if (e.key.length !== 1) {
+      if (!e.key || e.key.length !== 1) {
         return;
       }
 

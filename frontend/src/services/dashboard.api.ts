@@ -64,32 +64,44 @@ export interface HourlyBreakdownData {
 
 export const dashboardApi = {
   getMetrics: async (branchId?: string | null): Promise<{ success: boolean; data: DashboardMetrics }> => {
-    const stats = await tauriClient.organizationGetDashboardStats();
-    const profitSummary = await tauriClient.profitGetDashboardSummary(branchId || undefined);
+    const stats = await tauriClient.organizationGetDashboardStats().catch(() => ({ product_count: 0, low_stock_count: 0 }));
+    let profitSummary: any;
+    try {
+      profitSummary = await tauriClient.profitGetDashboardSummary(branchId || undefined);
+    } catch {
+      // Graceful degradation for roles without profit access (e.g. Cashier, Salesman):
+      // Keep revenue and order metrics safe while zeroing profit fields.
+      profitSummary = {
+        today: { net_revenue: 0, gross_profit: 0, orders_count: 0 },
+        this_week: { net_revenue: 0, gross_profit: 0, orders_count: 0 },
+        this_month: { net_revenue: 0, gross_profit: 0, orders_count: 0 },
+        total: { net_revenue: 0, gross_profit: 0, orders_count: 0 },
+      };
+    }
     return {
       success: true,
       data: {
         summary: {
           revenue: {
-            today: profitSummary.today.net_revenue,
-            thisWeek: profitSummary.this_week.net_revenue,
-            thisMonth: profitSummary.this_month.net_revenue,
-            total: profitSummary.total.net_revenue,
+            today: profitSummary?.today?.net_revenue ?? 0,
+            thisWeek: profitSummary?.this_week?.net_revenue ?? 0,
+            thisMonth: profitSummary?.this_month?.net_revenue ?? 0,
+            total: profitSummary?.total?.net_revenue ?? 0,
             growth: 0,
           },
           profit: {
-            today: profitSummary.today.gross_profit,
-            thisMonth: profitSummary.this_month.gross_profit,
-            total: profitSummary.total.gross_profit,
+            today: profitSummary?.today?.gross_profit ?? 0,
+            thisMonth: profitSummary?.this_month?.gross_profit ?? 0,
+            total: profitSummary?.total?.gross_profit ?? 0,
           },
           orders: {
-            today: profitSummary.today.orders_count,
-            thisWeek: profitSummary.this_week.orders_count,
-            total: profitSummary.total.orders_count,
+            today: profitSummary?.today?.orders_count ?? 0,
+            thisWeek: profitSummary?.this_week?.orders_count ?? 0,
+            total: profitSummary?.total?.orders_count ?? 0,
           },
           inventory: {
-            totalProducts: stats.product_count,
-            lowStockItems: stats.low_stock_count,
+            totalProducts: stats?.product_count ?? 0,
+            lowStockItems: stats?.low_stock_count ?? 0,
           },
           customers: {
             total: 0,

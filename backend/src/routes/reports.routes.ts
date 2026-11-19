@@ -21,6 +21,13 @@ function isDbConnectionError(err: unknown): boolean {
   );
 }
 
+function canAccessProfitReports(identity: RequestIdentity): boolean {
+  if (!identity) return false;
+  if (isOrgAdmin(identity)) return true;
+  const r = String(identity.role || '').toUpperCase();
+  return r === 'SHOP_ADMIN' || r === 'MANAGER';
+}
+
 function sendError(_req: Request, res: Response, err: unknown): void {
   console.error('[reports.routes] Error handled by sendError:', err);
   if (isDbConnectionError(err)) {
@@ -47,8 +54,8 @@ export function createReportsRouter(pool: Pool): Router {
 
     // Branch admins (SHOP_ADMIN, MANAGER) may view their own branch reports.
     // Org admins may view any branch or unscoped org-wide reports.
-    if (!isBranchAdmin(identity)) {
-      res.status(403).json({ error: 'Access denied: Profit reporting requires Admin or ShopAdmin role' });
+    if (!canAccessProfitReports(identity)) {
+      res.status(403).json({ error: 'Access denied: Profit reporting requires Admin, ShopAdmin, or Manager role' });
       return;
     }
 
@@ -101,8 +108,8 @@ export function createReportsRouter(pool: Pool): Router {
     const identity = req.identity as RequestIdentity;
     const callerIsOrgAdmin = isOrgAdmin(identity);
 
-    if (!isBranchAdmin(identity)) {
-      res.status(403).json({ error: 'Access denied: Profit reporting requires Admin or ShopAdmin role' });
+    if (!canAccessProfitReports(identity)) {
+      res.status(403).json({ error: 'Access denied: Profit reporting requires Admin, ShopAdmin, or Manager role' });
       return;
     }
 

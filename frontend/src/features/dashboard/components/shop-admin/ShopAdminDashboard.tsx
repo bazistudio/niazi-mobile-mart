@@ -15,6 +15,7 @@ import { dashboardApi } from '@/services/dashboard.api';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { queryKeys } from '@/lib/react-query/queryKeys';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
+import { useAuthStore } from '@/lib/auth/core/auth.store';
 import { expensesApi } from '@/services/expenses.api';
 import { ExpenseSummary } from '@/lib/tauri/tauriClient';
 import { ReceiptText, Wallet, Ban } from 'lucide-react';
@@ -48,6 +49,16 @@ export const ShopAdminDashboard = () => {
   const location = useLocation();
   const pathname = location.pathname;
   const searchInvoice = searchParams.get('invoice');
+
+  const currentUser = useAuthStore((s) => s.user);
+  const userRole = (currentUser?.role || '').toUpperCase();
+  const canViewProfit =
+    userRole === 'ADMIN' ||
+    userRole === 'SUPER_ADMIN' ||
+    userRole === 'OWNER' ||
+    userRole === 'MULTI_ADMIN' ||
+    userRole === 'SHOP_ADMIN' ||
+    userRole === 'MANAGER';
 
   useEffect(() => {
     if (searchInvoice) {
@@ -134,27 +145,31 @@ export const ShopAdminDashboard = () => {
       format: 'currency',
       timeframe: 'vs. Yesterday',
     },
-    {
-      title: 'Estimated Profit',
-      value: isMetricsLoading ? 'Loading...' : `₨ ${(getFilterValue('profit', filter) || 0).toLocaleString()}`,
-      trend: metrics?.summary.revenue.growth || 0,
-      icon: <TrendingUp className="h-5 w-5" />,
-      format: 'currency',
-      timeframe: filter === 'today' ? 'Today' : 'This Month',
-    },
-    {
-      title: 'Gross Margin',
-      value: isMetricsLoading
-        ? 'Loading...'
-        : `${(
-            ((getFilterValue('profit', filter) || 0) / (getFilterValue('revenue', filter) || 1)) *
-            100
-          ).toFixed(1)}%`,
-      trend: 0,
-      icon: <CreditCard className="h-5 w-5" />,
-      format: 'number',
-      timeframe: 'Return on Sales',
-    },
+    ...(canViewProfit
+      ? [
+          {
+            title: 'Estimated Profit',
+            value: isMetricsLoading ? 'Loading...' : `₨ ${(getFilterValue('profit', filter) || 0).toLocaleString()}`,
+            trend: metrics?.summary.revenue.growth || 0,
+            icon: <TrendingUp className="h-5 w-5" />,
+            format: 'currency' as const,
+            timeframe: filter === 'today' ? 'Today' : 'This Month',
+          },
+          {
+            title: 'Gross Margin',
+            value: isMetricsLoading
+              ? 'Loading...'
+              : `${(
+                  ((getFilterValue('profit', filter) || 0) / (getFilterValue('revenue', filter) || 1)) *
+                  100
+                ).toFixed(1)}%`,
+            trend: 0,
+            icon: <CreditCard className="h-5 w-5" />,
+            format: 'number' as const,
+            timeframe: 'Return on Sales',
+          },
+        ]
+      : []),
   ];
 
 

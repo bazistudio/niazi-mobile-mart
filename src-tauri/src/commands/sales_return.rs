@@ -23,7 +23,7 @@ pub async fn sales_return_create(
     state: State<'_, AppState>,
     dto: CreateSalesReturnDto,
 ) -> AppResult<SalesReturnDetailDto> {
-    AuthService::require_permission(&state, Some("sales"), Some("pos:refund")).await?;
+    AuthService::require_permission(&state, Some("sales"), None).await?;
     let info = state.sales_return_service.get_sale_returnable_info(&dto.sale_id).await?;
     AuthService::require_branch_access(&state, Some(&info.branch_id)).await?;
     let user_id = { state.session.read().await.user_id.clone() };

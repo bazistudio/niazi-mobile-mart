@@ -61,11 +61,13 @@ impl StaffAccessProfile {
                 "repairs".to_string(),
                 "reports".to_string(),
             ],
-            allowed_actions: vec![],
+            allowed_actions: vec![
+                "pos:refund".to_string(),
+            ],
             limits: StaffOperationalLimits {
                 max_discount_percent: 0.0,
                 can_price_override: false,
-                can_refund: false,
+                can_refund: true,
                 can_void_sale: false,
                 can_view_profit: false,
             },
@@ -87,6 +89,7 @@ impl StaffAccessProfile {
             allowed_actions: vec![
                 "pos:sale".to_string(),
                 "pos:hold".to_string(),
+                "pos:refund".to_string(),
                 "order:create".to_string(),
                 "order:read".to_string(),
                 "cash:open".to_string(),
@@ -95,7 +98,7 @@ impl StaffAccessProfile {
             limits: StaffOperationalLimits {
                 max_discount_percent: 0.0,
                 can_price_override: false,
-                can_refund: false,
+                can_refund: true,
                 can_void_sale: false,
                 can_view_profit: false,
             },
@@ -184,13 +187,14 @@ impl StaffAccessProfile {
             allowed_actions: vec![
                 "pos:sale".to_string(),
                 "pos:hold".to_string(),
+                "pos:refund".to_string(),
                 "order:create".to_string(),
                 "order:read".to_string(),
             ],
             limits: StaffOperationalLimits {
                 max_discount_percent: 0.0,
                 can_price_override: false,
-                can_refund: false,
+                can_refund: true,
                 can_void_sale: false,
                 can_view_profit: false,
             },
@@ -365,7 +369,7 @@ mod tests {
         assert!(!profile.has_page_access("inventory"));
         assert!(profile.has_action_access("pos:sale"));
         assert!(!profile.has_action_access("finance:override"));
-        assert!(!profile.has_action_access("pos:refund"));
+        assert!(profile.has_action_access("pos:refund"));
         // Default max discount is 0.0 (INDIVIDUAL permission required)
         assert!(profile.check_discount_limit(0.0));
         assert!(!profile.check_discount_limit(0.1));
@@ -412,7 +416,7 @@ mod tests {
         assert!(!profile.has_page_access("users"));
         // Actions - INDIVIDUAL:
         assert!(!profile.has_action_access("pos:sale"));
-        assert!(!profile.has_action_access("pos:refund"));
+        assert!(profile.has_action_access("pos:refund"));
         assert!(!profile.has_action_access("stock:adjust"));
         assert!(!profile.has_action_access("product:create"));
         assert!(profile.check_discount_limit(0.0));

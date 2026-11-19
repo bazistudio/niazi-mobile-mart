@@ -18,7 +18,7 @@ export const DashboardShell = ({ children, variant = 'default' }: DashboardShell
 
   return (
     <main className="flex-1 min-h-0 overflow-y-auto custom-scrollbar bg-gray-50 dark:bg-gray-950 transition-colors duration-200">
-      <div className="mx-auto max-w-[1800px] py-6 px-4 md:px-8" style={{ zoom: 0.8 }}>
+      <div className="w-full py-5 px-[20px]" style={{ zoom: 0.8 }}>
         {children}
       </div>
     </main>
