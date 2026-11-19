@@ -1,30 +1,23 @@
 'use client';
 
 /**
- * MobileSaleHistoryDashboard — Frontend Preview
+ * MobileSaleHistoryDashboard
  *
- * ⚠️  FRONTEND PREVIEW — Sale History Not Connected ⚠️
+ * Connected live to backend mobile sales API (/api/mobiles/sales).
  *
- * No mobile-sale-history endpoint exists yet. This page renders a clearly-
- * labelled preview adapter with typed sample records so the UI can be
- * reviewed and iterated on before backend integration.
- *
- * The adapter is isolated in the PREVIEW_ADAPTER section below. Replace it
- * with a real API call when the backend sale-history endpoint is authorised.
- *
- * Rules:
- *  - Sample records are never mixed with real persisted data.
- *  - No records are written to any database.
- *  - Timestamps are fabricated for preview purposes only and are labelled as such.
+ * Requirements:
+ *  - Latest invoice on top (ORDER BY created_at DESC from backend, preserved in UI)
+ *  - Multi-payment methods breakdown display and reprint support
+ *  - Proper branch and date filtering
+ *  - Official Dual-Copy A4 reprint
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import {
   History,
   Search,
   AlertTriangle,
-  Info,
   ShieldCheck,
   Calendar,
   Filter,
@@ -32,22 +25,19 @@ import {
   ChevronLeft,
   ChevronRight,
   Printer,
+  RefreshCw,
 } from 'lucide-react';
 import { Badge, Card, Button } from '@/components/ui';
 import { usePrintStore } from '@/lib/printer';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
 import { printFormatter } from '@/features/settings/printer/utils/printFormatter';
+import { buildMobileSaleDualA4Html } from '../templates/mobileSaleA4Template';
+import { mobileApi } from '../services/mobile.api';
 import { toast } from 'react-hot-toast';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PREVIEW ADAPTER — replace with real API call when backend is ready
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Frontend-only view model for a sale history row. */
-interface SaleHistoryRecord {
-  /** Stable key — preview only, not a real sale ID */
-  previewId: string;
-  /** ISO datetime string — fabricated for preview */
+export interface MobileSaleRecordRow {
+  id: string;
+  invoiceNumber: string;
   saleDateTime: string;
   brand: string;
   model: string;
@@ -59,125 +49,31 @@ interface SaleHistoryRecord {
   imei2?: string;
   ptaStatus: string;
   branch: string;
+  branchId: string;
   customerName: string | null;
   salePrice: number;
   discount: number;
   grandTotal: number;
+  paidAmount: number;
+  changeAmount: number;
+  creditAmount: number;
   paymentMethod: string;
-}
-
-/**
- * PREVIEW_ADAPTER
- *
- * Typed sample records used only while the real sale-history endpoint is
- * unavailable. Each record is clearly marked as preview data in the UI.
- *
- * To replace: delete this array and swap the `usePreviewData()` hook below
- * with a real `useQuery(queryKeys.mobileSales.history(...), ...)` call.
- */
-const PREVIEW_SAMPLE_RECORDS: SaleHistoryRecord[] = [
-  {
-    previewId: 'preview-001',
-    saleDateTime: '2024-10-15T11:32:00+05:00',
-    brand: 'Samsung',
-    model: 'Galaxy A55',
-    storage: '256GB',
-    ram: '8GB',
-    color: 'Awesome Navy',
-    condition: 'NEW',
-    imei1: '356938035643809',
-    imei2: '356938035643817',
-    ptaStatus: 'PTA_APPROVED',
-    branch: 'Main Branch',
-    customerName: 'Ahmed Raza',
-    salePrice: 85000,
-    discount: 2000,
-    grandTotal: 83000,
-    paymentMethod: 'Cash',
-  },
-  {
-    previewId: 'preview-002',
-    saleDateTime: '2024-10-14T14:18:00+05:00',
-    brand: 'iPhone',
-    model: '15 Pro',
-    storage: '128GB',
-    ram: '8GB',
-    color: 'Natural Titanium',
-    condition: 'USED',
-    imei1: '353479100523456',
-    ptaStatus: 'NON_PTA',
-    branch: 'Main Branch',
-    customerName: null,
-    salePrice: 320000,
-    discount: 0,
-    grandTotal: 320000,
-    paymentMethod: 'Bank Transfer',
-  },
-  {
-    previewId: 'preview-003',
-    saleDateTime: '2024-10-13T09:55:00+05:00',
-    brand: 'Xiaomi',
-    model: 'Redmi Note 13',
-    storage: '128GB',
-    ram: '6GB',
-    color: 'Midnight Black',
-    condition: 'NEW',
-    imei1: '869765034123490',
-    imei2: '869765034123508',
-    ptaStatus: 'PTA_APPROVED',
-    branch: 'Main Branch',
-    customerName: 'Fatima Malik',
-    salePrice: 42000,
-    discount: 500,
-    grandTotal: 41500,
-    paymentMethod: 'Cash',
-  },
-  {
-    previewId: 'preview-004',
-    saleDateTime: '2024-10-12T16:40:00+05:00',
-    brand: 'Realme',
-    model: 'C65',
-    storage: '64GB',
-    ram: '4GB',
-    color: 'Star Trail Gold',
-    condition: 'NEW',
-    imei1: '354821076543210',
-    ptaStatus: 'JV',
-    branch: 'Main Branch',
-    customerName: 'Usman Tariq',
-    salePrice: 28500,
-    discount: 0,
-    grandTotal: 28500,
-    paymentMethod: 'Cash',
-  },
-  {
-    previewId: 'preview-005',
-    saleDateTime: '2024-10-11T13:05:00+05:00',
-    brand: 'OPPO',
-    model: 'A98',
-    storage: '256GB',
-    ram: '8GB',
-    color: 'Cool Black',
-    condition: 'USED',
-    imei1: '863752050123456',
-    ptaStatus: 'PTA_APPROVED',
-    branch: 'Main Branch',
-    customerName: 'Sara Khan',
-    salePrice: 65000,
-    discount: 3000,
-    grandTotal: 62000,
-    paymentMethod: 'JazzCash',
-  },
-];
-
-/** Hook that returns preview records. Replace with a real useQuery when API exists. */
-function usePreviewData() {
-  return {
-    records: PREVIEW_SAMPLE_RECORDS,
-    isPreview: true,
-    isLoading: false,
-    error: null as string | null,
-  };
+  payments: Array<{
+    id: string;
+    method: string;
+    amount: number;
+    referenceNumber?: string | null;
+    notes?: string | null;
+  }>;
+  devices: Array<{
+    deviceId: string;
+    brand: string;
+    model: string;
+    imei1: string;
+    imei2: string | null;
+    salePrice: number;
+    costPrice: number;
+  }>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -185,7 +81,7 @@ function usePreviewData() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function fmtPKR(value: number): string {
-  return `Rs. ${value.toLocaleString('en-PK', {
+  return `Rs. ${value.toLocaleString('en-PK', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   })}`;
@@ -227,10 +123,6 @@ function getPtaBadge(status: string) {
 
 const PAGE_SIZE = 10;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main component
-// ─────────────────────────────────────────────────────────────────────────────
-
 // ─── Mobile module sub-navigation tabs ─────────────────────────────────────
 const MOBILE_NAV_TABS = [
   { label: 'Inventory', href: '/dashboard/shop-admin/mobiles' },
@@ -241,7 +133,10 @@ const MOBILE_NAV_TABS = [
 
 export const MobileSaleHistoryDashboard: React.FC = () => {
   const { pathname } = useLocation();
-  const { records, isPreview, isLoading, error } = usePreviewData();
+
+  const [records, setRecords] = useState<MobileSaleRecordRow[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const { openPreview } = usePrintStore();
   const { settings, shopHeader, isHydrated, fetchSettings } = usePrinterStore();
@@ -251,16 +146,79 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
     fetchSettings();
   }, [fetchSettings]);
 
+  // Fetch live sales history
+  const fetchSales = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await mobileApi.getMobileSalesHistory({ limit: 100 });
+      if (res && Array.isArray(res.sales)) {
+        const mapped: MobileSaleRecordRow[] = res.sales.map((s) => {
+          const firstDev = s.devices?.[0];
+          const paymentMethodsStr = s.payments?.length
+            ? s.payments.map((p) => p.method).join(', ')
+            : 'Cash';
+
+          return {
+            id: s.id,
+            invoiceNumber: s.invoice_number || `INV-${s.id.slice(0, 8).toUpperCase()}`,
+            saleDateTime: s.created_at,
+            brand: firstDev?.brand || (s.devices?.length > 1 ? `${s.devices.length} Devices` : 'Mobile'),
+            model: firstDev?.model || '',
+            storage: '',
+            ram: '',
+            color: '',
+            condition: 'NEW',
+            imei1: firstDev?.imei1 || '—',
+            imei2: firstDev?.imei2 || undefined,
+            ptaStatus: 'PTA_APPROVED',
+            branch: s.branch_name || 'Main Branch',
+            branchId: s.branch_id,
+            customerName: s.customer_name_snapshot,
+            salePrice: s.subtotal || s.totalAmount,
+            discount: s.discount || 0,
+            grandTotal: s.totalAmount,
+            paidAmount: s.paidAmount || s.totalAmount,
+            changeAmount: s.changeAmount || 0,
+            creditAmount: Math.max(0, (s.totalAmount || 0) - (s.paidAmount || 0)),
+            paymentMethod: paymentMethodsStr,
+            payments: s.payments || [],
+            devices: s.devices || [],
+          };
+        });
+        // Sort descending by created_at (latest invoice on top)
+        mapped.sort((a, b) => new Date(b.saleDateTime).getTime() - new Date(a.saleDateTime).getTime());
+        setRecords(mapped);
+      }
+    } catch (err: any) {
+      console.error('Failed to load mobile sale history:', err);
+      setError(err?.message || 'Failed to load sale history from server.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSales();
+  }, [fetchSales]);
+
   // ── Filters ──
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterCondition, setFilterCondition] = useState<'ALL' | 'NEW' | 'USED'>('ALL');
   const [filterPayment, setFilterPayment] = useState('ALL');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
 
   const paymentMethods = useMemo(() => {
-    const methods = new Set(records.map((r) => r.paymentMethod));
+    const methods = new Set<string>();
+    records.forEach((r) => {
+      r.payments.forEach((p) => {
+        if (p.method) methods.add(p.method);
+      });
+      if (r.paymentMethod) {
+        r.paymentMethod.split(', ').forEach((m) => methods.add(m));
+      }
+    });
     return Array.from(methods).sort();
   }, [records]);
 
@@ -270,22 +228,26 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
     return records.filter((r) => {
       const matchSearch =
         !q ||
+        r.invoiceNumber.toLowerCase().includes(q) ||
         r.brand.toLowerCase().includes(q) ||
         r.model.toLowerCase().includes(q) ||
         r.imei1.includes(q) ||
         (r.imei2 && r.imei2.includes(q)) ||
-        (r.customerName && r.customerName.toLowerCase().includes(q));
+        (r.customerName && r.customerName.toLowerCase().includes(q)) ||
+        r.devices.some((d) => d.brand.toLowerCase().includes(q) || d.model.toLowerCase().includes(q) || d.imei1.includes(q));
 
-      const matchCondition = filterCondition === 'ALL' || r.condition === filterCondition;
-      const matchPayment = filterPayment === 'ALL' || r.paymentMethod === filterPayment;
+      const matchPayment =
+        filterPayment === 'ALL' ||
+        r.paymentMethod.toLowerCase().includes(filterPayment.toLowerCase()) ||
+        r.payments.some((p) => p.method.toLowerCase() === filterPayment.toLowerCase());
 
       const saleDate = r.saleDateTime.slice(0, 10);
       const matchFrom = !filterDateFrom || saleDate >= filterDateFrom;
       const matchTo = !filterDateTo || saleDate <= filterDateTo;
 
-      return matchSearch && matchCondition && matchPayment && matchFrom && matchTo;
+      return matchSearch && matchPayment && matchFrom && matchTo;
     });
-  }, [records, searchQuery, filterCondition, filterPayment, filterDateFrom, filterDateTo]);
+  }, [records, searchQuery, filterPayment, filterDateFrom, filterDateTo]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
@@ -293,59 +255,76 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
 
   const clearFilters = () => {
     setSearchQuery('');
-    setFilterCondition('ALL');
     setFilterPayment('ALL');
     setFilterDateFrom('');
     setFilterDateTo('');
     setCurrentPage(1);
   };
 
-  const handleReprint = (row: SaleHistoryRecord) => {
+  const handleReprint = (row: MobileSaleRecordRow) => {
     if (!isHydrated || !settings || !shopHeader) {
       toast.error('Printer settings not ready. Please try again in a moment.');
       return;
     }
 
-    setReprintingId(row.previewId);
+    setReprintingId(row.id);
     try {
-      const orderPayload: any = {
-        id: row.previewId,
-        orderNumber: `INV-${row.previewId.toUpperCase()}`,
-        invoiceNumber: `INV-${row.previewId.toUpperCase()}`,
+      const printOrder = {
+        invoiceNumber: row.invoiceNumber,
         createdAt: row.saleDateTime,
-        customerName: row.customerName || 'Walk-in Customer',
-        customerPhone: '—',
-        paymentMethod: row.paymentMethod.toLowerCase(),
+        customer: row.customerName
+          ? { name: row.customerName, phone: '—' }
+          : { name: 'Walk-In Customer' },
+        cashier: 'Cashier',
+        items: row.devices.length > 0
+          ? row.devices.map((d) => ({
+              name: `${d.brand} ${d.model}`,
+              qty: 1,
+              price: d.salePrice,
+              total: d.salePrice,
+              imei1: d.imei1,
+              imei2: d.imei2 || undefined,
+            }))
+          : [
+              {
+                name: `${row.brand} ${row.model}`,
+                qty: 1,
+                price: row.salePrice,
+                total: row.salePrice,
+                imei1: row.imei1,
+                imei2: row.imei2,
+              },
+            ],
         subtotal: row.salePrice,
         discount: row.discount,
-        grandTotal: row.grandTotal,
         total: row.grandTotal,
-        items: [
-          {
-            id: row.previewId,
-            lineType: 'MOBILE',
-            name: `${row.brand} ${row.model}`,
-            productName: `${row.brand} ${row.model}`,
-            specs: `${row.storage} / ${row.ram} · ${row.color}`,
-            imei: row.imei1,
-            imei1: row.imei1,
-            imei2: row.imei2,
-            condition: row.condition,
-            ptaStatus: row.ptaStatus,
-            quantity: 1,
-            unitPrice: row.salePrice,
-            salePrice: row.salePrice,
-            lineTotal: row.grandTotal,
-          },
-        ],
+        paymentBreakdown: row.payments.length > 0
+          ? row.payments.map((p) => ({
+              method: p.method,
+              amount: p.amount,
+              referenceNumber: p.referenceNumber,
+            }))
+          : [{ method: row.paymentMethod || 'Cash', amount: row.grandTotal }],
+        tendered: row.paidAmount,
+        change: row.changeAmount,
+        due: row.creditAmount,
       };
 
-      const html = printFormatter.formatMobileSaleInvoice(orderPayload, settings, shopHeader);
+      const effectiveShop = {
+        name: shopHeader?.name || 'Niazi Mobile Mart',
+        branchName: shopHeader?.branchName || row.branch || '',
+        address: shopHeader?.address || '',
+        phone: shopHeader?.phone || '',
+        secondaryPhone: (shopHeader as any)?.secondaryPhone || '',
+        whatsapp: (shopHeader as any)?.whatsapp || '',
+      };
+
+      const html = buildMobileSaleDualA4Html(printOrder as any, effectiveShop as any);
       openPreview({
         html,
         documentType: 'MobileSaleInvoice',
-        referenceId: orderPayload.orderNumber || 'preview-sale-invoice',
-        title: `Mobile Sale Invoice - ${orderPayload.orderNumber}`,
+        referenceId: row.invoiceNumber,
+        title: `Mobile Sale Invoice - ${row.invoiceNumber}`,
       });
     } catch (err: any) {
       toast.error(err?.message || 'Failed to generate print preview.');
@@ -356,7 +335,6 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
 
   const hasActiveFilters =
     searchQuery.trim() ||
-    filterCondition !== 'ALL' ||
     filterPayment !== 'ALL' ||
     filterDateFrom ||
     filterDateTo;
@@ -402,30 +380,19 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Preview badge */}
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-warning/10 border border-warning/30 rounded-lg self-start sm:self-auto">
-          <Info className="w-4 h-4 text-warning shrink-0" />
-          <span className="text-xs font-semibold text-warning">Frontend Preview — History Not Connected</span>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchSales}
+            disabled={isLoading}
+            className="flex items-center gap-1.5 text-xs font-semibold"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
         </div>
       </div>
-
-      {/* Preview notice */}
-      {isPreview && (
-        <div className="flex items-start gap-3 p-4 bg-warning/10 border border-warning/30 rounded-lg">
-          <Info className="w-5 h-5 text-warning shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold text-warning mb-1">
-              Frontend Preview — Sample Data Only
-            </p>
-            <p className="text-xs text-text-muted">
-              No mobile sale-history endpoint is connected yet. The rows below are typed sample
-              records for UI review purposes only. They do not represent real company sales, real
-              devices, real customers, or real financial transactions. Backend integration will be
-              authorised in a future phase.
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* Error */}
       {error && (
@@ -452,29 +419,18 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
             </button>
           )}
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {/* Search */}
           <div className="relative sm:col-span-2 lg:col-span-1">
             <Search className="w-3.5 h-3.5 text-text-muted absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
-              placeholder="Brand, model, IMEI, customer…"
+              placeholder="Invoice #, brand, model, IMEI, customer…"
               value={searchQuery}
               onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
               className="w-full pl-8 pr-3 py-2 text-sm bg-surface text-text-primary placeholder:text-text-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring"
             />
           </div>
-
-          {/* Condition */}
-          <select
-            value={filterCondition}
-            onChange={(e) => { setFilterCondition(e.target.value as 'ALL' | 'NEW' | 'USED'); setCurrentPage(1); }}
-            className="px-3 py-2 text-sm bg-surface text-text-primary border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring"
-          >
-            <option value="ALL">All conditions</option>
-            <option value="NEW">New</option>
-            <option value="USED">Used</option>
-          </select>
 
           {/* Payment */}
           <select
@@ -516,16 +472,14 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
         <div className="px-4 py-2.5 border-b border-border flex items-center justify-between">
           <p className="text-xs text-text-muted">
             Showing <strong className="text-text-primary">{filtered.length}</strong> sale{filtered.length !== 1 ? 's' : ''}
-            {isPreview && (
-              <span className="ml-2 px-1.5 py-0.5 bg-warning/10 text-warning text-xs rounded font-medium">
-                Sample Data
-              </span>
-            )}
           </p>
         </div>
 
         {isLoading ? (
-          <div className="text-center py-12 text-text-muted text-sm">Loading sale history…</div>
+          <div className="text-center py-12 text-text-muted text-sm flex items-center justify-center gap-2">
+            <RefreshCw className="w-4 h-4 animate-spin text-primary" />
+            Loading live sale history…
+          </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-16 px-4">
             <History className="w-10 h-10 mx-auto mb-3 text-text-muted opacity-30" />
@@ -536,8 +490,7 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
               </p>
             ) : (
               <p className="text-sm text-text-muted mb-4">
-                Sale history will appear here once mobile sales are processed and the backend
-                integration is connected.
+                No mobile sales have been processed yet. Sales processed in Mobile POS will appear here.
               </p>
             )}
             {hasActiveFilters && (
@@ -552,11 +505,10 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
               <thead>
                 <tr className="bg-surface-hover border-b border-border">
                   <th className="text-left px-4 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap">
-                    Date &amp; Time
-                    {isPreview && <span className="ml-1 text-warning opacity-70">*</span>}
+                    Invoice # / Date
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap">
-                    Device
+                    Device(s)
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap">
                     IMEI
@@ -568,16 +520,10 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
                     Branch
                   </th>
                   <th className="text-right px-4 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap">
-                    Price
-                  </th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap">
-                    Discount
-                  </th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap">
                     Total
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap">
-                    Payment
+                    Payment Breakdown
                   </th>
                   <th className="text-center px-4 py-3 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap">
                     Action
@@ -589,43 +535,66 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
                   const { date, time } = fmtDateTime(row.saleDateTime);
                   return (
                     <tr
-                      key={row.previewId}
+                      key={row.id}
                       className="hover:bg-surface-hover transition-colors"
                     >
-                      {/* Date + Time — always together in one cell */}
+                      {/* Invoice + Date */}
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <p className="font-medium text-text-primary">{date}</p>
-                        <p className="text-xs text-text-muted">{time}</p>
-                        {isPreview && (
-                          <p className="text-[10px] text-warning mt-0.5 font-medium">preview</p>
-                        )}
+                        <p className="font-bold text-text-primary font-mono text-xs text-primary">
+                          {row.invoiceNumber}
+                        </p>
+                        <p className="text-xs text-text-secondary mt-0.5">{date}</p>
+                        <p className="text-[11px] text-text-muted">{time}</p>
                       </td>
 
                       {/* Device */}
                       <td className="px-4 py-3">
-                        <p className="font-semibold text-text-primary whitespace-nowrap">
-                          {row.brand} {row.model}
-                        </p>
-                        <p className="text-xs text-text-muted whitespace-nowrap">
-                          {row.storage} / {row.ram} · {row.color}
-                        </p>
-                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                          <Badge variant={row.condition === 'NEW' ? 'success' : 'warning'} size="sm">
-                            {row.condition === 'NEW' ? 'New' : 'Used'}
-                          </Badge>
-                          {getPtaBadge(row.ptaStatus)}
-                        </div>
+                        {row.devices.length > 0 ? (
+                          row.devices.map((d, idx) => (
+                            <div key={idx} className="mb-1 last:mb-0">
+                              <p className="font-semibold text-text-primary whitespace-nowrap">
+                                {d.brand} {d.model}
+                              </p>
+                              <p className="text-xs text-text-muted whitespace-nowrap">
+                                Rs. {d.salePrice.toLocaleString()}
+                              </p>
+                            </div>
+                          ))
+                        ) : (
+                          <div>
+                            <p className="font-semibold text-text-primary whitespace-nowrap">
+                              {row.brand} {row.model}
+                            </p>
+                          </div>
+                        )}
                       </td>
 
                       {/* IMEI */}
                       <td className="px-4 py-3">
-                        <p className="text-xs font-mono text-text-secondary whitespace-nowrap">
-                          {row.imei1}
-                        </p>
-                        {row.imei2 && (
-                          <p className="text-xs font-mono text-text-muted whitespace-nowrap">
-                            {row.imei2}
-                          </p>
+                        {row.devices.length > 0 ? (
+                          row.devices.map((d, idx) => (
+                            <div key={idx} className="mb-1 last:mb-0">
+                              <p className="text-xs font-mono text-text-secondary whitespace-nowrap">
+                                {d.imei1}
+                              </p>
+                              {d.imei2 && (
+                                <p className="text-xs font-mono text-text-muted whitespace-nowrap">
+                                  {d.imei2}
+                                </p>
+                              )}
+                            </div>
+                          ))
+                        ) : (
+                          <div>
+                            <p className="text-xs font-mono text-text-secondary whitespace-nowrap">
+                              {row.imei1}
+                            </p>
+                            {row.imei2 && (
+                              <p className="text-xs font-mono text-text-muted whitespace-nowrap">
+                                {row.imei2}
+                              </p>
+                            )}
+                          </div>
                         )}
                       </td>
 
@@ -643,28 +612,28 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
                         <p className="text-text-secondary text-sm">{row.branch}</p>
                       </td>
 
-                      {/* Price */}
-                      <td className="px-4 py-3 text-right whitespace-nowrap">
-                        <p className="text-text-secondary">{fmtPKR(row.salePrice)}</p>
-                      </td>
-
-                      {/* Discount */}
-                      <td className="px-4 py-3 text-right whitespace-nowrap">
-                        {row.discount > 0 ? (
-                          <p className="text-warning font-medium">−{fmtPKR(row.discount)}</p>
-                        ) : (
-                          <p className="text-text-muted text-xs">—</p>
-                        )}
-                      </td>
-
                       {/* Total */}
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         <p className="font-bold text-primary">{fmtPKR(row.grandTotal)}</p>
+                        {row.discount > 0 && (
+                          <p className="text-xs text-warning">−{fmtPKR(row.discount)}</p>
+                        )}
                       </td>
 
-                      {/* Payment */}
+                      {/* Payment Breakdown */}
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <p className="text-text-secondary text-sm">{row.paymentMethod}</p>
+                        {row.payments.length > 0 ? (
+                          <div className="flex flex-col gap-0.5">
+                            {row.payments.map((p, idx) => (
+                              <span key={idx} className="text-xs text-text-secondary">
+                                <strong className="text-text-primary">{p.method}</strong>: Rs {p.amount.toLocaleString()}
+                                {p.referenceNumber ? ` (${p.referenceNumber})` : ''}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-text-secondary text-sm">{row.paymentMethod || 'Cash'}</p>
+                        )}
                       </td>
 
                       {/* Action */}
@@ -673,11 +642,11 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleReprint(row)}
-                          disabled={reprintingId === row.previewId}
+                          disabled={reprintingId === row.id}
                           className="text-xs text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 cursor-pointer font-medium"
-                          title="Reprint A4 Sale Invoice"
+                          title="Reprint A4 Dual-Copy Sale Invoice"
                         >
-                          <Printer className={`w-3.5 h-3.5 mr-1 ${reprintingId === row.previewId ? 'animate-spin' : ''}`} />
+                          <Printer className={`w-3.5 h-3.5 mr-1 ${reprintingId === row.id ? 'animate-spin' : ''}`} />
                           Reprint
                         </Button>
                       </td>
@@ -716,14 +685,6 @@ export const MobileSaleHistoryDashboard: React.FC = () => {
             </Button>
           </div>
         </div>
-      )}
-
-      {/* Preview footnote */}
-      {isPreview && filtered.length > 0 && (
-        <p className="text-xs text-text-muted text-center pb-2">
-          * Dates and times in this table are fabricated for UI review only and do not represent
-          real sales. This section is clearly labelled as a frontend preview throughout.
-        </p>
       )}
     </div>
   );

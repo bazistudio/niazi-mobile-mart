@@ -216,7 +216,11 @@ export const MobileSaleDashboard: React.FC = () => {
   const [saleNotes, setSaleNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [completedSaleResult, setCompletedSaleResult] = useState<any | null>(null);
-  const { settings: printerSettings, shopHeader } = usePrinterStore();
+  const { settings: printerSettings, shopHeader, fetchSettings } = usePrinterStore();
+
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
   const openPrintPreview = usePrintStore((s) => s.openPreview);
   const [showReview, setShowReview] = useState(false);
   const [actionNoticeModal, setActionNoticeModal] = useState<{
@@ -483,19 +487,28 @@ export const MobileSaleDashboard: React.FC = () => {
   const updateCartItemPrice = useCallback(
     (deviceId: string, raw: string) => {
       const num = raw === '' ? 0 : parseFloat(raw);
-      const isValid = !isNaN(num) && num >= 0;
+      const targetItem = cart.find((item) => item.device.id === deviceId);
+      const costPrice = targetItem ? (parseFloat(targetItem.device.cost_price ?? '0') || 0) : 0;
+      const isReturnBucket = targetItem?.bucket === 'RETURN';
+
+      let errorMsg: string | null = null;
+      if (isNaN(num) || num < 0) {
+        errorMsg = 'Invalid amount';
+      } else if (!isReturnBucket && costPrice > 0 && num <= costPrice) {
+        errorMsg = `Sale price must exceed purchase cost (Rs ${costPrice.toLocaleString()})`;
+      }
 
       setPriceErrors((prev) => {
         const next = { ...prev };
-        if (!isValid) {
-          next[`${deviceId}_salePrice`] = 'Invalid amount';
+        if (errorMsg) {
+          next[`${deviceId}_salePrice`] = errorMsg;
         } else {
           delete next[`${deviceId}_salePrice`];
         }
         return next;
       });
 
-      if (!isValid) return;
+      if (isNaN(num) || num < 0) return;
 
       setCart((prev) => {
         const nextCart = prev.map((item) =>
@@ -505,7 +518,7 @@ export const MobileSaleDashboard: React.FC = () => {
         return nextCart;
       });
     },
-    [syncDefaultPaymentToNetTotal]
+    [cart, syncDefaultPaymentToNetTotal]
   );
 
   // ── Separated Cart Buckets & Bill Totals (Matches CartTable.tsx & CartSummary.tsx) ──
@@ -624,16 +637,17 @@ export const MobileSaleDashboard: React.FC = () => {
 
       // Trigger unified thermal print document (Type 2: Mobile Sale Invoice)
       try {
-        const effectiveShop = shopHeader || {
-          name: activeShop?.name || "Niazi Mobile Mart",
-          branchName: activeShop?.name || "Main Branch",
-          address: (activeShop as any)?.address || "",
-          phone: (activeShop as any)?.phone || "",
-          whatsapp: "",
-          email: "",
-          taxNumber: "",
-          footerText: "Thank you for shopping with Niazi Mobile Mart!",
-          returnPolicy: "Mobile handsets once sold are covered by check warranty as per invoice terms.",
+        const effectiveShop = {
+          name: shopHeader?.name || activeShop?.name || "Niazi Mobile Mart",
+          branchName: shopHeader?.branchName || activeShop?.name || "Main Branch",
+          address: shopHeader?.address || (activeShop as any)?.address || "",
+          phone: shopHeader?.phone || (activeShop as any)?.phone || "",
+          secondaryPhone: shopHeader?.secondaryPhone || "",
+          whatsapp: shopHeader?.whatsapp || "",
+          email: shopHeader?.email || "",
+          taxNumber: shopHeader?.taxNumber || "",
+          footerText: shopHeader?.footerText || "Thank you for shopping with Niazi Mobile Mart!",
+          returnPolicy: shopHeader?.returnPolicy || "Mobile handsets once sold are covered by check warranty as per invoice terms.",
         };
 
         const effectiveSettings = printerSettings || {

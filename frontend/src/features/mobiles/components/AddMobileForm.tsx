@@ -515,9 +515,9 @@ export const AddMobileForm: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutsideSeller);
   }, []);
 
-  // Auto-fetch next Sr No when branch or condition changes (USED only)
+  // Auto-fetch next Sr No when branch changes (active for both NEW and USED)
   useEffect(() => {
-    if (!isUsed || !branchId) {
+    if (!branchId) {
       setNextSrNo(null);
       return;
     }
@@ -538,7 +538,7 @@ export const AddMobileForm: React.FC = () => {
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId, isUsed]);
+  }, [branchId]);
 
   const handleAutofillSeller = (s: SellerSearchResult) => {
     setFormData((prev) => ({
@@ -744,9 +744,27 @@ export const AddMobileForm: React.FC = () => {
         }
       }
 
-      setTimeout(() => {
-        navigate('/dashboard/shop-admin/mobiles');
-      }, shouldPrint ? 1500 : 700);
+      // Reset IMEI, serial, and defect notes for next entry while preserving brand/model/supplier context
+      setFormData((prev) => ({
+        ...prev,
+        specs: {
+          ...prev.specs,
+          imei1: '',
+          imei2: '',
+          serialNumber: '',
+        },
+        inspection: {
+          ...prev.inspection,
+          defectNotes: '',
+        },
+      }));
+
+      // Refresh next sequential Sr No for the next mobile
+      if (branchId) {
+        mobileApi.getNextSrNo(branchId).then((nextRes) => {
+          setNextSrNo(nextRes.next_sr_no);
+        }).catch(() => {});
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to register mobile device. Please try again.';
       setSubmitError(msg);
@@ -774,9 +792,20 @@ export const AddMobileForm: React.FC = () => {
           <span>Back to Mobile Inventory</span>
         </button>
 
-        <Badge variant="primary" size="sm">
-          Live System — Serialized Inventory
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant="primary" size="sm">
+            Live System — Serialized Inventory
+          </Badge>
+          <button
+            type="button"
+            onClick={() => navigate('/dashboard/shop-admin/mobiles')}
+            className="p-1.5 text-text-muted hover:text-text-primary hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
+            title="Close and Return to Inventory"
+            aria-label="Close form"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
       {/* Page Title & Context */}

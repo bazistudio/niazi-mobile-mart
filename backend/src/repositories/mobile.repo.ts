@@ -685,6 +685,13 @@ export class MobileRepo {
         }
       }
 
+      // Auto-assign serial_number for NEW devices if omitted or empty
+      if (input.condition === 'NEW') {
+        if (!input.serial_number || input.serial_number.trim() === '') {
+          input.serial_number = await this.getNextVoucherNumber(input.branch_id, client);
+        }
+      }
+
       // ── Supplier active-status check (NEW + supplier_id provided) ──────────
       if (input.condition === 'NEW' && input.supplier_id) {
         const supResult = await client.query<{ is_active: number | boolean }>(
@@ -1427,6 +1434,17 @@ export class MobileRepo {
           input.device_id,
         ]
       );
+
+      // Update cost_price directly for NEW devices when purchase_price or cost_price is updated
+      if (device.condition === 'NEW' && input.purchase_price !== undefined) {
+        await client.query(
+          `UPDATE mobile_devices
+           SET cost_price = $1,
+               updated_at = $2
+           WHERE id = $3`,
+          [String(input.purchase_price), now, input.device_id]
+        );
+      }
 
       // USED-device paperwork fields (only update when supplied and device is USED)
       if (device.condition === 'USED' && (input.purchase_date !== undefined || input.purchase_price !== undefined)) {
@@ -2304,16 +2322,13 @@ export class MobileRepo {
     const result = await client.query<{ next_no: string }>(
       `SELECT (
          COALESCE(
-           MAX(
-             CASE WHEN voucher_no ~ '^[0-9]+$'
-             THEN voucher_no::BIGINT
-             ELSE 0 END
+           GREATEST(
+             (SELECT MAX(CASE WHEN voucher_no ~ '^[0-9]+$' THEN voucher_no::BIGINT ELSE 0 END) FROM mobile_purchase_paperwork WHERE branch_id = $1),
+             (SELECT MAX(CASE WHEN serial_number ~ '^[0-9]+$' THEN serial_number::BIGINT ELSE 0 END) FROM mobile_devices WHERE branch_id = $1)
            ),
            1000
          ) + 1
-       )::TEXT AS next_no
-       FROM mobile_purchase_paperwork
-       WHERE branch_id = $1`,
+       )::TEXT AS next_no`,
       [branchId]
     );
 

@@ -215,6 +215,8 @@ export const EditMobileModal: React.FC<EditMobileModalProps> = ({
         setSellerCnic(p.paperwork.seller?.seller_cnic ?? p.paperwork.seller?.seller_cnic_masked ?? '');
         setSellerPhone(p.paperwork.seller?.seller_phone ?? '');
         setSellerAddress(p.paperwork.seller?.seller_address ?? '');
+      } else if (p.device.cost_price) {
+        setPurchasePrice(parseFloat(p.device.cost_price).toString());
       }
       if (p.inspection) {
         setBodyGrade(p.inspection.body_grade ?? '');
@@ -285,7 +287,7 @@ export const EditMobileModal: React.FC<EditMobileModalProps> = ({
         expected_sale_price: expectedSalePrice ? parseFloat(expectedSalePrice) : null,
         notes: notes.trim() || null,
         ...(profile.device.condition === 'USED' && purchaseDate ? { purchase_date: purchaseDate } : {}),
-        ...(profile.device.condition === 'USED' && purchasePrice ? { purchase_price: parseFloat(purchasePrice) } : {}),
+        ...(purchasePrice ? { purchase_price: parseFloat(purchasePrice) } : {}),
         ...(bodyGrade ? { body_grade: bodyGrade } : {}),
         ...(screenCondition ? { screen_condition: screenCondition } : {}),
         ...(batteryHealth !== '' ? { battery_health_percent: batteryHealth ? parseFloat(batteryHealth) : null } : {}),
@@ -612,8 +614,8 @@ export const EditMobileModal: React.FC<EditMobileModalProps> = ({
               ══════════════════════════════════════════ */}
               <div className="flex flex-col gap-2.5 p-5 flex-1 overflow-hidden">
 
-                {/* Purchase Paperwork (USED only) */}
-                {isUsed && profile?.paperwork && (
+                {/* Purchase Details / Paperwork */}
+                {isUsed && profile?.paperwork ? (
                   <>
                     <SectionHead title="Purchase Paperwork" />
                     <div className="grid grid-cols-2 gap-2.5">
@@ -627,6 +629,18 @@ export const EditMobileModal: React.FC<EditMobileModalProps> = ({
                         <input type="number" min="0" step="1" value={purchasePrice}
                           onChange={(e) => setPurchasePrice(e.target.value)}
                           className={inputCls} placeholder="Optional" />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <SectionHead title="Purchase Cost" />
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <Lbl text="Cost / Purchase Price (Rs.)" hint="cost" />
+                        <input type="number" min="0" step="1" value={purchasePrice}
+                          onChange={(e) => setPurchasePrice(e.target.value)}
+                          className={inputCls} placeholder="Purchase Cost" />
                       </div>
                     </div>
                   </>

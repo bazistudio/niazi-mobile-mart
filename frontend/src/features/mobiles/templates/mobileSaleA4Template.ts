@@ -50,6 +50,7 @@ export interface MobileSalePrintShop {
   branchName?: string;
   address?: string;
   phone?: string;
+  secondaryPhone?: string;
   whatsapp?: string;
   email?: string;
 }
@@ -93,7 +94,15 @@ function renderSingleInvoiceColumn(
   const shopName = esc(shop.name || 'Niazi Mobile Mart');
   const branchName = esc(shop.branchName || 'Main Branch');
   const shopAddress = esc(shop.address || '');
-  const shopPhone = esc(shop.phone || shop.whatsapp || '');
+  const shopPhone = esc(shop.phone || '');
+  const shopSecondaryPhone = esc(shop.secondaryPhone || '');
+  const shopWhatsapp = esc(shop.whatsapp || '');
+
+  const contactParts: string[] = [];
+  if (shopPhone) contactParts.push(`Phone: <strong>${shopPhone}</strong>`);
+  if (shopSecondaryPhone) contactParts.push(`Alt: <strong>${shopSecondaryPhone}</strong>`);
+  if (shopWhatsapp) contactParts.push(`WhatsApp: <strong>${shopWhatsapp}</strong>`);
+  const contactLine = contactParts.join(' &bull; ');
 
   const invoiceNo = esc(order.invoiceNumber);
   const formattedDate = fmtDate(order.createdAt);
@@ -115,7 +124,7 @@ function renderSingleInvoiceColumn(
             <td style="width: 58%; vertical-align: top;">
               <div class="shop-title">${shopName}</div>
               <div class="shop-sub">${branchName}${shopAddress ? ' &bull; ' + shopAddress : ''}</div>
-              ${shopPhone ? `<div class="shop-sub">Contact: <strong>${shopPhone}</strong></div>` : ''}
+              ${contactLine ? `<div class="shop-sub">${contactLine}</div>` : ''}
             </td>
             <td style="width: 42%; text-align: right; vertical-align: top;">
               <div class="copy-badge">${esc(copyLabel)}</div>

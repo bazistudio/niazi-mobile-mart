@@ -753,4 +753,54 @@ export const mobileApi = {
     return httpClient.get(`/api/mobiles/transfers${qs ? `?${qs}` : ''}`);
   },
 
+  /**
+   * List mobile device sales history.
+   */
+  getMobileSalesHistory: async (
+    params: { branch_id?: string; page?: number; limit?: number; search?: string } = {}
+  ): Promise<{
+    sales: Array<{
+      id: string;
+      invoice_number: string;
+      branch_id: string;
+      branch_name: string;
+      customer_id: string | null;
+      customer_name_snapshot: string | null;
+      subtotal: number;
+      discount: number;
+      totalAmount: number;
+      paidAmount: number;
+      changeAmount: number;
+      payment_status: string;
+      created_at: string;
+      cashier_name: string | null;
+      devices: Array<{
+        deviceId: string;
+        brand: string;
+        model: string;
+        imei1: string;
+        imei2: string | null;
+        salePrice: number;
+        costPrice: number;
+      }>;
+      payments: Array<{
+        id: string;
+        method: string;
+        amount: number;
+        referenceNumber?: string | null;
+        notes?: string | null;
+      }>;
+    }>;
+    total: number;
+    page: number;
+    limit: number;
+  }> => {
+    const searchParams = new URLSearchParams();
+    if (params.branch_id) searchParams.set('branch_id', params.branch_id);
+    if (params.page) searchParams.set('page', String(params.page));
+    if (params.limit) searchParams.set('limit', String(params.limit));
+    if (params.search) searchParams.set('search', params.search);
+    const qs = searchParams.toString();
+    return httpClient.get(`/api/mobiles/sales${qs ? `?${qs}` : ''}`);
+  },
 };

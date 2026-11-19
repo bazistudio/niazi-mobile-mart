@@ -493,16 +493,13 @@ export function buildMobileRouter(pool: Pool): Router {
       const result = await pool.query<{ next_no: string }>(
         `SELECT (
            COALESCE(
-             MAX(
-               CASE WHEN voucher_no ~ '^[0-9]+$'
-               THEN voucher_no::BIGINT
-               ELSE 0 END
+             GREATEST(
+               (SELECT MAX(CASE WHEN voucher_no ~ '^[0-9]+$' THEN voucher_no::BIGINT ELSE 0 END) FROM mobile_purchase_paperwork WHERE branch_id = $1),
+               (SELECT MAX(CASE WHEN serial_number ~ '^[0-9]+$' THEN serial_number::BIGINT ELSE 0 END) FROM mobile_devices WHERE branch_id = $1)
              ),
              1000
            ) + 1
-         )::TEXT AS next_no
-         FROM mobile_purchase_paperwork
-         WHERE branch_id = $1`,
+         )::TEXT AS next_no`,
         [branchId]
       );
       const next_sr_no = result.rows[0]?.next_no ?? '1001';
@@ -670,6 +667,114 @@ export function buildMobileRouter(pool: Pool): Router {
       }
       const message = err instanceof Error ? err.message : 'Failed to complete mobile sale';
       res.status(500).json({ error: message });
+    }
+  });
+
+  // ── GET /api/mobiles/sales ───────────────────────────────────────────────
+  // Dedicated Mobile Sales History endpoint
+  router.get('/sales', async (req: Request, res: Response) => {
+    if (!requireInventoryView(req, res)) return;
+
+    const identity = req.identity!;
+    const branchId = await resolveReadBranchId(identity, req.query.branch_id, res);
+    if (branchId === undefined) return;
+
+    try {
+      const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+      const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit || '50'), 10) || 50));
+      const offset = (page - 1) * limit;
+
+      const params: unknown[] = [identity.organization_id];
+      let whereClause = `WHERE s.sale_status = 'COMPLETED' AND msi.organization_id = $1`;
+      let paramIdx = 2;
+
+      if (branchId) {
+        whereClause += ` AND s.branch_id = $${paramIdx++}`;
+        params.push(branchId);
+      }
+
+      if (req.query.search && typeof req.query.search === 'string' && req.query.search.trim()) {
+        const q = `%${req.query.search.trim().toLowerCase()}%`;
+        whereClause += ` AND (LOWER(msi.brand_snapshot) LIKE $${paramIdx} OR LOWER(msi.model_snapshot) LIKE $${paramIdx} OR msi.imei1_snapshot LIKE $${paramIdx} OR LOWER(COALESCE(s.customer_name_snapshot, '')) LIKE $${paramIdx})`;
+        params.push(q);
+        paramIdx++;
+      }
+
+      const totalRes = await pool.query<{ total: string }>(
+        `SELECT COUNT(DISTINCT s.id) AS total
+         FROM sales s
+         INNER JOIN mobile_sale_items msi ON msi.sale_id = s.id
+         ${whereClause}`,
+        params
+      );
+      const total = parseInt(totalRes.rows[0]?.total || '0', 10);
+
+      const salesRes = await pool.query(
+        `SELECT s.id, s.invoice_number, s.branch_id, b.name as branch_name, s.customer_id, s.customer_name_snapshot,
+                s.subtotal, s.discount, s.total_amount, s.paid_amount, s.change_amount, s.payment_status,
+                s.created_at, u.name as cashier_name,
+                COALESCE(
+                  json_agg(
+                    json_build_object(
+                      'deviceId', msi.device_id,
+                      'brand', msi.brand_snapshot,
+                      'model', msi.model_snapshot,
+                      'imei1', msi.imei1_snapshot,
+                      'imei2', msi.imei2_snapshot,
+                      'salePrice', msi.sale_price,
+                      'costPrice', msi.cost_price_snapshot
+                    )
+                  ) FILTER (WHERE msi.id IS NOT NULL), '[]'
+                ) AS devices
+         FROM sales s
+         INNER JOIN mobile_sale_items msi ON msi.sale_id = s.id
+         LEFT JOIN branches b ON b.id = s.branch_id
+         LEFT JOIN users u ON u.id = s.performed_by
+         ${whereClause}
+         GROUP BY s.id, s.invoice_number, s.branch_id, b.name, s.customer_id, s.customer_name_snapshot,
+                  s.subtotal, s.discount, s.total_amount, s.paid_amount, s.change_amount, s.payment_status,
+                  s.created_at, u.name
+         ORDER BY s.created_at DESC
+         LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
+        [...params, limit, offset]
+      );
+
+      // Attach payments breakdown for each sale
+      const salesWithPayments = await Promise.all(
+        salesRes.rows.map(async (row) => {
+          const paymentsRes = await pool.query(
+            `SELECT id, payment_method, amount, reference_number, notes
+             FROM sale_payments
+             WHERE sale_id = $1
+             ORDER BY created_at ASC, id ASC`,
+            [row.id]
+          );
+          return {
+            ...row,
+            subtotal: Number(row.subtotal),
+            discount: Number(row.discount),
+            totalAmount: Number(row.total_amount),
+            paidAmount: Number(row.paid_amount),
+            changeAmount: Number(row.change_amount),
+            payments: paymentsRes.rows.map((p) => ({
+              id: p.id,
+              method: p.payment_method,
+              amount: Number(p.amount),
+              referenceNumber: p.reference_number,
+              notes: p.notes,
+            })),
+          };
+        })
+      );
+
+      res.status(200).json({
+        sales: salesWithPayments,
+        total,
+        page,
+        limit,
+      });
+    } catch (err) {
+      handleMobileError(res, err, 'list-mobile-sales');
     }
   });
 
