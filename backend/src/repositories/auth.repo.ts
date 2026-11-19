@@ -88,7 +88,10 @@ export function defaultLimitsForRole(role: string): StaffOperationalLimits {
   if (r === 'SHOP_ADMIN' || r === 'SHOPADMIN') {
     return { max_discount_percent: 25.0, can_price_override: true, can_refund: true, can_void_sale: true, can_view_profit: true };
   }
-  // All other roles: conservative defaults (mirrors cashier/salesman/manager/staff)
+  if (r === 'MANAGER' || r === 'CASHIER' || r === 'SALESMAN') {
+    return { max_discount_percent: 0.0, can_price_override: false, can_refund: true, can_void_sale: false, can_view_profit: false };
+  }
+  // All other roles (STAFF, ACCOUNTANT, REPAIR_MECHANIC, etc.): conservative defaults
   return { max_discount_percent: 0.0, can_price_override: false, can_refund: false, can_void_sale: false, can_view_profit: false };
 }
 

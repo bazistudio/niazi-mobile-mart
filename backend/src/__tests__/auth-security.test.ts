@@ -39,6 +39,7 @@ import {
 import { UsersRepo } from '../repositories/users.repo.js';
 import { AuthRepo } from '../repositories/auth.repo.js';
 import type { AtomicLockoutResult } from '../repositories/auth.repo.js';
+import { loadAndEnforceTestEnvironment } from './test-db-guard.js';
 
 // ─── Environment bootstrap ────────────────────────────────────────────────────
 
@@ -58,17 +59,11 @@ for (const p of pubCandidates) {
   if (fs.existsSync(p)) { process.env['JWT_PUBLIC_KEY'] = fs.readFileSync(p, 'utf8'); break; }
 }
 
-const envPath = path.join(process.cwd(), '.env');
-if (fs.existsSync(envPath) && !process.env['DATABASE_URL']) {
-  const lines = fs.readFileSync(envPath, 'utf8').split('\n');
-  for (const line of lines) {
-    const m = line.match(/^([A-Z_]+)\s*=\s*(.+)$/);
-    if (m) process.env[m[1]] = m[2].trim().replace(/^["']|["']$/g, '');
-  }
-}
-
-const DATABASE_URL = process.env['DATABASE_URL'];
-const SKIP_DB = !DATABASE_URL;
+// Enforce strict isolated test database: loads .env.test.local if present,
+// and asserts that DATABASE_URL points strictly to 127.0.0.1:5432/niazi_mobile_mart_test.
+// Never falls back to backend/.env or development database.
+const DATABASE_URL = loadAndEnforceTestEnvironment();
+const SKIP_DB = false;
 
 // ─── Test fixtures ────────────────────────────────────────────────────────────
 

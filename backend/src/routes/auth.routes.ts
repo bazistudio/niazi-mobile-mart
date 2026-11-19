@@ -29,7 +29,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 import rateLimit from 'express-rate-limit';
-import { timingSafeEqual } from 'crypto';
+import { timingSafeEqual, randomBytes } from 'crypto';
 import { AuthRepo, defaultLimitsForRole } from '../repositories/auth.repo';
 import { UsersRepo } from '../repositories/users.repo';
 import { AuthService, AuthServiceError } from '../services/auth.service';
@@ -111,6 +111,60 @@ function constantTimeEqual(a: string, b: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Validates password complexity against the Niazi Mobile Mart password policy:
+ * - Minimum 8 characters
+ * - At least one uppercase letter (A-Z)
+ * - At least one lowercase letter (a-z)
+ * - At least one numeric digit (0-9)
+ * - At least one special/symbol character
+ */
+function validatePasswordComplexity(password: string): { valid: boolean; error?: string } {
+  if (typeof password !== 'string') {
+    return { valid: false, error: 'Password must be a string' };
+  }
+  if (password.length < 8) {
+    return { valid: false, error: 'Password must be at least 8 characters long' };
+  }
+  if (!/[A-Z]/.test(password)) {
+    return { valid: false, error: 'Password must contain at least one uppercase letter' };
+  }
+  if (!/[a-z]/.test(password)) {
+    return { valid: false, error: 'Password must contain at least one lowercase letter' };
+  }
+  if (!/[0-9]/.test(password)) {
+    return { valid: false, error: 'Password must contain at least one number' };
+  }
+  if (!/[^A-Za-z0-9]/.test(password)) {
+    return { valid: false, error: 'Password must contain at least one symbol or special character' };
+  }
+  return { valid: true };
+}
+
+/**
+ * Generates a cryptographically secure random recovery key formatted as NZRCV-XXXX-XXXX-XXXX-XXXX
+ * Uses the exact Base32 unambiguous uppercase alphanumeric charset (32 chars) matching src-tauri/src/services/admin_service.rs.
+ * Uses rejection sampling on crypto.randomBytes to ensure perfectly uniform, unbiased character distribution.
+ */
+function generateSecureRecoveryKey(): string {
+  const CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32 chars: 2^5 = 32 (perfect power of 2, 0-31 range unbiased with mask 0x1F)
+  const chunks: string[] = [];
+
+  for (let c = 0; c < 4; c++) {
+    let chunk = '';
+    while (chunk.length < 4) {
+      const bytes = randomBytes(8);
+      for (let i = 0; i < bytes.length && chunk.length < 4; i++) {
+        const val = bytes[i] & 0x1f; // 0..31 uniformly mapped
+        chunk += CHARSET[val];
+      }
+    }
+    chunks.push(chunk);
+  }
+
+  return `NZRCV-${chunks.join('-')}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +324,139 @@ export function buildAuthRouter(pool: Pool): Router {
       res.status(200).json({ success: true, message: 'Administrator password verified successfully' });
     } catch (err) {
       console.error('[auth/verify-admin-password] Unexpected error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /admin-recovery-key/generate
+  //
+  // Generates a dedicated one-time recovery key (NZRCV-XXXX-XXXX-XXXX-XXXX) for the
+  // authenticated Organization Admin upon successful verification of their 4-digit PIN.
+  //
+  // SECURITY:
+  //   - Strict authentication required (buildAuthMiddleware).
+  //   - Strict canonical Organization Admin check via isOrgAdmin(identity).
+  //   - Strictly bound to req.identity.user_id and req.identity.organization_id.
+  //   - Validates that PIN is exactly four numeric digits.
+  //   - Checks existing atomic PIN lockout before verification.
+  //   - On PIN failure, triggers atomic recordFailedPinAtomic lockout counter.
+  //   - Cryptographically random, unbiased key generated using crypto.randomBytes.
+  //   - Only the Argon2id hash is persisted in users.recovery_key_hash.
+  //   - Plaintext recovery key is returned once in response, never logged.
+  // -------------------------------------------------------------------------
+
+  router.post('/admin-recovery-key/generate', buildAuthMiddleware(pool), async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity;
+    if (!identity) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    if (!isOrgAdmin(identity)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Only Organization Administrators can generate an emergency recovery key' });
+      return;
+    }
+
+    const { pin } = req.body as Record<string, unknown>;
+    if (typeof pin !== 'string' || !/^\d{4}$/.test(pin.trim())) {
+      res.status(400).json({ error: 'INVALID_PIN_FORMAT', message: 'PIN must be exactly 4 numeric digits' });
+      return;
+    }
+
+    const cleanPin = pin.trim();
+    const sourceIp = req.ip ?? 'unknown';
+
+    try {
+      const adminUser = await authRepo.findById(identity.user_id);
+      if (!adminUser) {
+        res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Administrator record not found' });
+        return;
+      }
+
+      // Check current PIN lockout status
+      const now = Date.now();
+      if (adminUser.pin_locked_until_ms !== null) {
+        const lockedUntil = parseInt(adminUser.pin_locked_until_ms, 10);
+        if (!isNaN(lockedUntil) && lockedUntil > now) {
+          const retryAfterMs = Math.max(0, lockedUntil - now);
+          res.status(429).json({
+            error: 'LOCKED_OUT',
+            message: 'PIN entry is locked due to repeated failed attempts. Please try again later.',
+            retryAfterMs,
+          });
+          return;
+        } else {
+          // Lockout expired: reset lockout state
+          await authRepo.resetPinLockout(adminUser.id);
+          adminUser.failed_pin_attempts = 0;
+          adminUser.pin_locked_until_ms = null;
+        }
+      }
+
+      // Verify that admin has a configured PIN
+      if (!adminUser.pin_hash || adminUser.pin_hash.trim() === '') {
+        res.status(400).json({
+          error: 'NO_PIN_CONFIGURED',
+          message: 'No PIN is configured for this administrator account.',
+        });
+        return;
+      }
+
+      // Verify PIN with Argon2id
+      const pinMatches = await verifyArgon2(cleanPin, adminUser.pin_hash);
+
+      if (!pinMatches) {
+        // Record failed attempt atomically
+        const { attempts, lockedUntilMs } = await authRepo.recordFailedPinAtomic(adminUser.id, 5, 300_000);
+        console.warn(`[auth/admin-recovery-key/generate] Failed PIN attempt for admin "${adminUser.username}" (${attempts}/5) from IP ${sourceIp}`);
+
+        if (lockedUntilMs !== null) {
+          const lockedUntil = parseInt(lockedUntilMs, 10);
+          const retryAfterMs = isNaN(lockedUntil) ? 300_000 : Math.max(0, lockedUntil - now);
+          res.status(429).json({
+            error: 'LOCKED_OUT',
+            message: 'Terminal PIN locked for 5 minutes due to repeated failed attempts.',
+            retryAfterMs,
+          });
+          return;
+        }
+
+        res.status(401).json({
+          error: 'INVALID_CREDENTIALS',
+          message: 'Incorrect administrator PIN',
+        });
+        return;
+      }
+
+      // Successful PIN verification: reset failed PIN counters
+      await authRepo.resetPinLockout(adminUser.id);
+
+      // Generate cryptographically secure recovery key: NZRCV-XXXX-XXXX-XXXX-XXXX
+      const plaintextRecoveryKey = generateSecureRecoveryKey();
+
+      // Hash key with Argon2id
+      const recoveryKeyHash = await hashArgon2(plaintextRecoveryKey);
+
+      // Atomically persist recovery key hash
+      const updated = await usersRepo.setRecoveryKey(adminUser.id, recoveryKeyHash);
+      if (!updated) {
+        console.error(`[auth/admin-recovery-key/generate] Failed to persist recovery key hash for admin "${adminUser.username}"`);
+        res.status(500).json({ error: 'Failed to persist recovery key' });
+        return;
+      }
+
+      console.warn(
+        `[auth/admin-recovery-key/generate] SUCCESS: Emergency recovery key generated for admin "${adminUser.username}" from IP ${sourceIp}`
+      );
+
+      res.status(200).json({
+        success: true,
+        recoveryKey: plaintextRecoveryKey,
+        message: 'Recovery key generated successfully. Store it in a secure location; it will not be shown again.',
+      });
+    } catch (err) {
+      console.error('[auth/admin-recovery-key/generate] Unexpected error:', err);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
@@ -477,11 +664,18 @@ export function buildAuthRouter(pool: Pool): Router {
 
     const cleanKey = recovery_key.trim();
 
-    if (typeof new_password !== 'string' || new_password.length < 6) {
-      res.status(400).json({ error: 'new_password must be at least 6 characters' });
+    if (typeof new_password !== 'string') {
+      res.status(400).json({ error: 'new_password must be a string' });
       return;
     }
 
+    const passwordValidation = validatePasswordComplexity(new_password);
+    if (!passwordValidation.valid) {
+      res.status(400).json({ error: passwordValidation.error || 'Password does not meet complexity requirements' });
+      return;
+    }
+
+    const cleanNewPassword = new_password.trim();
     const sourceIp = req.ip ?? 'unknown';
 
     try {
@@ -508,7 +702,7 @@ export function buildAuthRouter(pool: Pool): Router {
 
       if (matchedAdmin) {
         // Hash the new password
-        const newHash = await hashArgon2(new_password.trim());
+        const newHash = await hashArgon2(cleanNewPassword);
 
         // Atomically consume the one-time key and set the new password
         const consumed = await authRepo.consumeRecoveryKeyAndResetPassword(matchedAdmin.id, newHash);
@@ -548,7 +742,19 @@ export function buildAuthRouter(pool: Pool): Router {
           return;
         }
 
-        const newHash = await hashArgon2(new_password.trim());
+        // SEC-2A1-M01: Enforce canonical ADMIN role on database user record.
+        // Emergency system recovery key must only be permitted to reset Organization Admin accounts.
+        // Staff accounts (CASHIER, TECHNICIAN, MANAGER, SHOP_ADMIN), legacy aliases (SUPER_ADMIN, OWNER),
+        // or any non-ADMIN role must be rejected without mutating credentials.
+        if (String(user.role || '').trim().toUpperCase() !== 'ADMIN') {
+          console.warn(
+            `[auth/admin-recovery] FORBIDDEN: Env recovery attempted on non-ADMIN user "${user.username}" (role="${user.role}") from IP ${sourceIp}`
+          );
+          res.status(403).json({ error: 'FORBIDDEN', message: 'System emergency recovery key may only reset Organization Administrator accounts.' });
+          return;
+        }
+
+        const newHash = await hashArgon2(cleanNewPassword);
         await authRepo.atomicPasswordReset(user.id, newHash, true);
 
         console.warn(`[auth/admin-recovery] SUCCESS: env recovery key used for user "${user.username}" from IP ${sourceIp}`);

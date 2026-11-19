@@ -171,13 +171,13 @@ export function getProfileForRole(role: string): AccessProfile {
     case 'CASHIER':
       return {
         allowed_pages: ['dashboard', 'pos', 'products', 'sales', 'customers', 'parties'],
-        allowed_actions: ['pos:sale', 'pos:hold', 'order:create', 'order:read', 'cash:open', 'cash:close'],
+        allowed_actions: ['pos:sale', 'pos:hold', 'pos:refund', 'order:create', 'order:read', 'cash:open', 'cash:close'],
         limits,
       };
     case 'SALESMAN':
       return {
         allowed_pages: ['dashboard', 'pos', 'products', 'sales', 'customers', 'parties'],
-        allowed_actions: ['pos:sale', 'pos:hold', 'order:create', 'order:read'],
+        allowed_actions: ['pos:sale', 'pos:hold', 'pos:refund', 'order:create', 'order:read'],
         limits,
       };
     case 'MANAGER':
@@ -194,7 +194,7 @@ export function getProfileForRole(role: string): AccessProfile {
           'repairs',
           'reports',
         ],
-        allowed_actions: ['pos:sale', 'pos:hold', 'order:create', 'order:read'],
+        allowed_actions: ['pos:refund', 'pos:sale', 'pos:hold', 'order:create', 'order:read'],
         limits,
       };
     case 'ACCOUNTANT':
