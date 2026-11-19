@@ -1,0 +1,18 @@
+{
+  "name": "@niazi-ai/core",
+  "version": "0.1.0",
+  "description": "Orchestration, task-based routing, and failover engine for Niazi AI Assistant",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@niazi-ai/types": "*",
+    "@niazi-ai/config": "*",
+    "@niazi-ai/providers": "*"
+  }
+}
+

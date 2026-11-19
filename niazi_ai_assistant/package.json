@@ -1,0 +1,27 @@
+{
+  "name": "niazi-ai-assistant",
+  "version": "0.1.0",
+  "description": "Independent, modular AI orchestration platform for Niazi Mobile Mart",
+  "type": "module",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "imports": {
+    "@niazi-ai/types": "./packages/ai-types/dist/index.js",
+    "@niazi-ai/config": "./packages/ai-config/dist/index.js",
+    "@niazi-ai/providers": "./packages/ai-providers/dist/index.js",
+    "@niazi-ai/core": "./packages/ai-core/dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "node --test tests/**/*.test.js",
+    "clean": "rimraf packages/*/dist"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}
+

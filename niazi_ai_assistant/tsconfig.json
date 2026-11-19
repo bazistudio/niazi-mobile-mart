@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "composite": true,
+    "paths": {
+      "@niazi-ai/types": ["./packages/ai-types/src/index.ts"],
+      "@niazi-ai/config": ["./packages/ai-config/src/index.ts"],
+      "@niazi-ai/providers": ["./packages/ai-providers/src/index.ts"],
+      "@niazi-ai/core": ["./packages/ai-core/src/index.ts"]
+    }
+  },
+  "files": [],
+  "references": [
+    { "path": "packages/ai-types" },
+    { "path": "packages/ai-config" },
+    { "path": "packages/ai-providers" },
+    { "path": "packages/ai-core" }
+  ],
+  "exclude": ["node_modules", "dist", "coverage"]
+}

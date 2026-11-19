@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "composite": true,
+    "paths": {
+      "@niazi-ai/types": ["../ai-types/src/index.ts"]
+    }
+  },
+  "references": [
+    { "path": "../ai-types" }
+  ],
+  "include": ["src/**/*"]
+}
