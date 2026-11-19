@@ -1,64 +1,42 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
-import { DollarSign, TrendingUp, CreditCard, Receipt, Package, RefreshCw } from 'lucide-react';
-import { KPIGrid } from '@/components/kpi/KPIGrid';
-import { KPIData } from '@/types/dashboard/kpi.types';
-import { HourlySalesChart, HourlySalesData } from '../HourlySalesChart';
-import { CategorySalesDistribution, CategorySalesData } from '../CategorySalesDistribution';
-import { AiRecommendations } from '../AiRecommendations';
-import { StockWidget } from '@/features/inventory/stock/StockWidget';
-import { DailySalesModal } from './DailySalesModal';
-
-import { useQuery } from '@tanstack/react-query';
-import { dashboardApi } from '@/services/dashboard.api';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import { queryKeys } from '@/lib/react-query/queryKeys';
+import { Receipt } from 'lucide-react';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
-import { expensesApi } from '@/services/expenses.api';
-import { ExpenseSummary } from '@/lib/tauri/tauriClient';
-import { ReceiptText, Wallet, Ban } from 'lucide-react';
+import { DailySalesModal } from './DailySalesModal';
+import { useCommandCenterData } from '@/features/organization/hooks/useCommandCenterData';
+import {
+  getPktTodayDateStr,
+  resolveDateRange,
+  type DashboardDatePreset,
+} from '@/features/organization/utils/dashboardDates';
+import { DashboardHeader } from '@/features/organization/components/dashboard/DashboardHeader';
+import { ExecutiveOverview } from '@/features/organization/components/dashboard/ExecutiveOverview';
+import { BusinessAlertsSection } from '@/features/organization/components/dashboard/BusinessAlertsSection';
+import { SalesPerformanceSection } from '@/features/organization/components/dashboard/SalesPerformanceSection';
+import { PaymentAnalysisSection } from '@/features/organization/components/dashboard/PaymentAnalysisSection';
+import { FinancialPositionSection } from '@/features/organization/components/dashboard/FinancialPositionSection';
+import { PurchasesExpensesSection } from '@/features/organization/components/dashboard/PurchasesExpensesSection';
+import { InventoryIntelligenceSection } from '@/features/organization/components/dashboard/InventoryIntelligenceSection';
+import { OperationalOverviewSection } from '@/features/organization/components/dashboard/OperationalOverviewSection';
+import { BusinessModulesGrid } from '@/features/organization/components/dashboard/BusinessModulesGrid';
 
 export const ShopAdminDashboard = () => {
-  const [filter, setFilter] = useState<'today' | 'week' | 'month'>('today');
-  const [isDailySalesModalOpen, setIsDailySalesModalOpen] = useState(false);
-
-  // Canonical branch context from store: reactive to topbar branch switcher
-  const activeShopId = useOrganizationStore((s) => s.activeShopId || s.activeShop?._id || null);
-
-  // Gate 5: Expense analytics for dashboard
-  const [expenseSummary, setExpenseSummary] = React.useState<ExpenseSummary | null>(null);
-  const [isExpenseFetching, setIsExpenseFetching] = React.useState(false);
-
-  React.useEffect(() => {
-    // DEFECT-06 FIX: Use local date components instead of .toISOString() which
-    // returns UTC and shifts to the previous day between 00:00–04:59 PKT (UTC+5).
-    const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    setIsExpenseFetching(true);
-    expensesApi
-      .getExpenseSummary({ branch_id: activeShopId, start_date: today, end_date: today })
-      .then(setExpenseSummary)
-      .catch(() => {/* non-critical */})
-      .finally(() => setIsExpenseFetching(false));
-  }, [activeShopId]);
-
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const pathname = location.pathname;
   const searchInvoice = searchParams.get('invoice');
 
-  const currentUser = useAuthStore((s) => s.user);
-  const userRole = (currentUser?.role || '').toUpperCase();
-  const canViewProfit =
-    userRole === 'ADMIN' ||
-    userRole === 'SUPER_ADMIN' ||
-    userRole === 'OWNER' ||
-    userRole === 'MULTI_ADMIN' ||
-    userRole === 'SHOP_ADMIN' ||
-    userRole === 'MANAGER';
+  const [isDailySalesModalOpen, setIsDailySalesModalOpen] = useState(false);
+
+  const user = useAuthStore((s) => s.user);
+  const activeOrganization = useOrganizationStore((s) => s.activeOrganization);
+  const activeShop = useOrganizationStore((s) => s.activeShop);
+  const activeShopId = useOrganizationStore(
+    (s) => s.activeShopId || s.activeShop?._id || (user as any)?.branch_id || (user as any)?.shopId || null
+  );
 
   useEffect(() => {
     if (searchInvoice) {
@@ -66,262 +44,202 @@ export const ShopAdminDashboard = () => {
     }
   }, [searchInvoice]);
 
-  const handleCloseModal = () => {
+  const handleCloseModal = useCallback(() => {
     setIsDailySalesModalOpen(false);
     if (searchInvoice) {
-      navigate(pathname, { replace: true });
+      navigate(location.pathname, { replace: true });
     }
-  };
+  }, [searchInvoice, navigate, location.pathname]);
 
-  // 1. Authoritative Metrics Query (Scoped by active branch)
-  const {
-    data: dashboardResponse,
-    isLoading: isMetricsLoading,
-    refetch: refetchMetrics,
-  } = useQuery({
-    queryKey: queryKeys.dashboard.byBranch(activeShopId),
-    queryFn: () => dashboardApi.getMetrics(activeShopId),
-    staleTime: 30000,
-    retry: 1,
-    refetchOnWindowFocus: false,
+  const initialToday = useMemo(() => getPktTodayDateStr(), []);
+  const [preset, setPreset] = useState<DashboardDatePreset>('today');
+  const [customStart, setCustomStart] = useState<string>(initialToday);
+  const [customEnd, setCustomEnd] = useState<string>(initialToday);
+
+  const dateRange = useMemo(
+    () => resolveDateRange(preset, customStart, customEnd),
+    [preset, customStart, customEnd]
+  );
+
+  const cc = useCommandCenterData({
+    mode: 'branch',
+    branchId: activeShopId,
+    dateRange,
   });
 
-  // 2. Dedicated Backend Hourly Breakdown Query (Scoped by active branch)
-  const {
-    data: hourlyBreakdownResponse,
-    isLoading: isHourlyLoading,
-    refetch: refetchHourly,
-  } = useQuery({
-    queryKey: [...queryKeys.dashboard.byBranch(activeShopId), 'hourly-breakdown'],
-    queryFn: () => dashboardApi.getHourlyBreakdown({ branchId: activeShopId }),
-    staleTime: 30000,
-    retry: 1,
-    refetchOnWindowFocus: false,
-  });
-
-  const metrics = dashboardResponse?.data;
-  const hourlyData = hourlyBreakdownResponse?.data;
-
-  const hourlySalesData = useMemo<HourlySalesData[]>(() => {
-    if (hourlyData?.hourlySales && hourlyData.hourlySales.length > 0) {
-      return hourlyData.hourlySales;
-    }
-    return Array.from({ length: 24 }, (_, i) => ({
-      hour: `${i.toString().padStart(2, '0')}:00`,
-      sales: 0,
-      ordersCount: 0,
-    }));
-  }, [hourlyData?.hourlySales]);
-
-  const categorySalesData = useMemo<CategorySalesData[]>(() => {
-    return hourlyData?.categorySales || [];
-  }, [hourlyData?.categorySales]);
-
-  const computedTopProduct = useMemo(() => {
-    return hourlyData?.topProduct || undefined;
-  }, [hourlyData?.topProduct]);
-
-  const getFilterValue = (field: 'revenue' | 'profit', currentFilter: 'today' | 'week' | 'month') => {
-    if (!metrics) return 0;
-    const key = currentFilter === 'today' ? 'today' : 'thisMonth';
-    return metrics.summary[field][key] || 0;
-  };
-
-  const kpiData: KPIData[] = [
-    {
-      title: "Today's Sales",
-      value: isMetricsLoading ? 'Loading...' : `${metrics?.summary.orders.today || 0} Sales`,
-      trend: 0,
-      icon: <Receipt className="h-5 w-5" />,
-      format: 'number',
-      timeframe: `₨ ${(metrics?.summary.revenue.today || 0).toLocaleString()}`,
-      onClick: () => setIsDailySalesModalOpen(true),
-    },
-    {
-      title: "Today's Revenue",
-      value: isMetricsLoading ? 'Loading...' : `₨ ${(metrics?.summary.revenue.today || 0).toLocaleString()}`,
-      trend: 0,
-      icon: <DollarSign className="h-5 w-5" />,
-      format: 'currency',
-      timeframe: 'vs. Yesterday',
-    },
-    ...(canViewProfit
-      ? [
-          {
-            title: 'Estimated Profit',
-            value: isMetricsLoading ? 'Loading...' : `₨ ${(getFilterValue('profit', filter) || 0).toLocaleString()}`,
-            trend: metrics?.summary.revenue.growth || 0,
-            icon: <TrendingUp className="h-5 w-5" />,
-            format: 'currency' as const,
-            timeframe: filter === 'today' ? 'Today' : 'This Month',
-          },
-          {
-            title: 'Gross Margin',
-            value: isMetricsLoading
-              ? 'Loading...'
-              : `${(
-                  ((getFilterValue('profit', filter) || 0) / (getFilterValue('revenue', filter) || 1)) *
-                  100
-                ).toFixed(1)}%`,
-            trend: 0,
-            icon: <CreditCard className="h-5 w-5" />,
-            format: 'number' as const,
-            timeframe: 'Return on Sales',
-          },
-        ]
-      : []),
-  ];
-
+  const scopeName = activeShop?.name
+    ? `${activeShop.name}${activeShop.code ? ` (${activeShop.code})` : ''}`
+    : 'Assigned Branch';
 
   return (
-    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8 max-w-[1600px] mx-auto w-full">
-      {/* 0. Top Bar: Performance KPIs */}
-      <section aria-labelledby="kpi-heading" className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h2 id="kpi-heading" className="text-lg font-bold text-text-primary">
-              Overview & Performance
-            </h2>
-            <p className="text-xs text-text-muted">Real-time sales, profitability, and stock health</p>
-          </div>
-
-          <div className="flex items-center gap-2">
+    <div className="max-w-[1600px] mx-auto space-y-5 text-text-primary min-h-full">
+      {/* Header Locked to Branch Scope */}
+      <DashboardHeader
+        mode="branch"
+        organizationName={activeOrganization?.name || 'Niazi Mobile Mart'}
+        scopeName={scopeName}
+        dateRange={dateRange}
+        preset={preset}
+        customStart={customStart}
+        customEnd={customEnd}
+        onPresetChange={setPreset}
+        onCustomDatesChange={(start, end) => {
+          setCustomStart(start);
+          setCustomEnd(end);
+          setPreset('custom');
+        }}
+        branches={[]}
+        selectedBranchId={activeShopId}
+        onRefresh={cc.refreshAll}
+        isRefreshing={cc.isRefreshing}
+        canAccessPos={cc.perms.canViewPos}
+        canAccessExpenses={cc.perms.canViewExpenses}
+        onNavigate={(href) => navigate(href)}
+        extraAction={
+          cc.perms.canViewSales ? (
             <button
               type="button"
-              onClick={() => {
-                refetchMetrics();
-                refetchHourly();
-              }}
-              title="Refresh Dashboard"
-              className="p-2 rounded-lg bg-surface border border-border text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
+              onClick={() => setIsDailySalesModalOpen(true)}
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border bg-surface text-xs font-semibold text-text-primary hover:bg-surface-hover transition-colors cursor-pointer"
             >
-              <RefreshCw className="h-4 w-4" />
+              <Receipt className="w-3.5 h-3.5 text-primary" />
+              <span>Daily Invoices</span>
             </button>
+          ) : undefined
+        }
+      />
 
-            <select
-              value={filter}
-              onChange={(e) => setFilter(e.target.value as any)}
-              className="px-3 py-1.5 border border-border bg-surface rounded-lg text-xs font-bold text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring cursor-pointer transition-colors hover:bg-surface-hover shadow-xs"
-            >
-              <option value="today">Today</option>
-              <option value="week">This Week</option>
-              <option value="month">This Month</option>
-            </select>
+      {/* Executive Overview (Branch-Scoped & Permission-Filtered) */}
+      <ExecutiveOverview
+        mode="branch"
+        dateRange={dateRange}
+        perms={cc.perms}
+        headline={cc.headline}
+        expenseCount={cc.expenseAnalytics.totalCount}
+        partyPosition={cc.partyPosition}
+        inventoryIntel={cc.inventoryIntel}
+        liquidPosition={cc.liquidPosition}
+        repairsSummary={cc.repairsSummary}
+        loading={{
+          executive: cc.loading.executive,
+          parties: cc.loading.parties,
+          inventory: cc.loading.inventory,
+          liquid: cc.loading.liquid,
+          repairs: cc.loading.repairs,
+        }}
+        onNavigate={(href) => navigate(href)}
+      />
+
+      {/* Operational Alerts */}
+      <BusinessAlertsSection alerts={cc.alerts} onNavigate={(href) => navigate(href)} />
+
+      {/* Sales Performance & Payment Settlement */}
+      {cc.perms.canViewSales && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+          <div className="lg:col-span-8 min-w-0">
+            <SalesPerformanceSection
+              mode="branch"
+              dateRange={dateRange}
+              series={cc.salesTrend.series}
+              grossSales={cc.headline.grossSales}
+              returnsAmount={cc.headline.returnsAmount}
+              netSales={cc.headline.netSales}
+              invoiceCount={cc.headline.invoiceCount}
+              averageInvoiceValue={cc.paymentSettlement.averageInvoiceValue}
+              isTruncated={cc.headline.isSalesListTruncated}
+              isLoading={cc.loading.sales}
+              isError={cc.errors.sales}
+              onRetry={cc.refetchSales}
+              onViewDetails={() => setIsDailySalesModalOpen(true)}
+            />
+          </div>
+          <div className="lg:col-span-4 min-w-0">
+            <PaymentAnalysisSection
+              settlement={cc.paymentSettlement}
+              todayCashSales={Number(cc.branchCash?.cash_sales ?? 0)}
+              todayCustomerCollections={Number(cc.branchCash?.customer_payments ?? 0)}
+              showCashTodaySupplement={Boolean(cc.branchCash)}
+              isLoading={cc.loading.sales}
+              onViewCash={() => navigate('/dashboard/shop-admin/cash')}
+            />
           </div>
         </div>
-
-        {/* 1. KPI Cards Row */}
-        <KPIGrid data={kpiData} isLoading={isMetricsLoading} />
-      </section>
-
-      {/* 2. Hourly Sales Progression Chart */}
-      <section aria-labelledby="hourly-sales-heading">
-        <HourlySalesChart
-          data={hourlySalesData}
-          isLoading={isHourlyLoading}
-          onRetry={refetchHourly}
-        />
-      </section>
-
-      {/* 3. Mid Analytics Grid: Category Distribution & AI Recommendations */}
-      <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-        <div className="lg:col-span-6 flex flex-col min-h-0">
-          <CategorySalesDistribution
-            data={categorySalesData}
-            isLoading={isHourlyLoading}
-          />
-        </div>
-
-        <div className="lg:col-span-6 flex flex-col min-h-0">
-          <AiRecommendations
-            lowStockCount={metrics?.summary.inventory.lowStockItems || 0}
-            topProduct={computedTopProduct}
-            pendingPaymentsAmount={metrics?.summary.customers.pendingPayments || 0}
-            isLoading={isMetricsLoading || isHourlyLoading}
-          />
-        </div>
-      </section>
-
-      {/* Gate 5: Expense Analytics Strip */}
-      {(expenseSummary || isExpenseFetching) && (
-        <section aria-labelledby="expense-analytics-heading">
-          <div className="rounded-2xl bg-surface border border-border shadow-card p-5 sm:p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 id="expense-analytics-heading" className="text-sm font-bold text-text-primary flex items-center gap-2">
-                  <ReceiptText className="w-4 h-4 text-orange-500" />
-                  Today's Expense Overview
-                </h3>
-                <p className="text-xs text-text-muted mt-0.5">Business expenses recorded today (COMPLETED only)</p>
-              </div>
-              {isExpenseFetching && (
-                <span className="text-xs text-text-muted animate-pulse">Refreshing…</span>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {/* Total Expenses */}
-              <div className="p-4 rounded-xl bg-orange-50 dark:bg-orange-950/20 border border-orange-100 dark:border-orange-900/40">
-                <div className="flex items-center gap-2 mb-2">
-                  <Wallet className="w-4 h-4 text-orange-500" />
-                  <span className="text-xs text-text-muted">Total Expenses</span>
-                </div>
-                <p className="text-lg font-bold text-text-primary">
-                  PKR {(expenseSummary?.total_amount ?? 0).toLocaleString()}
-                </p>
-                <p className="text-xs text-text-muted mt-0.5">
-                  {expenseSummary?.total_count ?? 0} records
-                </p>
-              </div>
-
-              {/* Cash Expenses */}
-              <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/40">
-                <div className="flex items-center gap-2 mb-2">
-                  <ReceiptText className="w-4 h-4 text-red-500" />
-                  <span className="text-xs text-text-muted">Cash Expenses</span>
-                </div>
-                <p className="text-lg font-bold text-text-primary">
-                  PKR {(expenseSummary?.cash_total ?? 0).toLocaleString()}
-                </p>
-                <p className="text-xs text-text-muted mt-0.5">Deducted from drawer</p>
-              </div>
-
-              {/* Non-Cash Expenses */}
-              <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/40">
-                <div className="flex items-center gap-2 mb-2">
-                  <Wallet className="w-4 h-4 text-blue-500" />
-                  <span className="text-xs text-text-muted">Non-Cash</span>
-                </div>
-                <p className="text-lg font-bold text-text-primary">
-                  PKR {(expenseSummary?.non_cash_total ?? 0).toLocaleString()}
-                </p>
-                <p className="text-xs text-text-muted mt-0.5">Card, Bank, Digital</p>
-              </div>
-
-              {/* Cancelled */}
-              <div className="p-4 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-100 dark:border-neutral-700">
-                <div className="flex items-center gap-2 mb-2">
-                  <Ban className="w-4 h-4 text-neutral-400" />
-                  <span className="text-xs text-text-muted">Cancelled</span>
-                </div>
-                <p className="text-lg font-bold text-text-primary">
-                  {expenseSummary?.cancelled_count ?? 0}
-                </p>
-                <p className="text-xs text-text-muted mt-0.5">Reversed entries</p>
-              </div>
-            </div>
-          </div>
-        </section>
       )}
 
-      {/* 4. Inventory Brain Section */}
-      <section aria-labelledby="inventory-heading">
-        <div className="rounded-2xl bg-surface border border-border shadow-card p-5 sm:p-6">
-          <StockWidget />
-        </div>
-      </section>
+      {/* Financial Position (Branch Cash + Customer/Supplier Exposure where permitted; no Org Bank Accounts) */}
+      <FinancialPositionSection
+        mode="branch"
+        canViewParties={cc.perms.canViewParties}
+        canViewPurchases={cc.perms.canViewPurchases}
+        canViewCash={cc.perms.canViewCash}
+        canViewAccounts={false}
+        partyPosition={cc.partyPosition}
+        liquidPosition={cc.liquidPosition}
+        partiesLoading={cc.loading.parties}
+        liquidLoading={cc.loading.liquid}
+        onNavigate={(href) => navigate(href)}
+      />
 
-      {/* Daily Sales Modal */}
+      {/* Procurement & Expenses */}
+      <PurchasesExpensesSection
+        mode="branch"
+        dateRange={dateRange}
+        canViewPurchases={cc.perms.canViewPurchases}
+        canViewExpenses={cc.perms.canViewExpenses}
+        purchaseAnalytics={cc.purchaseAnalytics}
+        expenseAnalytics={cc.expenseAnalytics}
+        purchasesLoading={cc.loading.purchases}
+        expensesLoading={cc.loading.expenses}
+        purchasesError={cc.errors.purchases}
+        expensesError={cc.errors.expenses}
+        onNavigate={(href) => navigate(href)}
+      />
+
+      {/* Branch Inventory Intelligence */}
+      {cc.perms.canViewInventory && (
+        <InventoryIntelligenceSection
+          mode="branch"
+          inventory={cc.inventoryIntel}
+          isLoading={cc.loading.inventory}
+          isError={cc.errors.inventory}
+          onNavigate={(href) => navigate(href)}
+        />
+      )}
+
+      {/* Branch Operational Summary */}
+      <OperationalOverviewSection
+        mode="branch"
+        dateRange={dateRange}
+        canViewRepairs={cc.perms.canViewRepairs}
+        canViewHr={cc.perms.canViewHr}
+        canViewSales={cc.perms.canViewSales}
+        canViewInventory={cc.perms.canViewInventory}
+        repairs={cc.repairsSummary}
+        hrAttendance={cc.hrAttendance}
+        mobileSales={cc.mobileSalesSummary}
+        recentHistory={cc.recentHistory}
+        loadingRepairs={cc.loading.repairs}
+        loadingHr={cc.loading.hr}
+        loadingMobileSales={cc.loading.mobileSales}
+        loadingHistory={cc.loading.history}
+        onNavigate={(href) => navigate(href)}
+      />
+
+      {/* Branch Module Directory */}
+      <BusinessModulesGrid
+        mode="branch"
+        perms={cc.perms}
+        counts={{
+          skus: cc.inventoryIntel.totalSkus,
+          mobiles: cc.inventoryIntel.mobileInStockCount,
+          demands: cc.purchaseAnalytics.activeDemandCount,
+          repairsPending: cc.repairsSummary.pendingCount,
+          staff: cc.hrAttendance?.totalEmployees ?? 0,
+        }}
+        onNavigate={(href) => navigate(href)}
+      />
+
+      {/* Preserved Daily Sales & Receipt Reprint Modal */}
       <DailySalesModal
         isOpen={isDailySalesModalOpen}
         onClose={handleCloseModal}

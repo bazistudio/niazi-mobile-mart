@@ -7,6 +7,14 @@
 export const queryKeys = {
   organization: {
     dashboard: ['organization', 'dashboard'] as const,
+    commandCenter: (
+      mode: 'organization' | 'branch',
+      branchId: string | null,
+      startDate: string,
+      endDate: string
+    ) => ['organization', 'command-center', mode, branchId ?? 'ALL', startDate, endDate] as const,
+    branchComparison: (startDate: string, endDate: string) =>
+      ['organization', 'branch-comparison', startDate, endDate] as const,
   },
   branches: {
     all: ['branches'] as const,
