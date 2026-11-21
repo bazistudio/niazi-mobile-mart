@@ -345,8 +345,8 @@ export const usePosStore = create<PosStore>()(
           saleTabs: saleTabs.map(tab => {
             if (tab.id !== activeTabId) return tab;
             
-            // If in sale mode with items, move them to returns and bake in the discount
-            if (tab.mode === 'sale' && tab.cart.length > 0) {
+            // Move cart items (from original invoice) to returnedItems
+            if (tab.cart.length > 0) {
               const subtotal = tab.cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
               let discountAmt = 0;
               if (tab.invoiceDiscountType === 'percentage') {
@@ -355,7 +355,24 @@ export const usePosStore = create<PosStore>()(
                 discountAmt = tab.invoiceDiscountValue || 0;
               }
 
-              const newReturnedItems = tab.cart.map(item => {
+              // Filter by returnLines selection if returnLines exist
+              const returnLines = tab.returnLines ?? [];
+              const selectedReturnLines = returnLines.filter(l => l.selectedForReturn && l.returnableQty > 0);
+              
+              let itemsToReturn = tab.cart;
+              if (selectedReturnLines.length > 0) {
+                itemsToReturn = tab.cart.filter(item => 
+                  selectedReturnLines.some(l => l.productId === item.productId)
+                ).map(item => {
+                  const line = selectedReturnLines.find(l => l.productId === item.productId);
+                  return {
+                    ...item,
+                    quantity: line ? line.returnQty : item.quantity
+                  };
+                });
+              }
+
+              const newReturnedItems = itemsToReturn.map(item => {
                 const itemTotal = item.unitPrice * item.quantity;
                 const proportion = subtotal > 0 ? (itemTotal / subtotal) : 0;
                 const itemDiscount = discountAmt * proportion;
@@ -373,6 +390,7 @@ export const usePosStore = create<PosStore>()(
                 transactionType: 'replace_exchange',
                 returnedItems: [...tab.returnedItems, ...newReturnedItems],
                 cart: [],
+                isReturnMode: false,
                 invoiceDiscountValue: 0 // Reset for new items
               };
             }
@@ -461,8 +479,8 @@ export const usePosStore = create<PosStore>()(
             const targetList = isReturn ? tab.returnedItems : tab.cart;
             const updatedList = targetList.map(item => {
               if (item.productId === productId) {
-                if (!isReturn && quantity > item.maxStock) {
-                  toast.error(`Only ${item.maxStock} items in stock`);
+                if (item.maxStock !== undefined && item.maxStock > 0 && quantity > item.maxStock) {
+                  toast.error(isReturn ? `Cannot exceed invoice returnable quantity (${item.maxStock})` : `Only ${item.maxStock} items in stock`);
                   return item;
                 }
                 return { ...item, quantity };

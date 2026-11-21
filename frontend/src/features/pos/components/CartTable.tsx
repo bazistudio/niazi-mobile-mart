@@ -58,8 +58,8 @@ export const CartTable = () => {
 
     const parsed = parseInt(value, 10);
     if (!isNaN(parsed) && parsed > 0) {
-      if (!isReturn && parsed > maxStock) {
-        import('react-hot-toast').then(m => m.default.error(`Only ${maxStock} items in stock`));
+      if (maxStock !== undefined && maxStock > 0 && parsed > maxStock) {
+        import('react-hot-toast').then(m => m.default.error(isReturn ? `Cannot exceed invoice returnable quantity (${maxStock})` : `Only ${maxStock} items in stock`));
         return;
       }
       updateQuantity(productId, parsed, isReturn);
@@ -290,7 +290,7 @@ export const CartTable = () => {
                 onKeyDown={(e) => {
                   if (e.key === 'ArrowUp') {
                     e.preventDefault();
-                    if (isReturn || item.quantity < item.maxStock) {
+                    if (!item.maxStock || item.quantity < item.maxStock) {
                       updateQuantity(item.productId, item.quantity + 1, isReturn);
                     }
                   } else if (e.key === 'ArrowDown') {
@@ -310,12 +310,12 @@ export const CartTable = () => {
                 aria-label={`Quantity for ${item.productName}`}
                 className="text-xs font-black w-8 text-center tabular-nums bg-transparent text-text-primary focus:outline-none focus:bg-surface rounded no-spinners"
                 min="1"
-                max={isReturn ? undefined : item.maxStock}
+                max={item.maxStock}
               />
               <button
                 type="button"
                 onClick={() => updateQuantity(item.productId, item.quantity + 1, isReturn)}
-                disabled={!isReturn && item.quantity >= item.maxStock}
+                disabled={Boolean(item.maxStock && item.quantity >= item.maxStock)}
                 aria-label="Increase quantity"
                 className="p-1 rounded bg-surface text-text-secondary hover:bg-border/30 transition-all disabled:opacity-30 shadow-xs"
               >
@@ -325,13 +325,21 @@ export const CartTable = () => {
           )}
         </div>
 
-        {/* 5. Unit Price — static red in return mode; editable in sale mode (Phase 1B/F fix Defect #2) */}
+        {/* 5. Unit Price — static red in return mode; locked/read-only for returned items in replace mode; editable in sale mode */}
         <div className="w-28 flex flex-col items-end justify-center">
           {isReturnMode ? (
             <div className="w-28 text-right text-xs font-black text-red-600 dark:text-red-400 tabular-nums pr-1">
               {isExhausted
                 ? <span className="text-text-muted text-[10px] font-medium">—</span>
                 : <span>-Rs {item.unitPrice.toLocaleString()}</span>}
+            </div>
+          ) : isReturn ? (
+            <div className="flex flex-col items-end justify-center">
+              <div className="flex items-center px-1.5 py-0.5 rounded bg-warning/10 border border-warning/30 text-warning" title="Locked: Original Invoice Sale Price cannot be manually overridden">
+                <span className="text-[10px] mr-1 font-bold">Rs</span>
+                <span className="text-xs font-black tabular-nums">{item.unitPrice.toLocaleString()}</span>
+              </div>
+              <span className="text-[9px] text-text-muted font-bold tracking-tight mt-0.5">Original Price</span>
             </div>
           ) : (
             <>
@@ -442,6 +450,29 @@ export const CartTable = () => {
 
   return (
     <div className="flex-1 h-full flex flex-col overflow-hidden min-h-0 bg-surface">
+
+      {/* Mode Status Banner for Product Replace / Exchange */}
+      {mode === 'replace' && (
+        <div className="px-3 py-2 bg-indigo-50 dark:bg-indigo-950/40 border-b border-indigo-200 dark:border-indigo-800/60 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-ping shrink-0" />
+            <span className="text-xs font-black text-indigo-700 dark:text-indigo-300 uppercase tracking-wider">
+              Product Replace Active
+            </span>
+            <span className="text-[11px] text-text-muted hidden sm:inline">
+              — Use Search dropdown (RETURN / NEW) to place items in correct category
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 font-bold text-[10px]">
+              Returned: Rs {returnQuantity > 0 ? returnedItems.reduce((s, i) => s + i.unitPrice * i.quantity, 0).toLocaleString() : '0'}
+            </span>
+            <span className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold text-[10px]">
+              New: Rs {totalQuantity > 0 ? cart.reduce((s, i) => s + i.unitPrice * i.quantity, 0).toLocaleString() : '0'}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Table Header: Exactly matching approved PNG */}
       <div className="flex items-center px-3 py-2 border-b border-border bg-surface-hover/70 text-[10px] font-black text-text-muted uppercase tracking-widest shrink-0">

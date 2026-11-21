@@ -577,15 +577,48 @@ export async function processAtomicExchange(
     const returnNumber = `RET-${branchCode}-${period}-${String(retSeqVal).padStart(6, '0')}`;
     const returnId = uuidv4();
 
-    // Sequence for Replacement Sale Invoice
+    // Ensure user_invoice_counters table exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_invoice_counters (
+        branch_id UUID NOT NULL,
+        user_id UUID NOT NULL,
+        period_yyyymm VARCHAR(10) NOT NULL,
+        next_value BIGINT NOT NULL DEFAULT 1,
+        PRIMARY KEY (branch_id, user_id, period_yyyymm)
+      )
+    `);
+
+    const effectiveUserId = userId || (origSale['performed_by'] as string) || '00000000-0000-0000-0000-000000000001';
+
+    // Resolve User Short Code (e.g. U01, U17) to match standard sales invoice convention
+    let userCode = 'U01';
+    if (effectiveUserId && effectiveUserId !== '00000000-0000-0000-0000-000000000001') {
+      try {
+        const userRow = await client.query(
+          'SELECT username FROM users WHERE id = $1',
+          [effectiveUserId]
+        );
+        if (userRow.rows.length > 0) {
+          const shortHex = effectiveUserId.replace(/-/g, '').slice(-2).toUpperCase();
+          userCode = `U${shortHex}`;
+        }
+      } catch {
+        const shortHex = effectiveUserId.replace(/-/g, '').slice(-2).toUpperCase();
+        userCode = `U${shortHex}`;
+      }
+    }
+
+    // Sequence for Replacement Sale Invoice (using authoritative user_invoice_counters)
     const invSeqRes = await client.query(
-      `INSERT INTO counters (name, value) VALUES ($1, 2)
-       ON CONFLICT (name) DO UPDATE SET value = counters.value + 1
-       RETURNING value - 1`,
-      [`invoice_seq_${branchId}_${period}`]
+      `INSERT INTO user_invoice_counters (branch_id, user_id, period_yyyymm, next_value)
+       VALUES ($1, $2, $3, 2)
+       ON CONFLICT (branch_id, user_id, period_yyyymm)
+       DO UPDATE SET next_value = user_invoice_counters.next_value + 1
+       RETURNING next_value - 1`,
+      [branchId, effectiveUserId, period]
     );
     const invSeqVal = Number(Object.values((invSeqRes.rows[0] as Record<string, unknown>) ?? {})[0] ?? 1);
-    const invoiceNumber = `INV-${branchCode}-${period}-${String(invSeqVal).padStart(6, '0')}`;
+    const invoiceNumber = `${branchCode}-${userCode}-${period}-${String(invSeqVal).padStart(6, '0')}`;
     const replacementSaleId = uuidv4();
 
     // 6a. Insert Replacement Sale Header early (placeholder payment fields) so that

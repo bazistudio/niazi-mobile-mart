@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Trash2, Banknote, Printer, Tag, Sparkles } from 'lucide-react';
+import { Trash2, Banknote, Printer, Tag, Sparkles, AlertTriangle } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
 import { DocumentService } from '../services/document/document.service';
 import toast from 'react-hot-toast';
@@ -14,6 +14,8 @@ import { CustomerSelector } from './CustomerSelector';
 import { customerApi } from '@/services/customer.api';
 import { CreditLimitWarningModal } from './modals/CreditLimitWarningModal';
 import { usePrinterStore } from '@/features/settings/printer/store/printer.store';
+import { formatExchangeReceipt, ExchangeReceiptData } from '@/features/settings/printer/utils/printFormatter';
+import { usePrintStore } from '@/lib/printer';
 import { GlobalLoadingOverlay } from '@/components/ui/GlobalLoadingOverlay';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { useAuthStore } from '@/lib/auth/core/auth.store';
@@ -39,6 +41,7 @@ export const CartSummary: React.FC = () => {
   const isReturnMode = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId)?.isReturnMode ?? false);
   const enterCashReturnMode = usePosStore((s) => s.enterCashReturnMode);
   const exitCashReturnMode = usePosStore((s) => s.exitCashReturnMode);
+  const prepareReplaceExchange = usePosStore((s) => s.prepareReplaceExchange);
   const returnLines = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId)?.returnLines ?? []);
 
   // Phase 1B: Drawer cash balance for State B review banner
@@ -60,6 +63,8 @@ export const CartSummary: React.FC = () => {
   // GAP-03: Exchange settlement modal state
   const [isExchangeModalOpen, setExchangeModalOpen] = useState(false);
   const [pendingExchangeShouldPrint, setPendingExchangeShouldPrint] = useState(false);
+  const [isExitReplaceConfirmOpen, setExitReplaceConfirmOpen] = useState(false);
+  const { openPreview } = usePrintStore();
   
   const selectedCustomer = activeSession?.customer && activeSession.customer.id !== 'walk-in'
     ? activeSession.customer
@@ -340,6 +345,77 @@ export const CartSummary: React.FC = () => {
     }
   };
 
+  // Phase 2: Dedicated Product Replace / Exchange Receipt Printing Dispatch
+  const triggerExchangePrint = async (
+    exchangeRes: any,
+    targetCustomer?: { id: string; name: string; phone?: string } | null
+  ) => {
+    try {
+      const activeShop = useOrganizationStore.getState().activeShop;
+      const authUser = useAuthStore.getState().user;
+      const realShopProfile = {
+        name: activeShop?.name || 'Niazi Mobile Mart',
+        address: (activeShop as any)?.address || '',
+        phone: (activeShop as any)?.phone || '',
+        branchName: activeShop?.name || 'Main Branch',
+        taxNumber: '',
+        footerText: 'Thank you for shopping with us!',
+        returnPolicy: 'Goods once sold can only be returned/exchanged within 3 days with original receipt.',
+      };
+
+      const sr = exchangeRes.sales_return;
+      const rLines = exchangeRes.return_lines || [];
+      const repLines = exchangeRes.replacement_sale?.lines || [];
+      const repSale = exchangeRes.replacement_sale?.sale;
+
+      const exchangeData: ExchangeReceiptData = {
+        invoiceNo: repSale?.invoice_number || `EXC-${Date.now()}`,
+        date: new Date(repSale?.created_at || sr?.created_at || Date.now()).toLocaleString(),
+        cashier: authUser ? (authUser.role ? `${authUser.name} (${authUser.role})` : authUser.name) : 'Cashier',
+        customer: targetCustomer
+          ? { name: targetCustomer.name, phone: targetCustomer.phone }
+          : { name: 'Walk-In Customer' },
+        shop: (shopHeader as any) || realShopProfile,
+        returnedItems: rLines.map((l: any) => ({
+          name: l.product_name_snapshot || 'Returned Item',
+          qty: l.quantity,
+          unitPrice: l.unit_price,
+          total: l.return_amount ?? (l.quantity * l.unit_price),
+          imei: l.sku_snapshot || undefined,
+        })),
+        returnedCredit: Number(sr?.total_amount || 0),
+        replacementItems: repLines.map((l: any) => ({
+          name: l.product_name_snapshot || 'Replacement Item',
+          qty: l.quantity,
+          unitPrice: l.unit_price,
+          total: l.line_total ?? (l.quantity * l.unit_price),
+          imei: l.sku_snapshot || undefined,
+        })),
+        replacementValue: Number(repSale?.total_amount || 0),
+        settlementType: exchangeRes.settlement_type,
+        cashCollected: exchangeRes.settlement_type === 'POSITIVE_COLLECTION' ? Number(exchangeRes.difference || 0) : 0,
+        cashRefunded: exchangeRes.settlement_type === 'NEGATIVE_REFUND' ? Number(exchangeRes.cash_refunded || Math.abs(exchangeRes.difference || 0)) : 0,
+        refundMethod: exchangeRes.refund_method || undefined,
+        customerBalanceAfter: exchangeRes.customer_balance_after !== null && exchangeRes.customer_balance_after !== undefined ? Number(exchangeRes.customer_balance_after) : undefined,
+      };
+
+      const html = formatExchangeReceipt(exchangeData, settings);
+      openPreview({
+        html,
+        documentType: 'ExchangeReceipt',
+        referenceId: exchangeData.invoiceNo,
+        title: `Exchange Receipt - ${exchangeData.invoiceNo}`,
+      });
+      await DocumentService.logPrint(exchangeData.invoiceNo, 'PRINT');
+    } catch (printErr) {
+      console.error('Failed to trigger exchange receipt print:', printErr);
+      // Fallback to order receipt if exchange print fails
+      if (exchangeRes?.order) {
+        await triggerReceiptPrint(exchangeRes.order, targetCustomer);
+      }
+    }
+  };
+
   // GAP-03: Called by ExchangeSettlementModal onConfirm.
   // Routes to atomic exchange backend endpoint (returns + replacement sale in 1 transaction)
   const processExchange = usePosStore((s) => s.processExchange);
@@ -363,7 +439,9 @@ export const CartSummary: React.FC = () => {
       });
       toast.success('Exchange processed successfully.');
       window.dispatchEvent(new CustomEvent('pos:sale-completed'));
-      if (pendingExchangeShouldPrint && res?.order) {
+      if (pendingExchangeShouldPrint && res?.exchangeResult) {
+        await triggerExchangePrint(res.exchangeResult, selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name, phone: selectedCustomer.phone } : null);
+      } else if (pendingExchangeShouldPrint && res?.order) {
         await triggerReceiptPrint(res.order, selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name, phone: selectedCustomer.phone } : null);
       }
     } catch (error: any) {
@@ -394,7 +472,9 @@ export const CartSummary: React.FC = () => {
         toast.success('Exchange processed successfully.');
         window.dispatchEvent(new CustomEvent('pos:sale-completed'));
         if (shouldPrint || pendingAction === 'print') {
-          if (res?.order) {
+          if (res?.exchangeResult) {
+            await triggerExchangePrint(res.exchangeResult, selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name, phone: selectedCustomer.phone } : null);
+          } else if (res?.order) {
             await triggerReceiptPrint(res.order, selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name, phone: selectedCustomer.phone } : null);
           }
         }
@@ -802,13 +882,78 @@ export const CartSummary: React.FC = () => {
         <button
           type="button"
           id="pos-btn-product-replace"
-          title="Exchange / Replace Product"
+          title={
+            activeSession.mode === 'replace' && (activeSession.returnedItems?.length ?? 0) > 0 && activeSession.cart.length > 0
+              ? 'Review Replace Invoice & Finalize'
+              : activeSession.linkedInvoiceId && activeSession.cart.length > 0
+              ? 'Select Items for Replace'
+              : 'Exchange / Replace Product'
+          }
           onClick={() => {
-            setSessionMode(activeSession.mode === 'replace' ? 'sale' : 'replace');
-            toast.success(
-              activeSession.mode === 'replace' ? 'Standard Sale Mode' : 'Product Replace Mode Active',
-              { icon: '🔁' }
-            );
+            // Case 1: In replace mode with BOTH returned items and new items added -> CONFIRM & SETTLE
+            if (activeSession.mode === 'replace' && (activeSession.returnedItems?.length ?? 0) > 0 && activeSession.cart.length > 0) {
+              setPendingExchangeShouldPrint(false);
+              setExchangeModalOpen(true);
+              return;
+            }
+
+            // Case 2: Cart has invoice items loaded and replace button is clicked to initiate replace
+            if (activeSession.cart.length > 0 && activeSession.linkedInvoiceId && (activeSession.returnedItems?.length ?? 0) === 0) {
+              const rLines = activeSession.returnLines ?? [];
+              const selectedRLines = rLines.filter(l => l.selectedForReturn && l.returnableQty > 0);
+
+              // Subcase: Multi-item/quantity invoice where return selection has NOT been prepared yet
+              if (activeSession.cart.length > 1 || (activeSession.cart[0]?.quantity ?? 1) > 1) {
+                if (!activeSession.isReturnMode && selectedRLines.length === 0) {
+                  // Enter return selection mode first, matching return flow
+                  enterCashReturnMode();
+                  toast('Select items and quantities from the invoice to return for replacement, then click Replace again.', {
+                    icon: '🔁',
+                    duration: 5000,
+                  });
+                  return;
+                }
+              }
+
+              // Settle the returned items into replace mode
+              prepareReplaceExchange();
+              window.dispatchEvent(new CustomEvent('pos:set-scan-destination', { detail: { bucket: 'new' } }));
+              toast.success('Original item(s) set for return. Now scan or search the new replacement product.', {
+                icon: '🔁',
+                duration: 6000,
+              });
+              return;
+            }
+
+            // Case 3: In replace mode with returned items and NO new items yet -> remind operator to add replacement product
+            if (activeSession.mode === 'replace' && (activeSession.returnedItems?.length ?? 0) > 0 && activeSession.cart.length === 0) {
+              window.dispatchEvent(new CustomEvent('pos:set-scan-destination', { detail: { bucket: 'new' } }));
+              toast('Scan or search the new replacement product to exchange against returned items.', {
+                icon: '🔍',
+                duration: 4000,
+              });
+              return;
+            }
+
+            // Case 4: In replace mode and clicked to exit
+            if (activeSession.mode === 'replace') {
+              // Only open warning if user has actually added replacement items or returns and there is no confirmation action
+              const hasItems = (activeSession.cart?.length ?? 0) > 0 || (activeSession.returnedItems?.length ?? 0) > 0;
+              if (hasItems) {
+                // If there are returned items but no new items yet, offer safe reset
+                if (window.confirm('Do you want to cancel Product Replace and return to standard sale?')) {
+                  clearCart();
+                  setSessionMode('sale');
+                  toast.success('Standard Sale Mode Active');
+                }
+                return;
+              }
+              setSessionMode('sale');
+              toast.success('Standard Sale Mode', { icon: '🛒' });
+            } else {
+              setSessionMode('replace');
+              toast.success('Product Replace Mode Active', { icon: '🔁' });
+            }
           }}
           onKeyDown={(e) => {
             if (e.key === 'Tab' && !e.shiftKey) {
@@ -820,13 +965,21 @@ export const CartSummary: React.FC = () => {
             }
           }}
           className={`h-9 px-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 ${
-            activeSession.mode === 'replace'
+            activeSession.mode === 'replace' && (activeSession.returnedItems?.length ?? 0) > 0 && activeSession.cart.length > 0
+              ? 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white ring-2 ring-indigo-400 animate-pulse'
+              : activeSession.mode === 'replace' || (activeSession.linkedInvoiceId && activeSession.cart.length > 0 && activeSession.isReturnMode)
               ? 'bg-indigo-700 text-white ring-2 ring-indigo-400'
               : 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white'
           }`}
         >
           <Sparkles className="h-3.5 w-3.5" />
-          <span className="truncate">Product Replace</span>
+          <span className="truncate">
+            {activeSession.mode === 'replace' && (activeSession.returnedItems?.length ?? 0) > 0 && activeSession.cart.length > 0
+              ? 'CONFIRM REPLACE'
+              : activeSession.linkedInvoiceId && activeSession.cart.length > 0 && activeSession.isReturnMode
+              ? 'SET FOR REPLACE'
+              : 'Product Replace'}
+          </span>
         </button>
 
         {/* 3. Return by Invoice */}
@@ -960,7 +1113,55 @@ export const CartSummary: React.FC = () => {
         <ExchangeResultSummaryModal
           result={lastExchangeResult}
           onClose={clearLastExchangeResult}
+          onPrint={() => {
+            triggerExchangePrint(
+              lastExchangeResult,
+              selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name, phone: selectedCustomer.phone } : null
+            );
+            clearLastExchangeResult();
+          }}
         />
+      )}
+
+      {/* Phase 2: Confirmation Dialog when Exiting Replace Mode with Active Items */}
+      {isExitReplaceConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-surface border border-border rounded-2xl shadow-2xl max-w-sm w-full p-5 flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-black text-text-primary">Exit Exchange Mode?</h4>
+                <p className="text-xs text-text-muted">The exchange cart contains unsaved items</p>
+              </div>
+            </div>
+            <p className="text-xs text-text-secondary leading-relaxed bg-surface-hover/70 p-3 rounded-xl border border-border">
+              Returning to standard Sale mode will discard any returned items and reset the linked invoice. Your customer selection will be preserved.
+            </p>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setExitReplaceConfirmOpen(false)}
+                className="h-9 px-3 rounded-xl border border-border bg-surface hover:bg-surface-hover text-xs font-bold text-text-secondary transition-colors"
+              >
+                Keep Exchange
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setExitReplaceConfirmOpen(false);
+                  clearCart();
+                  setSessionMode('sale');
+                  toast.success('Exchange discarded. Standard Sale Mode active.');
+                }}
+                className="h-9 px-3 rounded-xl bg-red-600 hover:bg-red-700 text-xs font-bold text-white transition-colors shadow-xs"
+              >
+                Discard & Exit
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <GlobalLoadingOverlay isOpen={isProcessing} message="Processing Transaction..." />

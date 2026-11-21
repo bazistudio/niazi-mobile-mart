@@ -12,7 +12,7 @@
  */
 
 import React from 'react';
-import { CheckCircle2, ArrowLeftRight, X } from 'lucide-react';
+import { CheckCircle2, ArrowLeftRight, X, Printer } from 'lucide-react';
 import type { ExchangeResultDto } from '@/lib/tauri/tauriClient';
 
 // ---------------------------------------------------------------------------
@@ -48,6 +48,7 @@ function refundMethodLabel(method: string | null | undefined): string {
 export interface ExchangeResultSummaryModalProps {
   result: ExchangeResultDto;
   onClose: () => void;
+  onPrint?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -57,6 +58,7 @@ export interface ExchangeResultSummaryModalProps {
 export const ExchangeResultSummaryModal: React.FC<ExchangeResultSummaryModalProps> = ({
   result,
   onClose,
+  onPrint,
 }) => {
   const invoiceNumber =
     result.replacement_sale?.sale?.invoice_number ?? null;
@@ -168,14 +170,28 @@ export const ExchangeResultSummaryModal: React.FC<ExchangeResultSummaryModalProp
           </p>
         </div>
 
-        {/* Close */}
-        <div className="px-4 pb-4">
+        {/* Action Buttons: Print Receipt vs Cancel / Next Transaction */}
+        <div className="px-4 pb-4 flex gap-2">
+          {onPrint && (
+            <button
+              type="button"
+              onClick={onPrint}
+              className="flex-1 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-sm font-bold transition-all flex items-center justify-center gap-1.5 shadow-xs"
+            >
+              <Printer className="w-4 h-4" />
+              <span>Print Receipt</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
-            className="w-full h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-sm font-bold transition-all"
+            className={`h-10 rounded-xl text-sm font-bold transition-all ${
+              onPrint
+                ? 'flex-1 bg-surface-hover hover:bg-border text-text-primary border border-border'
+                : 'w-full bg-emerald-600 hover:bg-emerald-700 text-white'
+            }`}
           >
-            Done
+            {onPrint ? 'Cancel Print / Done' : 'Done'}
           </button>
         </div>
 

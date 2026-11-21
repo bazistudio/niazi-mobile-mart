@@ -238,7 +238,7 @@ export const printFormatter = {
       returnPolicy: order.returnPolicy || shop.returnPolicy || 'Goods once sold can only be returned/exchanged within 3 days with original receipt.',
       warrantyInstructions: order.warrantyInstructions || shop.warrantyInstructions || undefined
     };
-    return renderDocument(invoice, settings, 'Sale Receipt');
+    return renderDocument(invoice, settings, 'PRODUCT SALE INVOICE');
   },
 
   formatPurchaseInvoice: (purchase: any, settings: PrinterSettings, shop: ShopHeader): string => {
@@ -838,7 +838,7 @@ const _exchangeSettlementLine = (data: ExchangeReceiptData, thermal: boolean): s
 
 const _formatExchangeThermal = (data: ExchangeReceiptData, settings: PrinterSettings): string => {
   const isPureReturn = !data.replacementItems || data.replacementItems.length === 0;
-  const docTitle = isPureReturn ? 'SALES RETURN / CREDIT NOTE' : 'EXCHANGE RECEIPT';
+  const docTitle = isPureReturn ? 'PRODUCT RETURN INVOICE' : 'PRODUCT REPLACE / EXCHANGE INVOICE';
   const fontFamily = settings.font?.family === 'monospace' ? 'Courier, "Courier New", monospace' : 'Arial, sans-serif';
   const tblHead = `<table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:4px;table-layout:fixed;overflow-wrap:break-word;"><thead><tr style="border-bottom:1px dashed #000;"><th style="text-align:left;padding:3px 2px;width:46%;">Item</th><th style="text-align:center;padding:3px 0;width:10%;">Qty</th><th style="text-align:right;padding:3px 0;width:22%;">Price</th><th style="text-align:right;padding:3px 0;width:22%;">Amount</th></tr></thead><tbody>`;
 
@@ -879,7 +879,7 @@ const _formatExchangeThermal = (data: ExchangeReceiptData, settings: PrinterSett
 
 const _formatExchangeA4 = (data: ExchangeReceiptData, settings: PrinterSettings): string => {
   const isPureReturn = !data.replacementItems || data.replacementItems.length === 0;
-  const docTitle = isPureReturn ? 'Sales Return / Credit Note' : 'Exchange Receipt';
+  const docTitle = isPureReturn ? 'PRODUCT RETURN INVOICE' : 'PRODUCT REPLACE / EXCHANGE INVOICE';
   const fontFamily = settings.font?.family === 'monospace' ? 'Courier, monospace' : 'Arial, Helvetica, sans-serif';
   const fs = settings.font?.size || 12;
   const tblWrap = (rows: string) => `<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-size:${fs}px;"><thead><tr style="border-bottom:2px solid #000;background:#f9f9f9;"><th style="text-align:left;padding:6px;">Item</th><th style="text-align:center;padding:6px;width:60px;">Qty</th><th style="text-align:right;padding:6px;width:100px;">Rate (Rs)</th><th style="text-align:right;padding:6px;width:110px;">Amount (Rs)</th></tr></thead><tbody>${rows}</tbody></table>`;

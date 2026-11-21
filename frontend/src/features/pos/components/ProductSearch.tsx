@@ -18,7 +18,7 @@ export const ProductSearch = () => {
   const products = useInventoryStore((s) => s.products);
 
   const isReplaceMode = activeSession?.mode === 'replace';
-  const [targetBucket, setTargetBucket] = useState<'new' | 'return'>('new');
+  const [targetBucket, setTargetBucket] = useState<'new' | 'return'>('return');
 
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -35,10 +35,33 @@ export const ProductSearch = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Auto-switch back to 'new' if replace mode is turned off
+  // Auto-focus search input when entering replace mode or when returned items are set
   useEffect(() => {
-    if (!isReplaceMode) setTargetBucket('new');
-  }, [isReplaceMode]);
+    if (isReplaceMode) {
+      if ((activeSession?.returnedItems?.length ?? 0) > 0) {
+        setTargetBucket('new');
+      } else {
+        setTargetBucket('return');
+      }
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 50);
+    } else {
+      setTargetBucket('new');
+    }
+  }, [isReplaceMode, activeSession?.returnedItems?.length]);
+
+  // Listen for programmatic scan destination updates (e.g. from replace setup)
+  useEffect(() => {
+    const handleSetBucket = (e: Event) => {
+      const detail = (e as CustomEvent<{ bucket: 'new' | 'return' }>).detail;
+      if (detail?.bucket) {
+        setTargetBucket(detail.bucket);
+      }
+    };
+    window.addEventListener('pos:set-scan-destination', handleSetBucket);
+    return () => window.removeEventListener('pos:set-scan-destination', handleSetBucket);
+  }, []);
 
   // Debounce logic
   useEffect(() => {
@@ -196,7 +219,7 @@ export const ProductSearch = () => {
   };
 
   return (
-    <div className="relative z-50 flex flex-col gap-2 w-full" ref={containerRef}>
+    <div className="relative z-50 flex flex-col gap-1.5 w-full" ref={containerRef}>
       <div className="relative">
         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
           <Search className="h-5 w-5 text-gray-400" />
@@ -214,7 +237,13 @@ export const ProductSearch = () => {
             if (results.length > 0) setIsDropdownOpen(true);
           }}
           onKeyDown={handleKeyDown}
-          placeholder="Scan or search products..."
+          placeholder={
+            isReplaceMode
+              ? targetBucket === 'return'
+                ? 'Scan barcode or search RETURNED product...'
+                : 'Scan barcode or search NEW replacement product...'
+              : 'Scan or search products...'
+          }
           className={`block w-full pl-10 pr-3 py-1.5 text-sm border rounded-md bg-gray-50 focus:bg-white dark:bg-gray-800/50 dark:focus:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-offset-0 transition-all ${targetBucket === 'return' ? 'border-orange-200 focus:border-orange-500 focus:ring-orange-500/20' : 'border-gray-200 dark:border-gray-700 focus:border-[#006970] focus:ring-[#006970]/20'
             }`}
         />
