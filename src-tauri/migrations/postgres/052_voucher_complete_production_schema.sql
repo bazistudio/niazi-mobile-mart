@@ -1,30 +1,20 @@
 -- Migration 052: Voucher Complete Production Schema
 --
 -- PURPOSE:
---   This is the AUTHORITATIVE, single-source-of-truth voucher schema migration.
---   Migrations 050 and 051 exist as SQL files but were NEVER registered in the
---   migration runner and have NEVER executed against any database.
---
---   This migration supersedes both 050 and 051 by creating all required tables
---   with CORRECT constraints from the start (no ALTER TABLE patches needed).
---
--- CORRECTIONS vs migration 050 (which never ran):
---   1. delivered_qty: removed CHECK > 0 → now allows 0 for PRE_BOOKING / INSTANT_INVENTORY
---   2. matched_qty CHECK: now matched_qty <= voucher_qty (not <= delivered_qty, allows pre-match)
---   3. payment_method: expanded to include CARD, BANK_TRANSFER, SPLIT, OTHER, NONE
---   4. payment_status: added REGISTRATION_ONLY for INSTANT_INVENTORY type
---   5. Added idempotency_key, request_fingerprint, sale_id columns
---   6. Created pos_voucher_payments table (multi-tender history with idempotency)
---   7. Created voucher_counters table (atomic branch-scoped monthly counter)
---   8. Created pos_voucher_deliveries table (delivery event idempotency + audit)
+--   Authoritative voucher schema migration aligned with backend repository
+--   implementation (`backend/src/repositories/voucher.repo.ts`), multi-tender
+--   history, atomic branch counters, physical delivery audit trail, inventory
+--   matching reconciliation, and branch-scoped idempotency.
 --
 -- SAFE AND IDEMPOTENT:
---   All statements use IF NOT EXISTS. Safe to run against any database state.
+--   All statements use IF NOT EXISTS and non-destructive constraint updates.
+--   Safe for clean installations as well as environments with prior migrations.
 
 -- -----------------------------------------------------------------------------
 -- TABLE 1: voucher_counters
 -- Atomic branch-scoped monthly voucher numbering: {BRANCH_CODE}-VCH-{YYYYMM}-{000001}
--- INSERT ... ON CONFLICT DO UPDATE ensures race-safe atomic counter increment.
+-- INSERT ... ON CONFLICT (branch_id, period_yyyymm) DO UPDATE ensures race-safe
+-- atomic counter increment.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS voucher_counters (
     branch_id      TEXT        NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
@@ -50,11 +40,6 @@ CREATE TABLE IF NOT EXISTS pos_direct_vouchers (
     voucher_number           TEXT        NOT NULL UNIQUE,
     voucher_type             TEXT        NOT NULL DEFAULT 'INSTANT_INVENTORY'
                              CHECK(voucher_type IN ('INSTANT_INVENTORY', 'DIRECT_ADVANCE', 'PRE_BOOKING')),
-
-    -- Idempotency: SHA-256 fingerprint of the creation request payload
-    -- Prevents double-submission from network retries or UI races
-    idempotency_key          TEXT        UNIQUE,
-    request_fingerprint      TEXT        UNIQUE,
 
     organization_id          TEXT        NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
     branch_id                TEXT        NOT NULL REFERENCES branches(id)      ON DELETE RESTRICT,
@@ -86,8 +71,13 @@ CREATE TABLE IF NOT EXISTS pos_direct_vouchers (
     total_sale_amount        BIGINT      GENERATED ALWAYS AS (voucher_qty * voucher_sale_price) STORED,
 
     -- Payment Accounting
-    -- REGISTRATION_ONLY: for INSTANT_INVENTORY type — no financial transaction
-    -- PAID / PARTIALLY_PAID / UNPAID / ON_ACCOUNT: standard payment states
+    -- Primary payment method recorded on voucher header
+    payment_method           TEXT        NOT NULL DEFAULT 'NONE'
+                             CHECK(payment_method IN (
+                                 'CASH', 'CARD', 'BANK', 'BANK_TRANSFER',
+                                 'EASYPAISA', 'JAZZCASH', 'CREDIT', 'SPLIT',
+                                 'OTHER', 'NONE'
+                             )),
     payment_status           TEXT        NOT NULL
                              CHECK(payment_status IN (
                                  'REGISTRATION_ONLY',
@@ -102,10 +92,6 @@ CREATE TABLE IF NOT EXISTS pos_direct_vouchers (
     customer_ledger_id       TEXT        REFERENCES customer_ledger_entries(id) ON DELETE SET NULL,
 
     -- Lifecycle Status
-    -- PENDING_RECEIPT: voucher created, inventory not yet matched
-    -- PARTIALLY_MATCHED: some inventory received, reconciliation in progress
-    -- FULFILLED: all units matched to received inventory
-    -- CANCELLED: voided before fulfilment (only allowed when no payments made)
     status                   TEXT        NOT NULL DEFAULT 'PENDING_RECEIPT'
                              CHECK(status IN (
                                  'PENDING_RECEIPT', 'PARTIALLY_MATCHED', 'FULFILLED', 'CANCELLED'
@@ -114,8 +100,30 @@ CREATE TABLE IF NOT EXISTS pos_direct_vouchers (
     notes                    TEXT,
     performed_by             TEXT        NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Branch-scoped idempotency key and request payload fingerprint
+    idempotency_key          TEXT,
+    request_fingerprint      TEXT
 );
+
+-- Conditional column additions if pos_direct_vouchers pre-existed from an earlier migration
+ALTER TABLE pos_direct_vouchers
+    ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'NONE',
+    ADD COLUMN IF NOT EXISTS idempotency_key TEXT,
+    ADD COLUMN IF NOT EXISTS request_fingerprint TEXT,
+    ADD COLUMN IF NOT EXISTS sale_id TEXT REFERENCES sales(id) ON DELETE SET NULL;
+
+-- Ensure relaxed delivered_qty & matched_qty check constraints
+ALTER TABLE pos_direct_vouchers
+    DROP CONSTRAINT IF EXISTS pos_direct_vouchers_delivered_qty_check,
+    DROP CONSTRAINT IF EXISTS pos_direct_vouchers_matched_qty_check;
+
+ALTER TABLE pos_direct_vouchers
+    ADD CONSTRAINT pos_direct_vouchers_delivered_qty_check
+        CHECK (delivered_qty >= 0 AND delivered_qty <= voucher_qty),
+    ADD CONSTRAINT pos_direct_vouchers_matched_qty_check
+        CHECK (matched_qty >= 0 AND matched_qty <= voucher_qty);
 
 CREATE INDEX IF NOT EXISTS idx_pos_direct_vouchers_branch_status
     ON pos_direct_vouchers (branch_id, status);
@@ -135,43 +143,53 @@ CREATE INDEX IF NOT EXISTS idx_pos_direct_vouchers_product
 CREATE INDEX IF NOT EXISTS idx_pos_direct_vouchers_created_at
     ON pos_direct_vouchers (created_at);
 
-CREATE INDEX IF NOT EXISTS idx_pos_direct_vouchers_idempotency_key
-    ON pos_direct_vouchers (idempotency_key)
-    WHERE idempotency_key IS NOT NULL;
-
 CREATE INDEX IF NOT EXISTS idx_pos_direct_vouchers_sale_id
     ON pos_direct_vouchers (sale_id)
     WHERE sale_id IS NOT NULL;
+
+-- Branch-scoped uniqueness for voucher idempotency (prevents cross-branch key collisions)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_direct_vouchers_idempotency
+    ON pos_direct_vouchers (branch_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
 -- TABLE 3: pos_voucher_payments
 -- Multi-tender payment history for vouchers.
 -- Supports split-payment (CASH + BANK_TRANSFER + EASYPAISA etc.) per voucher.
--- Each row represents a single payment line/event.
--- Idempotency via (voucher_id, idempotency_key) prevents duplicate payment posts.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS pos_voucher_payments (
-    id                TEXT        PRIMARY KEY CHECK(length(id) = 36),
-    voucher_id        TEXT        NOT NULL REFERENCES pos_direct_vouchers(id) ON DELETE RESTRICT,
+    id                  TEXT        PRIMARY KEY CHECK(length(id) = 36),
+    organization_id     TEXT        NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+    branch_id           TEXT        NOT NULL REFERENCES branches(id)      ON DELETE RESTRICT,
+    voucher_id          TEXT        NOT NULL REFERENCES pos_direct_vouchers(id) ON DELETE RESTRICT,
 
-    -- Idempotency key scoped to the voucher: prevents double-posting on retry
-    idempotency_key   TEXT,
+    -- Scoped idempotency key: prevents double-posting on retry
+    idempotency_key     TEXT,
 
-    payment_method    TEXT        NOT NULL
-                      CHECK(payment_method IN (
-                          'CASH', 'CARD', 'BANK_TRANSFER',
-                          'EASYPAISA', 'JAZZCASH', 'OTHER', 'NONE'
-                      )),
-    amount            BIGINT      NOT NULL CHECK(amount > 0),
-    reference_number  TEXT,
-    notes             TEXT,
+    payment_method      TEXT        NOT NULL
+                        CHECK(payment_method IN (
+                            'CASH', 'CARD', 'BANK_TRANSFER',
+                            'EASYPAISA', 'JAZZCASH', 'OTHER', 'NONE'
+                        )),
+    amount              BIGINT      NOT NULL CHECK(amount > 0),
+    reference_number    TEXT,
+    notes               TEXT,
 
-    -- Back-reference to the cash_movements row created for CASH payments
-    cash_movement_id  TEXT        REFERENCES cash_movements(id) ON DELETE SET NULL,
+    -- Back-references to financial movements created during payment
+    cash_movement_id    TEXT        REFERENCES cash_movements(id) ON DELETE SET NULL,
+    customer_ledger_id  TEXT        REFERENCES customer_ledger_entries(id) ON DELETE SET NULL,
+    is_reversed         BOOLEAN     NOT NULL DEFAULT FALSE,
 
-    performed_by      TEXT        NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    performed_by        TEXT        NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Conditional additions if pos_voucher_payments pre-existed
+ALTER TABLE pos_voucher_payments
+    ADD COLUMN IF NOT EXISTS organization_id TEXT REFERENCES organizations(id) ON DELETE RESTRICT,
+    ADD COLUMN IF NOT EXISTS branch_id TEXT REFERENCES branches(id) ON DELETE RESTRICT,
+    ADD COLUMN IF NOT EXISTS customer_ledger_id TEXT REFERENCES customer_ledger_entries(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS is_reversed BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_voucher_payments_idempotency
     ON pos_voucher_payments (voucher_id, idempotency_key)
@@ -186,22 +204,42 @@ CREATE INDEX IF NOT EXISTS idx_pos_voucher_payments_created_at
 -- -----------------------------------------------------------------------------
 -- TABLE 4: pos_voucher_deliveries
 -- Immutable audit log of each physical delivery event for a PRE_BOOKING voucher.
--- Delivery idempotency via idempotency_key prevents duplicate delivery posts.
--- For DIRECT_ADVANCE vouchers, one delivery record is created at voucher creation
--- (the entire qty is immediately delivered).
+-- Uses `quantity_delivered` matching `backend/src/repositories/voucher.repo.ts`.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS pos_voucher_deliveries (
-    id               TEXT        PRIMARY KEY CHECK(length(id) = 36),
-    voucher_id       TEXT        NOT NULL REFERENCES pos_direct_vouchers(id) ON DELETE RESTRICT,
+    id                  TEXT        PRIMARY KEY CHECK(length(id) = 36),
+    voucher_id          TEXT        NOT NULL REFERENCES pos_direct_vouchers(id) ON DELETE RESTRICT,
 
-    -- Idempotency key: prevents double-posting on network retry
-    idempotency_key  TEXT        UNIQUE,
+    -- Scoped idempotency key: prevents double-posting on network retry
+    idempotency_key     TEXT        NOT NULL,
 
-    delivered_qty    INT         NOT NULL CHECK(delivered_qty > 0),
-    delivery_notes   TEXT,
-    performed_by     TEXT        NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    quantity_delivered  INT         NOT NULL CHECK(quantity_delivered > 0),
+    customer_ledger_id  TEXT        REFERENCES customer_ledger_entries(id) ON DELETE SET NULL,
+    request_fingerprint TEXT,
+    delivery_notes      TEXT,
+    performed_by        TEXT        NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (voucher_id, idempotency_key)
 );
+
+-- Conditional check and column alignment if pos_voucher_deliveries pre-existed with delivered_qty
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'pos_voucher_deliveries' AND column_name = 'delivered_qty'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'pos_voucher_deliveries' AND column_name = 'quantity_delivered'
+    ) THEN
+        ALTER TABLE pos_voucher_deliveries RENAME COLUMN delivered_qty TO quantity_delivered;
+    END IF;
+END $$;
+
+ALTER TABLE pos_voucher_deliveries
+    ADD COLUMN IF NOT EXISTS quantity_delivered INT CHECK(quantity_delivered > 0),
+    ADD COLUMN IF NOT EXISTS customer_ledger_id TEXT REFERENCES customer_ledger_entries(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS request_fingerprint TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_pos_voucher_deliveries_voucher_id
     ON pos_voucher_deliveries (voucher_id);

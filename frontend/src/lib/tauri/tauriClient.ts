@@ -137,6 +137,9 @@ export const getApiBaseUrl = (): string => {
   return DEFAULT_CENTRAL_API_URL;
 };
 
+// PERF-E: Default 10 s hard timeout for all HTTP calls via AbortController.
+const HTTP_TIMEOUT_MS = 10_000;
+
 export async function httpFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getAuthToken();
   const headers: Record<string, string> = {
@@ -156,10 +159,16 @@ export async function httpFetch<T>(path: string, options: RequestInit = {}): Pro
       console.log(`[API DEV] ${options.method || 'GET'} ${u.pathname}${bId ? ` [branch_id=${bId}]` : ''}`);
     } catch {}
   }
+
+  // AbortController 10 s hard timeout — prevents hanging POS UI on slow server
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
+
   const res = await fetch(url, {
     ...options,
     headers,
-  });
+    signal: options.signal ?? controller.signal,
+  }).finally(() => clearTimeout(timeoutId));
 
   if (!res.ok) {
     let errorMsg = `HTTP Error ${res.status}`;
@@ -1470,6 +1479,22 @@ export const tauriClient = {
   async saleGetByInvoice(invoiceNumber: string): Promise<Sale | null> {
     try {
       return await httpFetch<Sale>(`/api/sales/invoice/${encodeURIComponent(invoiceNumber)}`);
+    } catch (e: any) {
+      if (e?.status === 404) return null;
+      throw e;
+    }
+  },
+
+  /**
+   * POS scanner fast-path: fetches sale header + lines + payments in ONE HTTP request.
+   * Eliminates 3 sequential calls (getByInvoice → getLines → getPayments).
+   * Returns null when invoice not found (404).
+   */
+  async saleGetInvoiceFull(invoiceNumber: string): Promise<{ sale: Sale; lines: SaleLine[]; payments: SalePayment[] } | null> {
+    try {
+      return await httpFetch<{ sale: Sale; lines: SaleLine[]; payments: SalePayment[] }>(
+        `/api/sales/invoice/${encodeURIComponent(invoiceNumber)}/full`
+      );
     } catch (e: any) {
       if (e?.status === 404) return null;
       throw e;

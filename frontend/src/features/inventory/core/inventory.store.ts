@@ -37,6 +37,8 @@ interface InventoryState {
   
   // async thunks
   fetchProducts: (params?: Partial<PaginationParams>) => Promise<void>;
+  /** PERF-D: Targeted stock update from WebSocket hint — avoids full refetch */
+  updateStockForProduct: (productId: string, newQty: number) => void;
   forceSync: () => Promise<void>;
   updateProduct: (id: string, data: import('../dto/inventory.dto').UpdateProductDTO, image?: File) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
@@ -63,6 +65,14 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
   setSort: (sort) => set({ sort }),
 
   setScope: (scope) => set({ scope }),
+
+  updateStockForProduct: (productId: string, newQty: number) => {
+    set((state) => ({
+      products: state.products.map((p) =>
+        p.id === productId ? { ...p, quantity: newQty } : p
+      ),
+    }));
+  },
 
   fetchProducts: async (params) => {
     if (get().status === 'loading') return;

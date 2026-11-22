@@ -201,6 +201,41 @@ export function createSaleRouter(pool: Pool): Router {
     }
   });
 
+  // ── GET /api/sales/invoice/:number/full ─────────────────────────────────
+  // POS scanner optimisation: returns sale header + lines + payments in a single request.
+  // Eliminates 2 sequential HTTP calls (getSaleByInvoice → getSaleLines/getSalePayments)
+  // down to 1. Must be registered before /:id to avoid route param collision.
+  router.get('/invoice/:number/full', async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity as RequestIdentity;
+
+    const denied = authorizePermission(identity, 'pos', null);
+    if (denied) {
+      res.status(403).json({ error: denied });
+      return;
+    }
+
+    try {
+      const invoiceNumber = req.params['number'] as string;
+      const sale = await getSaleByInvoice(pool, invoiceNumber);
+      if (!sale) {
+        res.status(404).json({ error: 'Sale not found' });
+        return;
+      }
+      if (!canAccessBranch(identity, sale.branch_id)) {
+        res.status(403).json({ error: 'Access denied: sale belongs to a different branch' });
+        return;
+      }
+      // Fetch lines and payments in parallel — single backend DB trip each
+      const [lines, payments] = await Promise.all([
+        getSaleLines(pool, sale.id),
+        getSalePayments(pool, sale.id),
+      ]);
+      res.status(200).json({ sale, lines, payments });
+    } catch (err) {
+      sendError(req, res, err);
+    }
+  });
+
   // ── GET /api/sales/:id ───────────────────────────────────────────────────
   router.get('/:id', async (req: Request, res: Response): Promise<void> => {
     const identity = req.identity as RequestIdentity;

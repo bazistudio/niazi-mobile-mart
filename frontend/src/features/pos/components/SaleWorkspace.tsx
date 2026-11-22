@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { CategoryFilterBar } from './CategoryFilterBar';
 import { ProductCardGrid } from './ProductCardGrid';
 import { CartPanel } from './CartPanel';
@@ -12,6 +12,8 @@ import { DBInventory } from '@/types/db.types';
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
 import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { salesApi } from '@/services/sales.api';
+import { tauriClient } from '@/lib/tauri/tauriClient';
+import { useInventoryRealtimeSync } from '@/features/inventory/hooks/useInventoryRealtimeSync';
 import toast from 'react-hot-toast';
 
 export const SaleWorkspace: React.FC = () => {
@@ -23,7 +25,21 @@ export const SaleWorkspace: React.FC = () => {
 
   const activeShopId = useOrganizationStore((s) => s.activeShop?._id || s.activeShopId);
   const products = useInventoryStore((s) => s.products);
+  const inventoryStatus = useInventoryStore((s) => s.status);
   const fetchProducts = useInventoryStore((s) => s.fetchProducts);
+
+  // O(1) barcode/SKU lookup index — rebuilt only when products array changes
+  const barcodeIndex = useMemo(() => {
+    const idx = new Map<string, (typeof products)[0]>();
+    for (const p of products) {
+      if (p.barcode) idx.set(p.barcode.toLowerCase(), p);
+      if (p.sku) idx.set(p.sku.toLowerCase(), p);
+    }
+    return idx;
+  }, [products]);
+
+  // Scanner queue: holds scans that arrive before products are loaded
+  const pendingScanRef = useRef<string | null>(null);
   const addToCart = usePosStore((s) => s.addToCart);
   const loadInvoice = usePosStore((s) => s.loadInvoice);
   const activeSession = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId));
@@ -59,59 +75,76 @@ export const SaleWorkspace: React.FC = () => {
       if (isInvoiceCode) {
         const query = trimmed.toUpperCase();
         try {
-          const res = await salesApi.getOrders({
-            orderNumber: query,
-            branchId: activeShopId,
-            limit: 5,
-          });
+          // PERF-B: Single HTTP call returns sale header + lines + payments combined.
+          // Replaces the previous 3-call chain (getOrders → getOrderById → getSaleLines).
+          const full = await tauriClient.saleGetInvoiceFull(query);
 
-          if (res.success && res.data && res.data.length > 0) {
-            // Pick exact match or first candidate
-            const target =
-              res.data.find(
-                (o: any) =>
-                  (o.orderNumber && o.orderNumber.toUpperCase() === query) ||
-                  (o.invoiceNumber && o.invoiceNumber.toUpperCase() === query) ||
-                  (o._id && String(o._id).toUpperCase() === query)
-              ) || res.data[0];
-
-            const saleId = target.id || target._id;
-            let fullOrder = target;
-            if (!target.items || target.items.length === 0) {
-              const detailRes = await salesApi.getOrderById(saleId);
-              if (detailRes.success && detailRes.order) {
-                fullOrder = detailRes.order;
-              }
-            }
-
-            // Direct-to-cart load without opening modal
+          if (full) {
+            // Map to the Order shape loadInvoice() expects (same as salesApi.mapSaleToOrder)
+            const { sale, lines, payments } = full;
+            const orderLines = lines.map((l: any) => ({
+              id: l.id,
+              productId: l.product_id,
+              productName: l.product_name_snapshot,
+              sku: l.sku_snapshot,
+              unitPrice: l.unit_price,
+              costPrice: l.cost_price_snapshot,
+              quantity: l.quantity,
+              discount: l.discount,
+              lineTotal: l.line_total,
+              lineType: l.line_type ?? 'PRODUCT',
+              specs: l.specs,
+            }));
+            const orderPayments = payments.map((p: any) => ({
+              id: p.id,
+              method: p.payment_method,
+              amount: p.amount,
+              referenceNumber: p.reference_number,
+              notes: p.notes,
+            }));
+            const fullOrder = {
+              id: sale.id,
+              orderNumber: sale.invoice_number,
+              invoiceNumber: sale.invoice_number,
+              transactionId: sale.invoice_number,
+              branchId: sale.branch_id,
+              customerId: sale.customer_id,
+              customerName: sale.customer_name_snapshot,
+              subtotal: sale.subtotal,
+              discount: sale.discount,
+              totalAmount: sale.total_amount,
+              paidAmount: sale.paid_amount,
+              changeAmount: sale.change_amount,
+              paymentStatus: sale.payment_status,
+              status: sale.sale_status,
+              items: orderLines,
+              payments: orderPayments,
+              createdAt: sale.created_at,
+            };
             loadInvoice(fullOrder);
-            toast.success(`Invoice ${fullOrder.orderNumber || fullOrder.invoiceNumber || query} added directly to POS cart!`, {
+            toast.success(`Invoice ${sale.invoice_number || query} loaded!`, {
               icon: '🛒',
               duration: 3500,
             });
             return;
           }
         } catch (err) {
-          console.error('[SaleWorkspace] Direct invoice lookup failed:', err);
+          console.error('[SaleWorkspace] Fast invoice lookup failed:', err);
         }
 
-        // Fallback: If no invoice matches directly, open InvoiceLookupModal pre-filled so operator can inspect/correct
+        // Fallback: not found — open InvoiceLookupModal pre-filled so operator can inspect/correct
         window.dispatchEvent(
           new CustomEvent('pos:open-invoice-lookup', {
             detail: { prefill: query },
           })
         );
-        toast(`Invoice ${query} not found directly — opening search`, { icon: '🔍', duration: 2500 });
+        toast(`Invoice ${query} not found — opening search`, { icon: '🔍', duration: 2500 });
         return;
       }
 
       // --- Route 2: Product barcode / SKU ---
-      const matchedProduct = products.find(
-        (p) =>
-          (p.barcode && p.barcode.toLowerCase() === trimmed.toLowerCase()) ||
-          (p.sku && p.sku.toLowerCase() === trimmed.toLowerCase())
-      );
+      // PERF-A3: O(1) hash lookup instead of O(n) linear scan across all products
+      const matchedProduct = barcodeIndex.get(trimmed.toLowerCase());
 
       if (matchedProduct) {
         const isOutOfStock = (matchedProduct.stock || 0) <= 0;
@@ -149,7 +182,7 @@ export const SaleWorkspace: React.FC = () => {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [products, isReturnMode, addToCart, loadInvoice, activeShopId]
+    [barcodeIndex, products, isReturnMode, addToCart, loadInvoice, activeShopId]
   );
 
   // Listen for custom event to open invoice lookup from extra actions toolbar or scanner
@@ -184,6 +217,19 @@ export const SaleWorkspace: React.FC = () => {
   useEffect(() => {
     fetchProducts();
   }, [fetchProducts, activeShopId]);
+
+  // PERF-D: Subscribe to WebSocket realtime hints for live stock updates
+  useInventoryRealtimeSync();
+
+  // PERF-A6: Drain queued scanner input once products are loaded
+  // If the scanner fires before products are ready, the scan is held here and replayed.
+  useEffect(() => {
+    if (inventoryStatus === 'success' && pendingScanRef.current) {
+      const queued = pendingScanRef.current;
+      pendingScanRef.current = null;
+      handleScanComplete(queued);
+    }
+  }, [inventoryStatus, handleScanComplete]);
 
   // Activate headless barcode scanner
   // Activate headless barcode scanner (disabled when InvoiceLookupModal is open to prevent duplicate processing)

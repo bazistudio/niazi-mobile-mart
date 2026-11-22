@@ -28,7 +28,7 @@ interface UseBarcodeScannerProps {
 export const useBarcodeScanner = ({
   onScan,
   enabled = true,
-  maxKeystrokeGap = 80,
+  maxKeystrokeGap = 50,
   minLength = 2,
 }: UseBarcodeScannerProps) => {
   const bufferRef = useRef<string>('');

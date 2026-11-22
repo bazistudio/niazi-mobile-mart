@@ -11,6 +11,54 @@ import { companyService } from '../services/company.service';
 import { colorService } from '../services/color.service';
 import { qualityService } from '../services/quality.service';
 
+// ── PERF-C: In-memory session TTL cache for static master-data ──────────────
+// Categories, brands, companies, colors, and qualities rarely change during a
+// POS session. Caching them for 10 minutes reduces `getProducts()` from 7
+// parallel HTTP calls to 2 (productList + stockMap only).
+const SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+
+const masterDataCache = {
+  categories: null as CacheEntry<any[]> | null,
+  brands: null as CacheEntry<any[]> | null,
+  companies: null as CacheEntry<any[]> | null,
+  colors: null as CacheEntry<any[]> | null,
+  qualities: null as CacheEntry<any[]> | null,
+};
+
+function getCached<T>(key: keyof typeof masterDataCache): T[] | null {
+  const entry = masterDataCache[key] as CacheEntry<T[]> | null;
+  if (entry && Date.now() < entry.expiresAt) return entry.data;
+  return null;
+}
+
+function setCached<T>(key: keyof typeof masterDataCache, data: T[]): T[] {
+  (masterDataCache[key] as CacheEntry<T[]>) = { data, expiresAt: Date.now() + SESSION_TTL_MS };
+  return data;
+}
+
+async function fetchCached<T>(
+  key: keyof typeof masterDataCache,
+  fetcher: () => Promise<T[]>
+): Promise<T[]> {
+  const cached = getCached<T>(key);
+  if (cached) return cached;
+  const data = await fetcher().catch(() => [] as T[]);
+  return setCached<T>(key, data);
+}
+
+/** Call this when master data is known to have changed (e.g. after edit/create). */
+export function invalidateMasterDataCache(): void {
+  (Object.keys(masterDataCache) as (keyof typeof masterDataCache)[]).forEach(k => {
+    masterDataCache[k] = null;
+  });
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function getActiveBranchId(): string {
   const store = useOrganizationStore.getState();
   const branchId = store.activeShop?._id || store.activeShop?.id || store.activeShopId;
@@ -45,11 +93,11 @@ export const inventoryApi = {
             return {} as Record<string, number>;
           })
         : Promise.resolve({} as Record<string, number>),
-      categoryService.getCategories().catch(() => []),
-      brandService.getBrands().catch(() => []),
-      companyService.getCompanies().catch(() => []),
-      colorService.getColors().catch(() => []),
-      qualityService.getQualities().catch(() => []),
+      fetchCached('categories', () => categoryService.getCategories()),
+      fetchCached('brands', () => brandService.getBrands()),
+      fetchCached('companies', () => companyService.getCompanies()),
+      fetchCached('colors', () => colorService.getColors()),
+      fetchCached('qualities', () => qualityService.getQualities()),
     ]);
 
     const stockMap = stockMapResult || {};

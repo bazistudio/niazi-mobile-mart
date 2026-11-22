@@ -67,7 +67,7 @@ export const ProductSearch = () => {
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedTerm(searchTerm);
-    }, 300);
+    }, 150); // PERF-F: reduced from 300ms → 150ms for faster search response
     return () => clearTimeout(handler);
   }, [searchTerm]);
 
