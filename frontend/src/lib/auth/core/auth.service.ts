@@ -9,6 +9,7 @@ import { AuthSession } from "@/types/auth/session";
 import { setSession, getSession, getAuthToken, clearSession, isSessionValid, getDeviceId } from "./auth.session";
 import { useAuthStore } from "./auth.store";
 import { isTauriEnvironment, tauriClient, getApiBaseUrl } from "@/lib/tauri/tauriClient";
+import { composeAbortSignals } from "@/lib/http/abortUtils";
 
 export class AuthService {
   /**
@@ -23,15 +24,25 @@ export class AuthService {
       let response: Response | null = null;
       let netError: Error | null = null;
 
+      const { signal, cleanup, isTimeout } = composeAbortSignals(null, 10_000);
       try {
         const url = `${apiBaseUrl}/api/v1/auth/login`;
         response = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ username: identifier, password: password }),
+          signal,
         });
       } catch (err: any) {
-        netError = err;
+        if (isTimeout() || err?.name === 'TimeoutError') {
+          const timeoutErr = new Error('Authentication request timed out after 10000ms');
+          timeoutErr.name = 'TimeoutError';
+          netError = timeoutErr;
+        } else {
+          netError = err;
+        }
+      } finally {
+        cleanup();
       }
 
       if (response) {
@@ -271,14 +282,18 @@ export class AuthService {
         console.warn("[AuthService] Tauri authLogout warning:", err);
       }
     } else if (token && getApiBaseUrl()) {
+      const { signal, cleanup } = composeAbortSignals(null, 5_000);
       try {
         const url = `${getApiBaseUrl()}/api/auth/logout`;
         await fetch(url, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
+          signal,
         });
       } catch (err) {
         console.warn("[AuthService] Central API logout warning:", err);
+      } finally {
+        cleanup();
       }
     }
 
@@ -399,10 +414,12 @@ export class AuthService {
     const token = getAuthToken();
     if (!token) return null;
 
+    const { signal, cleanup } = composeAbortSignals(null, 10_000);
     try {
       const url = `${getApiBaseUrl()}/api/auth/me`;
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
+        signal,
       });
 
       if (!response.ok) return null;
@@ -428,6 +445,8 @@ export class AuthService {
       };
     } catch {
       return null;
+    } finally {
+      cleanup();
     }
   }
 
@@ -444,14 +463,21 @@ export class AuthService {
 
     const apiBaseUrl = getApiBaseUrl();
     const url = `${apiBaseUrl}/api/auth/unlock`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ pin }),
-    });
+    const { signal, cleanup } = composeAbortSignals(null, 10_000);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ pin }),
+        signal,
+      });
+    } finally {
+      cleanup();
+    }
 
     if (!response.ok) {
       let errMessage = 'Incorrect PIN. Please try again.';

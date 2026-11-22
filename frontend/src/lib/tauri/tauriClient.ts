@@ -105,6 +105,7 @@ export interface AuthResponse {
 }
 
 import { getAuthToken } from '../auth/core/auth.session';
+import { composeAbortSignals } from '../http/abortUtils';
 
 export const DEFAULT_CENTRAL_API_URL = 'https://niazi-server-860232188829.asia-south1.run.app';
 
@@ -140,7 +141,11 @@ export const getApiBaseUrl = (): string => {
 // PERF-E: Default 10 s hard timeout for all HTTP calls via AbortController.
 const HTTP_TIMEOUT_MS = 10_000;
 
-export async function httpFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+export interface HttpFetchOptions extends RequestInit {
+  timeoutMs?: number;
+}
+
+export async function httpFetch<T>(path: string, options: HttpFetchOptions = {}): Promise<T> {
   const token = getAuthToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -160,15 +165,29 @@ export async function httpFetch<T>(path: string, options: RequestInit = {}): Pro
     } catch {}
   }
 
-  // AbortController 10 s hard timeout — prevents hanging POS UI on slow server
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
+  // PACKAGE 3B-D: Merge caller signal with timeout signal via composeAbortSignals
+  const timeoutMs = typeof options.timeoutMs === 'number' ? options.timeoutMs : HTTP_TIMEOUT_MS;
+  const { signal: composedSignal, cleanup, isTimeout } = composeAbortSignals(options.signal, timeoutMs);
 
-  const res = await fetch(url, {
-    ...options,
-    headers,
-    signal: options.signal ?? controller.signal,
-  }).finally(() => clearTimeout(timeoutId));
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      headers,
+      signal: composedSignal,
+    });
+  } catch (fetchErr: any) {
+    // If the request aborted due to timeout, surface clear TimeoutError
+    if (isTimeout() || fetchErr?.name === 'TimeoutError') {
+      const timeoutErr = new Error(`Request timeout after ${timeoutMs}ms: ${options.method || 'GET'} ${path}`);
+      timeoutErr.name = 'TimeoutError';
+      (timeoutErr as any).isTimeout = true;
+      throw timeoutErr;
+    }
+    throw fetchErr;
+  } finally {
+    cleanup();
+  }
 
   if (!res.ok) {
     let errorMsg = `HTTP Error ${res.status}`;
