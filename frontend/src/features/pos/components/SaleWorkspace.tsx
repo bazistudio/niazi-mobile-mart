@@ -38,8 +38,9 @@ export const SaleWorkspace: React.FC = () => {
     return idx;
   }, [products]);
 
-  // Scanner queue: holds scans that arrive before products are loaded
-  const pendingScanRef = useRef<string | null>(null);
+  // Scanner queue: holds scans that arrive before products are loaded (FIFO order)
+  const pendingScanQueueRef = useRef<string[]>([]);
+  const isDrainingRef = useRef<boolean>(false);
   const addToCart = usePosStore((s) => s.addToCart);
   const loadInvoice = usePosStore((s) => s.loadInvoice);
   const activeSession = usePosStore((s) => s.saleTabs.find(t => t.id === s.activeTabId));
@@ -143,6 +144,17 @@ export const SaleWorkspace: React.FC = () => {
       }
 
       // --- Route 2: Product barcode / SKU ---
+      // If catalog is still loading, buffer into FIFO queue instead of failing with false "not found"
+      if (inventoryStatus !== 'success') {
+        pendingScanQueueRef.current.push(trimmed);
+        toast(`Catalog loading... queued barcode: ${trimmed}`, {
+          icon: '⏳',
+          duration: 2000,
+          id: `queue-${trimmed}`,
+        });
+        return;
+      }
+
       // PERF-A3: O(1) hash lookup instead of O(n) linear scan across all products
       const matchedProduct = barcodeIndex.get(trimmed.toLowerCase());
 
@@ -215,19 +227,28 @@ export const SaleWorkspace: React.FC = () => {
 
   // Reload inventory on initial mount and when activeShopId changes
   useEffect(() => {
+    // Clear pending scanner queue when branch/shop changes to avoid cross-branch replay
+    pendingScanQueueRef.current = [];
+    isDrainingRef.current = false;
     fetchProducts();
   }, [fetchProducts, activeShopId]);
 
   // PERF-D: Subscribe to WebSocket realtime hints for live stock updates
   useInventoryRealtimeSync();
 
-  // PERF-A6: Drain queued scanner input once products are loaded
-  // If the scanner fires before products are ready, the scan is held here and replayed.
+  // PERF-A6: Drain queued scanner input in FIFO order once products are loaded
+  // If the scanner fires before products are ready, scans are buffered in pendingScanQueueRef.
   useEffect(() => {
-    if (inventoryStatus === 'success' && pendingScanRef.current) {
-      const queued = pendingScanRef.current;
-      pendingScanRef.current = null;
-      handleScanComplete(queued);
+    if (inventoryStatus === 'success' && pendingScanQueueRef.current.length > 0 && !isDrainingRef.current) {
+      isDrainingRef.current = true;
+      const itemsToDrain = [...pendingScanQueueRef.current];
+      pendingScanQueueRef.current = [];
+
+      // Drain sequentially in FIFO order
+      for (const queued of itemsToDrain) {
+        handleScanComplete(queued);
+      }
+      isDrainingRef.current = false;
     }
   }, [inventoryStatus, handleScanComplete]);
 
