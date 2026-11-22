@@ -53,6 +53,9 @@ export function getAuthToken(): string | null {
 
 /**
  * Clear session (logout)
+ *
+ * PACKAGE 3B-C: Purges auth tokens and volatile master data caches.
+ * Explicitly preserves durable offline records, sync outbox, and device IDs.
  */
 export function clearSession() {
   if (typeof window === "undefined") return;
@@ -60,6 +63,24 @@ export function clearSession() {
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem(LEGACY_SESSION_KEY);
   localStorage.removeItem(TOKEN_KEY);
+
+  // Safely purge volatile master data caches and legacy unscoped keys
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      // Match volatile master keys: niazi_master_*
+      if (k.startsWith("niazi_master_")) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach((k) => {
+      try { localStorage.removeItem(k); } catch {}
+    });
+  } catch (err) {
+    console.warn("[clearSession] Error purging volatile master caches:", err);
+  }
 }
 
 /**

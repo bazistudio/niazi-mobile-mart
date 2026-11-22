@@ -8,6 +8,10 @@ import { getQueryClient } from "@/components/providers/ReactQueryProvider";
 import { isTauriEnvironment, tauriClient } from "@/lib/tauri/tauriClient";
 import { nmmWsClient } from "@/lib/ws/wsClient";
 import { useTerminalStore } from "@/store/useTerminalStore";
+import { invalidateMasterDataCache } from "@/features/inventory/api/inventory.api";
+import { useInventoryStore } from "@/features/inventory/core/inventory.store";
+import { usePosStore } from "@/features/pos/store/usePosStore";
+import { useOrganizationStore } from "@/store/useOrganizationStore";
 
 interface AuthState {
   user: AuthUser | null;
@@ -66,13 +70,41 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       useTerminalStore.getState().unlockTerminal();
     } catch {}
 
-    // 4. Purge browser authentication storage & credentials
+    // 4. Invalidate in-memory master data caches
+    try {
+      invalidateMasterDataCache();
+    } catch (cacheErr) {
+      console.warn("[AuthStore] Master cache invalidation error:", cacheErr);
+    }
+
+    // 5. Reset inventory and POS stores to prevent cross-session leaks
+    try {
+      useInventoryStore.setState({
+        products: [],
+        totalProducts: 0,
+        searchTerm: '',
+        categories: [],
+        status: 'idle',
+        error: null,
+      });
+      usePosStore.getState().clearAllSessions();
+      usePosStore.setState({
+        lastInvoice: null,
+        lastExchangeResult: null,
+        returnOverflowState: null,
+      });
+      useOrganizationStore.getState().clear();
+    } catch (storeErr) {
+      console.warn("[AuthStore] Store reset error:", storeErr);
+    }
+
+    // 6. Purge browser authentication storage & credentials
     clearSession();
 
-    // 5. Purge all cached queries (customer records, inventory, finances)
+    // 7. Purge all cached queries (customer records, inventory, finances)
     getQueryClient().clear();
 
-    // 6. Reset in-memory auth state
+    // 8. Reset in-memory auth state
     set({ user: null, session: null, isAuthenticated: false, isHydrated: true });
   },
 
@@ -101,16 +133,44 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       useTerminalStore.getState().unlockTerminal();
     } catch {}
 
-    // 4. Purge browser authentication storage & credentials
+    // 4. Invalidate in-memory master data caches
+    try {
+      invalidateMasterDataCache();
+    } catch (cacheErr) {
+      console.warn("[AuthStore] Master cache invalidation error:", cacheErr);
+    }
+
+    // 5. Reset inventory and POS stores to prevent cross-session leaks
+    try {
+      useInventoryStore.setState({
+        products: [],
+        totalProducts: 0,
+        searchTerm: '',
+        categories: [],
+        status: 'idle',
+        error: null,
+      });
+      usePosStore.getState().clearAllSessions();
+      usePosStore.setState({
+        lastInvoice: null,
+        lastExchangeResult: null,
+        returnOverflowState: null,
+      });
+      useOrganizationStore.getState().clear();
+    } catch (storeErr) {
+      console.warn("[AuthStore] Store reset error:", storeErr);
+    }
+
+    // 6. Purge browser authentication storage & credentials
     clearSession();
 
-    // 5. Purge all cached queries (customer records, inventory, finances)
+    // 7. Purge all cached queries (customer records, inventory, finances)
     getQueryClient().clear();
 
-    // 6. Reset in-memory auth state
+    // 8. Reset in-memory auth state
     set({ user: null, session: null, isAuthenticated: false });
 
-    // 7. Route cleanly to login screen
+    // 9. Route cleanly to login screen
     window.location.href = "/auth/login";
   },
 

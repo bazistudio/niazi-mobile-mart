@@ -1,49 +1,32 @@
 import { isTauriEnvironment, tauriClient, httpFetch } from '@/lib/tauri/tauriClient';
 import { ProductBrand } from '../types';
+import { readScopedMasterData, writeScopedMasterData, getActiveOrganizationId } from './masterDataCacheHelper';
 
-const STORAGE_KEY = 'niazi_master_brands';
+const DOMAIN = 'brands';
 
 const DEFAULT_BRANDS: ProductBrand[] = [
-  { id: 'brd_samsung', name: 'Samsung', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'brd_apple', name: 'Apple (iPhone)', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'brd_infinix', name: 'Infinix', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'brd_tecno', name: 'Tecno', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'brd_vivo', name: 'Vivo', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'brd_oppo', name: 'Oppo', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'brd_realme', name: 'Realme', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'brd_xiaomi', name: 'Xiaomi / Redmi', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'brd_nokia', name: 'Nokia', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'brd_itel', name: 'Itel', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'brd_ronin', name: 'Ronin', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'brd_audionic', name: 'Audionic', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'brd_faster', name: 'Faster', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: 'brd_anker', name: 'Anker', organizationId: '00000000-0000-0000-0000-000000000001' },
+  { id: 'brd_samsung', name: 'Samsung' },
+  { id: 'brd_apple', name: 'Apple (iPhone)' },
+  { id: 'brd_infinix', name: 'Infinix' },
+  { id: 'brd_tecno', name: 'Tecno' },
+  { id: 'brd_vivo', name: 'Vivo' },
+  { id: 'brd_oppo', name: 'Oppo' },
+  { id: 'brd_realme', name: 'Realme' },
+  { id: 'brd_xiaomi', name: 'Xiaomi / Redmi' },
+  { id: 'brd_nokia', name: 'Nokia' },
+  { id: 'brd_itel', name: 'Itel' },
+  { id: 'brd_ronin', name: 'Ronin' },
+  { id: 'brd_audionic', name: 'Audionic' },
+  { id: 'brd_faster', name: 'Faster' },
+  { id: 'brd_anker', name: 'Anker' },
 ];
 
 function getStoredBrands(): ProductBrand[] {
-  try {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch (e) {
-    // ignore
-  }
-  if (typeof window !== 'undefined') {
-    saveStoredBrands(DEFAULT_BRANDS);
-  }
-  return DEFAULT_BRANDS;
+  return readScopedMasterData<ProductBrand>(DOMAIN, DEFAULT_BRANDS);
 }
 
 function saveStoredBrands(list: ProductBrand[]) {
-  try {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-    }
-  } catch (e) {
-    // ignore
-  }
+  writeScopedMasterData<ProductBrand>(DOMAIN, list);
 }
 
 export const brandService = {
@@ -51,10 +34,11 @@ export const brandService = {
     try {
       const list = await httpFetch<any[]>('/api/brands');
       if (list && list.length > 0) {
+        const activeOrgId = getActiveOrganizationId();
         const mapped = list.map((b: any) => ({
           id: b.id,
           name: b.name,
-          organizationId: b.organization_id || '00000000-0000-0000-0000-000000000001',
+          organizationId: b.organization_id || activeOrgId || undefined,
         }));
         saveStoredBrands(mapped);
         return mapped;
@@ -71,10 +55,11 @@ export const brandService = {
       method: 'POST',
       body: JSON.stringify({ name: cleanName }),
     });
+    const activeOrgId = getActiveOrganizationId();
     const brandObj: ProductBrand = {
       id: created.id,
       name: created.name,
-      organizationId: created.organization_id || '00000000-0000-0000-0000-000000000001',
+      organizationId: created.organization_id || activeOrgId || undefined,
     };
     const current = getStoredBrands();
     saveStoredBrands([...current.filter(b => b.id !== brandObj.id), brandObj]);
@@ -87,10 +72,11 @@ export const brandService = {
       method: 'PUT',
       body: JSON.stringify({ name: cleanName }),
     });
+    const activeOrgId = getActiveOrganizationId();
     const brandObj: ProductBrand = {
       id: updated.id,
       name: updated.name,
-      organizationId: '00000000-0000-0000-0000-000000000001',
+      organizationId: updated.organization_id || activeOrgId || undefined,
     };
     const current = getStoredBrands();
     saveStoredBrands(current.map(b => b.id === id ? brandObj : b));

@@ -1446,3 +1446,26 @@ export const usePosStore = create<PosStore>()(
     }
   )
 );
+
+// PACKAGE 3B-C: Safeguard 3 — Branch-sensitive operational state reset on branch/org change.
+if (typeof window !== 'undefined') {
+  window.addEventListener('branch-changed', () => {
+    console.log('[usePosStore] Branch changed: resetting active cart, customer and pending transaction state');
+    usePosStore.getState().clearAllSessions();
+    usePosStore.setState({
+      lastInvoice: null,
+      lastExchangeResult: null,
+      returnOverflowState: null,
+    });
+  });
+
+  window.addEventListener('organization-changed', () => {
+    console.log('[usePosStore] Organization changed: clearing POS sessions');
+    usePosStore.getState().clearAllSessions();
+    usePosStore.setState({
+      lastInvoice: null,
+      lastExchangeResult: null,
+      returnOverflowState: null,
+    });
+  });
+}

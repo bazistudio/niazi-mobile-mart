@@ -1,40 +1,26 @@
 import { isTauriEnvironment, tauriClient, httpFetch } from '@/lib/tauri/tauriClient';
 import { ProductColor } from '../types';
+import { readScopedMasterData, writeScopedMasterData, getActiveOrganizationId } from './masterDataCacheHelper';
 
-const STORAGE_KEY = 'niazi_master_colors';
+const DOMAIN = 'colors';
 
 const DEFAULT_COLORS: ProductColor[] = [
-  { id: '00000000-0000-0000-0000-000000000301', name: 'Black', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: '00000000-0000-0000-0000-000000000302', name: 'White', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: '00000000-0000-0000-0000-000000000303', name: 'Blue', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: '00000000-0000-0000-0000-000000000304', name: 'Gold', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: '00000000-0000-0000-0000-000000000305', name: 'Silver', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: '00000000-0000-0000-0000-000000000306', name: 'Green', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: '00000000-0000-0000-0000-000000000307', name: 'Red', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: '00000000-0000-0000-0000-000000000308', name: 'Purple', organizationId: '00000000-0000-0000-0000-000000000001' },
+  { id: 'clr_black', name: 'Black' },
+  { id: 'clr_white', name: 'White' },
+  { id: 'clr_blue', name: 'Blue' },
+  { id: 'clr_gold', name: 'Gold' },
+  { id: 'clr_silver', name: 'Silver' },
+  { id: 'clr_green', name: 'Green' },
+  { id: 'clr_purple', name: 'Purple' },
+  { id: 'clr_grey', name: 'Grey / Space Grey' },
 ];
 
 function getStoredColors(): ProductColor[] {
-  try {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch (e) {
-    // ignore
-  }
-  return DEFAULT_COLORS;
+  return readScopedMasterData<ProductColor>(DOMAIN, DEFAULT_COLORS);
 }
 
 function saveStoredColors(list: ProductColor[]) {
-  try {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-    }
-  } catch (e) {
-    // ignore
-  }
+  writeScopedMasterData<ProductColor>(DOMAIN, list);
 }
 
 export const colorService = {
@@ -42,10 +28,11 @@ export const colorService = {
     try {
       const list = await httpFetch<any[]>('/api/colors');
       if (list && list.length > 0) {
+        const activeOrgId = getActiveOrganizationId();
         const mapped = list.map((c: any) => ({
           id: c.id,
           name: c.name,
-          organizationId: c.organization_id || '00000000-0000-0000-0000-000000000001',
+          organizationId: c.organization_id || activeOrgId || undefined,
         }));
         saveStoredColors(mapped);
         return mapped;
@@ -62,10 +49,11 @@ export const colorService = {
       method: 'POST',
       body: JSON.stringify({ name: cleanName }),
     });
+    const activeOrgId = getActiveOrganizationId();
     const colorObj: ProductColor = {
       id: created.id,
       name: created.name,
-      organizationId: created.organization_id || '00000000-0000-0000-0000-000000000001',
+      organizationId: created.organization_id || activeOrgId || undefined,
     };
     const current = getStoredColors();
     saveStoredColors([...current.filter(c => c.id !== colorObj.id), colorObj]);
@@ -78,10 +66,11 @@ export const colorService = {
       method: 'PUT',
       body: JSON.stringify({ name: cleanName }),
     });
+    const activeOrgId = getActiveOrganizationId();
     const colorObj: ProductColor = {
       id: updated.id,
       name: updated.name,
-      organizationId: '00000000-0000-0000-0000-000000000001',
+      organizationId: updated.organization_id || activeOrgId || undefined,
     };
     const current = getStoredColors();
     saveStoredColors(current.map(c => c.id === id ? colorObj : c));

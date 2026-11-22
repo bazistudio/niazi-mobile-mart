@@ -96,21 +96,53 @@ export const useOrganizationStore = create<OrganizationState>()(
       organizations: [],
       memberships: [],
 
-      setActiveContext: (orgId, shopId) => set({
-        activeOrganizationId: orgId,
-        activeShopId: shopId,
-        viewMode: shopId ? 'shop' : 'organization'
-      }),
+      setActiveContext: (orgId, shopId) => {
+        const prevOrgId = get().activeOrganizationId;
+        const prevShopId = get().activeShopId;
+        if (orgId !== prevOrgId) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('organization-changed', { detail: { orgId, prevOrgId } }));
+          }
+        }
+        if (shopId !== prevShopId) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('branch-changed', { detail: { shopId, prevShopId } }));
+          }
+        }
+        set({
+          activeOrganizationId: orgId,
+          activeShopId: shopId,
+          viewMode: shopId ? 'shop' : 'organization'
+        });
+      },
 
-      setActiveOrganization: (org) => set({
-        activeOrganization: org,
-        activeOrganizationId: org?._id || null
-      }),
+      setActiveOrganization: (org) => {
+        const newOrgId = org?._id || null;
+        const prevOrgId = get().activeOrganizationId;
+        if (newOrgId !== prevOrgId) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('organization-changed', { detail: { orgId: newOrgId, prevOrgId } }));
+          }
+        }
+        set({
+          activeOrganization: org,
+          activeOrganizationId: newOrgId
+        });
+      },
 
-      setActiveShop: (shop) => set({
-        activeShop: shop,
-        activeShopId: shop?._id || null
-      }),
+      setActiveShop: (shop) => {
+        const newShopId = shop?._id || null;
+        const prevShopId = get().activeShopId;
+        if (newShopId !== prevShopId) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('branch-changed', { detail: { shopId: newShopId, prevShopId } }));
+          }
+        }
+        set({
+          activeShop: shop,
+          activeShopId: newShopId
+        });
+      },
 
       setViewMode: (mode) => set({ viewMode: mode }),
       setOrganizations: (orgs) => set({ organizations: orgs }),

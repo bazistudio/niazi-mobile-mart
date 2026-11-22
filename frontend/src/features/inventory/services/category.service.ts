@@ -1,29 +1,15 @@
 import { isTauriEnvironment, tauriClient, httpFetch } from '@/lib/tauri/tauriClient';
 import { ProductCategory } from '../types';
+import { readScopedMasterData, writeScopedMasterData, getActiveOrganizationId } from './masterDataCacheHelper';
 
-const STORAGE_KEY = 'niazi_master_categories';
+const DOMAIN = 'categories';
 
 function getStoredCategories(): ProductCategory[] {
-  try {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch (e) {
-    // ignore
-  }
-  return [];
+  return readScopedMasterData<ProductCategory>(DOMAIN, []);
 }
 
 function saveStoredCategories(list: ProductCategory[]) {
-  try {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-    }
-  } catch (e) {
-    // ignore
-  }
+  writeScopedMasterData<ProductCategory>(DOMAIN, list);
 }
 
 export const categoryService = {
@@ -31,10 +17,11 @@ export const categoryService = {
     try {
       const list = await httpFetch<any[]>('/api/categories');
       if (list && list.length > 0) {
+        const activeOrgId = getActiveOrganizationId();
         const mapped = list.map((cat: any) => ({
           id: cat.id,
           name: cat.name,
-          organizationId: cat.organization_id || '00000000-0000-0000-0000-000000000001',
+          organizationId: cat.organization_id || activeOrgId || undefined,
         }));
         saveStoredCategories(mapped);
         return mapped;
@@ -53,10 +40,11 @@ export const categoryService = {
       method: 'POST',
       body: JSON.stringify({ name: cleanName, code, description: null }),
     });
+    const activeOrgId = getActiveOrganizationId();
     const catObj: ProductCategory = {
       id: created.id,
       name: created.name,
-      organizationId: created.organization_id || '00000000-0000-0000-0000-000000000001',
+      organizationId: created.organization_id || activeOrgId || undefined,
     };
     const current = getStoredCategories();
     saveStoredCategories([...current.filter(c => c.id !== catObj.id), catObj]);
@@ -69,10 +57,11 @@ export const categoryService = {
       method: 'PUT',
       body: JSON.stringify({ name: cleanName }),
     });
+    const activeOrgId = getActiveOrganizationId();
     const catObj: ProductCategory = {
       id: updated.id,
       name: updated.name,
-      organizationId: '00000000-0000-0000-0000-000000000001',
+      organizationId: updated.organization_id || activeOrgId || undefined,
     };
     const current = getStoredCategories();
     saveStoredCategories(current.map(c => c.id === id ? catObj : c));

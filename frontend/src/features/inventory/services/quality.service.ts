@@ -1,37 +1,23 @@
 import { isTauriEnvironment, tauriClient, httpFetch } from '@/lib/tauri/tauriClient';
 import { ProductQuality } from '../types';
+import { readScopedMasterData, writeScopedMasterData, getActiveOrganizationId } from './masterDataCacheHelper';
 
-const STORAGE_KEY = 'niazi_master_qualities';
+const DOMAIN = 'qualities';
 
 const DEFAULT_QUALITIES: ProductQuality[] = [
-  { id: '00000000-0000-0000-0000-000000000201', name: 'Original / 100% Genuine', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: '00000000-0000-0000-0000-000000000202', name: 'A+ Master Copy', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: '00000000-0000-0000-0000-000000000203', name: 'High Copy', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: '00000000-0000-0000-0000-000000000204', name: 'Standard Market Quality', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: '00000000-0000-0000-0000-000000000205', name: 'Refurbished / Used', organizationId: '00000000-0000-0000-0000-000000000001' },
+  { id: '00000000-0000-0000-0000-000000000201', name: 'Original / 100% Genuine' },
+  { id: '00000000-0000-0000-0000-000000000202', name: 'A+ Master Copy' },
+  { id: '00000000-0000-0000-0000-000000000203', name: 'High Copy' },
+  { id: '00000000-0000-0000-0000-000000000204', name: 'Standard Market Quality' },
+  { id: '00000000-0000-0000-0000-000000000205', name: 'Refurbished / Used' },
 ];
 
 function getStoredQualities(): ProductQuality[] {
-  try {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch (e) {
-    // ignore
-  }
-  return DEFAULT_QUALITIES;
+  return readScopedMasterData<ProductQuality>(DOMAIN, DEFAULT_QUALITIES);
 }
 
 function saveStoredQualities(list: ProductQuality[]) {
-  try {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-    }
-  } catch (e) {
-    // ignore
-  }
+  writeScopedMasterData<ProductQuality>(DOMAIN, list);
 }
 
 export const qualityService = {
@@ -39,10 +25,11 @@ export const qualityService = {
     try {
       const list = await httpFetch<any[]>('/api/qualities');
       if (list && list.length > 0) {
+        const activeOrgId = getActiveOrganizationId();
         const mapped = list.map((q: any) => ({
           id: q.id,
           name: q.name,
-          organizationId: q.organization_id || '00000000-0000-0000-0000-000000000001',
+          organizationId: q.organization_id || activeOrgId || undefined,
         }));
         saveStoredQualities(mapped);
         return mapped;
@@ -59,10 +46,11 @@ export const qualityService = {
       method: 'POST',
       body: JSON.stringify({ name: cleanName }),
     });
+    const activeOrgId = getActiveOrganizationId();
     const qltObj: ProductQuality = {
       id: created.id,
       name: created.name,
-      organizationId: created.organization_id || '00000000-0000-0000-0000-000000000001',
+      organizationId: created.organization_id || activeOrgId || undefined,
     };
     const current = getStoredQualities();
     saveStoredQualities([...current.filter(q => q.id !== qltObj.id), qltObj]);
@@ -75,10 +63,11 @@ export const qualityService = {
       method: 'PUT',
       body: JSON.stringify({ name: cleanName }),
     });
+    const activeOrgId = getActiveOrganizationId();
     const qltObj: ProductQuality = {
       id: updated.id,
       name: updated.name,
-      organizationId: '00000000-0000-0000-0000-000000000001',
+      organizationId: updated.organization_id || activeOrgId || undefined,
     };
     const current = getStoredQualities();
     saveStoredQualities(current.map(q => q.id === id ? qltObj : q));

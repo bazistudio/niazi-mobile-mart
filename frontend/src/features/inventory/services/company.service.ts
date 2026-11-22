@@ -1,36 +1,22 @@
 import { isTauriEnvironment, tauriClient, httpFetch } from '@/lib/tauri/tauriClient';
 import { ProductCompany } from '../types';
+import { readScopedMasterData, writeScopedMasterData, getActiveOrganizationId } from './masterDataCacheHelper';
 
-const STORAGE_KEY = 'niazi_master_companies';
+const DOMAIN = 'companies';
 
 const DEFAULT_COMPANIES: ProductCompany[] = [
-  { id: '00000000-0000-0000-0000-000000000101', name: 'Official Importer', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: '00000000-0000-0000-0000-000000000102', name: 'China Direct', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: '00000000-0000-0000-0000-000000000103', name: 'Local Wholesale', organizationId: '00000000-0000-0000-0000-000000000001' },
-  { id: '00000000-0000-0000-0000-000000000104', name: 'Niazi Trading', organizationId: '00000000-0000-0000-0000-000000000001' },
+  { id: '00000000-0000-0000-0000-000000000101', name: 'Official Importer' },
+  { id: '00000000-0000-0000-0000-000000000102', name: 'China Direct' },
+  { id: '00000000-0000-0000-0000-000000000103', name: 'Local Wholesale' },
+  { id: '00000000-0000-0000-0000-000000000104', name: 'Niazi Trading' },
 ];
 
 function getStoredCompanies(): ProductCompany[] {
-  try {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch (e) {
-    // ignore
-  }
-  return DEFAULT_COMPANIES;
+  return readScopedMasterData<ProductCompany>(DOMAIN, DEFAULT_COMPANIES);
 }
 
 function saveStoredCompanies(list: ProductCompany[]) {
-  try {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-    }
-  } catch (e) {
-    // ignore
-  }
+  writeScopedMasterData<ProductCompany>(DOMAIN, list);
 }
 
 export const companyService = {
@@ -38,10 +24,11 @@ export const companyService = {
     try {
       const list = await httpFetch<any[]>('/api/companies');
       if (list && list.length > 0) {
+        const activeOrgId = getActiveOrganizationId();
         const mapped = list.map((c: any) => ({
           id: c.id,
           name: c.name,
-          organizationId: c.organization_id || '00000000-0000-0000-0000-000000000001',
+          organizationId: c.organization_id || activeOrgId || undefined,
         }));
         saveStoredCompanies(mapped);
         return mapped;
@@ -58,14 +45,15 @@ export const companyService = {
       method: 'POST',
       body: JSON.stringify({ name: cleanName }),
     });
-    const compObj: ProductCompany = {
+    const activeOrgId = getActiveOrganizationId();
+    const companyObj: ProductCompany = {
       id: created.id,
       name: created.name,
-      organizationId: created.organization_id || '00000000-0000-0000-0000-000000000001',
+      organizationId: created.organization_id || activeOrgId || undefined,
     };
     const current = getStoredCompanies();
-    saveStoredCompanies([...current.filter(c => c.id !== compObj.id), compObj]);
-    return compObj;
+    saveStoredCompanies([...current.filter(c => c.id !== companyObj.id), companyObj]);
+    return companyObj;
   },
 
   updateCompany: async (id: string, data: { name: string }): Promise<ProductCompany> => {
@@ -74,17 +62,19 @@ export const companyService = {
       method: 'PUT',
       body: JSON.stringify({ name: cleanName }),
     });
-    const compObj: ProductCompany = {
+    const activeOrgId = getActiveOrganizationId();
+    const companyObj: ProductCompany = {
       id: updated.id,
       name: updated.name,
-      organizationId: '00000000-0000-0000-0000-000000000001',
+      organizationId: updated.organization_id || activeOrgId || undefined,
     };
     const current = getStoredCompanies();
-    saveStoredCompanies(current.map(c => c.id === id ? compObj : c));
-    return compObj;
+    saveStoredCompanies(current.map(c => c.id === id ? companyObj : c));
+    return companyObj;
   },
 
-  deleteCompany: async (_id: string): Promise<void> => {
-    // Master entity deactivation handled via update is_active = false if needed
+  deleteCompany: async (id: string): Promise<void> => {
+    const current = getStoredCompanies();
+    saveStoredCompanies(current.filter((c) => c.id !== id));
   }
 };

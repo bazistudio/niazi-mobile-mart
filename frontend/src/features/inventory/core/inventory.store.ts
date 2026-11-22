@@ -208,4 +208,22 @@ if (typeof window !== 'undefined') {
     console.log('[DEBUG] Inventory updated event received, forcing sync...');
     useInventoryStore.getState().forceSync().catch(console.error);
   });
+
+  window.addEventListener('organization-changed', () => {
+    console.log('[inventoryStore] Organization changed, resetting inventory state');
+    useInventoryStore.setState({
+      products: [],
+      totalProducts: 0,
+      searchTerm: '',
+      categories: [],
+      status: 'idle',
+      error: null,
+    });
+  });
+
+  window.addEventListener('branch-changed', () => {
+    console.log('[inventoryStore] Branch changed, refreshing branch products');
+    // Re-fetch products for the newly selected branch
+    useInventoryStore.getState().fetchProducts({ page: 1, scope: 'branch' }).catch(console.error);
+  });
 }

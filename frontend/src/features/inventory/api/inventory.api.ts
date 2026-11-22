@@ -11,7 +11,7 @@ import { companyService } from '../services/company.service';
 import { colorService } from '../services/color.service';
 import { qualityService } from '../services/quality.service';
 
-// ── PERF-C: In-memory session TTL cache for static master-data ──────────────
+// ── PERF-C / PACKAGE 3B-C: Scoped In-memory master-data cache & context generation ──
 // Categories, brands, companies, colors, and qualities rarely change during a
 // POS session. Caching them for 10 minutes reduces `getProducts()` from 7
 // parallel HTTP calls to 2 (productList + stockMap only).
@@ -20,29 +20,63 @@ const SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutes
 interface CacheEntry<T> {
   data: T;
   expiresAt: number;
+  organizationId: string;
 }
 
-const masterDataCache = {
-  categories: null as CacheEntry<any[]> | null,
-  brands: null as CacheEntry<any[]> | null,
-  companies: null as CacheEntry<any[]> | null,
-  colors: null as CacheEntry<any[]> | null,
-  qualities: null as CacheEntry<any[]> | null,
+// Request / context generation tracking to prevent stale async responses
+let currentContextGeneration = 0;
+
+export function getContextGeneration(): number {
+  return currentContextGeneration;
+}
+
+export function incrementContextGeneration(): number {
+  currentContextGeneration++;
+  return currentContextGeneration;
+}
+
+const masterDataCache: Record<string, CacheEntry<any[]> | null> = {
+  categories: null,
+  brands: null,
+  companies: null,
+  colors: null,
+  qualities: null,
 };
 
-function getCached<T>(key: keyof typeof masterDataCache): T[] | null {
+function getActiveOrgIdSafe(): string {
+  try {
+    const store = useOrganizationStore.getState();
+    return store.activeOrganization?._id || store.activeOrganizationId || '';
+  } catch {
+    return '';
+  }
+}
+
+function getCached<T>(key: string): T[] | null {
+  const currentOrgId = getActiveOrgIdSafe();
   const entry = masterDataCache[key] as CacheEntry<T[]> | null;
-  if (entry && Date.now() < entry.expiresAt) return entry.data;
+  if (!entry) return null;
+  // Tenant isolation check
+  if (entry.organizationId !== currentOrgId) {
+    masterDataCache[key] = null;
+    return null;
+  }
+  if (Date.now() < entry.expiresAt) return entry.data;
   return null;
 }
 
-function setCached<T>(key: keyof typeof masterDataCache, data: T[]): T[] {
-  (masterDataCache[key] as CacheEntry<T[]>) = { data, expiresAt: Date.now() + SESSION_TTL_MS };
+function setCached<T>(key: string, data: T[]): T[] {
+  const currentOrgId = getActiveOrgIdSafe();
+  masterDataCache[key] = {
+    data,
+    expiresAt: Date.now() + SESSION_TTL_MS,
+    organizationId: currentOrgId,
+  };
   return data;
 }
 
 async function fetchCached<T>(
-  key: keyof typeof masterDataCache,
+  key: string,
   fetcher: () => Promise<T[]>
 ): Promise<T[]> {
   const cached = getCached<T>(key);
@@ -51,10 +85,23 @@ async function fetchCached<T>(
   return setCached<T>(key, data);
 }
 
-/** Call this when master data is known to have changed (e.g. after edit/create). */
+/** Call this when master data is known to have changed or context resets. */
 export function invalidateMasterDataCache(): void {
-  (Object.keys(masterDataCache) as (keyof typeof masterDataCache)[]).forEach(k => {
+  incrementContextGeneration();
+  Object.keys(masterDataCache).forEach(k => {
     masterDataCache[k] = null;
+  });
+}
+
+// Automatically bind context changes to master cache invalidation
+if (typeof window !== 'undefined') {
+  window.addEventListener('organization-changed', () => {
+    invalidateMasterDataCache();
+  });
+  window.addEventListener('branch-changed', () => {
+    // Branch switch preserves org-level master items (categories, brands),
+    // but increments context generation to discard in-flight branch requests.
+    incrementContextGeneration();
   });
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -70,6 +117,8 @@ function getActiveBranchId(): string {
 
 export const inventoryApi = {
   getProducts: async (params: PaginationParams): Promise<PaginatedProductsDTO> => {
+    const reqGen = currentContextGeneration;
+    const reqOrgId = getActiveOrgIdSafe();
     const isOrgScope = params.scope === 'organization';
     let branchId: string | undefined = undefined;
 
@@ -77,6 +126,7 @@ export const inventoryApi = {
       const store = useOrganizationStore.getState();
       branchId = store.activeShop?._id || store.activeShop?.id || store.activeShopId || undefined;
     }
+    const reqBranchId = branchId;
 
     const items = await tauriClient.productList({
       search: params.search,
@@ -157,6 +207,19 @@ export const inventoryApi = {
         isLowStock: quantity <= (p.low_stock_threshold || 5),
       };
     });
+
+    // Async race protection: check if context generation, organization, or branch changed while in-flight
+    if (
+      reqGen !== currentContextGeneration ||
+      reqOrgId !== getActiveOrgIdSafe() ||
+      (!isOrgScope && reqBranchId !== (useOrganizationStore.getState().activeShop?._id || useOrganizationStore.getState().activeShop?.id || useOrganizationStore.getState().activeShopId || undefined))
+    ) {
+      console.warn('[inventoryApi.getProducts] Discarding stale asynchronous response from previous session/context');
+      return {
+        products: [],
+        pagination: { total: 0, page: 1, pages: 1, limit: params.limit || 10 },
+      };
+    }
 
     return {
       products,
