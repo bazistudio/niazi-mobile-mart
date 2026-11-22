@@ -125,6 +125,13 @@ ALTER TABLE pos_direct_vouchers
     ADD CONSTRAINT pos_direct_vouchers_matched_qty_check
         CHECK (matched_qty >= 0 AND matched_qty <= voucher_qty);
 
+-- Drop obsolete global uniqueness constraints/indexes if pre-existing
+ALTER TABLE pos_direct_vouchers
+    DROP CONSTRAINT IF EXISTS pos_direct_vouchers_idempotency_key_key,
+    DROP CONSTRAINT IF EXISTS pos_direct_vouchers_request_fingerprint_key;
+
+DROP INDEX IF EXISTS idx_pos_direct_vouchers_idempotency_key;
+
 CREATE INDEX IF NOT EXISTS idx_pos_direct_vouchers_branch_status
     ON pos_direct_vouchers (branch_id, status);
 
@@ -151,6 +158,11 @@ CREATE INDEX IF NOT EXISTS idx_pos_direct_vouchers_sale_id
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_direct_vouchers_idempotency
     ON pos_direct_vouchers (branch_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
+
+-- Branch-scoped non-unique lookup index for request payload fingerprint
+CREATE INDEX IF NOT EXISTS idx_pos_direct_vouchers_fingerprint
+    ON pos_direct_vouchers (branch_id, request_fingerprint)
+    WHERE request_fingerprint IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
 -- TABLE 3: pos_voucher_payments
@@ -240,6 +252,10 @@ ALTER TABLE pos_voucher_deliveries
     ADD COLUMN IF NOT EXISTS quantity_delivered INT CHECK(quantity_delivered > 0),
     ADD COLUMN IF NOT EXISTS customer_ledger_id TEXT REFERENCES customer_ledger_entries(id) ON DELETE SET NULL,
     ADD COLUMN IF NOT EXISTS request_fingerprint TEXT;
+
+-- Drop obsolete global uniqueness constraint if pre-existing
+ALTER TABLE pos_voucher_deliveries
+    DROP CONSTRAINT IF EXISTS pos_voucher_deliveries_idempotency_key_key;
 
 CREATE INDEX IF NOT EXISTS idx_pos_voucher_deliveries_voucher_id
     ON pos_voucher_deliveries (voucher_id);
