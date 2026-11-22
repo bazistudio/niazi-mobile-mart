@@ -1,14 +1,16 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { CreditCard, Receipt, FileText, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { CreditCard, Receipt, FileText, ArrowUpRight, ArrowDownLeft, Ticket } from 'lucide-react';
 import { usePosStore } from '../store/usePosStore';
 import { useLedger } from '@/features/ledger/hooks/useLedger';
 import { CustomerSelector } from './CustomerSelector';
 import { LedgerSettlementModal } from './modals/LedgerSettlementModal';
+import { PosCustomerVoucherModal } from './modals/PosCustomerVoucherModal';
 import { InvoicePreviewModal } from '@/features/history/components/InvoicePreviewModal';
 import { HistoryItem } from '@/features/history/types/history.types';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 
 interface PosCustomerLedgerPanelProps {
   isSaleSuccess?: boolean;
@@ -29,6 +31,7 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
   const customerSearchInputRef = useRef<HTMLInputElement>(null);
 
   const [isReceivePaymentOpen, setReceivePaymentOpen] = useState(false);
+  const [isVoucherOpen, setVoucherOpen] = useState(false);
   const [previewItem, setPreviewItem] = useState<HistoryItem | null>(null);
 
   // Fetch real ledger timeline for selected customer
@@ -267,8 +270,8 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
         />
       )}
 
-      {/* 4. Bottom Panel Actions */}
-      <div className="grid grid-cols-2 gap-2 pt-1 shrink-0">
+      {/* 4. Bottom Panel Actions — Receive Payment, Voucher, View Statement */}
+      <div className="grid grid-cols-3 gap-1.5 pt-1 shrink-0">
         <button
           type="button"
           onClick={() => {
@@ -279,10 +282,22 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
               setReceivePaymentOpen(true);
             }
           }}
-          className="h-9 px-3 rounded-xl border border-border bg-surface text-text-primary hover:bg-surface-hover hover:border-primary/50 text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
+          className="h-9 px-2 rounded-xl border border-border bg-surface text-text-primary hover:bg-surface-hover hover:border-primary/50 text-[11px] font-bold transition-all shadow-xs flex items-center justify-center gap-1"
+          title="Receive Payment against Customer Khata"
         >
-          <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Receive Payment</span>
+          <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+          <span className="truncate">Receive Payment</span>
+        </button>
+
+        <button
+          type="button"
+          id="pos-btn-customer-voucher"
+          onClick={() => setVoucherOpen(true)}
+          className="h-9 px-2 rounded-xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/70 dark:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 text-[11px] font-black transition-all shadow-xs flex items-center justify-center gap-1"
+          title="Issue Advance Deposit or Pre-booking Voucher"
+        >
+          <Ticket className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+          <span className="truncate">Voucher</span>
         </button>
 
         <button
@@ -294,12 +309,25 @@ export const PosCustomerLedgerPanel: React.FC<PosCustomerLedgerPanelProps> = ({ 
               navigate('/dashboard/shop-admin/customers');
             }
           }}
-          className="h-9 px-3 rounded-xl border border-border bg-surface text-text-primary hover:bg-surface-hover hover:border-primary/50 text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
+          className="h-9 px-2 rounded-xl border border-border bg-surface text-text-primary hover:bg-surface-hover hover:border-primary/50 text-[11px] font-bold transition-all shadow-xs flex items-center justify-center gap-1"
+          title="View Full Customer Statement & History"
         >
-          <ArrowUpRight className="w-3.5 h-3.5 text-primary" />
-          <span>View Full Statement</span>
+          <ArrowUpRight className="w-3.5 h-3.5 text-primary shrink-0" />
+          <span className="truncate">View Statement</span>
         </button>
       </div>
+
+      {/* Customer Voucher Modal */}
+      {isVoucherOpen && (
+        <PosCustomerVoucherModal
+          customer={selectedCustomer as any}
+          onClose={() => setVoucherOpen(false)}
+          onSuccess={() => {
+            setVoucherOpen(false);
+            refetchLedger();
+          }}
+        />
+      )}
 
       {/* Receive Payment / Settle Balance Modal */}
       {/* GAP-04: standaloneMode=true causes the modal to call ledgerApi.recordPayment itself
