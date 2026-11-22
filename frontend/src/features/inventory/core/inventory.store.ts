@@ -68,9 +68,18 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
 
   updateStockForProduct: (productId: string, newQty: number) => {
     set((state) => ({
-      products: state.products.map((p) =>
-        p.id === productId ? { ...p, quantity: newQty } : p
-      ),
+      products: state.products.map((p) => {
+        if (p.id !== productId) return p;
+        const threshold = p.minStockThreshold ?? 3;
+        const newStatus = inventoryService.calculateStockStatus(newQty, threshold);
+        return {
+          ...p,
+          stock: newQty,
+          status: newStatus,
+          // Compatibility alias for any legacy consumers reading .quantity
+          ...(p as any).quantity !== undefined ? { quantity: newQty } : {},
+        };
+      }),
     }));
   },
 
