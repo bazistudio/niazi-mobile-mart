@@ -105,6 +105,7 @@ export const SaleWorkspace: React.FC = () => {
             }));
             const fullOrder = {
               id: sale.id,
+              _id: sale.id,
               orderNumber: sale.invoice_number,
               invoiceNumber: sale.invoice_number,
               transactionId: sale.invoice_number,

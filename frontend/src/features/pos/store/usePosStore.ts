@@ -576,11 +576,16 @@ export const usePosStore = create<PosStore>()(
       loadInvoice: (invoice: any) => {
         const { saleTabs, activeTabId } = get();
         
-        // Phase 1B/F fix (Defect A1-A4): Map invoice items into cart AND
+        // Phase 1B/F & Package 3B-B: Map invoice items into cart AND
         // asynchronously fetch getSaleReturnableInfo() to populate returnLines
         // with saleLineId, originalSoldQty, alreadyReturnedQty, returnableQty.
-        // This async call does NOT block the synchronous cart population.
-        const saleId: string = invoice._id || invoice.orderNumber || '';
+        // Database identity must be resolved from UUID fields (_id or id).
+        // orderNumber is a human-readable display string, NOT a database UUID.
+        const saleId: string = (typeof invoice._id === 'string' && invoice._id.trim())
+          ? invoice._id.trim()
+          : (typeof invoice.id === 'string' && invoice.id.trim())
+            ? invoice.id.trim()
+            : '';
 
         const mappedItems: CartItem[] = (invoice.items || []).map((i: any) => ({
           productId: i.productId || i.product || i._id,
