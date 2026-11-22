@@ -6,6 +6,8 @@ import toast from 'react-hot-toast';
 import { DynamicMasterSelect } from './master-data/DynamicMasterSelect';
 import { useProducts } from '@/features/inventory/hooks/useProducts';
 import { useInventoryStore } from '@/features/inventory/core/inventory.store';
+import { useAuthStore } from '@/lib/auth/core/auth.store';
+import { useOrganizationStore } from '@/store/useOrganizationStore';
 import { httpClient } from '@/lib/http/httpClient';
 import type { Branch } from '@/lib/tauri/tauriClient';
 
@@ -17,6 +19,18 @@ export interface AddProductDrawerProps {
 export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
   const { createProduct, isCreating } = useProducts({ page: 1, limit: 10 }, { enabled: false });
   const fetchProducts = useInventoryStore((state) => state.fetchProducts);
+  const user = useAuthStore((s) => s.user);
+  const activeShop = useOrganizationStore((s) => s.activeShop);
+  const activeShopId = useOrganizationStore((s) => s.activeShopId);
+
+  const isOrgAdmin =
+    user?.role === 'ADMIN' ||
+    user?.role === 'OWNER' ||
+    user?.role === 'SUPER_ADMIN' ||
+    user?.role === 'MULTI_ADMIN';
+
+  const userBranchId = (user as any)?.branch_id || (user as any)?.branchId || (user as any)?.shopId || null;
+
   const nameInputRef = useRef<HTMLInputElement>(null);
   
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -70,14 +84,36 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
             setBranches(list);
             setFormData((prev) => {
               if (prev.branchId) return prev;
-              const warehouseBranch =
-                list.find((b) => b.id === '00000000-0000-0000-0000-000000000003') ||
-                list.find((b) => b.code === 'WAREHOUSE' || b.name.toLowerCase().includes('warehouse'));
-              const mainBranch =
-                list.find((b) => b.code === 'MAIN' || b.name.toLowerCase().includes('main')) ||
-                list[0];
-              const defaultBranch = warehouseBranch ?? mainBranch;
-              return { ...prev, branchId: defaultBranch ? defaultBranch.id : '' };
+
+              let targetBranch: Branch | undefined;
+
+              // If non-admin user is tagged to a branch, lock/default to their assigned branch
+              if (!isOrgAdmin && userBranchId) {
+                targetBranch = list.find((b) => b.id === userBranchId);
+              }
+
+              // Otherwise check active shop context from POS / UI navigation
+              if (!targetBranch && (activeShopId || activeShop?._id)) {
+                const targetId = activeShopId || activeShop?._id;
+                targetBranch = list.find((b) => b.id === targetId);
+              }
+
+              // Default to Main Branch first
+              if (!targetBranch) {
+                targetBranch = list.find(
+                  (b) => b.code === 'MAIN' || b.name.toLowerCase().includes('main branch') || b.name.toLowerCase() === 'main'
+                );
+              }
+
+              // Fallback to warehouse or first available
+              if (!targetBranch) {
+                targetBranch =
+                  list.find((b) => b.id === '00000000-0000-0000-0000-000000000003') ||
+                  list.find((b) => b.code === 'WAREHOUSE' || b.name.toLowerCase().includes('warehouse')) ||
+                  list[0];
+              }
+
+              return { ...prev, branchId: targetBranch ? targetBranch.id : '' };
             });
           }
         })
@@ -94,7 +130,7 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
     return () => {
       cancelled = true;
     };
-  }, [isOpen]);
+  }, [isOpen, isOrgAdmin, userBranchId, activeShopId, activeShop]);
 
   // Load remembered master data on open and focus product name
   useEffect(() => {
@@ -199,6 +235,9 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
 
   const margin = (Number(formData.price) || 0) - (Number(formData.purchasePrice) || 0);
 
+  // Non-org-admin users tagged to a specific branch cannot change the destination branch
+  const isBranchLocked = !isOrgAdmin && !!userBranchId;
+
   return (
     <div 
       className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/50 backdrop-blur-sm overflow-y-auto"
@@ -229,8 +268,9 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                 tabIndex={-1}
                 value={formData.branchId}
                 onChange={(e) => handleChange('branchId', e.target.value)}
-                disabled={isLoadingBranches || branches.length === 0}
-                className="bg-transparent text-xs font-semibold text-gray-900 dark:text-white focus:outline-none cursor-pointer pr-1 py-0.5"
+                disabled={isLoadingBranches || branches.length === 0 || isBranchLocked}
+                className={`bg-transparent text-xs font-semibold text-gray-900 dark:text-white focus:outline-none cursor-pointer pr-1 py-0.5 ${isBranchLocked ? 'opacity-85 cursor-not-allowed' : ''}`}
+                title={isBranchLocked ? 'Tagged to your assigned branch' : 'Select destination branch'}
               >
                 {isLoadingBranches && <option value="">Loading branches...</option>}
                 {!isLoadingBranches && branches.length === 0 && <option value="">No branches available</option>}
@@ -448,64 +488,57 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Compatible Mobile Models (Spare Parts)
                     </label>
-                    <div className="flex gap-2 mb-2">
+                    <div className="flex gap-2">
                       <input
                         tabIndex={-1}
                         type="text"
                         value={formData.newModelInput}
                         onChange={(e) => handleChange('newModelInput', e.target.value)}
+                        placeholder="e.g. Realme C35, Tecno Spark 10 (Press Enter)"
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             e.preventDefault();
-                            const val = formData.newModelInput.trim();
-                            if (val && !formData.compatibleModels.includes(val)) {
-                              setFormData(prev => ({
-                                ...prev,
-                                compatibleModels: [...prev.compatibleModels, val],
-                                newModelInput: ''
-                              }));
+                            if (formData.newModelInput.trim()) {
+                              handleChange('compatibleModels', [...formData.compatibleModels, formData.newModelInput.trim()]);
+                              handleChange('newModelInput', '');
                             }
                           }
                         }}
-                        placeholder="e.g. Realme C35, Tecno X680 (Press Enter)"
-                        className="block flex-1 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
+                        className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
                       />
                       <button
                         tabIndex={-1}
                         type="button"
                         onClick={() => {
-                          const val = formData.newModelInput.trim();
-                          if (val && !formData.compatibleModels.includes(val)) {
-                            setFormData(prev => ({
-                              ...prev,
-                              compatibleModels: [...prev.compatibleModels, val],
-                              newModelInput: ''
-                            }));
+                          if (formData.newModelInput.trim()) {
+                            handleChange('compatibleModels', [...formData.compatibleModels, formData.newModelInput.trim()]);
+                            handleChange('newModelInput', '');
                           }
                         }}
-                        className="px-3 py-1.5 bg-[#006970] text-white text-xs font-semibold rounded-md hover:bg-[#005a60] transition-colors"
+                        className="px-3 py-2 border border-transparent rounded-md shadow-sm text-xs font-medium text-white bg-[#006970] hover:bg-[#005a60]"
                       >
                         + Add Model
                       </button>
                     </div>
+
                     {formData.compatibleModels.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 p-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md max-h-24 overflow-y-auto">
-                        {formData.compatibleModels.map((m, idx) => (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {formData.compatibleModels.map((model, idx) => (
                           <span
                             key={idx}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-[#006970]/10 text-[#006970] dark:bg-[#006970]/30 dark:text-teal-200 border border-[#006970]/20"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-[#006970]/10 text-[#006970] dark:bg-[#006970]/20 dark:text-[#00B4BB]"
                           >
-                            {m}
+                            {model}
                             <button
-                              tabIndex={-1}
                               type="button"
+                              tabIndex={-1}
                               onClick={() => {
-                                setFormData(prev => ({
-                                  ...prev,
-                                  compatibleModels: prev.compatibleModels.filter((_, i) => i !== idx)
-                                }));
+                                handleChange(
+                                  'compatibleModels',
+                                  formData.compatibleModels.filter((_, i) => i !== idx)
+                                );
                               }}
-                              className="hover:text-red-500 font-bold ml-1"
+                              className="text-gray-400 hover:text-red-500 font-bold ml-0.5"
                             >
                               ×
                             </button>
@@ -517,74 +550,77 @@ export function AddProductDrawer({ isOpen, onClose }: AddProductDrawerProps) {
                 </div>
               </section>
 
-              {/* Section 4: Advanced Inventory Settings */}
+              {/* Section 4: Advanced Settings */}
               <section>
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider mb-4 border-b border-gray-200 dark:border-gray-800 pb-2">4. Advanced Settings</h3>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="flex items-center">
-                      <input tabIndex={-1} type="checkbox" id="serialTracking" checked={formData.serialTracking} onChange={(e) => handleChange('serialTracking', e.target.checked)} className="h-4 w-4 text-[#006970] rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700" />
-                      <label htmlFor="serialTracking" className="ml-2 text-sm text-gray-700 dark:text-gray-300">Serial Tracking</label>
-                    </div>
-                    <div className="flex items-center">
-                      <input tabIndex={-1} type="checkbox" id="imeiTracking" checked={formData.imeiTracking} onChange={(e) => handleChange('imeiTracking', e.target.checked)} className="h-4 w-4 text-[#006970] rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700" />
-                      <label htmlFor="imeiTracking" className="ml-2 text-sm text-gray-700 dark:text-gray-300">IMEI Tracking</label>
-                    </div>
-                    <div className="flex items-center">
-                      <input tabIndex={-1} type="checkbox" id="batchTracking" checked={formData.batchTracking} onChange={(e) => handleChange('batchTracking', e.target.checked)} className="h-4 w-4 text-[#006970] rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700" />
-                      <label htmlFor="batchTracking" className="ml-2 text-sm text-gray-700 dark:text-gray-300">Batch Tracking</label>
-                    </div>
-                    <div className="flex items-center">
-                      <input tabIndex={-1} type="checkbox" id="expiryTracking" checked={formData.expiryTracking} onChange={(e) => handleChange('expiryTracking', e.target.checked)} className="h-4 w-4 text-[#006970] rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700" />
-                      <label htmlFor="expiryTracking" className="ml-2 text-sm text-gray-700 dark:text-gray-300">Expiry Tracking</label>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="col-span-2 mt-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Cost Method</label>
-                      <select
-                        tabIndex={-1}
-                        value={formData.costMethod}
-                        onChange={(e) => handleChange('costMethod', e.target.value)}
-                        className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm mb-1.5"
-                      >
-                        <option value="Average Cost">Average Cost (Recommended)</option>
-                        <option value="FIFO">FIFO</option>
-                        <option value="LIFO">LIFO</option>
-                      </select>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {formData.costMethod === 'Average Cost' && "Uses the average purchase cost of all available stock. Best for most local retail shops."}
-                        {formData.costMethod === 'FIFO' && "Uses the oldest purchase cost first. Best for expiry-based inventory and strict inventory accounting."}
-                        {formData.costMethod === 'LIFO' && "Uses the latest purchase cost first. Advanced option for specialized accounting."}
-                      </p>
-                    </div>
-                  </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      tabIndex={-1}
+                      type="checkbox"
+                      checked={formData.serialTracking}
+                      onChange={(e) => handleChange('serialTracking', e.target.checked)}
+                      className="rounded border-gray-300 text-[#006970] focus:ring-[#006970]"
+                    />
+                    <span className="text-xs text-gray-600 dark:text-gray-400">Serial Tracking</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      tabIndex={-1}
+                      type="checkbox"
+                      checked={formData.imeiTracking}
+                      onChange={(e) => handleChange('imeiTracking', e.target.checked)}
+                      className="rounded border-gray-300 text-[#006970] focus:ring-[#006970]"
+                    />
+                    <span className="text-xs text-gray-600 dark:text-gray-400">IMEI Tracking</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      tabIndex={-1}
+                      type="checkbox"
+                      checked={formData.batchTracking}
+                      onChange={(e) => handleChange('batchTracking', e.target.checked)}
+                      className="rounded border-gray-300 text-[#006970] focus:ring-[#006970]"
+                    />
+                    <span className="text-xs text-gray-600 dark:text-gray-400">Batch Tracking</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      tabIndex={-1}
+                      type="checkbox"
+                      checked={formData.expiryTracking}
+                      onChange={(e) => handleChange('expiryTracking', e.target.checked)}
+                      className="rounded border-gray-300 text-[#006970] focus:ring-[#006970]"
+                    />
+                    <span className="text-xs text-gray-600 dark:text-gray-400">Expiry Tracking</span>
+                  </label>
                 </div>
               </section>
 
             </div>
+
           </div>
         </div>
 
-        {/* Bottom Sticky Action */}
-        <div className="p-4 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 flex justify-end gap-3">
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-end gap-3 bg-gray-50/50 dark:bg-gray-800/30">
           <button
             type="button"
-            tabIndex={-1}
             onClick={onClose}
-            className="px-6 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none transition-colors"
+            className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
           >
             Cancel
           </button>
           <button
-            tabIndex={11}
-            onClick={handleSave}
+            type="button"
             disabled={!isValid || isCreating}
-            className="px-8 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#006970] hover:bg-[#005a60] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#006970] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            onClick={handleSave}
+            className="px-5 py-2 bg-[#006970] text-white rounded-lg text-sm font-medium hover:bg-[#005a60] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-all"
           >
             {isCreating ? 'Saving...' : 'Save Product'}
           </button>
         </div>
+
       </div>
     </div>
   );
