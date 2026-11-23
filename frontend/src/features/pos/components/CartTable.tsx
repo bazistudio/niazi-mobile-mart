@@ -103,16 +103,16 @@ export const CartTable = () => {
         return;
       }
 
-      // Minimum Selling Price Security: selling price must be strictly greater than cost price
+      // Minimum Selling Price Security: selling price must be at least cost price (below cost is blocked)
       if (!isReturn) {
         const item = cart.find(i => i.productId === productId);
         const costPrice = item?.costPrice ?? 0;
 
-        if (costPrice > 0 && parsed <= costPrice) {
-          const minAllowed = costPrice + 1;
+        if (costPrice > 0 && parsed < costPrice) {
+          const minAllowed = costPrice;
           import("react-hot-toast").then(m =>
             m.default.error(
-              `Selling price (Rs. ${parsed.toLocaleString()}) cannot be equal to or below the latest purchase cost (Rs. ${costPrice.toLocaleString()}). Minimum allowed: Rs. ${minAllowed.toLocaleString()}.`,
+              `Selling price (Rs. ${parsed.toLocaleString()}) cannot be below the latest purchase cost (Rs. ${costPrice.toLocaleString()}). Minimum allowed: Rs. ${minAllowed.toLocaleString()}.`,
               { duration: 4500, id: `min-price-${productId}` }
             )
           );
@@ -344,7 +344,7 @@ export const CartTable = () => {
           ) : (
             <>
               <div className={`flex items-center px-1.5 py-0.5 rounded border transition-all ${
-            !isReturn && item.costPrice > 0 && (localPrices[key] !== undefined ? (parseFloat(localPrices[key]) <= item.costPrice) : (item.unitPrice <= item.costPrice))
+            !isReturn && item.costPrice > 0 && (localPrices[key] !== undefined ? (parseFloat(localPrices[key]) < item.costPrice) : (item.unitPrice < item.costPrice))
               ? "bg-rose-50 dark:bg-rose-950/40 border-rose-500 ring-1 ring-rose-500/50"
               : "bg-surface-hover border-border focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20"
           }`}>
@@ -362,10 +362,10 @@ export const CartTable = () => {
                 } else if (e.key === 'ArrowDown') {
                   e.preventDefault();
                   const targetPrice = item.unitPrice - 50;
-                  if (!isReturn && item.costPrice > 0 && targetPrice <= item.costPrice) {
+                  if (!isReturn && item.costPrice > 0 && targetPrice < item.costPrice) {
                     import('react-hot-toast').then(m =>
                       m.default.error(
-                        `Cannot decrease price below cost (Rs. ${item.costPrice.toLocaleString()}). Selling price must be higher than cost.`,
+                        `Cannot decrease price below cost (Rs. ${item.costPrice.toLocaleString()}). Minimum allowed price is Rs. ${item.costPrice.toLocaleString()}.`,
                         { duration: 3000, id: `min-price-${item.productId}` }
                       )
                     );
@@ -400,12 +400,12 @@ export const CartTable = () => {
           {/* Immediate Below-Cost Warning while typing/focused */}
           {!isReturn && item.costPrice > 0 && (() => {
             const effectiveVal = localPrices[key] !== undefined ? parseFloat(localPrices[key]) : item.unitPrice;
-            const isBelow = !isNaN(effectiveVal) && effectiveVal <= item.costPrice;
+            const isBelow = !isNaN(effectiveVal) && effectiveVal < item.costPrice;
             if (!isBelow) return null;
-            const minAllowed = item.costPrice + 1;
+            const minAllowed = item.costPrice;
             return (
               <div className="text-[9px] text-rose-600 dark:text-rose-400 font-bold whitespace-nowrap mt-0.5 leading-tight flex items-center gap-0.5" title={`Product Cost: Rs. ${item.costPrice.toLocaleString()} | Minimum Sale Price: Rs. ${minAllowed.toLocaleString()}`}>
-                <span>Min &gt; Rs.{item.costPrice.toLocaleString()}</span>
+                <span>Min Rs.{item.costPrice.toLocaleString()}</span>
               </div>
             );
           })()}

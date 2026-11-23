@@ -1,12 +1,8 @@
 import React from 'react';
-import { SalesAnalyticsWidget } from '@/features/sales/components/SalesAnalyticsWidget';
+import { SalesAnalyticsPage } from '@/pages/dashboard/organization/SalesAnalyticsPage';
 
 export function SalesPage() {
-  return (
-    <div className="w-full">
-      <SalesAnalyticsWidget />
-    </div>
-  );
+  return <SalesAnalyticsPage mode="shop-admin" />;
 }
 
 export default SalesPage;

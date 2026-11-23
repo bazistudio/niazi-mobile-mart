@@ -64,6 +64,8 @@ import { buildRolesRouter } from './routes/roles.routes'; // DEF-08
 import { buildMobileRouter } from './routes/mobile.routes';
 import { buildHrRouter } from './routes/hr.routes';
 import { buildAccountsRouter } from './routes/accounts.routes';
+import { createSalesAnalyticsRouter } from './routes/sales_analytics.routes';
+import { createVoucherRouter } from './routes/voucher.routes';
 import { BranchRepo } from './repositories/branch.repo';
 import {
   listBrands,
@@ -280,6 +282,10 @@ async function main(): Promise<void> {
   app.use('/api/sales', saleRouter);
   app.use('/api/v1/sales', saleRouter);
 
+  const voucherRouter = createVoucherRouter(pool);
+  app.use('/api/pos/vouchers', voucherRouter);
+  app.use('/api/v1/pos/vouchers', voucherRouter);
+
   const customerRouter = createCustomerRouter(pool);
   app.use('/api/customers', customerRouter);
 
@@ -341,6 +347,13 @@ async function main(): Promise<void> {
   const mobileRouter = buildMobileRouter(pool);
   app.use('/api/mobiles', mobileRouter);
   app.use('/api/v1/mobiles', mobileRouter);
+
+  // -------------------------------------------------------------------------
+  // Sales Analytics routes — read-only profitability & reconciliation engine
+  // -------------------------------------------------------------------------
+  const salesAnalyticsRouter = createSalesAnalyticsRouter(pool);
+  app.use('/api/reports/sales-analytics', salesAnalyticsRouter);
+  app.use('/api/v1/reports/sales-analytics', salesAnalyticsRouter);
 
   // DEF-SALE-10: Protect org balances endpoint — was unauthenticated, exposed to any caller.
   // Now requires a valid JWT and organization-admin role.

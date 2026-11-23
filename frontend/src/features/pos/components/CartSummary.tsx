@@ -141,8 +141,8 @@ export const CartSummary: React.FC = () => {
   const cart = activeSession.cart ?? [];
   const returnedItems = activeSession.returnedItems ?? [];
   const isCartEmpty = cart.length === 0 && returnedItems.length === 0;
-  // Strict Minimum Selling Price Guard: cart line price must be strictly greater than product cost
-  const hasInvalidPrice = cart.some(item => item.costPrice > 0 && item.unitPrice <= item.costPrice);
+  // Strict Minimum Selling Price Guard: cart line price must be at least product cost (below cost is blocked)
+  const hasInvalidPrice = cart.some(item => item.costPrice > 0 && item.unitPrice < item.costPrice);
   const hasCustomer = !!(activeSession.customer && activeSession.customer.id !== 'walk-in');
   const hasLinkedInvoice = !!activeSession.linkedInvoiceId;
   const hasDiscount = (activeSession.invoiceDiscountValue || 0) > 0;

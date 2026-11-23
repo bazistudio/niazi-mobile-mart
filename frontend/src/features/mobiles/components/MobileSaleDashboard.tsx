@@ -494,8 +494,8 @@ export const MobileSaleDashboard: React.FC = () => {
       let errorMsg: string | null = null;
       if (isNaN(num) || num < 0) {
         errorMsg = 'Invalid amount';
-      } else if (!isReturnBucket && costPrice > 0 && num <= costPrice) {
-        errorMsg = `Sale price must exceed purchase cost (Rs ${costPrice.toLocaleString()})`;
+      } else if (!isReturnBucket && costPrice > 0 && num < costPrice) {
+        errorMsg = `Sale price cannot be below purchase cost (Rs ${costPrice.toLocaleString()})`;
       }
 
       setPriceErrors((prev) => {

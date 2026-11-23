@@ -109,6 +109,8 @@ CREATE TABLE IF NOT EXISTS pos_direct_vouchers (
 
 -- Conditional column additions if pos_direct_vouchers pre-existed from an earlier migration
 ALTER TABLE pos_direct_vouchers
+    ADD COLUMN IF NOT EXISTS voucher_type TEXT NOT NULL DEFAULT 'INSTANT_INVENTORY'
+        CHECK(voucher_type IN ('INSTANT_INVENTORY', 'DIRECT_ADVANCE', 'PRE_BOOKING')),
     ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'NONE',
     ADD COLUMN IF NOT EXISTS idempotency_key TEXT,
     ADD COLUMN IF NOT EXISTS request_fingerprint TEXT,

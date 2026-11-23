@@ -410,10 +410,10 @@ export async function completeSaleTx(
       );
     }
 
-    if (effectiveUnitPrice <= minPriceBasis) {
-      const minAllowed = minPriceBasis + 1;
+    if (effectiveUnitPrice < minPriceBasis) {
+      const minAllowed = minPriceBasis;
       throw new SaleRepoError(
-        `Selling price (Rs. ${effectiveUnitPrice.toLocaleString()}) cannot be equal to or below the latest purchase cost (Rs. ${minPriceBasis.toLocaleString()}) for product "${prod['name']}". Minimum allowed selling price is Rs. ${minAllowed.toLocaleString()}.`,
+        `Selling price (Rs. ${effectiveUnitPrice.toLocaleString()}) cannot be below the latest purchase cost (Rs. ${minPriceBasis.toLocaleString()}) for product "${prod['name']}". Minimum allowed selling price is Rs. ${minAllowed.toLocaleString()}.`,
         400
       );
     }

@@ -53,6 +53,7 @@ export const VALID_ROUTES = [
   '/dashboard/organization/business',
   '/dashboard/organization/ledger',
   '/dashboard/organization/analytics',
+  '/dashboard/organization/sales-analytics',
   '/dashboard/organization/social',
   '/dashboard/organization/products',
   '/dashboard/organization/customers',

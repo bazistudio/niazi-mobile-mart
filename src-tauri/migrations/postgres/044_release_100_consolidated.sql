@@ -81,9 +81,9 @@ ON CONFLICT (name) DO NOTHING;
 CREATE TABLE IF NOT EXISTS supplier_demands (
   id                     UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   demand_number          VARCHAR(20)   NOT NULL UNIQUE,
-  supplier_id            UUID          REFERENCES suppliers(id) ON DELETE SET NULL,
-  customer_id            UUID          REFERENCES customers(id) ON DELETE SET NULL,
-  branch_id              UUID          NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  supplier_id            TEXT          REFERENCES suppliers(id) ON DELETE SET NULL,
+  customer_id            TEXT          REFERENCES customers(id) ON DELETE SET NULL,
+  branch_id              TEXT          NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
   status                 VARCHAR(30)   NOT NULL DEFAULT 'DRAFT'
                            CHECK (status IN ('DRAFT','ORDERED','PARTIALLY_RECEIVED','RECEIVED','CANCELLED')),
   total_estimated_amount BIGINT        NOT NULL DEFAULT 0
@@ -116,7 +116,7 @@ COMMENT ON TABLE supplier_demands IS
 CREATE TABLE IF NOT EXISTS supplier_demand_items (
   id                   UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   demand_id            UUID        NOT NULL REFERENCES supplier_demands(id) ON DELETE CASCADE,
-  product_id           UUID        NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+  product_id           TEXT        NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
   requested_quantity   BIGINT      NOT NULL CHECK (requested_quantity > 0),
   received_quantity    BIGINT      NOT NULL DEFAULT 0
                          CHECK (received_quantity >= 0),
@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS supplier_demand_items (
   estimated_line_total BIGINT      GENERATED ALWAYS AS
                          (requested_quantity * estimated_unit_cost) STORED,
   actual_line_total    BIGINT,
-  fulfilled_purchase_id UUID       REFERENCES purchases(id) ON DELETE SET NULL,
+  fulfilled_purchase_id TEXT       REFERENCES purchases(id) ON DELETE SET NULL,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   -- A product can appear only once per demand order

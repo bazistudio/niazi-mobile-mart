@@ -1,6 +1,5 @@
 import { 
   LayoutDashboard,
-  Store, 
   Users, 
   Activity,
   BarChart3,
@@ -8,18 +7,15 @@ import {
   Briefcase,
   BookOpen,
   LineChart,
-  Share2,
   Package,
   Smartphone,
   UserCheck,
   Truck,
-  Contact2,
   Settings,
   Wrench,
   UserCog,
   Coins,
   TrendingUp,
-  PackageCheck,
 } from 'lucide-react';
 import { NavigationGroup } from '../../types/navigation';
 
@@ -36,7 +32,7 @@ export const organizationNavigation: NavigationGroup[] = [
       { name: 'Business', href: '/dashboard/organization/business', icon: Briefcase },
       { name: 'Ledger', href: '/dashboard/organization/ledger', icon: BookOpen },
       { name: 'Cash Management', href: '/dashboard/organization/cash', icon: Coins },
-      { name: 'Analytics', href: '/dashboard/organization/analytics', icon: LineChart },
+      { name: 'Sales Analytics', href: '/dashboard/organization/sales-analytics', icon: LineChart },
       // Temporarily hidden from admin dashboard (Step 02) — route & implementation preserved
       // { name: 'Social', href: '/dashboard/organization/social', icon: Share2 },
       { name: 'Products', href: '/dashboard/organization/products', icon: Package },

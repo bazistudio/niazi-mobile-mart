@@ -672,12 +672,12 @@ export async function executeMobileSale(
       });
     }
 
-    // 3. Compute Totals & Enforce Minimum Sale Price Floor (Selling price must exceed purchase cost)
+    // 3. Compute Totals & Enforce Minimum Sale Price Floor (Selling price must be at least purchase cost)
     for (const item of dto.items) {
       const dev = lockedDevices.find((d) => d.id === item.deviceId);
-      if (dev && dev.cost_price > 0 && item.salePrice <= dev.cost_price) {
+      if (dev && dev.cost_price > 0 && item.salePrice < dev.cost_price) {
         throw new MobileSaleRepoError(
-          `Cannot complete sale: Selling price (Rs ${item.salePrice.toLocaleString()}) for '${dev.brand} ${dev.model}' must strictly exceed purchase cost (Rs ${dev.cost_price.toLocaleString()}).`,
+          `Cannot complete sale: Selling price (Rs ${item.salePrice.toLocaleString()}) for '${dev.brand} ${dev.model}' cannot be below purchase cost (Rs ${dev.cost_price.toLocaleString()}).`,
           400
         );
       }

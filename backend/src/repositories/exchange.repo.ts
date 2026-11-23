@@ -497,9 +497,9 @@ export async function processAtomicExchange(
         );
       }
 
-      if (salePrice <= costPrice) {
+      if (salePrice < costPrice) {
         throw new SaleRepoError(
-          `Selling price (Rs. ${salePrice.toLocaleString()}) cannot be equal to or below product cost (Rs. ${costPrice.toLocaleString()}) for replacement product "${prod['name']}". Selling price must be strictly higher than cost.`,
+          `Selling price (Rs. ${salePrice.toLocaleString()}) cannot be below product cost (Rs. ${costPrice.toLocaleString()}) for replacement product "${prod['name']}". Minimum allowed selling price is Rs. ${costPrice.toLocaleString()}.`,
           400
         );
       }

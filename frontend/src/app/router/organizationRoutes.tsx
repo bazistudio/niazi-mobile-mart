@@ -12,7 +12,6 @@ import { OrganizationReportsPage } from '@/pages/dashboard/organization/Organiza
 import { OrganizationHistoryPage } from '@/pages/dashboard/organization/OrganizationHistoryPage';
 import { OrganizationBusinessPage } from '@/pages/dashboard/organization/OrganizationBusinessPage';
 import { OrganizationLedgerPage } from '@/pages/dashboard/organization/OrganizationLedgerPage';
-import { OrganizationAnalyticsPage } from '@/pages/dashboard/organization/OrganizationAnalyticsPage';
 import { OrganizationSocialPage } from '@/pages/dashboard/organization/OrganizationSocialPage';
 import { OrganizationProductsPage } from '@/pages/dashboard/organization/OrganizationProductsPage';
 import { OrganizationMobileInventoryPage } from '@/pages/dashboard/organization/OrganizationMobileInventoryPage';
@@ -23,6 +22,7 @@ import { OrganizationSettingsPage } from '@/pages/dashboard/organization/Organiz
 import { OrganizationHRPage } from '@/pages/dashboard/organization/OrganizationHRPage';
 import { OrganizationProgressReportPage } from '@/pages/dashboard/organization/OrganizationProgressReportPage';
 import { CashManagementPage } from '@/pages/dashboard/shop-admin/CashManagementPage';
+import { SalesAnalyticsPage } from '@/pages/dashboard/organization/SalesAnalyticsPage';
 
 export const organizationRoutes = (
   <Route element={<RoleGuard allowedRoles={['SUPER_ADMIN', 'MULTI_ADMIN', 'OWNER', 'ADMIN']} fallbackPath="/dashboard/shop-admin" />}>
@@ -64,8 +64,11 @@ export const organizationRoutes = (
       {/* Cash Management — All Branches */}
       <Route path="cash" element={<CashManagementPage />} />
 
-      {/* 11. Analytics */}
-      <Route path="analytics" element={<OrganizationAnalyticsPage />} />
+      {/* 11. Analytics — Legacy alias redirects to Sales Analytics */}
+      <Route path="analytics" element={<Navigate to="/dashboard/organization/sales-analytics" replace />} />
+
+      {/* Sales Analytics — Phase 1 frontend module */}
+      <Route path="sales-analytics" element={<SalesAnalyticsPage />} />
       
       {/* 12. Social */}
       <Route path="social" element={<OrganizationSocialPage />} />
