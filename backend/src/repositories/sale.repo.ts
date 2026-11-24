@@ -35,6 +35,7 @@ export interface Sale {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  total_cogs?: number;
 }
 
 export interface SaleLine {
@@ -215,6 +216,7 @@ function mapSaleRow(row: Record<string, unknown>): Sale {
     notes: (row['notes'] as string | null) ?? null,
     created_at: row['created_at'] as string,
     updated_at: row['updated_at'] as string,
+    total_cogs: row['total_cogs'] != null ? Number(row['total_cogs']) : undefined,
   };
 }
 
@@ -1442,48 +1444,55 @@ function parseLocalDateEnd(dateStr: string): string {
 }
 
 export async function listSales(pool: Pool, filter?: SaleFilterDto | null): Promise<Sale[]> {
-  let query = `SELECT id, invoice_number, branch_id, customer_id, customer_name_snapshot,
-                      subtotal, discount, tax_amount, total_amount, paid_amount, change_amount,
-                      payment_status, sale_status, performed_by, notes, created_at, updated_at
-               FROM sales WHERE 1=1`;
+  let query = `SELECT s.id, s.invoice_number, s.branch_id, s.customer_id, s.customer_name_snapshot,
+                      s.subtotal, s.discount, s.tax_amount, s.total_amount, s.paid_amount, s.change_amount,
+                      s.payment_status, s.sale_status, s.performed_by, s.notes, s.created_at, s.updated_at,
+                      COALESCE(cogs_summary.total_cogs, 0)::BIGINT AS total_cogs
+               FROM sales s
+               LEFT JOIN (
+                 SELECT sale_id, COALESCE(SUM(quantity * cost_price_snapshot), 0)::BIGINT AS total_cogs
+                 FROM sale_lines
+                 GROUP BY sale_id
+               ) cogs_summary ON cogs_summary.sale_id = s.id
+               WHERE 1=1`;
 
   const params: unknown[] = [];
   let paramIndex = 1;
 
   if (filter?.customer_id) {
-    query += ` AND customer_id = $${paramIndex++}`;
+    query += ` AND s.customer_id = $${paramIndex++}`;
     params.push(filter.customer_id);
   }
   if (filter?.branch_id) {
-    query += ` AND branch_id = $${paramIndex++}`;
+    query += ` AND s.branch_id = $${paramIndex++}`;
     params.push(filter.branch_id);
   }
   if (filter?.payment_status) {
-    query += ` AND payment_status = $${paramIndex++}`;
+    query += ` AND s.payment_status = $${paramIndex++}`;
     params.push(filter.payment_status);
   }
   if (filter?.sale_status) {
-    query += ` AND sale_status = $${paramIndex++}`;
+    query += ` AND s.sale_status = $${paramIndex++}`;
     params.push(filter.sale_status);
   }
   if (filter?.search && filter.search.trim()) {
     const term = `%${filter.search.trim()}%`;
-    query += ` AND (invoice_number ILIKE $${paramIndex} OR customer_name_snapshot ILIKE $${paramIndex} OR notes ILIKE $${paramIndex})`;
+    query += ` AND (s.invoice_number ILIKE $${paramIndex} OR s.customer_name_snapshot ILIKE $${paramIndex} OR s.notes ILIKE $${paramIndex})`;
     paramIndex++;
     params.push(term);
   }
   if (filter?.start_date) {
     const sDate = filter.start_date.length === 10 ? parseLocalDateStart(filter.start_date) : filter.start_date;
-    query += ` AND created_at >= $${paramIndex++}`;
+    query += ` AND s.created_at >= $${paramIndex++}`;
     params.push(sDate);
   }
   if (filter?.end_date) {
     const eDate = filter.end_date.length === 10 ? parseLocalDateEnd(filter.end_date) : filter.end_date;
-    query += ` AND created_at <= $${paramIndex++}`;
+    query += ` AND s.created_at <= $${paramIndex++}`;
     params.push(eDate);
   }
 
-  query += ' ORDER BY created_at DESC, id DESC';
+  query += ' ORDER BY s.created_at DESC, s.id DESC';
 
   const lim = filter?.limit ?? 50;
   query += ` LIMIT ${lim}`;
