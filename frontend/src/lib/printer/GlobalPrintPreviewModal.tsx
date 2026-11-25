@@ -27,6 +27,7 @@ export const GlobalPrintPreviewModal: React.FC = () => {
           <html>
             <head>
               <meta charset="utf-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1.0" />
               <style>
                 body { margin: 0; padding: 0; box-sizing: border-box; background: #fff; }
                 * { box-sizing: border-box; }
@@ -39,16 +40,38 @@ export const GlobalPrintPreviewModal: React.FC = () => {
         `);
         doc.close();
 
+        // Listen for afterprint so when Chrome's print dialog finishes or is cancelled,
+        // the preview modal automatically closes without requiring a second click.
+        const handleAfterPrint = () => {
+          closePreview();
+        };
+
+        const win = iframe.contentWindow;
+        if (win) {
+          win.addEventListener('afterprint', handleAfterPrint);
+          (win as any).onafterprint = handleAfterPrint;
+        }
+        window.addEventListener('afterprint', handleAfterPrint);
+
         // Automatically trigger print dialog so cashier doesn't have to click twice
-        setTimeout(() => {
+        const printTimer = setTimeout(() => {
           if (iframe.contentWindow) {
             iframe.contentWindow.focus();
             iframe.contentWindow.print();
           }
         }, 300);
+
+        return () => {
+          clearTimeout(printTimer);
+          if (win) {
+            win.removeEventListener('afterprint', handleAfterPrint);
+            (win as any).onafterprint = null;
+          }
+          window.removeEventListener('afterprint', handleAfterPrint);
+        };
       }
     }
-  }, [isPreviewOpen, currentPayload]);
+  }, [isPreviewOpen, currentPayload, closePreview]);
 
   if (!isPreviewOpen || !currentPayload) return null;
 

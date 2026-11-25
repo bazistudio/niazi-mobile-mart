@@ -554,12 +554,12 @@ const formatA4 = (invoice: UnifiedInvoice, settings: PrinterSettings, title: str
 
 const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, widthMm: number, title: string): string => {
   const is58 = widthMm === 58;
-  const pxWidth = is58 ? 190 : 256;
-  const baseFontSize = is58 ? 12 : 11;
+  const pxWidth = is58 ? 190 : 280;
+  const baseFontSize = is58 ? 12 : 12.5;
   const fontFamily = settings.font?.family === 'monospace' ? 'Courier, "Courier New", monospace' : 'Arial, sans-serif';
 
   return `
-    <div style="font-family: ${fontFamily}; font-size: ${baseFontSize}px; width: ${pxWidth}px; max-width: ${pxWidth}px; margin: 0 auto; line-height: 1.25; color: #000000; background-color: #ffffff; padding: 6px 4px 6px 4px; box-sizing: border-box; font-weight: bold; overflow: hidden;">
+    <div class="thermal-receipt" style="font-family: ${fontFamily}; font-size: ${baseFontSize}px; width: ${pxWidth}px; max-width: 100%; margin: 0 auto; line-height: 1.25; color: #000000; background-color: #ffffff; padding: 6px 4px 6px 4px; box-sizing: border-box; font-weight: bold; overflow: hidden; page-break-after: avoid; break-after: avoid;">
       <style>
         @media print {
           @page {
@@ -573,6 +573,19 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
             padding: 0 !important;
             width: ${pxWidth}px !important;
             max-width: ${pxWidth}px !important;
+            height: max-content !important;
+            overflow: hidden !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .thermal-receipt {
+            width: ${pxWidth}px !important;
+            max-width: ${pxWidth}px !important;
+            margin: 0 auto !important;
+            padding: 6px 4px 6px 4px !important;
+            overflow: visible !important;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
           }
         }
       </style>
@@ -745,6 +758,11 @@ const formatThermal = (invoice: UnifiedInvoice, settings: PrinterSettings, width
         <div style="font-weight: bold;">${invoice.shop.footerText || 'Thank you for shopping with us!'}</div>
         <div style="font-size: 8.5px; color: #555; margin-top: 3px; letter-spacing: 0.5px;">Powered by Niazi Mobile Mart</div>
       </div>
+
+      <!-- Cut Line Marker -->
+      <div style="text-align: center; margin-top: 10px; border-top: 1px dashed #000; padding-top: 4px; font-size: 9px; font-family: monospace; letter-spacing: 1px;">
+        - - - - - [ CUT HERE ] - - - - -
+      </div>
     </div>
   `;
 };
@@ -842,8 +860,35 @@ const _formatExchangeThermal = (data: ExchangeReceiptData, settings: PrinterSett
   const fontFamily = settings.font?.family === 'monospace' ? 'Courier, "Courier New", monospace' : 'Arial, sans-serif';
   const tblHead = `<table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:4px;table-layout:fixed;overflow-wrap:break-word;"><thead><tr style="border-bottom:1px dashed #000;"><th style="text-align:left;padding:3px 2px;width:46%;">Item</th><th style="text-align:center;padding:3px 0;width:10%;">Qty</th><th style="text-align:right;padding:3px 0;width:22%;">Price</th><th style="text-align:right;padding:3px 0;width:22%;">Amount</th></tr></thead><tbody>`;
 
-  return `<div style="font-family:${fontFamily};font-size:13.23px;width:272px;max-width:272px;margin:0 auto;line-height:1.3;color:#000;background:#fff;padding:10px 5px 8px 5px;box-sizing:border-box; /* 80mm: 5px L/R margins, 98% scale */">
-    <style>@media print{body,html{background:#fff !important;color:#000 !important;margin:0 !important;padding:0 !important;}}</style>
+  return `<div class="thermal-receipt" style="font-family:${fontFamily};font-size:13.23px;width:280px;max-width:100%;margin:0 auto;line-height:1.3;color:#000;background:#fff;padding:10px 5px 8px 5px;box-sizing:border-box;page-break-after:avoid;break-after:avoid;">
+    <style>
+      @media print {
+        @page {
+          margin: 0;
+          size: auto;
+        }
+        body, html {
+          background:#fff !important;
+          color:#000 !important;
+          margin:0 !important;
+          padding:0 !important;
+          width: 280px !important;
+          max-width: 280px !important;
+          height: max-content !important;
+          overflow: hidden !important;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+        .thermal-receipt {
+          width: 280px !important;
+          max-width: 280px !important;
+          margin: 0 auto !important;
+          padding: 10px 5px 8px 5px !important;
+          page-break-after: avoid !important;
+          break-after: avoid !important;
+        }
+      }
+    </style>
     <div style="text-align:center;margin-bottom:8px;">
       ${settings.invoice?.showLogo && data.shop.logoUrl ? `<img src="${escapeHtml(data.shop.logoUrl)}" style="max-width:70%;max-height:55px;margin-bottom:4px;" />` : ''}
       ${settings.invoice?.showShopInfo !== false ? `${rtlDiv(data.shop.name, 'font-weight:900;font-size:17px;text-transform:uppercase;letter-spacing:0.5px;text-align:center;')}${data.shop.branchName ? `<div style="font-size:12px;font-weight:bold;margin-top:2px;color:#222;">[ ${escapeHtml(data.shop.branchName)} ]</div>` : ''}${data.shop.address ? rtlDiv(data.shop.address, 'font-size:11px;white-space:pre-wrap;margin-top:2px;text-align:center;') : ''}${data.shop.phone ? `<div style="font-size:11px;margin-top:2px;">Tel: ${escapeHtml(data.shop.phone)}</div>` : ''}${data.shop.taxNumber ? `<div style="font-size:11px;">NTN: ${escapeHtml(data.shop.taxNumber)}</div>` : ''}` : ''}
