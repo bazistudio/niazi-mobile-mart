@@ -62,6 +62,7 @@ const BASE_EXPENSE: Expense = {
   performed_by_role: null,
   created_at: '2026-11-14T10:00:00Z',
   updated_at: '2026-11-14T10:00:00Z',
+  account_id: null,
 };
 
 // ─── Stub pool (no live DB needed) ───────────────────────────────────────────

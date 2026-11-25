@@ -911,6 +911,7 @@ export async function processAtomicExchange(
         reference_number: returnNumber,
         notes: `Exchange Return Offset: ${returnNumber}`,
         created_at: now,
+        account_id: null, // exchange-internal: no digital account
       });
 
       let remainingDiffAllocation = exchangeDiff;
@@ -920,8 +921,8 @@ export async function processAtomicExchange(
         if (allocated > 0) {
           const payId = uuidv4();
           await client.query(
-            `INSERT INTO sale_payments (id, sale_id, amount, payment_method, reference_number, notes, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            `INSERT INTO sale_payments (id, sale_id, amount, payment_method, reference_number, notes, created_at, account_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, NULL)`,
             [payId, replacementSaleId, allocated, tender.method, tender.reference_number, tender.notes, now]
           );
           insertedPayments.push({
@@ -932,6 +933,7 @@ export async function processAtomicExchange(
             reference_number: tender.reference_number,
             notes: tender.notes,
             created_at: now,
+            account_id: null, // exchange-internal: no digital account
           });
           remainingDiffAllocation -= allocated;
         }
@@ -990,6 +992,7 @@ export async function processAtomicExchange(
         reference_number: returnNumber,
         notes: `Exchange Return Offset: ${returnNumber}`,
         created_at: now,
+        account_id: null, // exchange-internal: no digital account
       });
 
       if (chosenRefundMethod === 'CREDIT' && customerId) {
@@ -1065,6 +1068,7 @@ export async function processAtomicExchange(
         reference_number: returnNumber,
         notes: `Exchange Return Offset: ${returnNumber}`,
         created_at: now,
+        account_id: null, // exchange-internal: no digital account
       });
     }
 

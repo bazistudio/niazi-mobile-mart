@@ -187,6 +187,7 @@ export interface Expense {
   performed_by_role: string | null;  // FEATURE-01: creator role at creation time
   created_at: string;
   updated_at: string;
+  account_id: string | null; // Phase 1: FK to business_accounts for EASYPAISA/JAZZCASH/BANK_TRANSFER; NULL for CASH/CARD/OTHER
 }
 
 export interface CreateExpenseCategoryDto {
@@ -210,6 +211,7 @@ export interface CreateExpenseDto {
   description: string;
   notes?: string | null;
   expense_date?: string | null; // YYYY-MM-DD; defaults to today
+  account_id?: string | null; // Phase 1: FK to business_accounts for digital payment methods
 }
 
 export interface UpdateExpenseDto {
@@ -420,11 +422,14 @@ export class ExpenseRepo {
       const expenseId = uuidv4();
 
       // 3. INSERT expense (EXP-FIX-01: include quantity and unit_price)
+      // Phase 1: account_id persisted for digital payment methods (EASYPAISA/JAZZCASH/BANK_TRANSFER)
+      const accountId = dto.account_id ?? null;
       await client.query(
         `INSERT INTO expenses (
           id, expense_number, category_id, branch_id, amount, quantity, unit_price,
-          payment_method, description, notes, expense_date, status, performed_by, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'COMPLETED', $12, $13, $14)`,
+          payment_method, description, notes, expense_date, status, performed_by, created_at, updated_at,
+          account_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'COMPLETED', $12, $13, $14, $15)`,
         [
           expenseId,
           expenseNumber,
@@ -440,6 +445,7 @@ export class ExpenseRepo {
           userId ?? null,
           now,
           now,
+          accountId,
         ]
       );
 
@@ -522,7 +528,7 @@ export class ExpenseRepo {
               e.payment_method, e.description,
               e.notes, e.expense_date, e.status, e.performed_by,
               u.name AS performed_by_name, u.role AS performed_by_role,
-              e.created_at, e.updated_at
+              e.created_at, e.updated_at, e.account_id
        FROM expenses e
        LEFT JOIN expense_categories ec ON ec.id = e.category_id
        LEFT JOIN users u ON u.id = e.performed_by
@@ -598,7 +604,7 @@ export class ExpenseRepo {
               e.payment_method, e.description,
               e.notes, e.expense_date, e.status, e.performed_by,
               u.name AS performed_by_name, u.role AS performed_by_role,
-              e.created_at, e.updated_at
+              e.created_at, e.updated_at, e.account_id
        FROM expenses e
        LEFT JOIN expense_categories ec ON ec.id = e.category_id
        LEFT JOIN users u ON u.id = e.performed_by
@@ -737,7 +743,7 @@ export class ExpenseRepo {
               e.payment_method, e.description,
               e.notes, e.expense_date, e.status, e.performed_by,
               u.name AS performed_by_name, u.role AS performed_by_role,
-              e.created_at, e.updated_at
+              e.created_at, e.updated_at, e.account_id
        FROM expenses e
        LEFT JOIN expense_categories ec ON ec.id = e.category_id
        LEFT JOIN users u ON u.id = e.performed_by

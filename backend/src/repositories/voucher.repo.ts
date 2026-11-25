@@ -79,6 +79,7 @@ export interface VoucherPaymentRecord {
   reversed_by_payment_id: string | null;
   performed_by: string;
   created_at: string;
+  account_id: string | null; // Phase 1: FK to business_accounts for EASYPAISA/JAZZCASH/BANK_TRANSFER
 }
 
 export interface VoucherInventoryMatchRecord {
@@ -143,6 +144,7 @@ export interface VoucherPaymentInput {
   amount: number;
   reference_number?: string | null;
   notes?: string | null;
+  account_id?: string | null; // Phase 1: FK to business_accounts for EASYPAISA/JAZZCASH/BANK_TRANSFER
 }
 
 export interface CreateVoucherRepoInput {
@@ -290,6 +292,7 @@ function mapVoucherPaymentRow(row: Record<string, unknown>): VoucherPaymentRecor
     reversed_by_payment_id: row['reversed_by_payment_id'] ? String(row['reversed_by_payment_id']) : null,
     performed_by: String(row['performed_by']),
     created_at: String(row['created_at']),
+    account_id: row['account_id'] ? String(row['account_id']) : null, // Phase 1
   };
 }
 
@@ -704,8 +707,8 @@ export async function createVoucherTx(
         `INSERT INTO pos_voucher_payments (
            id, organization_id, branch_id, voucher_id, payment_method, amount,
            reference_number, notes, cash_movement_id, customer_ledger_id,
-           is_reversed, performed_by, created_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,FALSE,$11,$12)
+           is_reversed, performed_by, created_at, account_id
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,FALSE,$11,$12,$13)
          RETURNING *`,
         [
           paymentId,
@@ -720,6 +723,7 @@ export async function createVoucherTx(
           paymentLedgerId,
           input.performed_by,
           now,
+          tender.account_id ?? null,
         ]
       );
       insertedPayments.push(mapVoucherPaymentRow(pRes.rows[0]!));
@@ -959,8 +963,8 @@ export async function recordVoucherPaymentTx(
       `INSERT INTO pos_voucher_payments (
          id, organization_id, branch_id, voucher_id, payment_method, amount,
          reference_number, notes, cash_movement_id, customer_ledger_id,
-         is_reversed, idempotency_key, performed_by, created_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,FALSE,$11,$12,$13)
+         is_reversed, idempotency_key, performed_by, created_at, account_id
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,FALSE,$11,$12,$13,$14)
        RETURNING *`,
       [
         uuidv4(),
@@ -976,6 +980,7 @@ export async function recordVoucherPaymentTx(
         rowKey,
         params.performed_by,
         now,
+        tender.account_id ?? null,
       ]
     );
     addedPayments.push(mapVoucherPaymentRow(pRes.rows[0]!));

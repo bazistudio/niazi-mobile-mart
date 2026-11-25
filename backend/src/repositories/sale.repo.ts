@@ -66,6 +66,7 @@ export interface SalePayment {
   reference_number: string | null;
   notes: string | null;
   created_at: string;
+  account_id: string | null; // Phase 1: FK to business_accounts for EASYPAISA/JAZZCASH/BANK_TRANSFER
 }
 
 export interface SaleResultDto {
@@ -92,6 +93,7 @@ export interface SalePaymentInputDto {
   amount: number;
   reference_number?: string | null;
   notes?: string | null;
+  account_id?: string | null; // Phase 1: FK to business_accounts for digital payment methods
 }
 
 export interface CompleteSaleDto {
@@ -446,6 +448,7 @@ export async function completeSaleTx(
     amount: number;
     reference_number: string | null;
     notes: string | null;
+    account_id: string | null; // Phase 1: passed through from SalePaymentInputDto
   }
 
   const tenderInputs: TenderInput[] = [];
@@ -459,6 +462,7 @@ export async function completeSaleTx(
           amount: p.amount,
           reference_number: p.reference_number ?? null,
           notes: p.notes ?? null,
+          account_id: p.account_id ?? null, // Phase 1
         });
       }
     }
@@ -486,6 +490,7 @@ export async function completeSaleTx(
         amount: legacyAmount,
         reference_number: null,
         notes: dto.notes ?? null,
+        account_id: null, // legacy path: no account
       });
     }
   }
@@ -918,8 +923,8 @@ export async function completeSaleTx(
   if (existingAdvanceApplied > 0) {
     const advPaymentId = uuidv4();
     await client.query(
-      `INSERT INTO sale_payments (id, sale_id, amount, payment_method, reference_number, notes, created_at)
-       VALUES ($1, $2, $3, 'OTHER', $4, $5, $6)`,
+      `INSERT INTO sale_payments (id, sale_id, amount, payment_method, reference_number, notes, created_at, account_id)
+       VALUES ($1, $2, $3, 'OTHER', $4, $5, $6, NULL)`,
       [advPaymentId, saleId, existingAdvanceApplied, invoiceNumber, `Customer Advance Applied: Rs ${existingAdvanceApplied}`, now]
     );
     salePayments.push({
@@ -930,6 +935,7 @@ export async function completeSaleTx(
       reference_number: invoiceNumber,
       notes: `Customer Advance Applied: Rs ${existingAdvanceApplied}`,
       created_at: now,
+      account_id: null, // advance-applied: no digital account
     });
     remainingAllocation -= existingAdvanceApplied;
   }
@@ -941,9 +947,9 @@ export async function completeSaleTx(
     if (allocated > 0) {
       const paymentId = uuidv4();
       await client.query(
-        `INSERT INTO sale_payments (id, sale_id, amount, payment_method, reference_number, notes, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [paymentId, saleId, allocated, tender.method, tender.reference_number, tender.notes, now]
+        `INSERT INTO sale_payments (id, sale_id, amount, payment_method, reference_number, notes, created_at, account_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [paymentId, saleId, allocated, tender.method, tender.reference_number, tender.notes, now, tender.account_id ?? null]
       );
       salePayments.push({
         id: paymentId,
@@ -953,6 +959,7 @@ export async function completeSaleTx(
         reference_number: tender.reference_number,
         notes: tender.notes,
         created_at: now,
+        account_id: tender.account_id ?? null,
       });
       remainingAllocation -= allocated;
     }
@@ -1410,7 +1417,7 @@ export async function getSaleLines(pool: Pool, saleId: string): Promise<SaleLine
 }
 
 export async function getSalePayments(pool: Pool, saleId: string): Promise<SalePayment[]> {
-  const sql = `SELECT id, sale_id, amount, payment_method, reference_number, notes, created_at
+  const sql = `SELECT id, sale_id, amount, payment_method, reference_number, notes, created_at, account_id
                FROM sale_payments WHERE sale_id = $1 ORDER BY created_at ASC, id ASC`;
   const result = await pool.query(sql, [saleId]);
   return result.rows.map((row) => {
@@ -1423,6 +1430,7 @@ export async function getSalePayments(pool: Pool, saleId: string): Promise<SaleP
       reference_number: (r['reference_number'] as string | null) ?? null,
       notes: (r['notes'] as string | null) ?? null,
       created_at: r['created_at'] as string,
+      account_id: (r['account_id'] as string | null) ?? null, // Phase 1
     };
   });
 }

@@ -109,6 +109,7 @@ export interface CompletePurchaseDto {
   demand_id?: string | null;            // optional: fulfill a saved demand order
   supplier_invoice_ref?: string | null; // supplier's own invoice number
   idempotency_key?: string | null;      // optional: client UUID to prevent duplicate-submit on retry
+  account_id?: string | null;           // Phase 1: FK to business_accounts for BANK/EASYPAISA/JAZZCASH payments
 }
 
 export interface PurchaseLine {
@@ -141,6 +142,8 @@ export interface Purchase {
   performed_by: string | null;
   created_at: string;
   updated_at: string;
+  payment_method: string | null; // Phase 1: persisted from migration 057
+  account_id: string | null;    // Phase 1: FK to business_accounts for digital payments
   lines?: PurchaseLine[];
 }
 
@@ -459,8 +462,8 @@ export async function completePurchase(
          id, purchase_number, supplier_id, branch_id,
          subtotal, discount, total_amount, paid_amount, credit_amount,
          payment_status, status, notes, performed_by, created_at, updated_at,
-         idempotency_key, request_fingerprint
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'COMPLETED',$11,$12,$13,$13,$14,$15)`,
+         idempotency_key, request_fingerprint, payment_method, account_id
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'COMPLETED',$11,$12,$13,$13,$14,$15,$16,$17)`,
       [
         purchaseId, purchaseNumber, supplierId, branchId,
         subtotal, totalDiscount, totalAmount, cappedPaid, creditAmount,
@@ -470,6 +473,8 @@ export async function completePurchase(
         now,
         dto.idempotency_key?.trim() || null,  // store key for future duplicate checks
         requestFingerprint,                   // payload hash for conflict detection
+        (dto.payment_method ?? 'CASH').toUpperCase(),  // Phase 1: persist payment method
+        dto.account_id ?? null,                        // Phase 1: FK to business_accounts
       ]
     );
 
@@ -1092,6 +1097,8 @@ function rowToPurchase(r: Record<string, unknown>): Purchase {
     performed_by:   safeStr(r['performed_by']),
     created_at:     String(r['created_at']),
     updated_at:     String(r['updated_at']),
+    payment_method: safeStr(r['payment_method']),  // Phase 1: null for pre-057 rows
+    account_id:     safeStr(r['account_id']),      // Phase 1: null for cash/card/other
   };
 }
 
