@@ -33,7 +33,7 @@ export const shopAdminNavigation: NavigationGroup[] = [
     label: 'Sales',
     items: [
       { name: 'POS', href: '/dashboard/shop-admin/pos', icon: MonitorPlay, permission: PERMISSIONS.POS_USE },
-      { name: 'Sales Analytics', href: '/dashboard/shop-admin/sales', icon: BarChart3, permission: PERMISSIONS.SALES_VIEW },
+      { name: 'Sales Analytics', href: '/dashboard/shop-admin/sales', icon: BarChart3, permission: PERMISSIONS.REPORTS_VIEW },
     ],
   },
   {

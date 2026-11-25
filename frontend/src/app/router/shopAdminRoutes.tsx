@@ -168,7 +168,7 @@ export const shopAdminCoreRoutes = (
     <Route
       path="sales"
       element={
-        <PermissionGuard requiredPermission={PERMISSIONS.SALES_VIEW} fallbackPath="/dashboard/shop-admin">
+        <PermissionGuard requiredPermission={PERMISSIONS.REPORTS_VIEW} fallbackPath="/dashboard/shop-admin">
           <SalesPage />
         </PermissionGuard>
       }

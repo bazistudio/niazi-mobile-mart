@@ -40,7 +40,6 @@ export const MAIN_BRANCH_ID = '00000000-0000-0000-0000-000000000002';
 export const NON_MAIN_BRANCH_DEFAULT_HREFS: ReadonlySet<string> = new Set([
   '/dashboard/shop-admin',              // Dashboard
   '/dashboard/shop-admin/pos',          // POS / Sales
-  '/dashboard/shop-admin/sales',        // Sales Analytics
   '/dashboard/shop-admin/mobiles',      // Mobile Inventory (available across all branches)
   '/dashboard/shop-admin/inventory',    // Products & Stock
   '/dashboard/shop-admin/stock',        // Stock
