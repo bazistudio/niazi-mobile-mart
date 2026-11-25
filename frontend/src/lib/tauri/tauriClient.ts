@@ -736,10 +736,11 @@ export const tauriClient = {
     throw new Error('API Base URL or Tauri environment required');
   },
 
-  async adminDeleteUser(userId: string): Promise<void> {
+  async adminDeleteUser(userId: string, credential?: { admin_password?: string; admin_pin?: string }): Promise<void> {
     if (getApiBaseUrl()) {
       await httpFetch<void>(`/api/v1/users/${userId}`, {
         method: 'DELETE',
+        body: JSON.stringify(credential || {}),
       });
       return;
     }
@@ -1045,9 +1046,10 @@ export const tauriClient = {
     return await httpFetch<Product[]>(`/api/products${qs ? '?' + qs : ''}`);
   },
 
-  async productDeactivate(id: string): Promise<void> {
+  async productDeactivate(id: string, credential?: { admin_password?: string; admin_pin?: string }): Promise<void> {
     await httpFetch<void>(`/api/products/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+      body: JSON.stringify(credential || {}),
     });
   },
 
@@ -1311,11 +1313,11 @@ export const tauriClient = {
     throw new Error('Tauri environment required');
   },
 
-  async customerDeactivate(id: string, password?: string): Promise<void> {
+  async customerDeactivate(id: string, credential?: { admin_password?: string; admin_pin?: string }): Promise<void> {
     if (getApiBaseUrl()) {
       await httpFetch<void>(`/api/v1/customers/${encodeURIComponent(id)}`, {
         method: 'DELETE',
-        body: JSON.stringify({ password }),
+        body: JSON.stringify(credential || {}),
       });
       return;
     }
@@ -2547,6 +2549,7 @@ export interface Sale {
   payment_status: PaymentStatus;
   sale_status: SaleStatus;
   performed_by: string | null;
+  cashier_name?: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;

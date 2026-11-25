@@ -202,7 +202,15 @@ export const printFormatter = {
       customer: order.customerId
         ? { name: order.customerId.name || 'Walk-in Customer', phone: order.customerId.phone }
         : (order.customer ? { name: order.customer.name || 'Walk-in Customer', phone: order.customer.phone } : undefined),
-      cashier: order.cashierName || order.cashier || 'Cashier',
+      cashier: (() => {
+        const isUuid = (val: unknown): boolean =>
+          typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim());
+        const rawCashier = order.cashierName || order.cashier || order.performed_by_name;
+        if (typeof rawCashier === 'string' && rawCashier.trim().length > 0 && !isUuid(rawCashier)) {
+          return rawCashier.trim();
+        }
+        return 'Cashier';
+      })(),
       items: (order.items || []).map((i: any) => {
         const price = i.salePrice ?? i.price ?? i.unitPrice ?? 0;
         const qty = i.quantity ?? i.qty ?? 1;

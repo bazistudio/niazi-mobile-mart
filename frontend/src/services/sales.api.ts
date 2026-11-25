@@ -60,6 +60,8 @@ export interface MappedSaleOrder {
   payments?: any[];
   partyId?: any;
   customer_name_snapshot?: string | null;
+  cashier?: string | null;
+  cashierName?: string | null;
 }
 
 export function mapSaleToOrder(s: Sale, lines: any[] = [], payments: any[] = []): MappedSaleOrder {
@@ -132,6 +134,14 @@ export function mapSaleToOrder(s: Sale, lines: any[] = [], payments: any[] = [])
     customerName: s.customer_name_snapshot,
     customer: s.customer_name_snapshot ? { name: s.customer_name_snapshot } : null,
     performedBy: s.performed_by,
+    cashier: ((s as any).cashier_name && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String((s as any).cashier_name)))
+      ? String((s as any).cashier_name)
+      : (((s as any).cashier && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String((s as any).cashier)))
+          ? String((s as any).cashier)
+          : null),
+    cashierName: ((s as any).cashier_name && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String((s as any).cashier_name)))
+      ? String((s as any).cashier_name)
+      : null,
     subtotal: s.subtotal,
     discountAmount: s.discount,
     discountTotal: s.discount,

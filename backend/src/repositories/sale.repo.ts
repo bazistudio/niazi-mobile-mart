@@ -32,6 +32,7 @@ export interface Sale {
   payment_status: PaymentStatus;
   sale_status: SaleStatus;
   performed_by: string | null;
+  cashier_name?: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -215,6 +216,7 @@ function mapSaleRow(row: Record<string, unknown>): Sale {
     payment_status,
     sale_status,
     performed_by: (row['performed_by'] as string | null) ?? null,
+    cashier_name: (row['cashier_name'] as string | null) ?? null,
     notes: (row['notes'] as string | null) ?? null,
     created_at: row['created_at'] as string,
     updated_at: row['updated_at'] as string,
@@ -1293,20 +1295,26 @@ export async function completeSale(
 }
 
 export async function getSaleById(pool: Pool, id: string): Promise<Sale | null> {
-  const sql = `SELECT id, invoice_number, branch_id, customer_id, customer_name_snapshot,
-                      subtotal, discount, tax_amount, total_amount, paid_amount, change_amount,
-                      payment_status, sale_status, performed_by, notes, created_at, updated_at
-               FROM sales WHERE id = $1`;
+  const sql = `SELECT s.id, s.invoice_number, s.branch_id, s.customer_id, s.customer_name_snapshot,
+                      s.subtotal, s.discount, s.tax_amount, s.total_amount, s.paid_amount, s.change_amount,
+                      s.payment_status, s.sale_status, s.performed_by, s.notes, s.created_at, s.updated_at,
+                      COALESCE(u.name, u.username) AS cashier_name
+               FROM sales s
+               LEFT JOIN users u ON u.id = s.performed_by
+               WHERE s.id = $1`;
   const result = await pool.query(sql, [id]);
   if (result.rows.length === 0) return null;
   return mapSaleRow(result.rows[0] as Record<string, unknown>);
 }
 
 export async function getSaleByInvoice(pool: Pool, invoiceNumber: string): Promise<Sale | null> {
-  const sql = `SELECT id, invoice_number, branch_id, customer_id, customer_name_snapshot,
-                      subtotal, discount, tax_amount, total_amount, paid_amount, change_amount,
-                      payment_status, sale_status, performed_by, notes, created_at, updated_at
-               FROM sales WHERE invoice_number = $1`;
+  const sql = `SELECT s.id, s.invoice_number, s.branch_id, s.customer_id, s.customer_name_snapshot,
+                      s.subtotal, s.discount, s.tax_amount, s.total_amount, s.paid_amount, s.change_amount,
+                      s.payment_status, s.sale_status, s.performed_by, s.notes, s.created_at, s.updated_at,
+                      COALESCE(u.name, u.username) AS cashier_name
+               FROM sales s
+               LEFT JOIN users u ON u.id = s.performed_by
+               WHERE s.invoice_number = $1`;
   const result = await pool.query(sql, [invoiceNumber.trim()]);
   if (result.rows.length === 0) return null;
   return mapSaleRow(result.rows[0] as Record<string, unknown>);
