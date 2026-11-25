@@ -149,6 +149,25 @@ export const BusinessAccountsStrip: React.FC<BusinessAccountsStripProps> = ({
           </button>
         </div>
 
+        {/* Summary card — total balance across all accounts */}
+        {!isLoading && !isError && accounts && accounts.length > 0 && (
+          <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800">
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500 dark:text-blue-400">
+                All Branches / Branch Sent
+              </span>
+              <span className="text-lg font-black tabular-nums text-blue-900 dark:text-blue-100">
+                {fmtPkr(accounts.reduce((sum, acc) => sum + acc.current_balance, 0))}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400">
+                {accounts.length} account{accounts.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Phase 1 POS sync notice */}
         <div className="px-3 py-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
           <p className="text-[11px] text-amber-700 dark:text-amber-400">

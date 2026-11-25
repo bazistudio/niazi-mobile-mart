@@ -13,6 +13,7 @@ import {
   Trash2,
   Building2,
 } from 'lucide-react';
+import { usePrintStore } from '@/lib/printer/print.store';
 import { useInventoryStore } from '@/features/inventory/core/inventory.store';
 import { useProducts } from '@/features/inventory/hooks/useProducts';
 import { DynamicMasterSelect } from '@/features/inventory/components/master-data/DynamicMasterSelect';
@@ -113,9 +114,16 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
   const [selectedCustIdx, setSelectedCustIdx] = useState(0);
   const custDropRef = useRef<HTMLDivElement>(null);
 
-  // ── Validation & submit state ───────────────────────────────────────────────
+  // ── Validation & submit state ────────────────────────────────────────
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // ── Voucher type & tender state ──────────────────────────────────────
+  type VoucherType = 'INSTANT_INVENTORY' | 'DIRECT_ADVANCE' | 'PRE_BOOKING';
+  const [voucherType, setVoucherType] = useState<VoucherType>('INSTANT_INVENTORY');
+  const [tenderMethod, setTenderMethod] = useState<string>('CASH');
+  const [tenderAmount, setTenderAmount] = useState<string>('');
+  const [tenderRef, setTenderRef] = useState<string>('');
 
   // ── Load branches on mount and default to Main Branch or User's Branch ──────
   useEffect(() => {
@@ -307,6 +315,10 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
       }
     }
 
+    if (voucherType === 'PRE_BOOKING' && !selectedCustomer) {
+      errs.customer = 'A customer must be selected for Pre-Booking vouchers.';
+    }
+
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -353,7 +365,7 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
           qualityId: qualityId || undefined,
           purchasePrice: Number(purchasePrice) || 0,
           price: catalogSalePrice, // Inventory catalog sale price
-          quantity: qtyNumber,
+          quantity: voucherType === 'INSTANT_INVENTORY' ? qtyNumber : 0,
           branchId: selectedBranchId || undefined,
           branch_id: selectedBranchId || undefined,
           lowStockThreshold: 2,
@@ -383,7 +395,7 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
       const productId: string | null = (finalProduct as any)?.id || (finalProduct as any)?._id || null;
 
       const voucherDto = {
-        voucher_type: 'INSTANT_INVENTORY' as const,
+        voucher_type: voucherType,
         branch_id: selectedBranchId || null,
         customer_id: selectedCustomer
           ? ((selectedCustomer as any).id || (selectedCustomer as any)._id || null)
@@ -401,7 +413,10 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
         locked_purchase_price: Number(purchasePrice) || 0,
         catalog_sale_price: catalogSalePrice || null,
         voucher_sale_price: actualAcceptedSalePrice || catalogSalePrice || 0,
-        payments: [], // INSTANT_INVENTORY: no advance payment collected at registration
+        payments:
+          voucherType !== 'INSTANT_INVENTORY' && tenderAmount && Number(tenderAmount) > 0
+            ? [{ payment_method: tenderMethod, amount: Number(tenderAmount), reference_number: tenderRef.trim() || null, notes: null }]
+            : [],
         notes: null,
         idempotency_key: idempotencyKey,
       };
@@ -454,6 +469,68 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
           ? `Voucher ${backendVoucher?.voucher_number || backendVoucher?.voucher?.voucher_number || ''} created!`
           : 'Product Voucher created successfully!'
       );
+
+      // Defect 6: Generate and open thermal receipt preview
+      try {
+        const esc = (s: string) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const vNum = esc(backendVoucher?.voucher_number || backendVoucher?.voucher?.voucher_number || '—');
+        const vDate = new Date().toLocaleString('en-PK', { dateStyle: 'short', timeStyle: 'short' });
+        const vTypeLabel = voucherType === 'INSTANT_INVENTORY' ? 'Instant Inventory'
+          : voucherType === 'DIRECT_ADVANCE' ? 'Direct Advance'
+          : 'Pre-Booking';
+        const custName = esc(selectedCustomer ? selectedCustomer.name : 'Walk-In Customer');
+        const custPhone = esc(selectedCustomer ? (selectedCustomer as any).phone || '' : '');
+        const pName = esc(name.trim());
+        const pPurchase = Number(purchasePrice) || 0;
+        const pSale = Number(actualAcceptedSalePrice) || Number(salePrice) || 0;
+        const qty = Number(openStock) || 0;
+        const paymentLine = tenderAmount && Number(tenderAmount) > 0 && voucherType !== 'INSTANT_INVENTORY'
+          ? `<div class="row"><span class="lbl">Payment:</span><span class="val">PKR ${Number(tenderAmount).toLocaleString()} (${esc(tenderMethod)})</span></div>`
+          : '';
+        const refLine = tenderRef.trim()
+          ? `<div class="row"><span class="lbl">Ref #:</span><span class="val">${esc(tenderRef.trim())}</span></div>`
+          : '';
+        const receiptHtml = `<style>
+          *{margin:0;padding:0;box-sizing:border-box}
+          body{font-family:'Courier New',monospace;font-size:11px;color:#000;background:#fff;width:302px;padding:8px}
+          .hdr{text-align:center;margin-bottom:6px}
+          .shop{font-size:14px;font-weight:bold;letter-spacing:1px}
+          .sub{font-size:10px;color:#444}
+          .div{border-top:1px dashed #000;margin:5px 0}
+          .row{display:flex;justify-content:space-between;margin:2px 0;gap:4px}
+          .lbl{color:#555;white-space:nowrap}
+          .val{font-weight:bold;text-align:right;word-break:break-word}
+          .badge{display:inline-block;padding:1px 5px;border:1px solid #000;border-radius:2px;font-size:9px;font-weight:bold;text-transform:uppercase}
+          .ftr{text-align:center;margin-top:8px;font-size:10px;color:#666}
+        </style>
+        <div class="hdr"><div class="shop">NIAZI MOBILE MART</div><div class="sub">PRODUCT VOUCHER</div></div>
+        <div class="div"></div>
+        <div class="row"><span class="lbl">Voucher #:</span><span class="val">${vNum}</span></div>
+        <div class="row"><span class="lbl">Date:</span><span class="val">${esc(vDate)}</span></div>
+        <div class="row"><span class="lbl">Type:</span><span class="val"><span class="badge">${esc(vTypeLabel)}</span></span></div>
+        <div class="div"></div>
+        <div class="row"><span class="lbl">Product:</span><span class="val">${pName}</span></div>
+        <div class="row"><span class="lbl">Qty:</span><span class="val">${qty}</span></div>
+        <div class="row"><span class="lbl">Purchase Price:</span><span class="val">PKR ${pPurchase.toLocaleString()}</span></div>
+        <div class="row"><span class="lbl">Sale Price:</span><span class="val">PKR ${pSale.toLocaleString()}</span></div>
+        <div class="div"></div>
+        <div class="row"><span class="lbl">Customer:</span><span class="val">${custName}</span></div>
+        ${custPhone ? `<div class="row"><span class="lbl">Phone:</span><span class="val">${custPhone}</span></div>` : ''}
+        ${paymentLine}
+        ${refLine}
+        <div class="div"></div>
+        <div class="ftr">Thank you for your business!</div>`;
+
+        usePrintStore.getState().openPreview({
+          html: receiptHtml,
+          documentType: 'Generic',
+          referenceId: backendVoucher?.id || backendVoucher?.voucher?.id || 'voucher',
+          title: `Voucher Receipt — ${vNum}`,
+        });
+      } catch (_printErr) {
+        // Printer unavailable does not reverse a successfully created voucher
+      }
+
       if (onSuccess) onSuccess(voucherPayload);
       setTimeout(onClose, 600);
     } catch (err: any) {
@@ -488,7 +565,7 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
                   Product Advance Voucher
                 </h3>
                 <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
-                  Instant Inventory Add
+                  {voucherType === 'INSTANT_INVENTORY' ? 'Instant Inventory Add' : voucherType === 'DIRECT_ADVANCE' ? 'Direct Advance' : 'Pre-Booking'}
                 </span>
               </div>
               <p className="text-xs text-text-muted">
@@ -861,13 +938,90 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
               </div>
             </div>
 
+            {/* ── Voucher Type Switcher ── */}
+            <div className="border-t border-border pt-4 flex flex-col gap-3">
+              <label className="text-[11px] font-bold text-text-secondary uppercase tracking-wider">
+                Voucher Type
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { value: 'INSTANT_INVENTORY' as const, label: 'Instant Inventory', desc: 'Add stock only, no payment' },
+                  { value: 'DIRECT_ADVANCE' as const, label: 'Direct Advance', desc: 'Delivery + advance payment' },
+                  { value: 'PRE_BOOKING' as const, label: 'Pre-Booking', desc: 'Book now, deliver later' },
+                ] as const).map(({ value, label, desc }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setVoucherType(value)}
+                    className={`flex flex-col items-start gap-0.5 p-3 rounded-xl border text-left transition-all ${ voucherType === value
+                      ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/40 shadow-sm'
+                      : 'border-border bg-surface hover:bg-surface-hover'
+                    }`}
+                  >
+                    <span className={`text-xs font-black ${ voucherType === value ? 'text-teal-700 dark:text-teal-300' : 'text-text-primary'}`}>{label}</span>
+                    <span className="text-[10px] text-text-muted leading-tight">{desc}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Tender section — only for DIRECT_ADVANCE and PRE_BOOKING */}
+              {voucherType !== 'INSTANT_INVENTORY' && (
+                <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl p-4 flex flex-col gap-3">
+                  <p className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+                    {voucherType === 'DIRECT_ADVANCE' ? 'Advance Payment Collected' : 'Advance Collected at Booking'}
+                  </p>
+                  <div className="grid grid-cols-3 gap-3">
+                    {/* Payment Method */}
+                    <div>
+                      <label className="block text-xs font-medium text-text-secondary mb-1">Method</label>
+                      <select
+                        value={tenderMethod}
+                        onChange={(e) => setTenderMethod(e.target.value)}
+                        className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-xs font-bold text-text-primary focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                      >
+                        {['CASH', 'CARD', 'BANK_TRANSFER', 'EASYPAISA', 'JAZZCASH', 'OTHER'].map((m) => (
+                          <option key={m} value={m}>{m.replace('_', ' ')}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {/* Amount */}
+                    <div>
+                      <label className="block text-xs font-medium text-text-secondary mb-1">Amount (Rs.)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={tenderAmount}
+                        onChange={(e) => setTenderAmount(e.target.value)}
+                        placeholder="0"
+                        className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-xs font-black tabular-nums text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                      />
+                    </div>
+                    {/* Reference */}
+                    <div>
+                      <label className="block text-xs font-medium text-text-secondary mb-1">Ref # (optional)</label>
+                      <input
+                        type="text"
+                        value={tenderRef}
+                        onChange={(e) => setTenderRef(e.target.value)}
+                        placeholder="Txn / cheque no."
+                        className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* ── Section 3: Customer Selection ── */}
             <div className="border-t border-border pt-4 flex flex-col gap-2">
               <label className="text-[11px] font-bold text-text-secondary uppercase tracking-wider flex items-center gap-1.5">
                 <User className="w-3.5 h-3.5" />
                 Customer
-                <span className="text-text-muted font-medium normal-case text-[10px]">
-                  — optional, leave blank for walk-in
+                <span className={`font-medium normal-case text-[10px] ${
+                  voucherType === 'PRE_BOOKING' ? 'text-red-600 dark:text-red-400 font-bold' : 'text-text-muted'
+                }`}>
+                  {voucherType === 'PRE_BOOKING' ? '— required for Pre-Booking' : '— optional, leave blank for walk-in'}
                 </span>
               </label>
 
@@ -977,9 +1131,11 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
         {/* ── Footer ── */}
         <div className="px-6 py-4 border-t border-border bg-surface-hover/30 shrink-0 flex flex-col gap-2.5">
           {!selectedCustomer && (
-            <p className="text-[10px] text-text-muted flex items-center gap-1.5">
-              <UserCircle2 className="w-3.5 h-3.5 text-text-muted shrink-0" />
-              No customer selected — will be recorded as a walk-in cash advance voucher.
+            <p className={`text-[10px] flex items-center gap-1.5 ${ voucherType === 'PRE_BOOKING' ? 'text-red-600 dark:text-red-400 font-bold' : 'text-text-muted'}`}>
+              <UserCircle2 className="w-3.5 h-3.5 shrink-0" />
+              {voucherType === 'PRE_BOOKING'
+                ? 'Customer required for Pre-Booking — please select a customer above.'
+                : 'No customer selected — will be recorded as a walk-in cash advance voucher.'}
             </p>
           )}
 
@@ -1005,7 +1161,7 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
               ) : (
                 <>
                   <Package className="w-4 h-4" />
-                  <span>Create Voucher & Add Stock</span>
+                  <span>{voucherType === 'INSTANT_INVENTORY' ? 'Create Voucher & Add Stock' : voucherType === 'DIRECT_ADVANCE' ? 'Create Direct Advance Voucher' : 'Create Pre-Booking Voucher'}</span>
                 </>
               )}
             </button>

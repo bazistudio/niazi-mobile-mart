@@ -588,10 +588,30 @@ export const settingsApi = {
       await tauriClient.adminVerifyPassword(password);
       return;
     }
+    // HTTP fallback: delegate to unified credential endpoint (password path)
+    await settingsApi.verifyAdminCredential({ admin_password: password });
   },
 
-  deleteStaff: async (id: string): Promise<void> => {
-    await tauriClient.adminDeleteUser(id);
+  verifyAdminCredential: async (credential: { admin_password?: string; admin_pin?: string }): Promise<void> => {
+    if (isTauriEnvironment()) {
+      // Tauri: route based on which credential was supplied
+      if (credential.admin_pin) {
+        // PIN verification via unified HTTP endpoint even in Tauri mode
+        await httpClient.post<{ success: boolean }>('/api/auth/verify-admin-credential', credential);
+        return;
+      }
+      await tauriClient.adminVerifyPassword(credential.admin_password ?? '');
+      return;
+    }
+    // HTTP mode: unified endpoint handles both PIN and password
+    const result = await httpClient.post<{ success: boolean }>('/api/auth/verify-admin-credential', credential);
+    if (!result.success) {
+      throw new Error('Credential verification failed');
+    }
+  },
+
+  deleteStaff: async (id: string, credential?: { admin_password?: string; admin_pin?: string }): Promise<void> => {
+    await tauriClient.adminDeleteUser(id, credential);
   },
 
   changeStaffRole: async (id: string, roleId: string): Promise<StaffUser> => {

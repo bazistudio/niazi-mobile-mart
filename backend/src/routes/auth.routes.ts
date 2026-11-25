@@ -329,6 +329,135 @@ export function buildAuthRouter(pool: Pool): Router {
   });
 
   // -------------------------------------------------------------------------
+  // POST /verify-admin-credential
+  //
+  // Unified admin credential verification: accepts either admin_password or admin_pin.
+  // Used by delete-action gates (delete customer, delete user, delete product) so that
+  // admins can choose between password or 4-digit PIN to authorize destructive actions.
+  //
+  // SECURITY:
+  //   - Requires authenticated session (buildAuthMiddleware).
+  //   - Restricted to Organization Administrators (isOrgAdmin).
+  //   - PIN path: full lockout protection via recordFailedPinAtomic (5 attempts / 5 min).
+  //   - Password path: Argon2id verification against login_key_hash (no lockout, matches
+  //     existing verify-admin-password pattern).
+  //   - Exactly one of admin_password or admin_pin must be supplied per call.
+  // -------------------------------------------------------------------------
+
+  router.post('/verify-admin-credential', buildAuthMiddleware(pool), async (req: Request, res: Response): Promise<void> => {
+    const identity = req.identity;
+    if (!identity) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    if (!isOrgAdmin(identity)) {
+      res.status(403).json({ error: 'FORBIDDEN', message: 'Only Organization Administrators can verify admin credentials' });
+      return;
+    }
+
+    const body = req.body as Record<string, unknown>;
+    const rawPassword = body.admin_password;
+    const rawPin = body.admin_pin;
+
+    const hasPassword = typeof rawPassword === 'string' && rawPassword.trim().length > 0;
+    const hasPin = typeof rawPin === 'string' && rawPin.trim().length > 0;
+
+    if (!hasPassword && !hasPin) {
+      res.status(400).json({ error: 'MISSING_CREDENTIAL', message: 'Provide either admin_password or admin_pin' });
+      return;
+    }
+
+    const sourceIp = req.ip ?? 'unknown';
+
+    try {
+      const adminUser = await authRepo.findById(identity.user_id);
+      if (!adminUser) {
+        res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Administrator record not found' });
+        return;
+      }
+
+      // ── PIN path ────────────────────────────────────────────────────────────────────────
+      if (hasPin) {
+        const cleanPin = (rawPin as string).trim();
+
+        if (!/^\d{4}$/.test(cleanPin)) {
+          res.status(400).json({ error: 'INVALID_PIN_FORMAT', message: 'PIN must be exactly 4 numeric digits' });
+          return;
+        }
+
+        if (!adminUser.pin_hash || adminUser.pin_hash.trim() === '') {
+          res.status(400).json({ error: 'NO_PIN_CONFIGURED', message: 'No PIN is configured for this administrator account.' });
+          return;
+        }
+
+        // Check active lockout
+        const now = Date.now();
+        if (adminUser.pin_locked_until_ms !== null) {
+          const lockedUntil = parseInt(adminUser.pin_locked_until_ms, 10);
+          if (!isNaN(lockedUntil) && lockedUntil > now) {
+            const retryAfterMs = Math.max(0, lockedUntil - now);
+            res.status(429).json({
+              error: 'LOCKED_OUT',
+              message: 'PIN entry is locked due to repeated failed attempts. Please try again later.',
+              retryAfterMs,
+            });
+            return;
+          } else {
+            // Expired lockout — reset
+            await authRepo.resetPinLockout(adminUser.id);
+            adminUser.failed_pin_attempts = 0;
+            adminUser.pin_locked_until_ms = null;
+          }
+        }
+
+        const pinMatches = await verifyArgon2(cleanPin, adminUser.pin_hash);
+
+        if (!pinMatches) {
+          const { attempts, lockedUntilMs } = await authRepo.recordFailedPinAtomic(adminUser.id, 5, 300_000);
+          console.warn(`[auth/verify-admin-credential] Failed PIN attempt for admin "${adminUser.username}" (${attempts}/5) from IP ${sourceIp}`);
+
+          if (lockedUntilMs !== null) {
+            const lockedUntil = parseInt(lockedUntilMs, 10);
+            const retryAfterMs = isNaN(lockedUntil) ? 300_000 : Math.max(0, lockedUntil - now);
+            res.status(429).json({
+              error: 'LOCKED_OUT',
+              message: 'Terminal PIN locked for 5 minutes due to repeated failed attempts.',
+              retryAfterMs,
+            });
+            return;
+          }
+
+          res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Incorrect administrator PIN' });
+          return;
+        }
+
+        // Success: reset lockout counter
+        await authRepo.resetPinLockout(adminUser.id);
+        res.status(200).json({ success: true, message: 'Administrator PIN verified successfully' });
+        return;
+      }
+
+      // ── Password path ───────────────────────────────────────────────────────────────────
+      if (!adminUser.login_key_hash) {
+        res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Administrator credentials not configured' });
+        return;
+      }
+
+      const passwordMatches = await verifyArgon2((rawPassword as string).trim(), adminUser.login_key_hash);
+      if (!passwordMatches) {
+        res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Incorrect administrator password' });
+        return;
+      }
+
+      res.status(200).json({ success: true, message: 'Administrator password verified successfully' });
+    } catch (err) {
+      console.error('[auth/verify-admin-credential] Unexpected error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // POST /admin-recovery-key/generate
   //
   // Generates a dedicated one-time recovery key (NZRCV-XXXX-XXXX-XXXX-XXXX) for the

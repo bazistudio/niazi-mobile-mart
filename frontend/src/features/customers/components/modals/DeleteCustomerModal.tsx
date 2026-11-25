@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { X, ShieldAlert, UserX, AlertTriangle } from 'lucide-react';
+import { X, ShieldAlert, UserX, AlertTriangle, Hash } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { settingsApi } from '@/features/settings/services/settings.api';
 import { customerApi } from '@/services/customer.api';
@@ -23,14 +23,18 @@ export const DeleteCustomerModal: React.FC<DeleteCustomerModalProps> = ({
   onSuccess,
 }) => {
   const [stage, setStage] = useState<Stage>('authorize');
+  const [credTab, setCredTab] = useState<'password' | 'pin'>('password');
   const [password, setPassword] = useState('');
+  const [pin, setPin] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isDeactivating, setIsDeactivating] = useState(false);
 
   const resetState = useCallback(() => {
     setStage('authorize');
+    setCredTab('password');
     setPassword('');
+    setPin('');
     setAuthError(null);
     setIsVerifying(false);
     setIsDeactivating(false);
@@ -41,29 +45,45 @@ export const DeleteCustomerModal: React.FC<DeleteCustomerModalProps> = ({
     onClose();
   }, [resetState, onClose]);
 
-  // Stage 1 — verify admin password
+  // Stage 1 — verify admin credential (password or PIN)
   const handleVerifyPassword = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
       setAuthError(null);
 
-      if (!password.trim()) {
-        setAuthError('Please enter your administrator password.');
-        return;
+      if (credTab === 'pin') {
+        if (!pin.trim() || !/^\d{4}$/.test(pin.trim())) {
+          setAuthError('Please enter your 4-digit administrator PIN.');
+          return;
+        }
+      } else {
+        if (!password.trim()) {
+          setAuthError('Please enter your administrator password.');
+          return;
+        }
       }
 
       setIsVerifying(true);
       try {
-        await settingsApi.verifyAdminPassword(password.trim());
-        // Correct password — advance to final confirmation
+        await settingsApi.verifyAdminCredential(
+          credTab === 'pin' ? { admin_pin: pin.trim() } : { admin_password: password.trim() }
+        );
+        // Credential verified — advance to final confirmation
         setStage('confirm');
       } catch (err: any) {
-        setAuthError(err?.message || 'Incorrect administrator password.');
+        const msg = err?.message ?? '';
+        if (msg.includes('LOCKED_OUT') || msg.includes('locked')) {
+          setAuthError('Too many failed attempts. PIN entry locked for 5 minutes.');
+        } else if (msg.includes('NO_PIN_CONFIGURED')) {
+          setAuthError('No PIN is configured on this admin account. Use password instead.');
+        } else {
+          setAuthError(credTab === 'pin' ? 'Incorrect administrator PIN.' : 'Incorrect administrator password.');
+        }
       } finally {
         setIsVerifying(false);
       }
     },
-    [password]
+    [credTab, password, pin]
   );
 
   // Stage 2 — final explicit deactivation
@@ -72,7 +92,10 @@ export const DeleteCustomerModal: React.FC<DeleteCustomerModalProps> = ({
 
     setIsDeactivating(true);
     try {
-      await customerApi.deleteCustomer(customer.id ?? customer._id, password.trim());
+      const credential = credTab === 'pin'
+        ? { admin_pin: pin.trim() }
+        : { admin_password: password.trim() };
+      await customerApi.deleteCustomer(customer.id ?? customer._id, credential);
       toast.success(
         `Customer "${customer.name}" has been deactivated. Historical records & ledger remain preserved.`
       );
@@ -85,7 +108,7 @@ export const DeleteCustomerModal: React.FC<DeleteCustomerModalProps> = ({
     } finally {
       setIsDeactivating(false);
     }
-  }, [customer, password, resetState, onSuccess, onClose]);
+  }, [customer, credTab, password, pin, resetState, onSuccess, onClose]);
 
   if (!isOpen || !customer) return null;
 
@@ -130,30 +153,68 @@ export const DeleteCustomerModal: React.FC<DeleteCustomerModalProps> = ({
                   <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                   <div>
                     <span className="font-bold">Security Verification:</span> You are about to deactivate{' '}
-                    <span className="font-bold underline">{customer.name}</span>. Please enter your Administrator password to proceed.
+                    <span className="font-bold underline">{customer.name}</span>. Verify your administrator credential to proceed.
                   </div>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2">
-                  Admin Password
-                </label>
-                <input
-                  type="password"
-                  autoFocus
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your administrator password"
-                  disabled={isVerifying}
-                  className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition-all outline-none"
-                />
-                {authError && (
-                  <p className="mt-1.5 text-xs text-red-600 dark:text-red-400 font-medium">
-                    {authError}
-                  </p>
-                )}
+              {/* Credential tab switcher */}
+              <div className="flex rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => { setCredTab('password'); setAuthError(null); }}
+                  className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${ credTab === 'password' ? 'bg-red-600 text-white' : 'bg-gray-50 dark:bg-gray-800 text-gray-500 hover:text-gray-700 dark:hover:text-gray-200' }`}
+                >
+                  Password
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setCredTab('pin'); setAuthError(null); }}
+                  className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5 ${ credTab === 'pin' ? 'bg-red-600 text-white' : 'bg-gray-50 dark:bg-gray-800 text-gray-500 hover:text-gray-700 dark:hover:text-gray-200' }`}
+                >
+                  <Hash className="w-3.5 h-3.5" /> PIN
+                </button>
               </div>
+
+              {credTab === 'password' ? (
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2">
+                    Admin Password
+                  </label>
+                  <input
+                    type="password"
+                    autoFocus
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter your administrator password"
+                    disabled={isVerifying}
+                    className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition-all outline-none"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2">
+                    Admin PIN (4 digits)
+                  </label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    pattern="\d{4}"
+                    maxLength={4}
+                    autoFocus
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    placeholder="••••"
+                    disabled={isVerifying}
+                    className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white text-sm text-center tracking-[0.5em] focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition-all outline-none"
+                  />
+                </div>
+              )}
+              {authError && (
+                <p className="text-xs text-red-600 dark:text-red-400 font-medium">
+                  {authError}
+                </p>
+              )}
 
               <div className="flex items-center justify-end gap-3 pt-3">
                 <button
@@ -166,7 +227,7 @@ export const DeleteCustomerModal: React.FC<DeleteCustomerModalProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={isVerifying || !password.trim()}
+                  disabled={isVerifying || (credTab === 'password' ? !password.trim() : pin.length !== 4)}
                   className="px-5 py-2 text-sm font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-sm transition-all"
                 >
                   {isVerifying ? 'Verifying...' : 'Authorize Deactivation'}
