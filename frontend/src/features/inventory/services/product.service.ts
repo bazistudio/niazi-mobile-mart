@@ -293,8 +293,8 @@ export const productService = {
     };
   },
 
-  deleteProduct: async (id: string): Promise<void> => {
-    await tauriClient.productDeactivate(id);
+  deleteProduct: async (id: string, credential?: { admin_password?: string; admin_pin?: string }): Promise<void> => {
+    await tauriClient.productDeactivate(id, credential);
   }
 };
 

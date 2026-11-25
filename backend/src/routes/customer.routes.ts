@@ -246,24 +246,66 @@ export function createCustomerRouter(pool: Pool): Router {
       return;
     }
 
-    const { password } = (req.body || {}) as { password?: string };
-    if (!password || typeof password !== 'string' || !password.trim()) {
-      res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Administrator password is required to deactivate a customer' });
+    const { admin_password, admin_pin, password: legacyPassword } = (req.body || {}) as {
+      admin_password?: string; admin_pin?: string; password?: string;
+    };
+    const rawPassword = (admin_password || legacyPassword || '').trim();
+    const rawPin = (admin_pin || '').trim();
+    const hasPin = rawPin.length > 0;
+    const hasPassword = rawPassword.length > 0;
+
+    if (!hasPin && !hasPassword) {
+      res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Administrator password or PIN is required to deactivate a customer' });
       return;
     }
 
     try {
       const authRepo = new AuthRepo(pool);
       const adminUser = await authRepo.findById(identity.user_id);
-      if (!adminUser || !adminUser.login_key_hash) {
+      if (!adminUser) {
         res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Administrator record or credentials not found' });
         return;
       }
 
-      const isPasswordValid = await verifyArgon2(password.trim(), adminUser.login_key_hash);
-      if (!isPasswordValid) {
-        res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Incorrect administrator password' });
-        return;
+      if (hasPin) {
+        if (!/^\d{4}$/.test(rawPin)) {
+          res.status(400).json({ error: 'INVALID_PIN_FORMAT', message: 'PIN must be exactly 4 numeric digits' });
+          return;
+        }
+        if (!adminUser.pin_hash) {
+          res.status(400).json({ error: 'NO_PIN_CONFIGURED', message: 'No PIN is configured for this administrator account.' });
+          return;
+        }
+        const now = Date.now();
+        if (adminUser.pin_locked_until_ms !== null) {
+          const lockedUntil = parseInt(adminUser.pin_locked_until_ms, 10);
+          if (!isNaN(lockedUntil) && lockedUntil > now) {
+            res.status(429).json({ error: 'LOCKED_OUT', message: 'PIN entry is locked due to repeated failed attempts. Please try again later.' });
+            return;
+          }
+          await authRepo.resetPinLockout(adminUser.id);
+        }
+        const pinMatches = await verifyArgon2(rawPin, adminUser.pin_hash);
+        if (!pinMatches) {
+          const { lockedUntilMs } = await authRepo.recordFailedPinAtomic(adminUser.id, 5, 300_000);
+          if (lockedUntilMs !== null) {
+            res.status(429).json({ error: 'LOCKED_OUT', message: 'Terminal PIN locked for 5 minutes due to repeated failed attempts.' });
+            return;
+          }
+          res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Incorrect administrator PIN' });
+          return;
+        }
+        await authRepo.resetPinLockout(adminUser.id);
+      } else {
+        if (!adminUser.login_key_hash) {
+          res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Administrator credentials not configured' });
+          return;
+        }
+        const isPasswordValid = await verifyArgon2(rawPassword, adminUser.login_key_hash);
+        if (!isPasswordValid) {
+          res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Incorrect administrator password' });
+          return;
+        }
       }
 
       const id = req.params['id'] as string;
@@ -434,24 +476,66 @@ export function createCustomerV1Router(pool: Pool): Router {
       return;
     }
 
-    const { password } = (req.body || {}) as { password?: string };
-    if (!password || typeof password !== 'string' || !password.trim()) {
-      res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Administrator password is required to deactivate a customer' });
+    const { admin_password, admin_pin, password: legacyPassword } = (req.body || {}) as {
+      admin_password?: string; admin_pin?: string; password?: string;
+    };
+    const rawPassword = (admin_password || legacyPassword || '').trim();
+    const rawPin = (admin_pin || '').trim();
+    const hasPin = rawPin.length > 0;
+    const hasPassword = rawPassword.length > 0;
+
+    if (!hasPin && !hasPassword) {
+      res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Administrator password or PIN is required to deactivate a customer' });
       return;
     }
 
     try {
       const authRepo = new AuthRepo(pool);
       const adminUser = await authRepo.findById(identity.user_id);
-      if (!adminUser || !adminUser.login_key_hash) {
+      if (!adminUser) {
         res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Administrator record or credentials not found' });
         return;
       }
 
-      const isPasswordValid = await verifyArgon2(password.trim(), adminUser.login_key_hash);
-      if (!isPasswordValid) {
-        res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Incorrect administrator password' });
-        return;
+      if (hasPin) {
+        if (!/^\d{4}$/.test(rawPin)) {
+          res.status(400).json({ error: 'INVALID_PIN_FORMAT', message: 'PIN must be exactly 4 numeric digits' });
+          return;
+        }
+        if (!adminUser.pin_hash) {
+          res.status(400).json({ error: 'NO_PIN_CONFIGURED', message: 'No PIN is configured for this administrator account.' });
+          return;
+        }
+        const now = Date.now();
+        if (adminUser.pin_locked_until_ms !== null) {
+          const lockedUntil = parseInt(adminUser.pin_locked_until_ms, 10);
+          if (!isNaN(lockedUntil) && lockedUntil > now) {
+            res.status(429).json({ error: 'LOCKED_OUT', message: 'PIN entry is locked due to repeated failed attempts. Please try again later.' });
+            return;
+          }
+          await authRepo.resetPinLockout(adminUser.id);
+        }
+        const pinMatches = await verifyArgon2(rawPin, adminUser.pin_hash);
+        if (!pinMatches) {
+          const { lockedUntilMs } = await authRepo.recordFailedPinAtomic(adminUser.id, 5, 300_000);
+          if (lockedUntilMs !== null) {
+            res.status(429).json({ error: 'LOCKED_OUT', message: 'Terminal PIN locked for 5 minutes due to repeated failed attempts.' });
+            return;
+          }
+          res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Incorrect administrator PIN' });
+          return;
+        }
+        await authRepo.resetPinLockout(adminUser.id);
+      } else {
+        if (!adminUser.login_key_hash) {
+          res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Administrator credentials not configured' });
+          return;
+        }
+        const isPasswordValid = await verifyArgon2(rawPassword, adminUser.login_key_hash);
+        if (!isPasswordValid) {
+          res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Incorrect administrator password' });
+          return;
+        }
       }
 
       const id = req.params['id'] as string;

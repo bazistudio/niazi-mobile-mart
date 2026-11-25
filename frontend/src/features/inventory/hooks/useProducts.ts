@@ -28,7 +28,8 @@ export const useProducts = (params: PaginationParams, options?: { enabled?: bool
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => productService.deleteProduct(id),
+    mutationFn: ({ id, credential }: { id: string; credential?: { admin_password?: string; admin_pin?: string } }) =>
+      productService.deleteProduct(id, credential),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
     },

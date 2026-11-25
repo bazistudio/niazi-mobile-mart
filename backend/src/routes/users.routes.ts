@@ -32,7 +32,7 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 import { UsersRepo } from '../repositories/users.repo';
 import { AuthRepo } from '../repositories/auth.repo';
-import { hashArgon2 } from '../services/argon2.service';
+import { hashArgon2, verifyArgon2 } from '../services/argon2.service';
 import { buildAuthMiddleware, authMiddleware, isAdmin, isOrgAdmin as authIsOrgAdmin, BLOCKED_LEGACY_ADMIN_ROLES } from '../auth';
 
 // ---------------------------------------------------------------------------
@@ -414,6 +414,19 @@ export function buildUsersRouter(pool: Pool): Router {
   router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
     if (!requireStrictAdmin(req, res)) return;
 
+    const { admin_password, admin_pin, password: legacyPassword } = (req.body || {}) as {
+      admin_password?: string; admin_pin?: string; password?: string;
+    };
+    const rawPassword = (admin_password || legacyPassword || '').trim();
+    const rawPin = (admin_pin || '').trim();
+    const hasPin = rawPin.length > 0;
+    const hasPassword = rawPassword.length > 0;
+
+    if (!hasPin && !hasPassword) {
+      res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Administrator password or PIN is required to deactivate a user account' });
+      return;
+    }
+
     const { id } = req.params as { id: string };
     const identity = req.identity!;
     const isOrg = isOrgAdmin(req);
@@ -424,6 +437,54 @@ export function buildUsersRouter(pool: Pool): Router {
     }
 
     try {
+      const authRepo = new AuthRepo(pool);
+      const adminUser = await authRepo.findById(identity.user_id);
+      if (!adminUser) {
+        res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Administrator record not found' });
+        return;
+      }
+
+      if (hasPin) {
+        if (!/^\d{4}$/.test(rawPin)) {
+          res.status(400).json({ error: 'INVALID_PIN_FORMAT', message: 'PIN must be exactly 4 numeric digits' });
+          return;
+        }
+        if (!adminUser.pin_hash) {
+          res.status(400).json({ error: 'NO_PIN_CONFIGURED', message: 'No PIN is configured for this administrator account.' });
+          return;
+        }
+        const now = Date.now();
+        if (adminUser.pin_locked_until_ms !== null) {
+          const lockedUntil = parseInt(adminUser.pin_locked_until_ms, 10);
+          if (!isNaN(lockedUntil) && lockedUntil > now) {
+            res.status(429).json({ error: 'LOCKED_OUT', message: 'PIN entry is locked. Please try again later.' });
+            return;
+          }
+          await authRepo.resetPinLockout(adminUser.id);
+        }
+        const pinMatches = await verifyArgon2(rawPin, adminUser.pin_hash);
+        if (!pinMatches) {
+          const { lockedUntilMs } = await authRepo.recordFailedPinAtomic(adminUser.id, 5, 300_000);
+          if (lockedUntilMs !== null) {
+            res.status(429).json({ error: 'LOCKED_OUT', message: 'Terminal PIN locked for 5 minutes.' });
+            return;
+          }
+          res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Incorrect administrator PIN' });
+          return;
+        }
+        await authRepo.resetPinLockout(adminUser.id);
+      } else {
+        if (!adminUser.login_key_hash) {
+          res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Administrator credentials not configured' });
+          return;
+        }
+        const passwordMatches = await verifyArgon2(rawPassword, adminUser.login_key_hash);
+        if (!passwordMatches) {
+          res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Incorrect administrator password' });
+          return;
+        }
+      }
+
       const target = await usersRepo.findById(id);
       if (!target) {
         res.status(404).json({ error: 'User not found' });

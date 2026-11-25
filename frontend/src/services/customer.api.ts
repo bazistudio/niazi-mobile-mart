@@ -141,13 +141,13 @@ export const customerApi = {
     }
   },
 
-  deleteCustomer: async (id: string, password?: string): Promise<{
+  deleteCustomer: async (id: string, credential?: { admin_password?: string; admin_pin?: string }): Promise<{
     success: boolean;
     message: string;
   }> => {
     try {
-      // Safe deactivation with ADMIN password gate
-      await tauriClient.customerDeactivate(id, password);
+      // Safe deactivation with ADMIN credential gate (password or PIN)
+      await tauriClient.customerDeactivate(id, credential);
       return {
         success: true,
         message: 'Customer deactivated successfully',

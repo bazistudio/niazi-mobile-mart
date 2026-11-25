@@ -86,7 +86,8 @@ export function useDeleteStaff() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (id: string) => settingsApi.deleteStaff(id),
+    mutationFn: ({ id, credential }: { id: string; credential?: { admin_password?: string; admin_pin?: string } }) =>
+      settingsApi.deleteStaff(id, credential),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: STAFF_QUERY_KEY });
     },
