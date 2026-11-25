@@ -80,6 +80,7 @@ export interface AddRepairPartDto {
   qty: number;
   cost: number;
   price: number;
+  source_type?: string; // 'OWN_STOCK' | 'MARKET_PURCHASE'
 }
 
 export interface AddRepairPaymentDto {
@@ -238,6 +239,7 @@ async function getPartsForJob(pool: Pool, jobId: string, branchId?: string): Pro
        rp.added_at,
        rp.stock_deducted,
        rp.stock_movement_id,
+       rp.source_type,
        COALESCE(s.quantity, 0) AS current_stock
      FROM repair_parts rp
      LEFT JOIN stock s ON s.product_id = rp.product_id
@@ -248,6 +250,8 @@ async function getPartsForJob(pool: Pool, jobId: string, branchId?: string): Pro
   );
   return res.rows.map((r: Record<string, unknown>) => ({
     _id: r['_id'],
+    // BUG A FIX: always expose productName at top level (the saved custom name)
+    productName: (r['product_name'] as string) || '',
     productId: r['product_id']
       ? {
           _id: r['product_id'],
@@ -263,6 +267,7 @@ async function getPartsForJob(pool: Pool, jobId: string, branchId?: string): Pro
     price: Number(r['price']),
     stockDeducted: Boolean(r['stock_deducted']),
     stockMovementId: (r['stock_movement_id'] as string) || null,
+    sourceType: (r['source_type'] as string) || (r['product_id'] ? 'OWN_STOCK' : 'MARKET_PURCHASE'),
     addedAt: r['added_at'] as string,
   }));
 }
@@ -1025,12 +1030,13 @@ export async function addRepairPartTx(
     }
 
     // ── Insert repair_parts row ──────────────────────────────────────────────
+    const sourceType = dto.source_type?.trim() || (productId ? 'OWN_STOCK' : 'MARKET_PURCHASE');
     await client.query(
       `INSERT INTO repair_parts (
          id, repair_job_id, product_id, product_name, product_sku,
          qty, cost, price, added_at,
-         stock_deducted, stock_movement_id, branch_id
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+         stock_deducted, stock_movement_id, branch_id, source_type
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
       [
         partId, realId,
         productId,
@@ -1040,7 +1046,7 @@ export async function addRepairPartTx(
         Number(dto.cost ?? 0),
         Number(dto.price ?? 0),
         now,
-        stockDeducted, stockMovementId, branchId,
+        stockDeducted, stockMovementId, branchId, sourceType,
       ]
     );
 

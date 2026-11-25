@@ -101,10 +101,17 @@ export const PartsConsumptionLabTab: React.FC<PartsConsumptionLabTabProps> = ({
             (typeof part.productId === 'string' && (part.productId as string).length > 0)
           );
 
+          // Use persisted sourceType from API if available, otherwise derive from catalog link
+          const resolvedSourceLevel: 'OWN_STOCK' | 'MARKET_PURCHASE' =
+            ((part as any).sourceType === 'OWN_STOCK' || (part as any).sourceType === 'MARKET_PURCHASE')
+              ? (part as any).sourceType
+              : (hasCatalogProduct ? 'OWN_STOCK' : 'MARKET_PURCHASE');
+
+          // Use productName top-level field first (saved custom name), then catalog name
           const partName =
-            typeof part.productId === 'object' && part.productId
-              ? part.productId.name
-              : (part as any).productName || `Replacement Part #${idx + 1}`;
+            (part as any).productName ||
+            (typeof part.productId === 'object' && part.productId ? part.productId.name : null) ||
+            `Replacement Part #${idx + 1}`;
           const partSku =
             typeof part.productId === 'object' && part.productId ? part.productId.sku : 'MARKET';
 
@@ -127,7 +134,7 @@ export const PartsConsumptionLabTab: React.FC<PartsConsumptionLabTabProps> = ({
             quantity: part.qty || 1,
             cost: Number(part.cost || 0),
             price: Number(part.price || 0),
-            sourceLevel: hasCatalogProduct ? 'OWN_STOCK' : 'MARKET_PURCHASE',
+            sourceLevel: resolvedSourceLevel,
             mechanicId: mechId,
             mechanicName: mechName,
             branchId: job.branch_id || job.branchId || '',

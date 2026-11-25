@@ -928,6 +928,7 @@ export const RepairDashboard = ({ hideBookingForm = false }: RepairDashboardProp
                 embedded
                 editingJob={editingJob}
                 onClearEditing={() => setEditingJob(null)}
+                onJobCreatedForSettlement={(job) => setSettlementJob(job as RepairJob)}
               />
             </div>
           )}

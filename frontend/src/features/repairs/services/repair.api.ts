@@ -116,7 +116,7 @@ export const repairApi = {
    */
   addPart: async (
     id: string,
-    partData: { productId?: string; productName: string; productSku?: string; qty: number; cost: number; price: number }
+    partData: { productId?: string; productName: string; productSku?: string; qty: number; cost: number; price: number; sourceType?: 'OWN_STOCK' | 'MARKET_PURCHASE' }
   ): Promise<RepairJob> => {
     return httpClient.post<RepairJob>(`/api/repairs/${encodeURIComponent(id)}/parts`, {
       product_id: partData.productId ?? null,
@@ -125,6 +125,7 @@ export const repairApi = {
       qty: partData.qty,
       cost: partData.cost,
       price: partData.price,
+      source_type: partData.sourceType ?? (partData.productId ? 'OWN_STOCK' : 'MARKET_PURCHASE'),
     });
   },
 

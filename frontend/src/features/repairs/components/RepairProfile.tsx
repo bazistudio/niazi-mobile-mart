@@ -247,13 +247,18 @@ const AddPartModal: React.FC<AddPartModalProps> = ({ repairId, onClose, onSucces
   const [price, setPrice] = useState<number>(0);
 
   const addPartMutation = useMutation({
-    mutationFn: () =>
-      repairApi.addPart(repairId, {
-        productName: productName.trim() || 'Manual Part',
+    mutationFn: () => {
+      if (!productName.trim()) {
+        return Promise.reject(new Error('Part name is required'));
+      }
+      return repairApi.addPart(repairId, {
+        productName: productName.trim(),
+        sourceType: 'MARKET_PURCHASE',
         qty,
         cost,
         price,
-      }),
+      });
+    },
     onSuccess: () => {
       toast.success('Part added successfully');
       onSuccess();
@@ -764,9 +769,13 @@ export const RepairProfile = ({ repairId }: { repairId: string }) => {
                         {job.partsUsed.map((part: any) => (
                           <tr key={part._id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
                             <td className="px-4 py-3 font-medium">
-                              {part.productId?.name || 'Manual Part'}
-                              {part.productId?.sku && (
+                              {/* BUG A/G FIX: show saved product_name first; fall back to linked product name */}
+                              {part.productName || (part.productId && typeof part.productId === 'object' ? part.productId.name : null) || 'Manual Part'}
+                              {part.productId && typeof part.productId === 'object' && part.productId.sku && (
                                 <div className="text-[10px] text-gray-400 font-mono">{part.productId.sku}</div>
+                              )}
+                              {!part.productId && (
+                                <div className="text-[10px] text-warning/80 font-semibold mt-0.5">Market Purchase</div>
                               )}
                             </td>
                             <td className="px-4 py-3 text-center">{part.qty}</td>

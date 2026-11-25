@@ -176,14 +176,28 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
       setPriority(editingJob.priority || 'Normal');
       if (Array.isArray(editingJob.partsUsed)) {
         setPartsList(
-          editingJob.partsUsed.map((p: any) => ({
-            id: p._id || p.id || Math.random().toString(),
-            productId: p.productId?._id || p.productId || undefined,
-            name: p.productName || p.productId?.name || 'Part',
-            qty: Number(p.qty || 1),
-            cost: Number(p.cost || 0),
-            price: Number(p.price || 0),
-          }))
+          editingJob.partsUsed.map((p: any) => {
+            // BUG A FIX: prefer top-level productName (now returned by API); also try product_name snake_case
+            const resolvedName =
+              p.productName ||
+              p.product_name ||
+              (typeof p.productId === 'object' && p.productId ? p.productId.name : null) ||
+              '';
+            // BUG F FIX: restore sourceType — market parts have no productId
+            const hasLinkedProduct = !!(p.productId?._id || (typeof p.productId === 'string' && p.productId));
+            const resolvedSourceType: 'OWN_STOCK' | 'MARKET_PURCHASE' = hasLinkedProduct
+              ? 'OWN_STOCK'
+              : 'MARKET_PURCHASE';
+            return {
+              id: p._id || p.id || Math.random().toString(),
+              productId: p.productId?._id || (typeof p.productId === 'string' ? p.productId : undefined),
+              name: resolvedName,
+              qty: Number(p.qty || 1),
+              cost: Number(p.cost || 0),
+              price: Number(p.price || 0),
+              sourceType: resolvedSourceType,
+            };
+          })
         );
       }
     }
@@ -349,11 +363,12 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
   };
 
   const handleAddManualPart = () => {
+    // BUG A FIX: start with empty name so mechanic types their own description instead of overriding the default
     setPartsList([
       ...partsList,
       {
         id: `part_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        name: 'Market Purchased Part',
+        name: '',
         qty: 1,
         cost: 0,
         price: 0,
@@ -538,9 +553,11 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
           for (const p of partsList) {
             const isExisting = existingPartIds.has(String(p.id));
             if (!isExisting) {
+              // BUG H FIX: send sourceType so backend can persist source classification
               await repairApi.addPart(editId, {
                 productId: p.productId,
                 productName: p.name,
+                sourceType: p.sourceType || (p.productId ? 'OWN_STOCK' : 'MARKET_PURCHASE'),
                 qty: p.qty,
                 cost: p.cost,
                 price: p.price,
@@ -575,9 +592,11 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
         setCreatedRepairId(job.id);
 
         for (const p of partsList) {
+          // BUG H FIX: include sourceType in new job part creation
           await repairApi.addPart(job.id, {
             productId: p.productId,
             productName: p.name,
+            sourceType: p.sourceType || (p.productId ? 'OWN_STOCK' : 'MARKET_PURCHASE'),
             qty: p.qty,
             cost: p.cost,
             price: p.price,
@@ -1654,8 +1673,13 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
               type="button"
               disabled={createJobMutation.isPending}
               onClick={() => {
+                // BUG E FIX: validate both customer name and device info in modal mode
                 if (!customerName.trim()) {
                   toast.error('Please enter customer name');
+                  return;
+                }
+                if (!brand.trim() || !model.trim()) {
+                  toast.error('Please enter device Brand and Model');
                   return;
                 }
                 createJobMutation.mutate({ shouldPrint: false, markRepaired: false, shouldSettle: true });
@@ -1671,8 +1695,13 @@ export const RepairFormDrawer: React.FC<RepairFormDrawerProps> = ({
               type="button"
               disabled={createJobMutation.isPending}
               onClick={() => {
+                // BUG E FIX: validate both customer name and device info in modal mode
                 if (!customerName.trim()) {
                   toast.error('Please enter customer name');
+                  return;
+                }
+                if (!brand.trim() || !model.trim()) {
+                  toast.error('Please enter device Brand and Model');
                   return;
                 }
                 createJobMutation.mutate({ shouldPrint: true, markRepaired: false });

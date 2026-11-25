@@ -231,6 +231,7 @@ export function buildRepairRouter(pool: Pool): Router {
         qty: Number(body.qty ?? body.quantity ?? 0),
         cost: Number(body.cost ?? 0),
         price: Number(body.price ?? 0),
+        source_type: body.source_type || body.sourceType || undefined,
       };
 
       const job = await addRepairPartTx(pool, id, dto, identity.user_id, identity.organization_id || '');
