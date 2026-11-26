@@ -67,12 +67,59 @@ async function getAppliedMigrations(client: PoolClient): Promise<Set<string>> {
   return set;
 }
 
+/** Maximum 32-bit signed integer value allowed by PostgreSQL `schema_migrations.version INT` */
+export const POSTGRES_INT_MAX = 2_147_483_647;
+
 /**
  * Extract integer prefix from migration filename (e.g. "001_initial_schema.sql" -> 1).
+ *
+ * Strict validation rules:
+ * - Filename must begin with a numeric digit sequence.
+ * - The digit sequence must be immediately followed by '_' or '.sql'.
+ * - Version must be a positive integer (greater than 0). Version 0 is forbidden.
+ * - Version must not exceed PostgreSQL `INT` upper bound (2,147,483,647) to prevent
+ *   database overflow, and must be within JavaScript safe integer range.
+ *
+ * Fails closed with an actionable error identifying the invalid filename.
  */
-function getMigrationVersion(filename: string): number {
-  const match = filename.match(/^(\d+)/);
-  return match ? parseInt(match[1], 10) : 0;
+export function getMigrationVersion(filename: string): number {
+  const match = filename.match(/^(\d+)(?:_|\.sql$)/);
+  if (!match) {
+    throw new Error(
+      `[migrate] FATAL: Invalid migration filename "${filename}". ` +
+      `Migration files must begin with a positive integer prefix followed by '_' or '.sql' (e.g. "001_initial.sql").`
+    );
+  }
+
+  const rawDigits = match[1];
+  let bigVal: bigint;
+  try {
+    bigVal = BigInt(rawDigits);
+  } catch {
+    throw new Error(`[migrate] FATAL: Migration "${filename}" has unparseable numeric prefix "${rawDigits}".`);
+  }
+
+  if (bigVal <= 0n) {
+    throw new Error(
+      `[migrate] FATAL: Migration "${filename}" specifies invalid version "${rawDigits}". ` +
+      `Migration version must be a positive integer greater than zero.`
+    );
+  }
+
+  if (bigVal > BigInt(POSTGRES_INT_MAX)) {
+    throw new Error(
+      `[migrate] FATAL: Migration "${filename}" version "${rawDigits}" exceeds PostgreSQL INT limit (${POSTGRES_INT_MAX}).`
+    );
+  }
+
+  const numVal = Number(bigVal);
+  if (!Number.isSafeInteger(numVal)) {
+    throw new Error(
+      `[migrate] FATAL: Migration "${filename}" version "${rawDigits}" exceeds JavaScript safe integer range.`
+    );
+  }
+
+  return numVal;
 }
 
 /**
@@ -240,12 +287,44 @@ export function validateExplicitDatabaseUrl(rawUrl: string): ValidatedTestDataba
 }
 
 /**
+ * Validate that no two migration files share the same numeric version prefix.
+ * Throws a descriptive error identifying all conflicting versions and files.
+ */
+export function assertUniqueMigrationVersions(files: string[]): void {
+  const versionToFileMap = new Map<number, string[]>();
+
+  for (const filename of files) {
+    const versionNum = getMigrationVersion(filename);
+    const existing = versionToFileMap.get(versionNum) || [];
+    existing.push(filename);
+    versionToFileMap.set(versionNum, existing);
+  }
+
+  const conflicts: string[] = [];
+  for (const [version, matchingFiles] of versionToFileMap.entries()) {
+    if (matchingFiles.length > 1) {
+      conflicts.push(`Version ${version}: [${matchingFiles.join(', ')}]`);
+    }
+  }
+
+  if (conflicts.length > 0) {
+    throw new Error(
+      `[migrate] FATAL: Duplicate migration version(s) detected in inventory:\n  - ${conflicts.join('\n  - ')}\n` +
+      `Each migration must have a unique numeric version prefix.`
+    );
+  }
+}
+
+/**
  * Filter and sort migration files based on optional targetVersion cutoff.
  */
 export function filterMigrationFiles(files: string[], targetVersion?: number): string[] {
   const sorted = [...files]
     .filter((f) => f.endsWith('.sql'))
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+  // Enforce inventory-wide uniqueness across all discovered .sql migrations
+  assertUniqueMigrationVersions(sorted);
 
   if (targetVersion === undefined) {
     return sorted;

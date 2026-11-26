@@ -154,10 +154,16 @@ SQLite (Local)  Windows FS       Thermal Printer    Sync Queue
 
 ### Central Database (PostgreSQL)
 - **Engine**: GCP Cloud SQL PostgreSQL.
-- **Migration Runner**: Enforced in code via `PostgresAdapter::run_migrations()` in `src-tauri/src/db/postgres.rs`.
-- **Active Migrations**: 8 Migrations (`001_initial_schema.sql` to `008_search_index_parity.sql`).
-- **Migration 007 (`007_parties_foundation.sql`)**: Canonical party identity model with deterministic backfill (mirrors SQLite 018–021).
-- **Migration 008 (`008_search_index_parity.sql`)**: Adds `lower()` functional indexes on `parties.display_name`, `customers.name`, `suppliers.name` for case-insensitive search parity.
+- **Sole Migration Authority**: Exclusively owned and executed by `backend/src/migrate.ts`.
+- **Migration Startup Entry Point**: `backend/src/server.ts` via `runMigrations(pool)` before mounting routes.
+- **Migration Discovery Directory**: `src-tauri/migrations/postgres/` (dynamically discovered, sorted numerically `001` through `054+`).
+- **Concurrency & Tracking**: Enforced with PostgreSQL advisory transaction lock (`pg_advisory_xact_lock`) and tracked in `schema_migrations`.
+- **Rust Desktop Adapter Policy**: The Rust desktop adapter (`PostgresAdapter` in `src-tauri/src/db/postgres.rs`) does NOT run or manage PostgreSQL migrations. Its `run_migrations()` method is retired and fails closed. Developers must NEVER add a secondary PostgreSQL migration sequence into the Rust desktop adapter.
+
+### Local Database (SQLite)
+- **Migration Ownership**: Owned and executed by the Rust SQLite migration system (`src-tauri/src/db/migrations.rs`) during offline/local desktop startup.
+- **Path**: Managed by Tauri AppData directory (`niazi_mobile_mart.db`).
+- **Pragmas**: `journal_mode = WAL`, `foreign_keys = ON`, `synchronous = NORMAL`.
 
 ### Intentional Schema Differences (SQLite vs PostgreSQL)
 

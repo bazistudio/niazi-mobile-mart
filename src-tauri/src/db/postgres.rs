@@ -82,175 +82,18 @@ impl PostgresAdapter {
         &self.pool
     }
 
-    /// Executes all PostgreSQL schema migrations (001 to 024, 052) against the connection pool.
+    /// DEPRECATED & RETIRED: PostgreSQL migrations are authoritatively owned and executed
+    /// by `backend/src/migrate.ts` upon server startup (`backend/src/server.ts`).
     ///
-    /// NOTE: The authoritative production migration runner is the TypeScript runner in
-    /// `backend/src/migrate.ts`, which runs at server startup via `runMigrations(pool)`.
-    /// This Rust runner is retained for integration testing and as a fallback. It must
-    /// remain in sync with the TypeScript runner — add every new migration to both.
+    /// This method is disabled to prevent accidental partial schema initialization or
+    /// out-of-band migration execution from the desktop application shell.
+    ///
+    /// # Errors
+    /// Returns `DbError::MigrationError` immediately directing operators to the authoritative runner.
     pub async fn run_migrations(&self) -> DbResult<()> {
-        info!("Running PostgreSQL schema migrations (001 to 024, 052)...");
-        let schema_001 = include_str!("../../migrations/postgres/001_initial_schema.sql");
-        let schema_002 = include_str!("../../migrations/postgres/002_add_terminals_and_sync_queue.sql");
-        let schema_003 = include_str!("../../migrations/postgres/003_add_change_log.sql");
-        let schema_004 = include_str!("../../migrations/postgres/004_add_master_data_foundation.sql");
-        let schema_005 = include_str!("../../migrations/postgres/005_product_identity_and_normalization.sql");
-        let schema_006 = include_str!("../../migrations/postgres/006_multi_payment.sql");
-        let schema_007 = include_str!("../../migrations/postgres/007_parties_foundation.sql");
-        let schema_008 = include_str!("../../migrations/postgres/008_search_index_parity.sql");
-        let schema_009 = include_str!("../../migrations/postgres/009_fix_public_rates_fk.sql");
-        let schema_010 = include_str!("../../migrations/postgres/010_add_terminal_code_for_invoice_numbering.sql");
-        let schema_011 = include_str!("../../migrations/postgres/011_terminal_invoice_counters.sql");
-        let schema_012 = include_str!("../../migrations/postgres/012_product_type_foundation.sql");
-        let schema_013 = include_str!("../../migrations/postgres/013_product_type_counters.sql");
-        let schema_014 = include_str!("../../migrations/postgres/014_opening_stock_and_user_counters.sql");
-        let schema_015 = include_str!("../../migrations/postgres/015_product_compatible_models.sql");
-        let schema_016 = include_str!("../../migrations/postgres/016_users_status_and_access_profile.sql");
-        let schema_017 = include_str!("../../migrations/postgres/017_ensure_stock_tables.sql");
-        let schema_018 = include_str!("../../migrations/postgres/018_fix_opening_stock_entries_types.sql");
-        let schema_019 = include_str!("../../migrations/postgres/019_backfill_missing_stock_rows.sql");
-        let schema_020 = include_str!("../../migrations/postgres/020_ensure_product_stock_trigger.sql");
-        let schema_021 = include_str!("../../migrations/postgres/021_stock_transfers_table.sql");
-        let schema_022 = include_str!("../../migrations/postgres/022_repair_jobs_table.sql");
-        let schema_023 = include_str!("../../migrations/postgres/023_payment_method_easypaisa_jazzcash.sql");
-        let schema_024 = include_str!("../../migrations/postgres/024_backfill_stock_all_active_branches.sql");
-        let schema_052 = include_str!("../../migrations/postgres/052_voucher_complete_production_schema.sql");
-
-        let mut tx = self.pool.begin().await.map_err(|e| {
-            DbError::MigrationError(format!("Failed to begin migration transaction: {e}"))
-        })?;
-
-        sqlx::raw_sql(schema_001)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 001: {e}")))?;
-
-        sqlx::raw_sql(schema_002)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 002: {e}")))?;
-
-        sqlx::raw_sql(schema_003)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 003: {e}")))?;
-
-        sqlx::raw_sql(schema_004)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 004: {e}")))?;
-
-        sqlx::raw_sql(schema_005)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 005: {e}")))?;
-
-        sqlx::raw_sql(schema_006)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 006: {e}")))?;
-
-        sqlx::raw_sql(schema_007)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 007: {e}")))?;
-
-        sqlx::raw_sql(schema_008)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 008: {e}")))?;
-
-        sqlx::raw_sql(schema_009)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 009: {e}")))?;
-
-        sqlx::raw_sql(schema_010)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 010: {e}")))?;
-
-        sqlx::raw_sql(schema_011)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 011: {e}")))?;
-
-        sqlx::raw_sql(schema_012)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 012: {e}")))?;
-
-        sqlx::raw_sql(schema_013)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 013: {e}")))?;
-
-        sqlx::raw_sql(schema_014)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 014: {e}")))?;
-
-        sqlx::raw_sql(schema_015)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 015: {e}")))?;
-
-        sqlx::raw_sql(schema_016)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 016: {e}")))?;
-
-        sqlx::raw_sql(schema_017)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 017: {e}")))?;
-
-        sqlx::raw_sql(schema_018)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 018: {e}")))?;
-
-        sqlx::raw_sql(schema_019)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 019: {e}")))?;
-
-        sqlx::raw_sql(schema_020)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 020: {e}")))?;
-
-        sqlx::raw_sql(schema_021)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 021: {e}")))?;
-
-        sqlx::raw_sql(schema_022)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 022: {e}")))?;
-
-        sqlx::raw_sql(schema_023)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 023: {e}")))?;
-
-        sqlx::raw_sql(schema_024)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 024: {e}")))?;
-
-        sqlx::raw_sql(schema_052)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| DbError::MigrationError(format!("Failed to execute PostgreSQL migration 052: {e}")))?;
-
-        tx.commit().await.map_err(|e| {
-            DbError::MigrationError(format!("Failed to commit migration transaction: {e}"))
-        })?;
-
-        info!("PostgreSQL schema migrations applied successfully (001 to 024, 052).");
-        Ok(())
+        let msg = "PostgreSQL migrations are disabled in the Rust desktop adapter. Apply central PostgreSQL migrations through backend/src/migrate.ts.";
+        tracing::error!("{msg}");
+        Err(DbError::MigrationError(msg.to_string()))
     }
 
     /// Closes all connections in the pool gracefully.
@@ -301,24 +144,66 @@ mod tests {
         }
     }
 
-    /// Live integration test — only runs when DATABASE_URL is set to a real PostgreSQL instance.
+    /// Live integration test — only runs when DATABASE_URL is set to an isolated test PostgreSQL instance.
     /// Run with: DATABASE_URL=postgres://... cargo test postgres -- --nocapture
+    ///
+    /// SAFETY: Strictly validates the connection URL via `reqwest::Url::parse`:
+    /// - Scheme must be `postgres` or `postgresql`.
+    /// - Host must be exactly loopback (`127.0.0.1`, `localhost`, or `[::1]`).
+    /// - Database name must be an authorized test database (`niazi_mobile_mart_test`, `niazi_local_test`, or end with `_test`).
+    /// - Explicitly rejects production database `niazi_mobile_mart`, remote hosts, and malformed targets.
     #[tokio::test]
     async fn test_postgres_live_connection_if_env_set() {
-        let url = match std::env::var("DATABASE_URL") {
+        let raw_url = match std::env::var("DATABASE_URL") {
             Ok(u) if u.starts_with("postgres") => u,
             _ => return, // Skip if not set or not PostgreSQL
         };
 
-        let adapter = PostgresAdapter::from_url(&url)
+        // 1. Strict URL Parsing using existing reqwest::Url (backed by url crate)
+        let parsed = reqwest::Url::parse(&raw_url)
+            .expect("SECURITY ABORT: DATABASE_URL is malformed and cannot be parsed as a valid URL.");
+
+        // 2. Strict Scheme Validation
+        let scheme = parsed.scheme().to_lowercase();
+        assert!(
+            scheme == "postgres" || scheme == "postgresql",
+            "SECURITY ABORT: Scheme must be 'postgres' or 'postgresql', got: '{scheme}'"
+        );
+
+        // 3. Strict Hostname Validation (Exact loopback only — rejects evil-localhost, subdomains, remote IPs)
+        let host_str = parsed.host_str().unwrap_or("").to_lowercase();
+        assert!(
+            host_str == "127.0.0.1" || host_str == "localhost" || host_str == "::1" || host_str == "[::1]",
+            "SECURITY ABORT: Integration test must only target loopback host (127.0.0.1 / localhost / [::1]), got: '{host_str}'"
+        );
+
+        // 4. Strict Database Name Validation (Extracted from path segment, isolated from credentials/params)
+        let db_path = parsed.path().trim_start_matches('/');
+        let db_name = db_path.split('?').next().unwrap_or("").trim().to_lowercase();
+
+        assert!(
+            !db_name.is_empty(),
+            "SECURITY ABORT: Database name cannot be empty."
+        );
+        assert!(
+            db_name != "niazi_mobile_mart" && db_name != "niazi_mobile_mart_local" && db_name != "postgres",
+            "SECURITY ABORT: Direct execution against production/default database '{db_name}' is forbidden."
+        );
+        assert!(
+            db_name == "niazi_mobile_mart_test" || db_name == "niazi_local_test" || db_name.ends_with("_test"),
+            "SECURITY ABORT: Database '{db_name}' is not an authorized test database (must end with '_test' or match test suite convention)."
+        );
+
+        let adapter = PostgresAdapter::from_url(&raw_url)
             .await
             .expect("PostgreSQL pool should initialize");
 
-        // Execute migrations on live PG instance
-        adapter
-            .run_migrations()
-            .await
-            .expect("PostgreSQL migrations should succeed");
+        // Verify that the deprecated run_migrations fails closed and instructs caller
+        let migration_res = adapter.run_migrations().await;
+        assert!(
+            migration_res.is_err(),
+            "run_migrations in Rust adapter must fail-closed directing to backend/src/migrate.ts"
+        );
 
         // Basic connectivity check
         let row: (i64,) = sqlx::query_as("SELECT 1")
@@ -328,48 +213,43 @@ mod tests {
 
         assert_eq!(row.0, 1, "SELECT 1 must return 1");
 
-        // Validate multi-step transaction commit
+        // Check if schema is already initialized by checking for core table 'organizations'
+        let schema_ready: Option<(String,)> = sqlx::query_as(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'organizations'"
+        )
+        .fetch_optional(adapter.pool())
+        .await
+        .expect("Information schema query should succeed");
+
+        if schema_ready.is_none() {
+            tracing::warn!("Skipping transactional tests: central schema not initialized. Run `npm run migrate` in backend/ first.");
+            adapter.close().await;
+            return;
+        }
+
+        // Test-Data Isolation: Run write & rollback tests entirely inside transactions so no test artifacts persist
         let mut tx = adapter
             .pool()
             .begin()
             .await
             .expect("Should be able to begin transaction");
 
-        sqlx::query("INSERT INTO counters (name, value) VALUES ('test_counter', 100) ON CONFLICT (name) DO UPDATE SET value = 100")
+        sqlx::query("INSERT INTO counters (name, value) VALUES ('test_counter_rollback', 100) ON CONFLICT (name) DO UPDATE SET value = 100")
             .execute(&mut *tx)
             .await
             .expect("Query inside transaction should work");
 
-        tx.commit().await.expect("Transaction commit should succeed");
-
-        // Validate transaction rollback
-        let mut tx2 = adapter
-            .pool()
-            .begin()
-            .await
-            .expect("Should be able to begin second transaction");
-
-        sqlx::query("UPDATE counters SET value = 999 WHERE name = 'test_counter'")
-            .execute(&mut *tx2)
-            .await
-            .expect("Query inside second transaction should work");
-
-        tx2.rollback()
+        // Roll back the transaction so zero test records remain in the counters table
+        tx.rollback()
             .await
             .expect("Transaction rollback should succeed");
 
-        // Verify value was NOT updated to 999 (rollback succeeded)
-        let val: (i64,) = sqlx::query_as("SELECT value FROM counters WHERE name = 'test_counter'")
-            .fetch_one(adapter.pool())
+        // Verify value was NOT persisted
+        let val: Option<(i64,)> = sqlx::query_as("SELECT value FROM counters WHERE name = 'test_counter_rollback'")
+            .fetch_optional(adapter.pool())
             .await
-            .expect("Select counter value should succeed");
-        assert_eq!(val.0, 100, "Rolled back change must not persist");
-
-        // Cleanup test counter
-        sqlx::query("DELETE FROM counters WHERE name = 'test_counter'")
-            .execute(adapter.pool())
-            .await
-            .ok();
+            .expect("Select counter value query should succeed");
+        assert!(val.is_none(), "Rolled back change must not persist in counters table");
 
         adapter.close().await;
     }
