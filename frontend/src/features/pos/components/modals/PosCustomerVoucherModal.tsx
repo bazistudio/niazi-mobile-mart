@@ -96,7 +96,8 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
 
   // POS Sale-time override & Open stock placed in the highlighted box
   const [customSalePrice, setCustomSalePrice] = useState(''); // POS Accepted Sale Price
-  const [openStock, setOpenStock] = useState('1');
+  const [openStock, setOpenStock] = useState('1'); // Physical inventory stock
+  const [voucherQty, setVoucherQty] = useState('1'); // Customer voucher / advance booking quantity
 
   // 2. Product Classification (Uses organization master data)
   const [categoryId, setCategoryId] = useState('');
@@ -120,7 +121,7 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
 
   // ── Voucher type & tender state ──────────────────────────────────────
   type VoucherType = 'INSTANT_INVENTORY' | 'DIRECT_ADVANCE' | 'PRE_BOOKING';
-  const [voucherType, setVoucherType] = useState<VoucherType>('INSTANT_INVENTORY');
+  const [voucherType, setVoucherType] = useState<VoucherType>('DIRECT_ADVANCE');
   const [tenderMethod, setTenderMethod] = useState<string>('CASH');
   const [tenderAmount, setTenderAmount] = useState<string>('');
   const [tenderRef, setTenderRef] = useState<string>('');
@@ -309,6 +310,15 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
       errs.openStock = 'Open stock must be 0 or greater.';
     }
 
+    const vQtyNum = parseInt(voucherQty, 10);
+    if (voucherType !== 'INSTANT_INVENTORY') {
+      if (isNaN(vQtyNum) || vQtyNum <= 0) {
+        errs.voucherQty = 'Voucher quantity must be greater than 0.';
+      } else if (voucherType === 'DIRECT_ADVANCE' && !isNaN(stockNum) && vQtyNum > stockNum) {
+        errs.voucherQty = 'Voucher quantity cannot exceed incoming open stock.';
+      }
+    }
+
     if (!selectedInventoryItem) {
       if (!categoryId.trim()) {
         errs.category = 'Type (Category) is required.';
@@ -350,7 +360,18 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
         }
 
         const autoCode = 'PRD-' + Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-        const qtyNumber = Number(openStock) || 0;
+        const totalOpenStockNumber = Number(openStock) || 0;
+        const vQtyNumber = Number(voucherType === 'INSTANT_INVENTORY' ? openStock : voucherQty) || 1;
+
+        // When adding new product with DIRECT_ADVANCE:
+        // Total open stock (e.g. 10 pcs) arrives into shop;
+        // The voucher quantity (e.g. 1 pc) is immediately handed over / sold to the customer.
+        // Net shelf inventory becomes: totalOpenStock - voucherSoldQty (e.g. 10 - 1 = 9 pcs).
+        const initialShelfStock = voucherType === 'DIRECT_ADVANCE'
+          ? Math.max(0, totalOpenStockNumber - vQtyNumber)
+          : voucherType === 'INSTANT_INVENTORY'
+          ? totalOpenStockNumber
+          : 0;
 
         const newProductPayload = {
           name: name.trim(),
@@ -365,7 +386,7 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
           qualityId: qualityId || undefined,
           purchasePrice: Number(purchasePrice) || 0,
           price: catalogSalePrice, // Inventory catalog sale price
-          quantity: voucherType === 'INSTANT_INVENTORY' ? qtyNumber : 0,
+          quantity: initialShelfStock,
           branchId: selectedBranchId || undefined,
           branch_id: selectedBranchId || undefined,
           lowStockThreshold: 2,
@@ -385,7 +406,11 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
           // ignore
         }
 
-        toast.success(`Product "${name.trim()}" added to inventory with ${qtyNumber} units!`);
+        if (voucherType === 'DIRECT_ADVANCE') {
+          toast.success(`Added ${totalOpenStockNumber} units: ${vQtyNumber} delivered on voucher, ${initialShelfStock} in inventory!`);
+        } else {
+          toast.success(`Product "${name.trim()}" added to inventory with ${totalOpenStockNumber} units!`);
+        }
       }
 
       // ── Persist voucher to backend (/api/v1/pos/vouchers) ─────────────────────
@@ -409,7 +434,7 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
         spec_company: companyId || null,
         spec_color: colorId || null,
         spec_quality: qualityId || null,
-        voucher_qty: Math.max(1, Number(openStock) || 1),
+        voucher_qty: Math.max(1, Number(voucherType === 'INSTANT_INVENTORY' ? openStock : voucherQty) || 1),
         locked_purchase_price: Number(purchasePrice) || 0,
         catalog_sale_price: catalogSalePrice || null,
         voucher_sale_price: actualAcceptedSalePrice || catalogSalePrice || 0,
@@ -802,13 +827,13 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
                   </div>
                 </section>
 
-                {/* ── HIGHLIGHTED SECTION: Custom Sale Price & Open Stock ── */}
-                <div className="border border-border/80 bg-surface-hover/40 rounded-xl p-3.5 flex flex-col gap-3 shadow-xs">
+                {/* Agreed Sale Price & Voucher Quantity Table */}
+                <div className="border border-border/80 bg-surface-hover/40 rounded-xl p-3.5 shadow-xs flex flex-col gap-3">
                   <div className="grid grid-cols-2 gap-4">
                     {/* Custom Sale Price */}
                     <div>
-                      <label className="block text-xs font-medium text-text-secondary mb-1">
-                        Custom Sale Price
+                      <label className="block text-xs font-bold text-text-secondary mb-1">
+                        Voucher Agreed Sale Price *
                       </label>
                       <div className="relative">
                         <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-xs font-bold text-text-muted">
@@ -827,39 +852,58 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
                       <FieldError message={errors.customSalePrice} />
                     </div>
 
-                    {/* Open Stock * */}
+                    {/* Voucher Quantity (Ordered/Booked) */}
                     <div>
-                      <label className="block text-xs font-medium text-text-secondary mb-1">
-                        Open Stock *
+                      <label className="block text-xs font-bold text-text-primary mb-1">
+                        Voucher Quantity *
                       </label>
                       <input
                         type="number"
-                        min="0"
+                        min="1"
                         step="1"
-                        value={openStock}
-                        onChange={(e) => setOpenStock(e.target.value)}
-                        placeholder="0"
-                        className={`block w-full px-3 py-2 border ${errors.openStock ? 'border-danger' : 'border-border'} rounded-lg shadow-xs focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-surface text-text-primary text-xs font-black tabular-nums placeholder:text-text-muted transition-all`}
+                        value={voucherQty}
+                        onChange={(e) => {
+                          setVoucherQty(e.target.value);
+                          if (errors.voucherQty) {
+                            setErrors((prev) => {
+                              const next = { ...prev };
+                              delete next.voucherQty;
+                              return next;
+                            });
+                          }
+                        }}
+                        placeholder="1"
+                        className={`block w-full px-3 py-2 border ${errors.voucherQty ? 'border-danger' : 'border-border'} rounded-lg shadow-xs focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-surface text-text-primary text-xs font-black tabular-nums transition-all`}
                       />
-                      <FieldError message={errors.openStock} />
+                      <FieldError message={errors.voucherQty} />
                     </div>
+                  </div>
+
+                  {/* Summary Breakdown */}
+                  <div className="pt-2 border-t border-border/60 flex items-center justify-between text-xs font-medium">
+                    <span className="text-text-muted">
+                      {voucherType === 'PRE_BOOKING' ? 'Customer Advance Booking Total:' : 'Voucher Line Total:'}
+                    </span>
+                    <span className="font-black text-text-primary tabular-nums">
+                      PKR {((Number(voucherType === 'INSTANT_INVENTORY' ? openStock : voucherQty) || 0) * (Number(customSalePrice) || Number(salePrice) || 0)).toLocaleString()}
+                    </span>
                   </div>
                 </div>
 
               </div>
 
-              {/* RIGHT COLUMN: Section 2. Product Classification */}
-              <div className="flex flex-col gap-6">
+              {/* RIGHT COLUMN: Section 2. Product Classification & Voucher Quantity Table */}
+              <div className="flex flex-col gap-5">
 
                 {/* Section 2: Product Classification */}
                 <section>
-                  <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-4 border-b border-border pb-2">
+                  <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider mb-3 border-b border-border pb-2">
                     2. Product Classification
                   </h4>
 
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     {/* Type * & Brand */}
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-text-secondary mb-1">
                           Type *
@@ -889,7 +933,7 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
                     </div>
 
                     {/* Company & Color */}
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-text-secondary mb-1">
                           Company
@@ -918,7 +962,7 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
                     </div>
 
                     {/* Quality */}
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-text-secondary mb-1">
                           Quality
@@ -934,6 +978,73 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
                     </div>
                   </div>
                 </section>
+
+                {/* ── DEDICATED VOUCHER QUANTITY & STOCK MATRIX TABLE ── */}
+                <div className="border-2 border-teal-500/30 bg-teal-50/40 dark:bg-teal-950/20 rounded-xl p-3.5 flex flex-col gap-2.5 shadow-xs">
+                  <div className="flex items-center justify-between border-b border-teal-200 dark:border-teal-900/50 pb-2">
+                    <span className="text-xs font-black uppercase tracking-wider text-teal-800 dark:text-teal-300">
+                      {voucherType === 'INSTANT_INVENTORY'
+                        ? '3. Inventory Open Stock'
+                        : '3. Voucher Booking & Stock Matrix'}
+                    </span>
+                    {selectedInventoryItem && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-100 dark:bg-teal-900/60 text-teal-800 dark:text-teal-200">
+                        Shelf Stock: {selectedInventoryItem.stock ?? selectedInventoryItem.quantity ?? 0}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 items-center">
+                    <div>
+                      <label className="block text-xs font-bold text-text-primary mb-1">
+                        {voucherType === 'INSTANT_INVENTORY'
+                          ? 'Open Stock to Add *'
+                          : 'Voucher Quantity *'}
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={openStock}
+                        onChange={(e) => {
+                          setOpenStock(e.target.value);
+                          if (errors.openStock || errors.voucherQty) {
+                            setErrors((prev) => {
+                              const next = { ...prev };
+                              delete next.openStock;
+                              const newStock = parseFloat(e.target.value);
+                              const curVQty = parseInt(voucherQty, 10);
+                              if (voucherType === 'DIRECT_ADVANCE' && !isNaN(newStock) && !isNaN(curVQty) && curVQty <= newStock) {
+                                delete next.voucherQty;
+                              }
+                              return next;
+                            });
+                          }
+                        }}
+                        placeholder="1"
+                        className={`block w-full px-3 py-2 border ${errors.openStock ? 'border-danger' : 'border-teal-400 dark:border-teal-700'} rounded-lg shadow-xs focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-surface text-text-primary text-sm font-black tabular-nums transition-all`}
+                      />
+                      <FieldError message={errors.openStock} />
+                    </div>
+
+                    <div className="bg-surface/80 border border-border/80 rounded-lg p-2.5 flex flex-col justify-center">
+                      <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider">
+                        {voucherType === 'PRE_BOOKING' ? 'Advance Booking Value' : 'Total Voucher Amount'}
+                      </span>
+                      <span className="text-sm font-black text-teal-700 dark:text-teal-300 tabular-nums">
+                        PKR {((Number(openStock) || 0) * (Number(customSalePrice) || Number(salePrice) || 0)).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-text-muted italic">
+                    {voucherType === 'INSTANT_INVENTORY'
+                      ? 'This quantity will be added directly into inventory stock.'
+                      : voucherType === 'PRE_BOOKING'
+                      ? 'Recorded in Customer Ledger. Quantity remains reserved for customer handover upon supplier arrival.'
+                      : 'Physical product will be delivered immediately to customer with this voucher.'}
+                  </p>
+                </div>
 
               </div>
             </div>
