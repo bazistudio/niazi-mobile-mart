@@ -6,6 +6,7 @@
 
 import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
+import { writeChangeLogEntry } from './change_log.repo';
 
 export type RefundMethod = 'CASH' | 'CREDIT' | 'ORIGINAL' | 'EXCHANGE';
 export type ReturnStatus = 'COMPLETED' | 'VOIDED';
@@ -224,6 +225,7 @@ export async function createSalesReturn(
     }
     const sale = saleRes.rows[0] as Record<string, unknown>;
     const branchId = sale['branch_id'] as string;
+    const organizationId = (sale['organization_id'] as string) || '00000000-0000-0000-0000-000000000001';
 
     // F-11 / Phase 13 Security Fix: Ensure non-org-admins are assigned a branch and it matches the original sale branch
     if (!isOrgAdmin) {
@@ -354,6 +356,21 @@ export async function createSalesReturn(
 
     // 5. Insert sales_return_lines & Restore Stock
     const insertedReturnLines: SalesReturnLine[] = [];
+    // Collect domain stock movements for sync event
+    const syncStockMovements: Array<{
+      id: string;
+      product_id: string;
+      branch_id: string;
+      movement_type: string;
+      quantity: number;
+      previous_stock: number;
+      resulting_stock: number;
+      reason: string | null;
+      performed_by: string | null;
+      reference_id: string | null;
+      created_at: string;
+    }> = [];
+
     for (const rLine of preparedReturnLines) {
       const returnLineId = uuidv4();
 
@@ -411,6 +428,20 @@ export async function createSalesReturn(
         [mvId, rLine.product_id, branchId, rLine.quantity, currentStock, newStock, reasonStr, userId ?? null, returnId, now]
       );
 
+      syncStockMovements.push({
+        id: mvId,
+        product_id: rLine.product_id,
+        branch_id: branchId,
+        movement_type: 'IN',
+        quantity: rLine.quantity,
+        previous_stock: currentStock,
+        resulting_stock: newStock,
+        reason: reasonStr,
+        performed_by: userId ?? null,
+        reference_id: returnId,
+        created_at: now,
+      });
+
       insertedReturnLines.push({
         id: returnLineId,
         return_id: returnId,
@@ -428,6 +459,8 @@ export async function createSalesReturn(
     // 6. Handle Customer Balance & Cash Refunds
     let customerBalanceAfter: number | null = null;
     let cashRefunded: number | null = null;
+    let syncCashMovement: Record<string, unknown> | null = null;
+    let syncCustomerLedgerEntry: Record<string, unknown> | null = null;
 
     if (refundMethod === 'CREDIT' && customerId) {
       // Customer row is already locked FOR UPDATE above (Phase C3).
@@ -448,6 +481,20 @@ export async function createSalesReturn(
          ) VALUES ($1, $2, $3, $4, 'RETURN', 0, $5, $6, $7, $8, $9)`,
         [ledgerId, customerId, returnId, returnNumber, totalReturnAmount, newBal, desc, userId ?? null, now]
       );
+
+      syncCustomerLedgerEntry = {
+        id: ledgerId,
+        customer_id: customerId,
+        reference_id: returnId,
+        reference_number: returnNumber,
+        entry_type: 'ADJUSTMENT',
+        debit: 0,
+        credit: totalReturnAmount,
+        balance_after: newBal,
+        description: desc,
+        performed_by: userId ?? null,
+        created_at: now,
+      };
     } else if (refundMethod === 'CASH') {
       cashRefunded = totalReturnAmount;
       const openSessRes = await client.query(
@@ -475,9 +522,36 @@ export async function createSalesReturn(
          ) VALUES ($1, $2, $3, 'RETURN_REFUND', 'OUT', $4, $5, $6, 'CASH', $7, $8, $9)`,
         [cashMvId, sessionId, branchId, totalReturnAmount, returnId, returnNumber, desc, userId ?? null, now]
       );
+
+      syncCashMovement = {
+        id: cashMvId,
+        session_id: sessionId,
+        branch_id: branchId,
+        movement_type: 'SALE_PAYMENT',
+        direction: 'OUT',
+        amount: totalReturnAmount,
+        reference_id: returnId,
+        reference_number: returnNumber,
+        payment_method: 'CASH',
+        description: desc,
+        performed_by: userId ?? null,
+        performed_by_name: null,
+        created_at: now,
+      };
     }
 
-    await client.query('COMMIT');
+    // Check whether the entire sale is fully refunded across all sale_lines
+    const allLinesRes = await client.query(
+      `SELECT sl.id, sl.quantity AS orig_qty, COALESCE(SUM(srl.quantity), 0)::BIGINT AS returned_qty
+       FROM sale_lines sl
+       LEFT JOIN sales_return_lines srl ON srl.sale_line_id = sl.id
+       WHERE sl.sale_id = $1
+       GROUP BY sl.id, sl.quantity`,
+      [dto.sale_id]
+    );
+    const isFullyRefunded = allLinesRes.rows.length > 0 && allLinesRes.rows.every(
+      (r: any) => Number(r.returned_qty) >= Number(r.orig_qty)
+    );
 
     const salesReturn: SalesReturn = {
       id: returnId,
@@ -487,7 +561,7 @@ export async function createSalesReturn(
       customer_id: customerId,
       customer_name_snapshot: customerName,
       total_amount: totalReturnAmount,
-      refund_method: refundMethod,
+      refund_method: refundMethod === 'CREDIT' ? 'CUSTOMER_CREDIT' : (refundMethod as any),
       status: 'COMPLETED',
       reason: dto.reason ?? null,
       notes: dto.notes ?? null,
@@ -495,6 +569,27 @@ export async function createSalesReturn(
       created_at: now,
       updated_at: now,
     };
+
+    // Gate 3 (G3-RET-02 / G3-SYNC-01 / Phase 1.2 P1-SYNC-PAYLOAD-MISMATCH):
+    // Emit canonical SalesReturnSyncEventDto matching desktop ChangeApplier contract exactly:
+    // { sales_return, lines, stock_movements, cash_movement, customer_ledger_entry, is_fully_refunded }
+    await writeChangeLogEntry(client, {
+      organizationId,
+      branchId,
+      eventType: 'SALES_RETURN_CREATED',
+      entityType: 'sales_return',
+      entityId: returnId,
+      payloadStr: JSON.stringify({
+        sales_return: salesReturn,
+        lines: insertedReturnLines,
+        stock_movements: syncStockMovements,
+        cash_movement: syncCashMovement,
+        customer_ledger_entry: syncCustomerLedgerEntry,
+        is_fully_refunded: isFullyRefunded,
+      }),
+    });
+
+    await client.query('COMMIT');
 
     return {
       sales_return: salesReturn,

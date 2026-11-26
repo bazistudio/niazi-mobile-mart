@@ -385,7 +385,7 @@ async function main(): Promise<void> {
     }
   });
 
-  app.post(['/api/brands', '/api/v1/brands'], authMiddleware, async (req: Request, res: Response) => {
+  app.post(['/api/brands', '/api/v1/brands'], buildAuthMiddleware(pool), async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       if (!isOrgAdmin(identity)) {
@@ -421,7 +421,7 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/brands/:id', '/api/v1/brands/:id'], authMiddleware, async (req: Request, res: Response) => {
+  app.put(['/api/brands/:id', '/api/v1/brands/:id'], buildAuthMiddleware(pool), async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       if (!isOrgAdmin(identity)) {
@@ -463,7 +463,7 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
-  app.post(['/api/categories', '/api/v1/categories'], authMiddleware, async (req: Request, res: Response) => {
+  app.post(['/api/categories', '/api/v1/categories'], buildAuthMiddleware(pool), async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       if (!isOrgAdmin(identity)) {
@@ -499,7 +499,7 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/categories/:id', '/api/v1/categories/:id'], authMiddleware, async (req: Request, res: Response) => {
+  app.put(['/api/categories/:id', '/api/v1/categories/:id'], buildAuthMiddleware(pool), async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       if (!isOrgAdmin(identity)) {
@@ -541,7 +541,7 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
-  app.post(['/api/companies', '/api/v1/companies'], authMiddleware, async (req: Request, res: Response) => {
+  app.post(['/api/companies', '/api/v1/companies'], buildAuthMiddleware(pool), async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       if (!isOrgAdmin(identity)) {
@@ -577,7 +577,7 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/companies/:id', '/api/v1/companies/:id'], authMiddleware, async (req: Request, res: Response) => {
+  app.put(['/api/companies/:id', '/api/v1/companies/:id'], buildAuthMiddleware(pool), async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       if (!isOrgAdmin(identity)) {
@@ -619,7 +619,7 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
-  app.post(['/api/qualities', '/api/v1/qualities'], authMiddleware, async (req: Request, res: Response) => {
+  app.post(['/api/qualities', '/api/v1/qualities'], buildAuthMiddleware(pool), async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       if (!isOrgAdmin(identity)) {
@@ -655,7 +655,7 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/qualities/:id', '/api/v1/qualities/:id'], authMiddleware, async (req: Request, res: Response) => {
+  app.put(['/api/qualities/:id', '/api/v1/qualities/:id'], buildAuthMiddleware(pool), async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       if (!isOrgAdmin(identity)) {
@@ -697,7 +697,7 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
-  app.post(['/api/colors', '/api/v1/colors'], authMiddleware, async (req: Request, res: Response) => {
+  app.post(['/api/colors', '/api/v1/colors'], buildAuthMiddleware(pool), async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       if (!isOrgAdmin(identity)) {
@@ -733,7 +733,7 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/colors/:id', '/api/v1/colors/:id'], authMiddleware, async (req: Request, res: Response) => {
+  app.put(['/api/colors/:id', '/api/v1/colors/:id'], buildAuthMiddleware(pool), async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       if (!isOrgAdmin(identity)) {
@@ -775,7 +775,7 @@ async function main(): Promise<void> {
     res.status(200).json(list);
   });
 
-  app.post(['/api/units', '/api/v1/units'], authMiddleware, async (req: Request, res: Response) => {
+  app.post(['/api/units', '/api/v1/units'], buildAuthMiddleware(pool), async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       if (!isOrgAdmin(identity)) {
@@ -794,7 +794,7 @@ async function main(): Promise<void> {
     }
   });
 
-  app.put(['/api/units/:id', '/api/v1/units/:id'], authMiddleware, async (req: Request, res: Response) => {
+  app.put(['/api/units/:id', '/api/v1/units/:id'], buildAuthMiddleware(pool), async (req: Request, res: Response) => {
     try {
       const identity = req.identity as RequestIdentity;
       if (!isOrgAdmin(identity)) {

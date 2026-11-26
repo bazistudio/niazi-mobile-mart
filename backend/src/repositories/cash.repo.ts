@@ -3,7 +3,7 @@
  * Direct TypeScript port of src-tauri/src/services/cash_service.rs.
  */
 
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 
 export type CashSessionStatus = 'OPEN' | 'CLOSED';
@@ -168,41 +168,70 @@ export async function openCashSession(
   dto: OpenCashSessionDto,
   userId: string
 ): Promise<CashSession> {
-  const existing = await getCurrentCashSession(pool, dto.branch_id);
-  if (existing) {
-    throw new CashRepoError(`An open cash register session already exists for this branch (Session ID: ${existing.id})`, 400);
+  const client: PoolClient = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Gate 3 (G3-CASH-01): Acquire transaction-scoped advisory lock keyed to branch_id
+    // to prevent concurrent race condition where two POS terminals open duplicate sessions.
+    const lockHashRes = await client.query<{ h: string }>(
+      'SELECT hashtext($1)::BIGINT AS h',
+      [`cash_session_open:${dto.branch_id}`]
+    );
+    const lockKey = Number(lockHashRes.rows[0]?.h ?? 0);
+    await client.query('SELECT pg_advisory_xact_lock($1)', [lockKey]);
+
+    // Check for existing OPEN session inside the locked transaction
+    const existingRes = await client.query<{ id: string }>(
+      "SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' ORDER BY opened_at DESC LIMIT 1 FOR UPDATE",
+      [dto.branch_id]
+    );
+
+    if (existingRes.rows.length > 0) {
+      throw new CashRepoError(
+        `An open cash register session already exists for this branch (Session ID: ${existingRes.rows[0].id})`,
+        400
+      );
+    }
+
+    const id = uuidv4();
+    const now = new Date().toISOString();
+    const businessDate = dto.business_date || now.slice(0, 10);
+    const openingCash = dto.opening_cash ?? dto.opening_float ?? 0;
+
+    await client.query(
+      `INSERT INTO cash_sessions (
+         id, branch_id, business_date, opened_by, opening_cash, status, notes, opened_at
+       ) VALUES ($1, $2, $3, $4, $5, 'OPEN', $6, $7)`,
+      [id, dto.branch_id, businessDate, userId, openingCash, dto.notes ?? null, now]
+    );
+
+    await client.query('COMMIT');
+
+    return {
+      id,
+      branch_id: dto.branch_id,
+      business_date: businessDate,
+      opened_by: userId,
+      closed_by: null,
+      opening_cash: openingCash,
+      opening_float: openingCash,
+      actual_closing_cash: null,
+      closing_float: null,
+      expected_closing_cash: null,
+      expected_amount: null,
+      cash_variance: null,
+      status: 'OPEN',
+      notes: dto.notes ?? null,
+      opened_at: now,
+      closed_at: null,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
   }
-
-  const id = uuidv4();
-  const now = new Date().toISOString();
-  const businessDate = dto.business_date || now.slice(0, 10);
-  const openingCash = dto.opening_cash ?? dto.opening_float ?? 0;
-
-  await pool.query(
-    `INSERT INTO cash_sessions (
-       id, branch_id, business_date, opened_by, opening_cash, status, notes, opened_at
-     ) VALUES ($1, $2, $3, $4, $5, 'OPEN', $6, $7)`,
-    [id, dto.branch_id, businessDate, userId, openingCash, dto.notes ?? null, now]
-  );
-
-  return {
-    id,
-    branch_id: dto.branch_id,
-    business_date: businessDate,
-    opened_by: userId,
-    closed_by: null,
-    opening_cash: openingCash,
-    opening_float: openingCash,
-    actual_closing_cash: null,
-    closing_float: null,
-    expected_closing_cash: null,
-    expected_amount: null,
-    cash_variance: null,
-    status: 'OPEN',
-    notes: dto.notes ?? null,
-    opened_at: now,
-    closed_at: null,
-  };
 }
 
 export async function closeCashSession(
@@ -441,12 +470,22 @@ export async function recordCashMovement(
   dto: RecordCashMovementDto,
   userId: string | null
 ): Promise<CashMovement> {
+  const paymentMethod = (dto.payment_method ?? 'CASH').toUpperCase();
   const currentSess = await getCurrentCashSession(pool, dto.branch_id);
   const sessionId = currentSess ? currentSess.id : null;
 
+  // Gate 3 (G3-CASH-03): Prevent orphaned ghost cash movements.
+  // Any movement with payment_method === 'CASH' must be tied to an active OPEN cash session.
+  // Fail-closed matches sale.repo.ts, repair.repo.ts, and returns.repo.ts policy.
+  if (paymentMethod === 'CASH' && !sessionId) {
+    throw new CashRepoError(
+      'Cannot record cash movement: No open cash register session exists for this branch. Please open a cash session first.',
+      400
+    );
+  }
+
   const id = uuidv4();
   const now = new Date().toISOString();
-  const paymentMethod = (dto.payment_method ?? 'CASH').toUpperCase();
 
   await pool.query(
     `INSERT INTO cash_movements (

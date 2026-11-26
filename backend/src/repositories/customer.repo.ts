@@ -806,11 +806,15 @@ export async function recordCustomerPayment(
     const balanceAfter = currentBalance - dto.amount;
 
     // 4. Atomic receipt number: RCP-000001
-    await client.query(
-      `UPDATE counters SET value = value + 1 WHERE name = 'receipt_number'`
-    );
+    // Gate 3 (G3-CUST-01): Use single atomic UPDATE ... RETURNING value statement to prevent
+    // race conditions resulting in duplicate receipt numbers under concurrent payment recording.
+    // If counters row doesn't exist, INSERT ... ON CONFLICT ensures safe initialization.
     const counterResult = await client.query<{ value: number }>(
-      `SELECT value FROM counters WHERE name = 'receipt_number'`
+      `INSERT INTO counters (name, value)
+       VALUES ('receipt_number', 1)
+       ON CONFLICT (name)
+       DO UPDATE SET value = counters.value + 1
+       RETURNING value`
     );
     const counterValue = Number(counterResult.rows[0]?.value ?? 1);
     const receiptNumber = dto.reference_number?.trim() || `RCP-${String(counterValue).padStart(6, '0')}`;
