@@ -1114,6 +1114,22 @@ export async function updateProduct(
       throw new RepoError('Price or threshold values cannot be negative', 400);
     }
 
+    // Gate 2 Round 2 — ADV-01: Effective cost-basis enforcement, consistent with checkout.
+    // sale.repo.ts checkout policy: minPriceBasis = purchasePrice > 0 ? purchasePrice : avgCost
+    // updateProduct() must use the same effective cost basis so catalog prices are always
+    // valid at POS. When purchase_price is 0 or absent, WAC (average_cost) governs the floor.
+    // Equal-to-cost is a valid zero-margin sale. ADMIN has no bypass.
+    // When both are 0, the floor is 0 (follows checkout's unavailable-cost handling — a product
+    // with no cost basis can be updated but checkout will reject sales of it separately).
+    const effectiveCostBasis = newPurchasePrice > 0 ? newPurchasePrice : (newAvgCost > 0 ? newAvgCost : 0);
+    if (effectiveCostBasis > 0 && newSalePrice < effectiveCostBasis) {
+      throw new RepoError(
+        `Sale price (Rs. ${newSalePrice.toLocaleString()}) cannot be less than the authoritative cost basis (Rs. ${effectiveCostBasis.toLocaleString()}). ` +
+        `Minimum allowed sale price is Rs. ${effectiveCostBasis.toLocaleString()}.`,
+        400
+      );
+    }
+
     const now = NOW_ISO();
     const activeVal = caps.isActiveBool ? newIsActive : (newIsActive ? 1 : 0);
 
@@ -2027,6 +2043,15 @@ export async function receiveStock(
       const parsedSalePrice = Math.round(Number(dto.new_sale_price));
       if (parsedSalePrice < 0) {
         throw new RepoError('Sale price cannot be negative', 400);
+      }
+      // Gate 2 — F-01 / receiveStock path: sale price cannot be set below the incoming
+      // unit_cost (new purchase price) even during a restock operation.
+      if (parsedSalePrice < cNew) {
+        throw new RepoError(
+          `Sale price (Rs. ${parsedSalePrice.toLocaleString()}) cannot be less than the restocked unit cost (Rs. ${cNew.toLocaleString()}). ` +
+          `Minimum allowed sale price is Rs. ${cNew.toLocaleString()}.`,
+          400
+        );
       }
       updatedSalePrice = parsedSalePrice;
     }

@@ -539,32 +539,43 @@ export async function createRepairJobTx(
       let sessionId: string | null = null;
       let cmId: string | null = null;
 
-      // Lab Cash Management Policy:
-      // Repair lab cash is kept in the technician's bench hold / lab register,
-      // and not forcefully injected into the front-counter POS sales register.
-      // If an open POS cash session exists, link it optionally; otherwise record
-      // as independent Lab Cash (session_id = NULL).
-      if (adv.method.toUpperCase() === 'CASH' && branchId) {
+      // Gate 2 Round 2 — NEW-01-C: CASH repair advance payments must be backed by an
+      // open branch cash session. Owner authorization (Gate 2 Remediation Round 2):
+      // all CASH repair payments, including advance payments at job creation, must
+      // be reflected in the branch cash register.
+      // Lab Cash legacy fail-open policy is superseded. Fail closed: throw 400 when
+      // no open session exists. Never silently set session_id = NULL.
+      if (adv.method.toUpperCase() === 'CASH') {
+        if (!branchId) {
+          throw new RepairRepoError(
+            'Cannot accept cash advance: Repair job has no assigned branch.',
+            400
+          );
+        }
         const sessRes = await client.query(
           "SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' ORDER BY opened_at DESC LIMIT 1 FOR UPDATE",
           [branchId]
         );
-        if (sessRes.rows.length > 0) {
-          sessionId = (sessRes.rows[0] as Record<string, unknown>)['id'] as string;
-          cmId = await insertCashMovement(client, {
-            sessionId,
-            branchId,
-            movementType: 'REPAIR_ADVANCE',
-            direction: 'IN',
-            amount: adv.amount,
-            referenceId: id,
-            referenceNumber: jobId,
-            paymentMethod: 'CASH',
-            description: `Repair advance for job ${jobId}`,
-            performedBy: userId,
-            now,
-          });
+        if (sessRes.rows.length === 0) {
+          throw new RepairRepoError(
+            'Cannot accept cash advance: No open cash register session exists for this branch. Please open a cash session first.',
+            400
+          );
         }
+        sessionId = (sessRes.rows[0] as Record<string, unknown>)['id'] as string;
+        cmId = await insertCashMovement(client, {
+          sessionId,
+          branchId,
+          movementType: 'REPAIR_ADVANCE',
+          direction: 'IN',
+          amount: adv.amount,
+          referenceId: id,
+          referenceNumber: jobId,
+          paymentMethod: 'CASH',
+          description: `Repair advance for job ${jobId}`,
+          performedBy: userId,
+          now,
+        });
       }
 
       await client.query(
@@ -1233,27 +1244,39 @@ export async function addRepairPaymentTx(
     let sessionId: string | null = null;
     let cmId: string | null = null;
 
-    if (method === 'CASH' && branchId) {
+    if (method === 'CASH') {
+      // Gate 2 — NEW-01: CASH repair payments must be backed by an open branch cash session.
+      // Fail closed: throw 400 if no session exists. Never silently set session_id = NULL.
+      if (!branchId) {
+        throw new RepairRepoError(
+          'Cannot accept cash payment: Repair job has no assigned branch.',
+          400
+        );
+      }
       const sessRes = await client.query(
         "SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' ORDER BY opened_at DESC LIMIT 1 FOR UPDATE",
         [branchId]
       );
-      if (sessRes.rows.length > 0) {
-        sessionId = (sessRes.rows[0] as Record<string, unknown>)['id'] as string;
-        cmId = await insertCashMovement(client, {
-          sessionId,
-          branchId,
-          movementType: 'REPAIR_ADVANCE',
-          direction: 'IN',
-          amount: dto.amount,
-          referenceId: realId,
-          referenceNumber: humanJobId,
-          paymentMethod: 'CASH',
-          description: `Repair payment for job ${humanJobId}`,
-          performedBy: userId,
-          now,
-        });
+      if (sessRes.rows.length === 0) {
+        throw new RepairRepoError(
+          'Cannot accept cash payment: No open cash register session exists for this branch. Please open a cash session first.',
+          400
+        );
       }
+      sessionId = (sessRes.rows[0] as Record<string, unknown>)['id'] as string;
+      cmId = await insertCashMovement(client, {
+        sessionId,
+        branchId,
+        movementType: 'REPAIR_ADVANCE',
+        direction: 'IN',
+        amount: dto.amount,
+        referenceId: realId,
+        referenceNumber: humanJobId,
+        paymentMethod: 'CASH',
+        description: `Repair payment for job ${humanJobId}`,
+        performedBy: userId,
+        now,
+      });
     }
 
     await client.query(
@@ -1422,32 +1445,41 @@ export async function completeRepairJobTx(
       const method = sp.method.toUpperCase();
       settlementPayId = uuidv4();
 
-      // Lab Cash Management Policy:
-      // Repair lab cash is kept in the technician's bench hold / lab register,
-      // and not forcefully injected into the front-counter POS sales register.
-      // If an open POS cash session exists, link it optionally; otherwise record
-      // as independent Lab Cash (session_id = NULL).
-      if (method === 'CASH' && branchId) {
+      // Gate 2 — NEW-01: CASH repair settlement payments must be backed by an open branch cash session.
+      // Owner authorization (Gate 2 Remediation Prompt): all CASH repair payments must be
+      // reflected in the branch cash register. Lab Cash legacy policy is superseded.
+      // Fail closed: throw 400 if no open session exists. Never silently set session_id = NULL.
+      if (method === 'CASH') {
+        if (!branchId) {
+          throw new RepairRepoError(
+            'Cannot accept cash settlement: Repair job has no assigned branch.',
+            400
+          );
+        }
         const sessRes = await client.query(
           "SELECT id FROM cash_sessions WHERE branch_id = $1 AND status = 'OPEN' ORDER BY opened_at DESC LIMIT 1 FOR UPDATE",
           [branchId]
         );
-        if (sessRes.rows.length > 0) {
-          settlementSessionId = (sessRes.rows[0] as Record<string, unknown>)['id'] as string;
-          settlementCmId = await insertCashMovement(client, {
-            sessionId: settlementSessionId,
-            branchId,
-            movementType: 'REPAIR_SETTLEMENT',
-            direction: 'IN',
-            amount: sp.amount,
-            referenceId: realId,
-            referenceNumber: invoiceNumber,
-            paymentMethod: 'CASH',
-            description: `Repair settlement for invoice ${invoiceNumber}`,
-            performedBy: userId,
-            now,
-          });
+        if (sessRes.rows.length === 0) {
+          throw new RepairRepoError(
+            'Cannot accept cash settlement: No open cash register session exists for this branch. Please open a cash session first.',
+            400
+          );
         }
+        settlementSessionId = (sessRes.rows[0] as Record<string, unknown>)['id'] as string;
+        settlementCmId = await insertCashMovement(client, {
+          sessionId: settlementSessionId,
+          branchId,
+          movementType: 'REPAIR_SETTLEMENT',
+          direction: 'IN',
+          amount: sp.amount,
+          referenceId: realId,
+          referenceNumber: invoiceNumber,
+          paymentMethod: 'CASH',
+          description: `Repair settlement for invoice ${invoiceNumber}`,
+          performedBy: userId,
+          now,
+        });
       }
 
       await client.query(

@@ -168,6 +168,16 @@ export const QuickStockAdjustModal: React.FC<QuickStockAdjustModalProps> = ({
       return;
     }
 
+    // Gate 2 — F-01: Sale price cannot be set below the restocked unit cost.
+    // Policy mirrors product.repo.ts receiveStock() non-supplier path: parsedSalePrice >= cNew.
+    // Equal-to-cost (zero-margin) is valid.
+    if (isRestock && salePrice < unitCost) {
+      setError(
+        `Sale price (Rs. ${salePrice.toLocaleString()}) cannot be less than the restocked unit cost (Rs. ${unitCost.toLocaleString()}). Minimum sale price: Rs. ${unitCost.toLocaleString()}.`
+      );
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       setError(null);

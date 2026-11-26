@@ -41,6 +41,15 @@ export function ProductEditModal({ product, onClose }: ProductEditModalProps) {
     Array.isArray(product.compatibleModels) ? product.compatibleModels.join(', ') : ''
   );
 
+  // Gate 2 — F-01: Derived price-floor validation.
+  // Sale price must be >= purchase price. Equal-to-cost (zero-margin) is valid.
+  const parsedPurchasePrice = Number(formData.purchasePrice) || 0;
+  const parsedSalePrice = Number(formData.price) || 0;
+  const salePriceError =
+    parsedSalePrice < parsedPurchasePrice
+      ? `Sale price (Rs. ${parsedSalePrice.toLocaleString()}) cannot be less than purchase price (Rs. ${parsedPurchasePrice.toLocaleString()}).`
+      : null;
+
   const handleChange = (field: string, value: any) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
@@ -49,6 +58,12 @@ export function ProductEditModal({ product, onClose }: ProductEditModalProps) {
     e.preventDefault();
     if (!formData.name.trim()) {
       toast.error('Product name is required');
+      return;
+    }
+
+    // Gate 2 — F-01: Reject below-cost sale price before attempting the API call.
+    if (salePriceError) {
+      toast.error(salePriceError);
       return;
     }
 
@@ -146,9 +161,16 @@ export function ProductEditModal({ product, onClose }: ProductEditModalProps) {
                     type="number"
                     value={formData.price}
                     onChange={(e) => handleChange('price', e.target.value)}
-                    className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm"
+                    className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:ring-[#006970] focus:border-[#006970] dark:bg-gray-800 dark:text-white sm:text-sm ${
+                      salePriceError
+                        ? 'border-red-400 dark:border-red-500'
+                        : 'border-gray-300 dark:border-gray-600'
+                    }`}
                     required
                   />
+                  {salePriceError && (
+                    <p className="mt-1 text-xs text-red-600 dark:text-red-400">{salePriceError}</p>
+                  )}
                 </div>
               </div>
 
@@ -283,7 +305,7 @@ export function ProductEditModal({ product, onClose }: ProductEditModalProps) {
             </button>
             <button
               type="submit"
-              disabled={isUpdating}
+              disabled={isUpdating || !!salePriceError}
               className="px-6 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#006970] hover:bg-[#005a60] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#006970] disabled:opacity-50 transition-colors flex items-center gap-2"
             >
               {isUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
