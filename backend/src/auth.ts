@@ -82,7 +82,77 @@ export const NIAZI_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
 // POS checkout is always bound to the user's JWT branch_id which is never the warehouse.
 export const CENTRAL_WAREHOUSE_ID = '00000000-0000-0000-0000-000000000003';
 
-// --- Legacy Admin Role Blocking (Temporary Compatibility Block) ---
+// --- Legacy Admin Role Blocking & Canonical Roles ---
+
+/**
+ * Canonical SCREAMING_SNAKE_CASE user roles matching Rust UserRole enum (domain/user.rs).
+ */
+export const CANONICAL_USER_ROLES = new Set<string>([
+  'ADMIN',
+  'SHOP_ADMIN',
+  'MANAGER',
+  'ACCOUNTANT',
+  'SALESMAN',
+  'CASHIER',
+  'REPAIR_MECHANIC',
+  'STAFF',
+  'PUBLIC_USER',
+]);
+
+/**
+ * Explicit prototype-safe map from accepted database/token role variants and legacy aliases
+ * to their exact canonical SCREAMING_SNAKE_CASE UserRole equivalent.
+ * Uses Object.create(null) to guarantee zero prototype inheritance (immune to toString, constructor, etc.).
+ * Unknown or deprecated legacy admin roles are NOT in this map and are rejected fail-closed.
+ */
+export const ROLE_CANONICAL_MAP: Readonly<Record<string, UserRole>> = Object.freeze(
+  Object.assign(Object.create(null) as Record<string, UserRole>, {
+    // Canonical forms
+    'ADMIN': 'ADMIN',
+    'SHOP_ADMIN': 'SHOP_ADMIN',
+    'MANAGER': 'MANAGER',
+    'ACCOUNTANT': 'ACCOUNTANT',
+    'SALESMAN': 'SALESMAN',
+    'CASHIER': 'CASHIER',
+    'REPAIR_MECHANIC': 'REPAIR_MECHANIC',
+    'STAFF': 'STAFF',
+    'PUBLIC_USER': 'PUBLIC_USER',
+
+    // PascalCase aliases (supported by Rust serde / legacy tokens)
+    'Admin': 'ADMIN',
+    'ShopAdmin': 'SHOP_ADMIN',
+    'Manager': 'MANAGER',
+    'Accountant': 'ACCOUNTANT',
+    'Salesman': 'SALESMAN',
+    'Cashier': 'CASHIER',
+    'RepairMechanic': 'REPAIR_MECHANIC',
+    'Staff': 'STAFF',
+    'PublicUser': 'PUBLIC_USER',
+  })
+);
+
+/**
+ * Prototype-safe role canonicalization lookup.
+ * Returns genuine canonical UserRole or undefined.
+ */
+export function getCanonicalUserRole(role: unknown): UserRole | undefined {
+  if (typeof role !== 'string') return undefined;
+  const trimmed = role.trim();
+  if (!trimmed) return undefined;
+  if (Object.prototype.hasOwnProperty.call(ROLE_CANONICAL_MAP, trimmed)) {
+    return ROLE_CANONICAL_MAP[trimmed];
+  }
+  const upper = trimmed.toUpperCase();
+  if (Object.prototype.hasOwnProperty.call(ROLE_CANONICAL_MAP, upper)) {
+    return ROLE_CANONICAL_MAP[upper];
+  }
+  return undefined;
+}
+
+/**
+ * Valid recognized user roles (canonical + supported aliases).
+ */
+export const VALID_USER_ROLES = new Set<string>(Object.keys(ROLE_CANONICAL_MAP));
 
 /**
  * Legacy admin aliases slated for temporary runtime blocking.
@@ -177,15 +247,21 @@ export function resolveIdentity(token: string): RequestIdentity {
     throw new AuthError('Invalid or corrupted authentication token', 401);
   }
 
-  const roleUpper = String(claims.role || '').toUpperCase();
+  const rawRole = String(claims.role || '').trim();
+  const roleUpper = rawRole.toUpperCase();
   if (BLOCKED_LEGACY_ADMIN_ROLES.has(roleUpper)) {
     throw new AuthError('Account role is deprecated or blocked. Please log in with a canonical role.', 401);
+  }
+
+  const canonicalRole = getCanonicalUserRole(rawRole);
+  if (!canonicalRole) {
+    throw new AuthError('Account role is invalid or unsupported. Please log in with a valid role.', 401);
   }
 
   return {
     user_id: claims.sub,
     username: claims.username,
-    role: claims.role,
+    role: canonicalRole,
     organization_id: NIAZI_ORGANIZATION_ID,
     branch_id: claims.branch_id ?? null,
     access_profile: claims.access_profile,
@@ -259,6 +335,72 @@ export function canAccessBranch(identity: RequestIdentity, targetBranchId: strin
 }
 
 /**
+ * Organization-level administrative pages that require canonical ADMIN (Org Admin) authority.
+ * Non-org-admins (including SHOP_ADMIN and staff) CANNOT access these pages via access_profile.
+ */
+export const ORG_ADMIN_ONLY_PAGES = new Set<string>([
+  'audit',
+  'branches',
+]);
+
+/**
+ * Administrative and sensitive pages that require administrative authority (ADMIN or SHOP_ADMIN).
+ * Non-administrative roles (CASHIER, SALESMAN, STAFF, MANAGER, ACCOUNTANT, REPAIR_MECHANIC)
+ * CANNOT access these pages via access_profile or fallback.
+ */
+export const RESTRICTED_ADMIN_PAGES = new Set<string>([
+  'settings',
+  'roles',
+  'users',
+  'audit',
+  'branches',
+  'admin',
+]);
+
+/**
+ * Organization-level administrative actions that require canonical ADMIN (Org Admin) authority.
+ * Non-org-admins (including SHOP_ADMIN and staff) CANNOT invoke these actions via access_profile.
+ */
+export const ORG_ADMIN_ONLY_ACTIONS = new Set<string>([
+  'products:delete',
+  'products:edit',
+  'product:create',
+  'roles:edit',
+  'roles:delete',
+  'roles:create',
+  'branches:manage',
+  'audit:view',
+]);
+
+/**
+ * Administrative and sensitive actions that require administrative authority (ADMIN or SHOP_ADMIN).
+ * Non-administrative roles (CASHIER, SALESMAN, STAFF, MANAGER, ACCOUNTANT, REPAIR_MECHANIC)
+ * CANNOT invoke these actions via access_profile or fallback.
+ */
+export const RESTRICTED_ADMIN_ACTIONS = new Set<string>([
+  'users:delete',
+  'users:create',
+  'users:edit',
+  'roles:edit',
+  'roles:delete',
+  'roles:create',
+  'branches:manage',
+  'settings:edit',
+  'audit:view',
+  'products:delete',
+  'products:edit',
+  'product:create',
+]);
+
+/**
+ * Normalizes a page route or permission key for comparison.
+ * Strips leading slashes, trailing slashes, whitespace, and lowercases.
+ */
+function normalizePermissionTarget(target: string): string {
+  return (target || '').trim().replace(/^\/+/, '').replace(/\/+$/, '').toLowerCase();
+}
+
+/**
  * Evaluates page + action permissions.
  * Mirrors RequestIdentity::authorize_permission() in identity.rs.
  * Returns null on success, error message string on failure (403).
@@ -268,10 +410,36 @@ export function authorizePermission(
   page: string | null,
   action: string | null
 ): string | null {
-  if (isAdmin(identity)) {
+  const isOrg = isOrgAdmin(identity);
+  const isBranchAdm = isBranchAdmin(identity);
+
+  // G4-AUTH-03-C: SHOP_ADMIN is restricted to branch-level administrative authority.
+  // Org-admin-only pages and actions require canonical ADMIN authority.
+  if (page !== null) {
+    const cleanP = normalizePermissionTarget(page);
+    if (ORG_ADMIN_ONLY_PAGES.has(cleanP) && !isOrg) {
+      return `Access denied: Organization administrator authority required for '${page}'`;
+    }
+  }
+
+  if (action !== null) {
+    const cleanA = normalizePermissionTarget(action);
+    if (ORG_ADMIN_ONLY_ACTIONS.has(cleanA) && !isOrg) {
+      return `Access denied: Organization administrator authority required for '${action}'`;
+    }
+  }
+
+  // Full Org Admins bypass all remaining page/action checks.
+  if (isOrg) {
     return null;
   }
 
+  // Branch Admins bypass standard operational page/action checks (except org-only ones handled above).
+  if (isBranchAdm) {
+    return null;
+  }
+
+  // Non-administrative roles: evaluate against access profile with strict restricted-item enforcement.
   if (page !== null) {
     if (!hasPageAccess(identity.access_profile, page, identity.role)) {
       return `Access denied: You do not have permission to access page '${page}'`;
@@ -289,13 +457,28 @@ export function authorizePermission(
 
 /**
  * Mirrors StaffAccessProfile::has_page_access() in access_control.rs.
- * Falls back to allowing staff roles (SALESMAN, CASHIER, STAFF, MANAGER) when allowed_pages is empty.
+ * G4-AUTH-03-A: Restricted-page policy is enforced BEFORE explicit access-profile grants
+ * and before operational fallback. Non-administrative roles CANNOT access RESTRICTED_ADMIN_PAGES.
  */
 function hasPageAccess(profile: StaffAccessProfile, page: string, role?: UserRole): boolean {
-  if (profile && Array.isArray(profile.allowed_pages) && profile.allowed_pages.length > 0) {
-    return profile.allowed_pages.some((p) => p === '*' || p === page);
-  }
+  const cleanPage = normalizePermissionTarget(page);
   const r = String(role || '').toUpperCase();
+  const isAdminRole = r === 'ADMIN' || r === 'SHOP_ADMIN';
+
+  // Strict check order: If the page is restricted to administrators and user is not admin, DENY unconditionally.
+  if (RESTRICTED_ADMIN_PAGES.has(cleanPage) && !isAdminRole) {
+    return false;
+  }
+
+  // Next: check explicit profile grants
+  if (profile && Array.isArray(profile.allowed_pages) && profile.allowed_pages.length > 0) {
+    return profile.allowed_pages.some((p) => {
+      const cleanP = normalizePermissionTarget(p);
+      return cleanP === '*' || cleanP === cleanPage;
+    });
+  }
+
+  // Operational fallback for unconfigured staff on standard operational pages:
   if (
     r === 'SALESMAN' ||
     r === 'CASHIER' ||
@@ -311,17 +494,28 @@ function hasPageAccess(profile: StaffAccessProfile, page: string, role?: UserRol
 
 /**
  * Mirrors StaffAccessProfile::has_action_access() in access_control.rs.
- * Falls back to allowing staff roles (SALESMAN, CASHIER, STAFF, MANAGER, REPAIR_MECHANIC) when allowed_actions is empty.
- *
- * IMPORTANT: This general fallback is intentional for most operations (POS, expenses, etc.).
- * For product mutation actions (products:edit, products:delete, product:create), callers MUST
- * use hasProductActionAccess() below, which is default-deny when allowed_actions is empty.
+ * G4-AUTH-03-B: Restricted-action policy is enforced BEFORE explicit access-profile grants
+ * and before operational fallback. Non-administrative roles CANNOT execute RESTRICTED_ADMIN_ACTIONS.
  */
 function hasActionAccess(profile: StaffAccessProfile, action: string, role?: UserRole): boolean {
-  if (profile && Array.isArray(profile.allowed_actions) && profile.allowed_actions.length > 0) {
-    return profile.allowed_actions.some((a) => a === '*' || a === action);
-  }
+  const cleanAction = normalizePermissionTarget(action);
   const r = String(role || '').toUpperCase();
+  const isAdminRole = r === 'ADMIN' || r === 'SHOP_ADMIN';
+
+  // Strict check order: If action is restricted to administrators and user is not admin, DENY unconditionally.
+  if (RESTRICTED_ADMIN_ACTIONS.has(cleanAction) && !isAdminRole) {
+    return false;
+  }
+
+  // Next: check explicit profile grants
+  if (profile && Array.isArray(profile.allowed_actions) && profile.allowed_actions.length > 0) {
+    return profile.allowed_actions.some((a) => {
+      const cleanA = normalizePermissionTarget(a);
+      return cleanA === '*' || cleanA === cleanAction;
+    });
+  }
+
+  // Operational fallback for unconfigured staff on standard operational actions:
   if (
     r === 'SALESMAN' ||
     r === 'CASHIER' ||
@@ -442,11 +636,21 @@ export function buildAuthMiddleware(pool: Pool): (req: Request, res: Response, n
       const row = result.rows[0] as Record<string, unknown>;
       const isActive = Boolean(row['is_active']);
       const status = String(row['status'] ?? '');
-      const dbRole = String(row['role'] ?? '').toUpperCase();
+      const rawDbRole = String(row['role'] ?? '').trim();
+      const dbRoleUpper = rawDbRole.toUpperCase();
 
-      if (BLOCKED_LEGACY_ADMIN_ROLES.has(dbRole)) {
-        console.warn(`[auth] 401 User ${identity.user_id} possesses blocked legacy admin role '${dbRole}' on ${req.method} ${req.originalUrl || req.path}`);
+      if (BLOCKED_LEGACY_ADMIN_ROLES.has(dbRoleUpper)) {
+        console.warn(`[auth] 401 User ${identity.user_id} possesses blocked legacy admin role '${rawDbRole}' on ${req.method} ${req.originalUrl || req.path}`);
         res.status(401).json({ error: 'Account role is deprecated or blocked. Contact your administrator.' });
+        return;
+      }
+
+      // Role must be a recognized canonical or supported role.
+      // Lookup canonical SCREAMING_SNAKE_CASE role via prototype-safe canonical mapping.
+      const canonicalRole = getCanonicalUserRole(rawDbRole);
+      if (!canonicalRole) {
+        console.warn(`[auth] 401 User ${identity.user_id} has unrecognized database role '${rawDbRole}' on ${req.method} ${req.originalUrl || req.path}`);
+        res.status(401).json({ error: 'Account role is invalid or unsupported. Contact your administrator.' });
         return;
       }
 
@@ -455,8 +659,77 @@ export function buildAuthMiddleware(pool: Pool): (req: Request, res: Response, n
         res.status(401).json({ error: 'Account is disabled. Contact your administrator.' });
         return;
       }
-      // Account confirmed active and role valid — attach identity and continue.
-      req.identity = identity;
+
+      // G4-AUTH-03: Stale Access-Profile Protection.
+      // 1. If database role is non-administrative (staff/cashier), strip ALL restricted admin pages,
+      //    restricted admin actions, wildcard privileges ('*'), and administrative operational limits.
+      // 2. If database role is SHOP_ADMIN (branch admin), strip organization-wide ADMIN privileges
+      //    (ORG_ADMIN_ONLY_PAGES, ORG_ADMIN_ONLY_ACTIONS, wildcards), capping limits to branch admin maximum.
+      let effectiveAccessProfile = identity.access_profile;
+      const isOrgAdminRole = canonicalRole === 'ADMIN';
+      const isShopAdminRole = canonicalRole === 'SHOP_ADMIN';
+
+      if (!isOrgAdminRole && effectiveAccessProfile) {
+        if (!isShopAdminRole) {
+          // Staff / Cashier: remove wildcards AND any restricted admin pages/actions
+          const sanitizedPages = Array.isArray(effectiveAccessProfile.allowed_pages)
+            ? effectiveAccessProfile.allowed_pages.filter((p) => {
+                const clean = normalizePermissionTarget(p);
+                return clean !== '*' && !RESTRICTED_ADMIN_PAGES.has(clean);
+              })
+            : [];
+          const sanitizedActions = Array.isArray(effectiveAccessProfile.allowed_actions)
+            ? effectiveAccessProfile.allowed_actions.filter((a) => {
+                const clean = normalizePermissionTarget(a);
+                return clean !== '*' && !RESTRICTED_ADMIN_ACTIONS.has(clean);
+              })
+            : [];
+          effectiveAccessProfile = {
+            allowed_pages: sanitizedPages,
+            allowed_actions: sanitizedActions,
+            limits: {
+              max_discount_percent: Math.min(effectiveAccessProfile.limits?.max_discount_percent ?? 0, 15),
+              can_price_override: false,
+              can_refund: effectiveAccessProfile.limits?.can_refund ?? false,
+              can_void_sale: false,
+              can_view_profit: false,
+            },
+          };
+        } else {
+          // SHOP_ADMIN: strip organization-wide pages, actions, and wildcards
+          const sanitizedPages = Array.isArray(effectiveAccessProfile.allowed_pages)
+            ? effectiveAccessProfile.allowed_pages.filter((p) => {
+                const clean = normalizePermissionTarget(p);
+                return clean !== '*' && !ORG_ADMIN_ONLY_PAGES.has(clean);
+              })
+            : [];
+          const sanitizedActions = Array.isArray(effectiveAccessProfile.allowed_actions)
+            ? effectiveAccessProfile.allowed_actions.filter((a) => {
+                const clean = normalizePermissionTarget(a);
+                return clean !== '*' && !ORG_ADMIN_ONLY_ACTIONS.has(clean);
+              })
+            : [];
+          effectiveAccessProfile = {
+            allowed_pages: sanitizedPages,
+            allowed_actions: sanitizedActions,
+            limits: {
+              max_discount_percent: Math.min(effectiveAccessProfile.limits?.max_discount_percent ?? 0, 25),
+              can_price_override: effectiveAccessProfile.limits?.can_price_override ?? true,
+              can_refund: effectiveAccessProfile.limits?.can_refund ?? true,
+              can_void_sale: effectiveAccessProfile.limits?.can_void_sale ?? true,
+              can_view_profit: effectiveAccessProfile.limits?.can_view_profit ?? true,
+            },
+          };
+        }
+      }
+
+      // Account confirmed active and role valid.
+      // Authoritative database role overrides any stale role claims from the JWT (G4-AUTH-01 / G4-AUTH-03).
+      req.identity = {
+        ...identity,
+        role: canonicalRole,
+        access_profile: effectiveAccessProfile,
+      };
       next();
     }).catch((err: unknown) => {
       // PostgreSQL error: fail-CLOSED. Do NOT call next().
