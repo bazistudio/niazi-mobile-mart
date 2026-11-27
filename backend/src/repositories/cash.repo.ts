@@ -239,59 +239,88 @@ export async function closeCashSession(
   dto: CloseCashSessionDto,
   userId: string
 ): Promise<CashSession> {
-  const res = await pool.query('SELECT * FROM cash_sessions WHERE id = $1', [dto.session_id]);
-  if (res.rows.length === 0) {
-    throw new CashRepoError(`Cash session '${dto.session_id}' not found`, 404);
+  // Gate 4 (G4-FIX-01 / M-CASH-01): Wrap entire close operation in a BEGIN/COMMIT
+  // transaction with a pg_advisory_xact_lock keyed on session_id to prevent the
+  // concurrent double-close TOCTOU race condition. The FOR UPDATE re-read inside
+  // the lock is the authoritative status check — not the pre-lock read.
+  const client: PoolClient = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Acquire advisory lock keyed on session_id to serialise concurrent close requests
+    const lockHashRes = await client.query<{ h: string }>(
+      'SELECT hashtext($1)::BIGINT AS h',
+      [`cash_session_close:${dto.session_id}`]
+    );
+    const lockKey = Number(lockHashRes.rows[0]?.h ?? 0);
+    await client.query('SELECT pg_advisory_xact_lock($1)', [lockKey]);
+
+    // FOR UPDATE: re-read session status inside lock to prevent TOCTOU race
+    const res = await client.query(
+      'SELECT * FROM cash_sessions WHERE id = $1 FOR UPDATE',
+      [dto.session_id]
+    );
+    if (res.rows.length === 0) {
+      throw new CashRepoError(`Cash session '${dto.session_id}' not found`, 404);
+    }
+    const session = res.rows[0] as Record<string, unknown>;
+    if (session['status'] === 'CLOSED') {
+      throw new CashRepoError('Cash session is already closed', 400);
+    }
+
+    const branchId = session['branch_id'] as string;
+    const openingCash = Number(session['opening_cash'] ?? session['opening_float'] ?? 0);
+
+    // Sum cash movements inside the same transaction for a consistent snapshot
+    const mvRes = await client.query(
+      `SELECT
+         COALESCE(SUM(CASE WHEN direction = 'IN' THEN amount ELSE 0 END), 0)::BIGINT AS total_in,
+         COALESCE(SUM(CASE WHEN direction = 'OUT' THEN amount ELSE 0 END), 0)::BIGINT AS total_out
+       FROM cash_movements WHERE session_id = $1 AND payment_method = 'CASH'`,
+      [dto.session_id]
+    );
+    const totalIn = Number(mvRes.rows[0]?.['total_in'] ?? 0);
+    const totalOut = Number(mvRes.rows[0]?.['total_out'] ?? 0);
+    const expectedClosingCash = openingCash + totalIn - totalOut;
+
+    const actualClosingCash = dto.actual_closing_cash ?? dto.closing_float ?? 0;
+    const variance = actualClosingCash - expectedClosingCash;
+    const now = new Date().toISOString();
+
+    await client.query(
+      `UPDATE cash_sessions
+       SET actual_closing_cash = $1, expected_closing_cash = $2, cash_variance = $3,
+           closed_by = $4, status = 'CLOSED', closed_at = $5, notes = COALESCE($6, notes)
+       WHERE id = $7`,
+      [actualClosingCash, expectedClosingCash, variance, userId, now, dto.notes ?? null, dto.session_id]
+    );
+
+    await client.query('COMMIT');
+
+    return {
+      id: dto.session_id,
+      branch_id: branchId,
+      business_date: (session['business_date'] as string) || ((session['opened_at'] as string) || '').slice(0, 10),
+      opened_by: session['opened_by'] as string,
+      closed_by: userId,
+      opening_cash: openingCash,
+      opening_float: openingCash,
+      actual_closing_cash: actualClosingCash,
+      closing_float: actualClosingCash,
+      expected_closing_cash: expectedClosingCash,
+      expected_amount: expectedClosingCash,
+      cash_variance: variance,
+      status: 'CLOSED',
+      notes: (dto.notes as string | null) ?? (session['notes'] as string | null) ?? null,
+      opened_at: session['opened_at'] as string,
+      closed_at: now,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
   }
-  const session = res.rows[0] as Record<string, unknown>;
-  if (session['status'] === 'CLOSED') {
-    throw new CashRepoError('Cash session is already closed', 400);
-  }
-
-  const branchId = session['branch_id'] as string;
-  const openingCash = Number(session['opening_cash'] ?? session['opening_float'] ?? 0);
-
-  // Sum cash movements in this session
-  const mvRes = await pool.query(
-    `SELECT 
-       COALESCE(SUM(CASE WHEN direction = 'IN' THEN amount ELSE 0 END), 0)::BIGINT AS total_in,
-       COALESCE(SUM(CASE WHEN direction = 'OUT' THEN amount ELSE 0 END), 0)::BIGINT AS total_out
-     FROM cash_movements WHERE session_id = $1 AND payment_method = 'CASH'`,
-    [dto.session_id]
-  );
-  const totalIn = Number(mvRes.rows[0]?.['total_in'] ?? 0);
-  const totalOut = Number(mvRes.rows[0]?.['total_out'] ?? 0);
-  const expectedClosingCash = openingCash + totalIn - totalOut;
-
-  const actualClosingCash = dto.actual_closing_cash ?? dto.closing_float ?? 0;
-  const variance = actualClosingCash - expectedClosingCash;
-  const now = new Date().toISOString();
-
-  await pool.query(
-    `UPDATE cash_sessions
-     SET actual_closing_cash = $1, expected_closing_cash = $2, cash_variance = $3, closed_by = $4, status = 'CLOSED', closed_at = $5, notes = COALESCE($6, notes)
-     WHERE id = $7`,
-    [actualClosingCash, expectedClosingCash, variance, userId, now, dto.notes ?? null, dto.session_id]
-  );
-
-  return {
-    id: dto.session_id,
-    branch_id: branchId,
-    business_date: (session['business_date'] as string) || ((session['opened_at'] as string) || '').slice(0, 10),
-    opened_by: session['opened_by'] as string,
-    closed_by: userId,
-    opening_cash: openingCash,
-    opening_float: openingCash,
-    actual_closing_cash: actualClosingCash,
-    closing_float: actualClosingCash,
-    expected_closing_cash: expectedClosingCash,
-    expected_amount: expectedClosingCash,
-    cash_variance: variance,
-    status: 'CLOSED',
-    notes: (dto.notes as string | null) ?? (session['notes'] as string | null) ?? null,
-    opened_at: session['opened_at'] as string,
-    closed_at: now,
-  };
 }
 
 export async function getDailySummary(

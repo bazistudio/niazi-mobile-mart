@@ -354,7 +354,10 @@ export async function getProductAnalytics(pool: Pool, f: SaFilters): Promise<SaP
 // ─── Repair profitability ─────────────────────────────────────────────────────
 
 export async function getRepairAnalytics(pool: Pool, f: SaFilters): Promise<SaRepairSummary> {
-  let where = "WHERE rj.status = 'Delivered'";
+  // Gate 4 (G4-FIX-03 / SA-01 / NEW-SA-02): Fix status casing from mixed-case 'Delivered'
+    // to canonical all-caps 'DELIVERED' matching repair_jobs.status CHECK constraint values.
+    // Prior code returned zero rows for completed_jobs when DB stores 'DELIVERED'.
+    let where = "WHERE rj.status = 'DELIVERED'";
   const params: unknown[] = [];
   let pIdx = 1;
   if (f.branch_id) {

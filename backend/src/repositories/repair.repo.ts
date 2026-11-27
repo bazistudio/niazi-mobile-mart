@@ -22,7 +22,64 @@ import { v4 as uuidv4 } from 'uuid';
 import { writeChangeLogEntry } from './change_log.repo';
 import { calculateAndPersistCommission } from '../services/repair-commission.service';
 
+// Gate 4 (G4-FIX-06 / M-PROD-02 & G4-SEC-02):
+// The change_log table defines `branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT`.
+// An empty string '' violates the foreign key constraint and causes SQL error 23503.
+// resolveAuditBranchId() provides organization-scoped branch resolution:
+//   1. When a branchId is supplied: trims and validates that the branch exists AND belongs
+//      to the caller's authoritative organizationId.
+//   2. When branchId is missing: queries an active branch belonging to organizationId,
+//      preferring code = 'MAIN'.
+//   3. Canonical fallback: validates CANONICAL_MAIN_BRANCH_ID against organizationId.
+//   4. Fails safely by throwing RepairRepoError if no valid organization-owned branch exists.
 const CANONICAL_MAIN_BRANCH_ID = '00000000-0000-0000-0000-000000000002';
+
+async function resolveAuditBranchId(
+  client: PoolClient,
+  branchId: string | null | undefined,
+  organizationId: string
+): Promise<string> {
+  const trimmed = branchId?.trim();
+  if (trimmed) {
+    const checkRes = await client.query<{ id: string }>(
+      'SELECT id FROM branches WHERE id = $1 AND organization_id = $2',
+      [trimmed, organizationId]
+    );
+    if (checkRes.rows[0]) {
+      return checkRes.rows[0].id;
+    }
+    throw new RepairRepoError(
+      `Branch '${trimmed}' does not exist or does not belong to organization '${organizationId}'`,
+      400
+    );
+  }
+
+  // Missing branchId: query active branch owned by this organization (prefer MAIN)
+  const branchRes = await client.query<{ id: string }>(
+    `SELECT id FROM branches
+     WHERE organization_id = $1 AND is_active = 1
+     ORDER BY (code = 'MAIN') DESC, created_at ASC
+     LIMIT 1`,
+    [organizationId]
+  );
+  if (branchRes.rows[0]) {
+    return branchRes.rows[0].id;
+  }
+
+  // Canonical fallback check: verify CANONICAL_MAIN_BRANCH_ID belongs to this organization
+  const canonRes = await client.query<{ id: string }>(
+    'SELECT id FROM branches WHERE id = $1 AND organization_id = $2',
+    [CANONICAL_MAIN_BRANCH_ID, organizationId]
+  );
+  if (canonRes.rows[0]) {
+    return canonRes.rows[0].id;
+  }
+
+  throw new RepairRepoError(
+    `Cannot resolve a valid active branch for organization '${organizationId}'`,
+    400
+  );
+}
 
 // ─── DTOs ────────────────────────────────────────────────────────────────────
 
@@ -592,9 +649,10 @@ export async function createRepairJobTx(
     }
 
     // ── Audit log ─────────────────────────────────────────────────────────────
+    const auditBranchId = await resolveAuditBranchId(client, dto.branch_id, organizationId);
     await writeChangeLogEntry(client, {
       organizationId,
-      branchId: dto.branch_id?.trim() || '',
+      branchId: auditBranchId,
       eventType: 'REPAIR_JOB_CREATED',
       entityType: 'repair_job',
       entityId: id,
@@ -737,9 +795,10 @@ export async function updateRepairJobTx(
       ]
     );
 
+    const auditBranchId = await resolveAuditBranchId(client, branchId, organizationId);
     await writeChangeLogEntry(client, {
       organizationId,
-      branchId: branchId || CANONICAL_MAIN_BRANCH_ID,
+      branchId: auditBranchId,
       eventType: 'REPAIR_JOB_UPDATED',
       entityType: 'repair_job',
       entityId: realId,
@@ -820,9 +879,10 @@ export async function transferRepairJobTx(
       [targetBranchId, targetTechnicianId || null, JSON.stringify(timeline), now, realId]
     );
 
+    const auditBranchId = await resolveAuditBranchId(client, targetBranchId, organizationId);
     await writeChangeLogEntry(client, {
       organizationId,
-      branchId: targetBranchId || CANONICAL_MAIN_BRANCH_ID,
+      branchId: auditBranchId,
       eventType: 'REPAIR_JOB_TRANSFERRED',
       entityType: 'repair_job',
       entityId: realId,
@@ -919,9 +979,10 @@ export async function deleteRepairJobTx(
     // Delete repair job (foreign keys repair_parts and repair_payments CASCADE automatically)
     await client.query('DELETE FROM repair_jobs WHERE id = $1', [realId]);
 
+    const auditBranchId = await resolveAuditBranchId(client, branchId, organizationId);
     await writeChangeLogEntry(client, {
       organizationId,
-      branchId: branchId || '',
+      branchId: auditBranchId,
       eventType: 'REPAIR_JOB_DELETED',
       entityType: 'repair_job',
       entityId: realId,
@@ -1064,9 +1125,10 @@ export async function addRepairPartTx(
     await client.query('UPDATE repair_jobs SET updated_at = $1 WHERE id = $2', [now, realId]);
 
     // ── Audit log ────────────────────────────────────────────────────────────
+    const auditBranchId = await resolveAuditBranchId(client, branchId, organizationId);
     await writeChangeLogEntry(client, {
       organizationId,
-      branchId: branchId || '',
+      branchId: auditBranchId,
       eventType: 'REPAIR_PART_ADDED',
       entityType: 'repair_job',
       entityId: realId,
@@ -1175,9 +1237,10 @@ export async function removeRepairPartTx(
     await client.query('UPDATE repair_jobs SET updated_at = $1 WHERE id = $2', [now, realJobId]);
 
     // ── Audit log ────────────────────────────────────────────────────────────
+    const auditBranchId = await resolveAuditBranchId(client, branchId, organizationId);
     await writeChangeLogEntry(client, {
       organizationId,
-      branchId: branchId || '',
+      branchId: auditBranchId,
       eventType: 'REPAIR_PART_REMOVED',
       entityType: 'repair_job',
       entityId: realJobId,
@@ -1291,9 +1354,10 @@ export async function addRepairPaymentTx(
     await client.query('UPDATE repair_jobs SET updated_at = $1 WHERE id = $2', [now, realId]);
 
     // ── Audit log ────────────────────────────────────────────────────────────
+    const auditBranchId = await resolveAuditBranchId(client, branchId, organizationId);
     await writeChangeLogEntry(client, {
       organizationId,
-      branchId: branchId || '',
+      branchId: auditBranchId,
       eventType: 'REPAIR_PAYMENT_ADDED',
       entityType: 'repair_job',
       entityId: realId,
@@ -1566,9 +1630,10 @@ export async function completeRepairJobTx(
     });
 
     // ── Audit log ─────────────────────────────────────────────────────────────
+    const auditBranchId = await resolveAuditBranchId(client, branchId, organizationId);
     await writeChangeLogEntry(client, {
       organizationId,
-      branchId,
+      branchId: auditBranchId,
       eventType: 'REPAIR_JOB_DELIVERED',
       entityType: 'repair_job',
       entityId: realId,

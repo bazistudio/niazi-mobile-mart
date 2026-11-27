@@ -14,8 +14,9 @@
  *  - search uses ONE bound parameter referenced three times ($1 ILIKE).
  *  - customer_code on Postgres path = "CUST-{uuid_simple_8chars}" (not sequential).
  *    See customer_service.rs lines 70-79: Postgres path uses Uuid::new_v4().simple().
- *  - record_customer_payment is NOT implemented on the Postgres path
- *    (customer_service.rs line 281: explicit Err("Postgres record_customer_payment not implemented")).
+ *  - record_customer_payment IS implemented on the Postgres path (TypeScript backend).
+ *    The Rust sqlite path noted "not implemented" in customer_service.rs line 281 — that
+ *    was the Rust path only. The TypeScript backend fully implements this function.
  *  - deactivate_customer: UPDATE SET is_active = 0; NotFound if rows_affected == 0.
  *  - Transaction safety: only sync-path functions (create_customer_tx, update_customer_tx,
  *    record_customer_payment_tx) use transactions. Direct API calls use pool.query().
@@ -886,33 +887,34 @@ export async function recordCustomerPayment(
       );
     }
 
-    // Atomic change_log entry + pg_notify before COMMIT
-    try {
-      if (branchId) {
-        const orgRow = await client.query<{ organization_id: string }>(
-          'SELECT organization_id FROM branches WHERE id = $1',
-          [branchId]
-        );
-        const orgId = orgRow.rows[0]?.organization_id;
-        if (orgId) {
-          await writeChangeLogEntry(client, {
-            organizationId: orgId,
-            branchId,
-            eventType: 'PAYMENT_RECEIVED',
-            entityType: 'customer_payment',
-            entityId: entryId,
-            payloadStr: JSON.stringify({
-              customer_id: customerId,
-              amount: dto.amount,
-              payment_method: paymentMethod,
-              receipt_number: receiptNumber,
-              balance_after: balanceAfter,
-            }),
-          });
-        }
-      }
-    } catch (logErr) {
-      console.error('[customer.repo] Failed to write atomic change_log entry for payment:', logErr);
+    // Gate 4 (G4-FIX-02 / CL-01 / NEW-CL-02): Remove try/catch wrapper around
+    // writeChangeLogEntry so a change_log failure aborts the transaction (ROLLBACK)
+    // rather than silently committing a payment with no sync event.
+    // The null-branchId bypass is closed: branchId is now a hard precondition for all
+    // payment methods (CASH already throws above; non-CASH now also requires branchId).
+    if (!branchId) {
+      throw new CustomerRepoError('branch_id is required for payment recording', 400);
+    }
+    const orgRow = await client.query<{ organization_id: string }>(
+      'SELECT organization_id FROM branches WHERE id = $1',
+      [branchId]
+    );
+    const orgId = orgRow.rows[0]?.organization_id;
+    if (orgId) {
+      await writeChangeLogEntry(client, {
+        organizationId: orgId,
+        branchId,
+        eventType: 'PAYMENT_RECEIVED',
+        entityType: 'customer_payment',
+        entityId: entryId,
+        payloadStr: JSON.stringify({
+          customer_id: customerId,
+          amount: dto.amount,
+          payment_method: paymentMethod,
+          receipt_number: receiptNumber,
+          balance_after: balanceAfter,
+        }),
+      });
     }
 
     await client.query('COMMIT');

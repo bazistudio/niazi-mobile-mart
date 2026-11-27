@@ -181,9 +181,34 @@ async function main(): Promise<void> {
   // DO NOT set to true (= trust all proxies) — use the numeric form.
   app.set('trust proxy', 1);
 
-  // Handle CORS for browser frontend development
+  // Gate 4 (G4-FIX-05 / M-POS-03 & G4-SEC-01):
+  // Configure via ALLOWED_ORIGINS env var (comma-separated).
+  // Allow only explicitly configured origins. Do NOT emit Access-Control-Allow-Origin
+  // for unapproved origins.
+  // RFC 7234 compliance: for every request with an Origin header (approved or unapproved),
+  // ensure 'Vary: Origin' is present without overwriting or duplicating existing Vary tokens.
+  const rawAllowedOrigins = process.env['ALLOWED_ORIGINS'] ?? 'tauri://localhost';
+  const allowedOrigins = rawAllowedOrigins.split(',').map(o => o.trim()).filter(Boolean);
+
   app.use((req: Request, res: Response, next: NextFunction) => {
-    res.header('Access-Control-Allow-Origin', '*');
+    const origin = req.headers['origin'];
+    if (origin) {
+      // Append 'Origin' to Vary header without overwriting existing vary tokens
+      const existingVary = res.getHeader('Vary');
+      if (!existingVary) {
+        res.setHeader('Vary', 'Origin');
+      } else {
+        const varyTokens = String(existingVary).split(',').map(s => s.trim().toLowerCase());
+        if (!varyTokens.includes('origin')) {
+          res.setHeader('Vary', `${existingVary}, Origin`);
+        }
+      }
+    }
+
+    if (origin && allowedOrigins.includes(origin)) {
+      res.header('Access-Control-Allow-Origin', origin);
+    }
+
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
     if (req.method === 'OPTIONS') {
