@@ -41,7 +41,6 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { getPool } from './db';
-import { runMigrations } from './migrate';
 import { createProductRouter } from './routes/product.routes';
 import { createSaleRouter } from './routes/sale.routes';
 import { createCustomerRouter, createCustomerV1Router } from './routes/customer.routes';
@@ -238,13 +237,10 @@ async function main(): Promise<void> {
   // it ran before req.identity was set by per-router authMiddleware.
   // Do NOT restore a global active-user middleware here.
 
-  // Run PostgreSQL database migrations sequentially on startup
-  try {
-    await runMigrations(pool);
-  } catch (err) {
-    console.error('[server] Fatal database migration failure:', (err as Error).message);
-    process.exit(1);
-  }
+  // NOTE: Database migrations are intentionally decoupled from normal server startup.
+  // Migrations must be executed independently via the dedicated CLI (`npm run migrate`).
+  // Normal server processes, replicas, and Cloud Run containers do NOT execute migrations
+  // on startup, ensuring zero lock contention, zero race conditions, and zero schema drift.
 
   // -------------------------------------------------------------------------
   // Auth routes — TypeScript Online Authority
