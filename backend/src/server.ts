@@ -181,14 +181,24 @@ async function main(): Promise<void> {
   // DO NOT set to true (= trust all proxies) — use the numeric form.
   app.set('trust proxy', 1);
 
-  // Gate 4 (G4-FIX-05 / M-POS-03 & G4-SEC-01):
+  // Gate 4 (G4-FIX-05 / M-POS-03 & G4-SEC-01) & P0 CORS Fix:
   // Configure via ALLOWED_ORIGINS env var (comma-separated).
+  // Built-in standard allowed origins include desktop Tauri origins and Vite dev server.
   // Allow only explicitly configured origins. Do NOT emit Access-Control-Allow-Origin
   // for unapproved origins.
   // RFC 7234 compliance: for every request with an Origin header (approved or unapproved),
   // ensure 'Vary: Origin' is present without overwriting or duplicating existing Vary tokens.
-  const rawAllowedOrigins = process.env['ALLOWED_ORIGINS'] ?? 'tauri://localhost';
-  const allowedOrigins = rawAllowedOrigins.split(',').map(o => o.trim()).filter(Boolean);
+  const DEFAULT_ALLOWED_ORIGINS = [
+    'tauri://localhost',
+    'https://tauri.localhost',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+  ];
+  const envAllowed = (process.env['ALLOWED_ORIGINS'] ?? '')
+    .split(',')
+    .map(o => o.trim())
+    .filter(Boolean);
+  const allowedOrigins = Array.from(new Set([...DEFAULT_ALLOWED_ORIGINS, ...envAllowed]));
 
   app.use((req: Request, res: Response, next: NextFunction) => {
     const origin = req.headers['origin'];
