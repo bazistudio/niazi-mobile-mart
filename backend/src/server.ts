@@ -190,6 +190,7 @@ async function main(): Promise<void> {
   const DEFAULT_ALLOWED_ORIGINS = [
     'tauri://localhost',
     'https://tauri.localhost',
+    'http://tauri.localhost',
     'http://localhost:5173',
     'http://127.0.0.1:5173',
   ];
