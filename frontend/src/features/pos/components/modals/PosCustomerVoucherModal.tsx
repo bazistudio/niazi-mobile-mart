@@ -776,8 +776,8 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
                       <FieldError message={errors.name} />
                     </div>
 
-                    {/* Purchase Price & Sale Price (Inventory) * */}
-                    <div className="grid grid-cols-2 gap-4">
+                    {/* Purchase Price, Sale Price (Inventory) & Open Stock * */}
+                    <div className="grid grid-cols-3 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-text-secondary mb-1">
                           Purchase Price *
@@ -793,7 +793,7 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
                             value={purchasePrice}
                             onChange={(e) => setPurchasePrice(e.target.value)}
                             placeholder="0.00"
-                            className={`block w-full pl-9 pr-3 py-2 border ${errors.purchaseCost ? 'border-danger' : 'border-border'} rounded-lg shadow-xs focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-surface text-text-primary text-xs font-black tabular-nums placeholder:text-text-muted transition-all`}
+                            className={`block w-full pl-9 pr-2 py-2 border ${errors.purchaseCost ? 'border-danger' : 'border-border'} rounded-lg shadow-xs focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-surface text-text-primary text-xs font-black tabular-nums placeholder:text-text-muted transition-all`}
                           />
                         </div>
                         <FieldError message={errors.purchaseCost} />
@@ -818,65 +818,66 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
                               if (!customSalePrice) setCustomSalePrice(e.target.value);
                             }}
                             placeholder="0.00"
-                            className={`block w-full pl-9 pr-3 py-2 border ${errors.salePrice ? 'border-danger' : 'border-border'} rounded-lg shadow-xs focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-surface text-text-primary text-xs font-black tabular-nums placeholder:text-text-muted transition-all`}
+                            className={`block w-full pl-9 pr-2 py-2 border ${errors.salePrice ? 'border-danger' : 'border-border'} rounded-lg shadow-xs focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-surface text-text-primary text-xs font-black tabular-nums placeholder:text-text-muted transition-all`}
                           />
                         </div>
                         <FieldError message={errors.salePrice} />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-text-secondary mb-1">
+                          Open Stock *
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={openStock}
+                          onChange={(e) => {
+                            setOpenStock(e.target.value);
+                            if (errors.openStock || errors.voucherQty) {
+                              setErrors((prev) => {
+                                const next = { ...prev };
+                                delete next.openStock;
+                                const newStock = parseFloat(e.target.value);
+                                const curVQty = parseInt(voucherQty, 10);
+                                if (voucherType === 'DIRECT_ADVANCE' && !isNaN(newStock) && !isNaN(curVQty) && curVQty <= newStock) {
+                                  delete next.voucherQty;
+                                }
+                                return next;
+                              });
+                            }
+                          }}
+                          placeholder="1"
+                          className={`block w-full px-3 py-2 border ${errors.openStock ? 'border-danger' : 'border-border'} rounded-lg shadow-xs focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-surface text-text-primary text-xs font-black tabular-nums placeholder:text-text-muted transition-all`}
+                        />
+                        <FieldError message={errors.openStock} />
                       </div>
                     </div>
                   </div>
                 </section>
 
-                {/* Agreed Sale Price & Voucher Quantity Table */}
+                {/* Agreed Sale Price */}
                 <div className="border border-border/80 bg-surface-hover/40 rounded-xl p-3.5 shadow-xs flex flex-col gap-3">
-                  <div className="grid grid-cols-2 gap-4">
-                    {/* Custom Sale Price */}
-                    <div>
-                      <label className="block text-xs font-bold text-text-secondary mb-1">
-                        Voucher Agreed Sale Price *
-                      </label>
-                      <div className="relative">
-                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-xs font-bold text-text-muted">
-                          Rs.
-                        </span>
-                        <input
-                          type="number"
-                          step="any"
-                          min="0"
-                          value={customSalePrice}
-                          onChange={(e) => setCustomSalePrice(e.target.value)}
-                          placeholder={salePrice || '0.00'}
-                          className={`block w-full pl-9 pr-3 py-2 border ${errors.customSalePrice ? 'border-danger' : 'border-border'} rounded-lg shadow-xs focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-surface text-text-primary text-xs font-black tabular-nums placeholder:text-text-muted transition-all`}
-                        />
-                      </div>
-                      <FieldError message={errors.customSalePrice} />
-                    </div>
-
-                    {/* Voucher Quantity (Ordered/Booked) */}
-                    <div>
-                      <label className="block text-xs font-bold text-text-primary mb-1">
-                        Voucher Quantity *
-                      </label>
+                  <div>
+                    <label className="block text-xs font-bold text-text-secondary mb-1">
+                      Voucher Agreed Sale Price *
+                    </label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-xs font-bold text-text-muted">
+                        Rs.
+                      </span>
                       <input
                         type="number"
-                        min="1"
-                        step="1"
-                        value={voucherQty}
-                        onChange={(e) => {
-                          setVoucherQty(e.target.value);
-                          if (errors.voucherQty) {
-                            setErrors((prev) => {
-                              const next = { ...prev };
-                              delete next.voucherQty;
-                              return next;
-                            });
-                          }
-                        }}
-                        placeholder="1"
-                        className={`block w-full px-3 py-2 border ${errors.voucherQty ? 'border-danger' : 'border-border'} rounded-lg shadow-xs focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-surface text-text-primary text-xs font-black tabular-nums transition-all`}
+                        step="any"
+                        min="0"
+                        value={customSalePrice}
+                        onChange={(e) => setCustomSalePrice(e.target.value)}
+                        placeholder={salePrice || '0.00'}
+                        className={`block w-full pl-9 pr-3 py-2 border ${errors.customSalePrice ? 'border-danger' : 'border-border'} rounded-lg shadow-xs focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-surface text-text-primary text-xs font-black tabular-nums placeholder:text-text-muted transition-all`}
                       />
-                      <FieldError message={errors.voucherQty} />
                     </div>
+                    <FieldError message={errors.customSalePrice} />
                   </div>
 
                   {/* Summary Breakdown */}
@@ -997,34 +998,32 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
                   <div className="grid grid-cols-2 gap-3 items-center">
                     <div>
                       <label className="block text-xs font-bold text-text-primary mb-1">
-                        {voucherType === 'INSTANT_INVENTORY'
-                          ? 'Open Stock to Add *'
-                          : 'Voucher Quantity *'}
+                        Voucher Quantity *
                       </label>
                       <input
                         type="number"
                         min="1"
                         step="1"
-                        value={openStock}
+                        value={voucherType === 'INSTANT_INVENTORY' ? openStock : voucherQty}
                         onChange={(e) => {
-                          setOpenStock(e.target.value);
-                          if (errors.openStock || errors.voucherQty) {
+                          const val = e.target.value;
+                          if (voucherType === 'INSTANT_INVENTORY') {
+                            setOpenStock(val);
+                          } else {
+                            setVoucherQty(val);
+                          }
+                          if (errors.voucherQty) {
                             setErrors((prev) => {
                               const next = { ...prev };
-                              delete next.openStock;
-                              const newStock = parseFloat(e.target.value);
-                              const curVQty = parseInt(voucherQty, 10);
-                              if (voucherType === 'DIRECT_ADVANCE' && !isNaN(newStock) && !isNaN(curVQty) && curVQty <= newStock) {
-                                delete next.voucherQty;
-                              }
+                              delete next.voucherQty;
                               return next;
                             });
                           }
                         }}
                         placeholder="1"
-                        className={`block w-full px-3 py-2 border ${errors.openStock ? 'border-danger' : 'border-teal-400 dark:border-teal-700'} rounded-lg shadow-xs focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-surface text-text-primary text-sm font-black tabular-nums transition-all`}
+                        className={`block w-full px-3 py-2 border ${errors.voucherQty ? 'border-danger' : 'border-teal-400 dark:border-teal-700'} rounded-lg shadow-xs focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-surface text-text-primary text-sm font-black tabular-nums transition-all`}
                       />
-                      <FieldError message={errors.openStock} />
+                      <FieldError message={errors.voucherQty} />
                     </div>
 
                     <div className="bg-surface/80 border border-border/80 rounded-lg p-2.5 flex flex-col justify-center">
@@ -1032,7 +1031,7 @@ export const PosCustomerVoucherModal: React.FC<CustomerVoucherModalProps> = ({
                         {voucherType === 'PRE_BOOKING' ? 'Advance Booking Value' : 'Total Voucher Amount'}
                       </span>
                       <span className="text-sm font-black text-teal-700 dark:text-teal-300 tabular-nums">
-                        PKR {((Number(openStock) || 0) * (Number(customSalePrice) || Number(salePrice) || 0)).toLocaleString()}
+                        PKR {((Number(voucherType === 'INSTANT_INVENTORY' ? openStock : voucherQty) || 0) * (Number(customSalePrice) || Number(salePrice) || 0)).toLocaleString()}
                       </span>
                     </div>
                   </div>
